@@ -72,8 +72,22 @@ function setupRegistries(): TestRefs {
   toolRegistry.registerImplementation('write_file', writeFileTool);
   toolRegistry.registerImplementation('git_status', gitStatusTool);
 
-  // Skill
+  // Skill — bootstrap catalog tools first because task_decomposition depends on them
   const skillRegistry = new SkillRegistry({ toolRegistry });
+  // inline bootstrap to avoid import cycle issues
+  for (const id of ['list_personas', 'list_skills', 'list_tools']) {
+    if (!toolRegistry.hasDefinition(id)) {
+      toolRegistry.registerDefinition({
+        id,
+        name: id,
+        description: id,
+        source: 'local',
+        modulePath: `./${id}`,
+        category: 'catalog',
+      });
+      toolRegistry.registerImplementation(id, fakeTool(id));
+    }
+  }
   loadSkillsFromDirectory(SKILLS_DIR, skillRegistry);
 
   // Model

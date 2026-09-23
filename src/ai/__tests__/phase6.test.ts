@@ -67,6 +67,12 @@ function setup(): TestDeps {
   toolRegistry.registerImplementation('git_status', gitStatusTool);
 
   const skillRegistry = new SkillRegistry({ toolRegistry });
+  // Bootstrap catalog tools BEFORE loading skills because task_decomposition depends on them
+  bootstrapCatalogTools({
+    toolRegistry,
+    personaRegistry,
+    skillRegistry,
+  });
   loadSkillsFromDirectory(SKILLS_DIR, skillRegistry);
 
   const modelRegistry = new ModelRegistry();

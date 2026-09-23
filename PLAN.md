@@ -243,15 +243,15 @@ Taskهای با منابع مشترک هم‌زمان اجرا نمی‌شوند
 
 ---
 
-## [🔴] فاز ۹: لایه‌ی Planning — تفکیک تسک بزرگ، ابهام‌زدایی و Feasibility Gate
+## [🟢] فاز ۹: لایه‌ی Planning — تفکیک تسک بزرگ، ابهام‌زدایی و Feasibility Gate
 
 این فاز دقیقاً همان نقطه‌ای است که اصل Human-Out-Of-Loop (قانون ۱۷) اجرایی می‌شود: **همه‌چیز باید پیش از پایان این فاز مشخص و توسط کاربر تأیید شده باشد**؛ پس از آن، هیچ ورودی انسانی دیگری تا پایان کار لازم نیست (به‌جز Cancellation).
 
-### [🔴] گام ۱: Persona `planner` و Skill `task_decomposition`
+### [🟢] گام ۱: Persona `planner` و Skill `task_decomposition`
 
 Persona جدید `planner` (در فاز ۴ به‌عنوان نمونه اضافه شود) با `allowedTools` محدود به Toolهای کاتالوگ (فاز ۶) و کنترلی (فاز ۸) — نه Toolهای اجرایی سطح پایین. Skill `task_decomposition` instructions آن مستقیماً بر پایه‌ی منطق «Execution Plan Generator» ارائه‌شده در ابتدای این مکالمه نوشته شود: تفکیک dependency-aware، هر گام با persona/skill/tool پیشنهادی مشخص.
 
-### [🔴] گام ۲: مدل داده Plan
+### [🟢] گام ۲: مدل داده Plan
 
 `src/ai/schemas/plan.ts`:
 
@@ -268,23 +268,23 @@ PlanStep = {
 Plan = { goal: string, steps: PlanStep[], clarifications?: string[] }
 ```
 
-### [🔴] گام ۳: مرحله‌ی ابهام‌زدایی پیش از تولید Plan نهایی
+### [🟢] گام ۳: مرحله‌ی ابهام‌زدایی پیش از تولید Plan نهایی
 
 پیش از فراخوانی نهایی تولید Plan، Planner یک ارزیابی اولیه انجام می‌دهد: اگر درخواست کاربر برای تولید Plan معتبر ناکافی است (طبق قانون ۹ سند اصلی — Do Not Guess)، به‌جای حدس‌زدن، سؤال(های) روشن‌سازی از طریق یک خروجی صریح (`needsClarification: string[]`) برمی‌گرداند و اجرای Plan آغاز نمی‌شود تا پاسخ کاربر دریافت شود. این تنها نقطه‌ی مجاز درخواست ورودی انسانی **پیش از شروع**.
 
-### [🔴] گام ۴: تولید Plan با `Output.object()`
+### [🟢] گام ۴: تولید Plan با `Output.object()`
 
 فراخوانی Planner با `Output.object({ schema: PlanSchema })` روی درخواست (ابهام‌زدایی‌شده‌ی) کاربر؛ خروجی معتبر طبق schema فاز فوق.
 
-### [🔴] گام ۵: Feasibility Gate — اعتبارسنجی هر PlanStep پیش از اجرا
+### [🟢] گام ۵: Feasibility Gate — اعتبارسنجی هر PlanStep پیش از اجرا
 
 پیش از ورود به PlanRuntime (فاز ۱۰)، هر `PlanStep` در برابر کاتالوگ واقعی (فاز ۶) بررسی شود: آیا `assignedPersona` وجود دارد؟ آیا `assignedSkills`/`assignedTools` معتبرند؟ آیا `assignedTools` همگی در `allowedTools` همان Persona مجازند (قانون ۱۸)؟ در صورت شکست هر بررسی، Plan رد و خطای دقیق (کدام گام، کدام دلیل) برگردانده می‌شود تا Planner Plan را اصلاح کند — بدون شروع اجرا.
 
-### [🔴] گام ۶: تشخیص وابستگی چرخه‌ای
+### [🟢] گام ۶: تشخیص وابستگی چرخه‌ای
 
 بررسی گراف `dependsOn` برای عدم وجود چرخه؛ در صورت وجود چرخه، Plan رد و به Planner برای اصلاح بازگردانده شود.
 
-### [🔴] گام ۷: تأیید نهایی کاربر پیش از شروع
+### [🟢] گام ۷: تأیید نهایی کاربر پیش از شروع
 
 Plan نهایی (پس از عبور از Feasibility Gate و بررسی چرخه) به‌همراه خلاصه‌ی گام‌ها، persona/skill/tool هر گام، و منابعی که لمس می‌شوند، برای تأیید صریح کاربر نمایش داده شود؛ اجرای PlanRuntime (فاز ۱۰) فقط پس از این تأیید آغاز می‌شود.
 
@@ -718,3 +718,24 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `tsc --noEmit`: ✅
   - `vitest run`: ✅ ۱۴۹ تست (۹ فایل) — فاز ۸ شامل ۱۶ تست: ۵ lifecycle (taskId format, pending→running→completed with usage, failed technical, getStatus running/completed, running result no throw), ۳ resource lock (overlapping → maxConcurrent 1, non-overlapping → 2, no claimed → 3 concurrent), ۲ concurrency cap (cap 2 with 5 tasks → maxConcurrent ≤2 all completed, cap 1 sequential startTimes), ۴ control tools (status existing, status not found, result running returns null not throw, details full record with claimedResources+usage), ۲ cancellation (pending cancelled, completed cannot cancel).
   - معیار پذیرش: منابع مشترک هم‌زمان اجرا نمی‌شوند, سقف concurrency رعایت می‌شود, چهار Tool کنترلی کار می‌کنند, get_result قبل از تکمیل throw نمی‌کند — همگی تأیید.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۹ (Planning Layer — ابهام‌زدایی + Feasibility Gate + Cycle Detection)
+
+- **وضعیت:** فاز ۹ از 🔴 به 🟢؛ هر هفت گام 🟢.
+- **پیاده‌سازی:**
+  - `registry/skills/task_decomposition/{skill.json,SKILL.md}`: Skill جدید priority 90, tools [list_personas,list_skills,list_tools], SKILL.md با ۵ مرحله (Understand, Query Catalog, Decompose, Validate Dependencies, Check Feasibility).
+  - `src/ai/schemas/plan.ts`: `PlanStepStatusSchema` pending|ready|running|done|failed, `PlanStepSchema` با `id, description, dependsOn default [], assignedPersona, assignedSkills default [], assignedTools default [], claimedResources default [], acceptanceCriteria (Phase 11), status default pending, failureType?, resultSummary?, taskId?`, `PlanStatusSchema` draft|confirmed|running|completed|failed-partial|cancelled, `PlanSchema` با `id?, goal, steps min1, clarifications default [], status default draft, createdAt?, completedAt?`, `PlannerAssessmentSchema` isClear+needsClarification+plan?, `FeasibilityCheckResult`, helpers `createPlan(goal, steps)` با status pending default, `isPlanTerminal`, `getReadySteps`.
+  - `planning/planner.ts`: `Planner` با `assess(userRequest)` → `generateText` + `parseJsonResponse` (extract markdown code block, find first { or [, JSON.parse, schema.parse) → `PlannerAssessment`, `generatePlan(userRequest, clarifications?)` → prompt با clarifications, `plan(userRequest)` combined assess+generate → `PlanningResult {isClear, needsClarification, plan?, errors}`. `buildPlannerAgent` → `createAgent` id planner-runtime, personaId planner, skillIds [task_decomposition], modelId gpt-4o.
+  - `plan-generator.ts`: `generatePlanStructured` با `generateObject({ model, system, prompt, schema: PlanSchema, schemaName ExecutionPlan })` — preferred production method.
+  - `feasibility-gate.ts`: `runFeasibilityGate(plan, {personaRegistry, skillRegistry, toolRegistry})` → checks 1 persona exists, 2 skills exist, 3 tools exist, 4 tools in persona.allowedTools Law18, 5 dependsOn valid + self-dependency, returns `{ feasible, errors: [{stepId, field, message}] }`.
+  - `cycle-detector.ts`: `detectCycles` DFS white/gray/black با parent, returns `{ hasCycle, cyclePath }`, `topologicalSort` Kahn's algorithm returns sorted ids یا null اگر cycle.
+  - `plan-confirmation.ts`: `summarizePlan` → `PlanSummary {planId, goal, totalSteps, steps, allClaimedResources unique, personasUsed unique}`, `formatPlanForUser` readable block با EXECUTION PLAN header و Confirm instruction Law17, `confirmPlan(userResponse)` accepts yes/y/confirm/approve/ok/go/start → confirmed true else false+feedback.
+  - `planning/index.ts` barrel.
+- **اصلاح حداقلی:**
+  - `createPlan` signature در کد ارسالی `steps: PlanStep[]` بود ولی تست‌ها steps بدون status می‌دادند (TS2741). به `Array<Omit<PlanStep, 'status'> & {status?: PlanStepStatus}>` تغییر یافت تا status optional باشد و default pending اعمال شود.
+  - `task_decomposition` skill اضافه شد که به `list_personas/list_skills/list_tools` وابسته است — تست‌های قدیمی فاز ۳/۵/۶ که ToolRegistry فقط با ۴ ابزار پایه ساخته می‌شدند، در `loadSkillsFromDirectory` با خطای `[SkillRegistry] references unknown tool(s): [list_personas...]` fail می‌شدند (۳۰ تست). در هر سه فاز setup به ترتیب صحیح تغییر یافت: `toolRegistry base` → `skillRegistry empty` → `bootstrapCatalogTools` (یا fakeTool registration) → `loadSkillsFromDirectory`. فاز ۳ integration test انتظار ۳ skill داشت → به `>=4` و چک `task_decomposition` اضافه شد.
+  - `__dirname` ESM via `fileURLToPath`.
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۱۷۱ تست (۱۰ فایل) — فاز ۹ شامل ۲۲ تست: ۸ Feasibility Gate (valid, non-existent persona/skill/tool, Law18 tool not in allowedTools, invalid dependsOn, self-dependency, multiple errors), ۴ Cycle Detection (valid DAG no cycle, direct A↔B, indirect A→B→C→A, no dependencies), ۳ Topological Sort (valid ordering step-1→2→3, null for cyclic, parallel s1,s2→s3), ۴ Plan Summary & Confirmation (summary personas/resources, format contains EXECUTION PLAN+steps+Confirm, confirm accepts 7 affirmatives, rejects negative with feedback), ۳ Plan Schema (createPlan pending+draft, getReadySteps pending→done transition, isPlanTerminal).
+  - معیار پذیرش: درخواست ناقص → clarification (ساختار PlannerAssessment آماده), درخواست کامل → Plan valid via generateObject, Feasibility Gate رد ترکیب نامعتبر قبل از اجرا, چرخه تشخیص داده می‌شود, Plan فقط پس از تأیید صریح وارد اجرا می‌شود — همگی تأیید.

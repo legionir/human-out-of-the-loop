@@ -16,3 +16,19 @@ export {
   type Task,
   type TaskStatus,
 } from './task.js';
+export {
+  PlanSchema,
+  PlanStepSchema,
+  PlanStatusSchema,
+  PlanStepStatusSchema,
+  PlannerAssessmentSchema,
+  createPlan,
+  isPlanTerminal,
+  getReadySteps,
+  type Plan,
+  type PlanStep,
+  type PlanStatus,
+  type PlanStepStatus,
+  type PlannerAssessment,
+  type FeasibilityCheckResult,
+} from './plan.js';
