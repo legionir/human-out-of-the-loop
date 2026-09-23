@@ -1,0 +1,8 @@
+{
+  "id": "git_operations",
+  "name": "Git Operations",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": ["git_status"],
+  "description": "Inspects and reports on the state of the git working tree"
+}

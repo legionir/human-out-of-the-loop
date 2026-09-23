@@ -1,2 +1,1 @@
-// Phase 4 — Persona Registry
-export {};
+export { PersonaRegistry } from '../registries/persona-registry.js';

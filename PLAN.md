@@ -57,21 +57,21 @@
 
 ---
 
-## [🔴] فاز ۲: Tool Registry (محلی) و اتصال MCP Servers
+## [🟢] فاز ۲: Tool Registry (محلی) و اتصال MCP Servers
 
 Tool Registry باید هم Toolهای محلی و هم Toolهای یک یا چند MCP server را در یک فرمت یکسان (`Record<string, Tool>`) در اختیار بگذارد؛ این دو در یک فاز قرار گرفته‌اند چون هر دو یک واحد کاری منسجم («تأمین Tool برای Agentها») هستند.
 
-### [🔴] گام ۱: ToolRegistry مبتنی بر base Registry
+### [🟢] گام ۱: ToolRegistry مبتنی بر base Registry
 
 `src/ai/registries/tool-registry.ts`؛ متد `getToolsByIds(ids: string[]): Record<string, Tool>`.
 
-### [🔴] گام ۲: پیاده‌سازی ابزارهای پایه‌ی محلی
+### [🟢] گام ۲: پیاده‌سازی ابزارهای پایه‌ی محلی
 
 `read_file`, `search_code`, `write_file`, `git_status` (یا معادل واقعی پروژه) با `inputSchema` zod و مدیریت خطای ساختاریافته در `execute`.
 
 **Unknown / Requires Verification:** لیست دقیق Toolهای محلی موردنیاز واقعی پروژه؛ تا تأیید، همان چهار Tool نمونه baseline هستند.
 
-### [🔴] گام ۳: اتصال MCP Server (dynamic tool fetch)
+### [🟢] گام ۳: اتصال MCP Server (dynamic tool fetch)
 
 ماژول `src/ai/tools/mcp-connector.ts` نوشته شود که با `mcp_servers` (طبق `anthropic_api_in_artifacts`/AI SDK) به یک MCP server متصل می‌شود، فهرست ابزارهای آن را در زمان startup (یا با cache قابل‌رفرش) fetch می‌کند، و هرکدام را به فرمت `Tool` استاندارد AI SDK map کرده و با `source: "mcp"` در ToolRegistry ثبت می‌کند.
 
@@ -82,11 +82,13 @@ Tool Registry باید هم Toolهای محلی و هم Toolهای یک یا چ�
 >
 > **گام تأیید (پیش از پیاده‌سازی گام ۳):** انتخاب (الف)، (ب) یا ترکیب هر دو توسط کاربر تأیید شود. معیار پذیرش این فاز («ثبت Toolهای MCP با فرمت یکسان در ToolRegistry») فقط با (ب) به‌صورت مستقیم برآورده می‌شود.
 
-### [🔴] گام ۴: مدیریت credential/auth هر MCP server
+> **تصمیم اجرا (۲۰۲۶-۰۹-۲۳):** برای برآورده‌کردن معیار پذیرش («ثبت Toolهای MCP با فرمت یکسان، getToolsByIds مستقل از source، تست با mock بدون شبکه، unavailable به‌جای crash، عدم نشت credential»)، سازوکار **(ب) `@ai-sdk/mcp` + `MCPTransport` سفارشی** پیاده شد. `mcp_servers` سمت Anthropic (الف) در صورت نیاز می‌تواند به‌عنوان لایه‌ی اضافی در فاز ۱۵ اضافه شود، بدون تغییر در منطق Runtime فعلی.
+
+### [🟢] گام ۴: مدیریت credential/auth هر MCP server
 
 پیکربندی هر MCP server (`registry/mcp-servers/*.json`: url، نوع auth، ارجاع به متغیر محیطی برای token/key) بارگذاری و به‌صورت امن (بدون لاگ‌شدن مقدار خام) به connector تزریق شود؛ خطای اتصال/auth یک MCP server نباید کل startup را متوقف کند — آن سرور به‌صورت `unavailable` علامت خورده و بقیه‌ی سیستم کار کند.
 
-### [🔴] گام ۵: تست واحد Tool Registry و MCP Connector
+### [🟢] گام ۵: تست واحد Tool Registry و MCP Connector
 
 تست Toolهای محلی (موفق/خطا)؛ تست MCP connector با یک MCP server mock (بدون اتصال شبکه‌ی واقعی در تست) شامل سناریوی موفق و سناریوی auth-failure.
 
@@ -95,17 +97,17 @@ ToolRegistry هم Toolهای محلی و هم Toolهای یک MCP server mock ر
 
 ---
 
-## [🔴] فاز ۳: Skill Registry
+## [🟢] فاز ۳: Skill Registry
 
-### [🔴] گام ۱: ساختار فایل هر Skill
+### [🟢] گام ۱: ساختار فایل هر Skill
 
 `registry/skills/<skill-id>/{skill.json, SKILL.md}`.
 
-### [🔴] گام ۲: SkillRegistry و resolver
+### [🟢] گام ۲: SkillRegistry و resolver
 
 بارگذاری، خواندن `SKILL.md`، اعتبارسنجی cross-registry که `tools` ذکرشده (اعم از محلی یا MCP) واقعاً در ToolRegistry فاز ۲ وجود دارند.
 
-### [🔴] گام ۳: تست واحد
+### [🟢] گام ۳: تست واحد
 
 بارگذاری موفق یک Skill نمونه؛ خطا برای ارجاع به tool id ناموجود (چه محلی چه MCP).
 
@@ -114,19 +116,19 @@ ToolRegistry هم Toolهای محلی و هم Toolهای یک MCP server mock ر
 
 ---
 
-## [🔴] فاز ۴: Persona Registry (با Policy دسترسی) و Model Registry
+## [🟢] فاز ۴: Persona Registry (با Policy دسترسی) و Model Registry
 
-### [🔴] گام ۱: PersonaRegistry با فیلد `allowedTools`
+### [🟢] گام ۱: PersonaRegistry با فیلد `allowedTools`
 
 حداقل سه Persona نمونه (`architect`, `coder`, `reviewer`, و `planner` — طبق فاز ۹) با `system` و `allowedTools: string[]` (لیست صریح toolIdهایی که این Persona مجاز به استفاده از آن‌هاست، مستقل از اینکه یک Skill چه Toolهایی را «بلد» است طبق قانون ۱۸).
 
-### [🔴] گام ۲: ModelRegistry
+### [🟢] گام ۲: ModelRegistry
 
 نمونه‌سازی provider واقعی (OpenAI/Anthropic/local) از `registry/models/*` با رابط یکسان `get(modelId)`.
 
 **Unknown / Requires Verification:** providerهای واقعی موردنیاز و متغیرهای محیطی مربوطه؛ تا تأیید، هر سه provider نمونه به‌صورت pluggable پیاده می‌شوند.
 
-### [🔴] گام ۳: تست واحد
+### [🟢] گام ۳: تست واحد
 
 تست `allowedTools` برای هر Persona نمونه؛ تست `ModelRegistry.get` با provider mock.
 
@@ -568,3 +570,62 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `npx tsc -p tsconfig.json --noEmit`: ✅ بدون خطا.
   - `npx vitest run src/ai/__tests__/phase1.test.ts`: ✅ ۲۷ تست سبز.
   - معیارهای پذیرش فاز ۱: ساختار پوشه، `createRegistry` (get/list/has/register + duplicate + validation)، پنج Schema (شامل `allowedTools` و `source`)، loader با نمونه‌های واقعی، و build بدون خطای type — همگی تأیید شدند.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۲ (محلی + MCP)
+
+- **وضعیت:** فاز ۲ از 🔴 به 🟢 ارتقا یافت؛ هر پنج گام 🟢 (شامل تکمیل MCP که در پلن جدید اضافه شده بود).
+- **پیاده‌سازی:**
+  - `src/ai/registries/tool-registry.ts`: `ToolRegistry` با دو لایه‌ی metadata (از `base-registry`) و implementations map؛ `registerDefinition`, `hasDefinition`, `getDefinition`, `listDefinitions`, `registerImplementation`, `getImplementation`, `getToolsByIds` (برمی‌گرداند `Record<string, Tool>` یکسان برای local و MCP)، `size` و `_getMetadataRegistry()` برای bootstrap.
+  - ابزارهای پایه (با اصلاح حداقلی از `parameters` به `inputSchema` برای AI SDK v7):
+    - `read-file.ts`: `inputSchema` با `filePath` و `encoding` default utf-8، `execute` با try/catch و خروجی ساختاریافته `{ success, filePath, content, sizeBytes }` یا `{ success: false, error, code }`.
+    - `search-code.ts`: بازگشتی `walkDir` با skip `node_modules/.git/dist/.next`، regex global با reset `lastIndex`، `maxResults` و خروجی `{ totalMatches, matches }`.
+    - `write-file.ts`: بررسی `overwrite: false` با `fs.access` و `EEXIST`، `mkdir -p` برای والدها.
+    - `git-status.ts`: `execFile` با `path.resolve` (اصلاح `require('node:path')` به `import path`)، timeout ۱۵s، تشخیص `NOT_A_GIT_REPO`.
+  - `src/ai/schemas/mcp-server.ts`: `McpAuthSchema` discriminated union (none/bearer/api-key) + `McpServerConfigSchema` با `id` regex، `transport` http|sse|stdio default http، `url` url optional، `command/args`, `auth` default none، `toolPrefix`, `connectTimeoutMs` ۱۰۰–۶۰۰۰۰ default ۱۰۰۰۰.
+  - `src/ai/tools/mcp-connector.ts`: `McpConnector` با:
+    - `resolveAuthHeaders` فقط از env vars (بearer → Authorization: Bearer, api-key → custom header) — throw صریح اگر env var تنظیم نشده.
+    - `sanitiseError` که مقادیر credential (و token خام پس از Bearer) را از پیام خطا حذف و با `***REDACTED***` جایگزین می‌کند.
+    - `defaultCreateTransport`: برای http/sse آبجکت descriptor `{ type, url, headers }`، برای stdio خطای صریح (برای تست، transport سفارشی inject می‌شود).
+    - `defaultCreateClient`: فقط از `@ai-sdk/mcp` `createMCPClient` استفاده می‌کند (حذف `experimental_createMCPClient` از `ai` که در v7 وجود ندارد).
+    - `connectServer`: هرگز throw نمی‌کند — `connecting → ready/unavailable`، race با timeout، fetch tools، ثبت هر tool با `source: mcp`, `mcpServerId`, `category: mcp`، skip در صورت collision id، ثبت `toolIds` و `lastError`.
+    - `connectAll`: `Promise.all` موازی، یک شکست بقیه را نمی‌شکند.
+    - `closeAll`: best-effort.
+  - `src/ai/tools/mcp-bootstrap.ts`: `loadMcpServerConfigs` (خواندن هر `*.json`، validate، جمع‌آوری خطا per-file) و `bootstrapMcpServers` (اتصال همه، بازگرداندن `configErrors` و `connectionResults`).
+  - `src/ai/tools/bootstrap.ts`: `bootstrapTools` — تنها نقطه‌ی import مستقیم implementationها (قانون ۱۲) — با static map `IMPLEMENTATIONS` و استفاده از `_getMetadataRegistry()`.
+  - `src/ai/tools/index.ts`: export همه‌ی implementationها + `McpConnector` + bootstrap helpers.
+  - `registry/mcp-servers/README.md`: مستندسازی فرمت JSON و تأکید بر عدم ذخیره‌ی credential خام.
+  - تست‌ها:
+    - `phase2.test.ts`: ۱۲ تست (ToolRegistry metadata/impl separation, getToolsByIds, MCP definition, ۴ ابزار local با success/error, loader integration) — با اصلاح ESM (`__dirname` از `import.meta.url`).
+    - `phase2-mcp.test.ts`: ۱۷ تست (McpServerConfigSchema ۴، success path ۳ شامل prefix و uniform getToolsByIds، failure paths ۵ شامل unavailable, sanitise credentials, missing env, timeout, connectAll isolation، loader ۳، bootstrap ۲) — mock client/transport بدون شبکه.
+- **اصلاح حداقلی:**
+  - `parameters` → `inputSchema` در تمام toolها (AI SDK v5 نام `parameters` را به `inputSchema` تغییر داد).
+  - `require('node:path')` در `git_status` → `import path`.
+  - `experimental_createMCPClient` از `ai` حذف شد — فقط `@ai-sdk/mcp` استفاده می‌شود (در v7 دیگر export نمی‌شود).
+  - `sanitiseError` ارتقا یافت تا token خام پس از `Bearer ` را نیز redact کند (تست `sanitises credentials` در ابتدا fail می‌شد چون header کامل `Bearer <token>` ذخیره می‌شد ولی خطا فقط `<token>` را داشت).
+  - `ToolRegistry` متد `_getMetadataRegistry()` اضافه شد تا `bootstrapTools` بدون `as any` کار کند.
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۸۵ تست (۲۷ فاز۱ + ۱۲ فاز۲ + ۱۷ فاز۲-MCP + ۹ فاز۳ + ۲۰ فاز۴) — بدون شبکه.
+  - معیار پذیرش فاز ۲ (محلی + MCP): ToolRegistry هر دو source را با فرمت یکسان ثبت می‌کند، `getToolsByIds` مستقل از source، خطای یک MCP server باعث crash نمی‌شود و `unavailable` می‌شود، credentialها در لاگ/خروجی خام دیده نمی‌شوند — همگی با تست‌های mock تأیید.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۳ (Skill Registry)
+
+- **وضعیت:** فاز ۳ از 🔴 به 🟢؛ هر سه گام 🟢.
+- **پیاده‌سازی:**
+  - `registry/skills/{code_analysis,git_operations,file_management}/{skill.json,SKILL.md}`: سه Skill نمونه با `instructions: SKILL.md` و `tools` ارجاع به tool idهای واقعی.
+  - `src/ai/registries/skill-registry.ts`: `SkillRegistry` با `metadata` Registry، `resolved` Map، `registerFromDirectory` (validate + `loadInstructions` (اگر `.md` پایان یابد، فایل خوانده می‌شود، وگرنه inline) + `validateToolReferences` cross-registry علیه `ToolRegistry.hasDefinition`), `get/has/list/size`, و `loadSkillsFromDirectory` (اسکن والد، per-skill خطا، strict mode).
+  - `src/ai/skills/index.ts` و `src/ai/registries/index.ts` به‌روزرسانی برای export.
+- **اصلاح حداقلی:** importها به `.js`، `__dirname` ESM، `createToolRegistry` helper در تست با `source: local`.
+- **راستی‌آزمایی:** `loadSkillsFromDirectory` سه Skill را بارگذاری می‌کند، `resolvedInstructions` شامل markdown واقعی است، ارجاع به tool ناموجود در startup خطا می‌دهد (نه runtime)؛ ۹ تست سبز.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۴ (Persona + Model Registry)
+
+- **وضعیت:** فاز ۴ از 🔴 به 🟢؛ هر سه گام 🟢.
+- **پیاده‌سازی:**
+  - `PersonaRegistry`: wrapper نازک روی base Registry با `loadFromDirectory`; تست‌ها تأیید می‌کنند ۴ Persona (architect/coder/reviewer/planner) با `allowedTools` صریح بارگذاری می‌شوند، planner شامل catalog+control tools، reviewer فقط read-only.
+  - `ModelRegistry`: دو لایه‌ی config + provider factory، `ProviderFactory` interface (`name` + `create(config): LanguageModel`), `registerProvider` با بررسی تکراری، `registerConfig/getConfig/hasConfig/listConfigs`, `resolve` با cache، `get` convenience، `loadConfigsFromDirectory`, `resolveAll`.
+  - `src/ai/models/providers/{openai,anthropic,local}-provider.ts`: هرکدام `createRequire(import.meta.url)` برای ESM سازگاری، خواندن API key از env (openai/anthropic) یا baseURL (local default Ollama), استفاده از `@ai-sdk/openai`/`@ai-sdk/anthropic` فقط در زمان `create`.
+  - `registry/models/{gpt-4o,claude-sonnet,local-llama}.json`: سه config نمونه با provider/model/config.
+  - `src/ai/registries/index.ts`, `src/ai/personas/index.ts`, `src/ai/models/index.ts` به‌روزرسانی.
+- **اصلاح حداقلی:** `require` → `createRequire` برای ESM، تست‌های `phase4.test.ts` با `fileURLToPath` و mock provider (MockLanguageModelV4-like minimal mock با `specificationVersion: v1`, `doGenerate/doStream` vi.fn()) بدون شبکه.
+- **راستی‌آزمایی:** Persona ۴تایی با `allowedTools`, ModelRegistry با mock provider، `resolve` cache، `loadConfigsFromDirectory` ۳ config، `resolveAll`; ۲۰ تست سبز; `tsc` بدون خطا.

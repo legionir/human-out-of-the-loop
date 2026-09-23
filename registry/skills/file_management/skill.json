@@ -1,0 +1,8 @@
+{
+  "id": "file_management",
+  "name": "File Management",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": ["read_file", "write_file", "search_code"],
+  "description": "Reads, writes, and searches files in the workspace"
+}

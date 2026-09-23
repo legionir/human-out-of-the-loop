@@ -1,0 +1,11 @@
+{
+  "id": "local-llama",
+  "provider": "local",
+  "model": "llama3",
+  "config": {
+    "baseURL": "http://localhost:11434/v1",
+    "temperature": 0.1,
+    "maxTokens": 2048
+  },
+  "description": "Local Ollama Llama 3 — fast, no API key needed"
+}

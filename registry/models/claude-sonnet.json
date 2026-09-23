@@ -1,0 +1,10 @@
+{
+  "id": "claude-sonnet",
+  "provider": "anthropic",
+  "model": "claude-sonnet-4-20250514",
+  "config": {
+    "temperature": 0.3,
+    "maxTokens": 8192
+  },
+  "description": "Anthropic Claude Sonnet — strong at code analysis"
+}

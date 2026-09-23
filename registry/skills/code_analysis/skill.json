@@ -1,0 +1,8 @@
+{
+  "id": "code_analysis",
+  "name": "Code Analysis",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": ["read_file", "search_code"],
+  "description": "Analyses source code for bugs, anti-patterns, and quality issues"
+}
