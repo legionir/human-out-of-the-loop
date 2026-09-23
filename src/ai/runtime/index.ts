@@ -70,3 +70,13 @@ export {
   type UsageRecord,
   type UsageSummary,
 } from './usage-aggregator.js';
+export {
+  FileSessionStore,
+  MemorySessionStore,
+  type SessionStore,
+} from './session-store.js';
+export {
+  ObservabilityLogger,
+  type LogEntry,
+  type ObservabilityLoggerConfig,
+} from './observability-logger.js';

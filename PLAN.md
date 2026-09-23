@@ -420,17 +420,17 @@ Tool/API سطح بالا `cancel_plan(planId)` اضافه شود که وضعیت
 
 ---
 
-## [🔴] فاز ۱۴: تداوم Session و Observability ماندگار
+## [🟢] فاز ۱۴: تداوم Session و Observability ماندگار
 
-### [🔴] گام ۱: پایداری Session بین چند درخواست کاربر
+### [🟢] گام ۱: پایداری Session بین چند درخواست کاربر
 
 یک `sessionStore` (حداقل فایل/دیتابیس ساده) اضافه شود که تاریخچه‌ی درخواست‌های قبلی کاربر و Planهای مرتبط (persist‌شده در فاز ۱۰) را نگه دارد؛ اگر کاربر در ادامه‌ی همان session سؤال جدیدی بپرسد، Main Agent/Planner بتواند به آخرین Plan/گزارش مرتبط ارجاع دهد (از طریق یک Tool `get_previous_plan_summary(sessionId)`).
 
-### [🔴] گام ۲: Observability ماندگار (لاگ/trace)
+### [🟢] گام ۲: Observability ماندگار (لاگ/trace)
 
 علاوه بر EventBus in-memory (فاز ۷)، تمام رویدادهای کلیدی (شروع/پایان هر Task، هر تصمیم re-planning، هر acceptance check) در یک لاگ ساختاریافته‌ی ماندگار (فایل JSONL یا معادل) نوشته شوند تا پس از پایان اجرا قابل بازبینی/دیباگ باشند؛ هر رکورد شامل `planId`, `stepId`, `timestamp`, `eventType`, `payload` است.
 
-### [🔴] گام ۳: تست واحد
+### [🟢] گام ۳: تست واحد
 
 تست ذخیره و بازیابی خلاصه‌ی Plan قبلی برای یک sessionId؛ تست این‌که لاگ ماندگار برای یک اجرای کامل Plan نمونه شامل تمام رویدادهای کلیدی است.
 
@@ -828,4 +828,26 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `tsc --noEmit`: ✅
   - `vitest run`: ✅ ۲۴۵ تست (۱۴ فایل) — فاز ۱۳ شامل ۲۶ تست: ۶ StreamingManager (running→step-started, tool_call name only no args leak, completed with usage, error truncated <200, multiple subscribers, subscriber error resilience), ۱ SSE (formats event+data+json+\n\n), ۴ CancellationManager (cancels running plan with runtime.cancel called, non-existent not found, already-completed terminal state, persists cancelled status+completedAt), ۸ RateLimiter (allows within limit 2 active, queues beyond limit, detects 429/rate limit, backoff exponential with jitter 37-63 for attempt0, caps at maxBackoffMs 500, retries on rate-limit succeeds attempt 2, throws after exhausting 3 attempts, no retry non-rate-limit), ۷ UsageAggregator (records aggregates 300/150/450, byAgent breakdown coder 450 count2 reviewer 75, byPlan plan-A 450 plan-B 75, getPlanUsage plan-X 450 count2, ignores tasks without usage, clear resets, getRecords raw).
   - معیار پذیرش: streaming live progress via ProgressEvent+SSES, cancel_plan without crash with persisted cancelled, rate-limit retry with backoff not immediate failure, final report usage summary via UsageAggregator — همگی تأیید.
+
+
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۱۴ (تداوم Session و Observability ماندگار)
+
+- **وضعیت:** فاز ۱۴ از 🔴 به 🟢؛ هر سه گام 🟢.
+- **پیاده‌سازی:**
+  - `src/ai/schemas/session.ts`: `SessionInteractionSchema` {id, userRequest, planIds default [], outcome success|partial-success|failure|cancelled|pending default pending, reviewSummary optional, createdAt, completedAt optional}, `SessionSchema` {id, label optional, interactions default [], metadata record default {}, createdAt, lastActiveAt}, helpers `createSession(label?)` id `session_${now}_${random}` + now timestamps, `createInteraction(userRequest)` id `interaction_${now}_${random}` + pending.
+  - `src/ai/runtime/session-store.ts`: `SessionStore` interface createSession/getSession/saveSession/listSessions/deleteSession/addInteraction/updateInteraction/getLatestPlanSummary. `FileSessionStore` dir create recursive, filePath sanitise `[^a-zA-Z0-9_-]→_`, sync read/write JSON pretty, listSessions filter .json→id, deleteSession unlink, addInteraction getSession+createInteraction+push+save, updateInteraction find+Object.assign+save, getLatestPlanSummary walk backwards pending≠ + reviewSummary exists. `MemorySessionStore` Map<string,Session> deep clone via JSON parse/stringify on save/get, same logic for all methods, mutation isolation test passes.
+  - `src/ai/tools/implementations/session-tools.ts`: `createGetPreviousPlanSummaryTool(sessionStore)` → `tool({ description conversational continuity, inputSchema {sessionId}, execute → getLatestPlanSummary, if undefined return success false code NO_PREVIOUS_PLAN else success true + previousPlanSummary })`. inputSchema not parameters (AI SDK v7 minimal fix).
+  - `src/ai/runtime/observability-logger.ts`: `LogEntry` {timestamp ISO, epochMs, planId?, stepId?, taskId?, eventType plan:created|confirmed|started|completed|failed|cancelled|replanning|step:started|completed|failed|quality-check|passed|failed|task:created|completed|failed|tool-call|session:created|interaction|system:error|info, message, payload?, level info|warn|error}, `ObservabilityLoggerConfig` {logFilePath, consoleOutput default false, redactKeys optional}. DEFAULT_REDACT_KEYS [apiKey, api_key, token, password, secret, authorization, credential, bearer, cookie, session_key]. `ObservabilityLogger` constructor ensures log dir exists, `log(entry)` builds fullEntry with now ISO + epochMs + redactPayload, appendFileSync JSONL + \n, try/catch fallback console.error, consoleOutput optional prefix ℹ️⚠️❌. `redactPayload` recursive: lowerKey check Set + original key check → ***REDACTED***, else if object not array recurse. Convenience: logPlanCreated (goal slice 100, stepCount, stepIds), logPlanStarted, logPlanCompleted (done count), logPlanFailed, logPlanReplanning attempt, logStepStarted (description slice 200 persona tools), logStepCompleted (resultSummary slice 300), logStepFailed (failureType), logQualityCheck accepted? quality-passed|failed info|warn, logSessionCreated, logSystemError slice 500. EventBus integration: subscribeToEventBus(eventBus) subscribe * → logAgentEvent: running→task:created, tool_call→task:tool-call payload toolName+callId Law14 no args, completed→task:completed payload toolsUsed+usage, error→task:failed payload code, level error. unsubscribeFromEventBus. Reading: readAll exists check → split \n filter trim → JSON.parse try catch filter null, readForPlan filter planId, readForStep filter planId+stepId.
+  - `schemas/index.ts`: export SessionSchema, SessionInteractionSchema, createSession, createInteraction, Session, SessionInteraction.
+  - `runtime/index.ts`: export FileSessionStore, MemorySessionStore, SessionStore, ObservabilityLogger, LogEntry, ObservabilityLoggerConfig.
+  - `tools/implementations/index.ts`: export createGetPreviousPlanSummaryTool.
+- **اصلاح حداقلی:**
+  - **inputSchema:** session-tools از `parameters` (spec) به `inputSchema` تغییر یافت — AI SDK v7 نام parameters را به inputSchema تغییر داده (همان fix فازهای ۲-۸).
+  - **.js extensions:** تمام importها در phase14.test.ts و runtime به `.js` برای ESM Bundler.
+  - **createPlan signature:** plan.test spec steps without status — already handled in plan.ts Omit<status> optional (فاز ۹).
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۲۷۲ تست (۱۵ فایل) — فاز ۱۴ شامل ۲۷ تست: ۱۲ MemorySessionStore (create id session_, retrieve id/label/empty, undefined non-existent, list 2, delete, add interaction Build login page pending length1, undefined ghost, update outcome success summary planIds, getLatestPlanSummary most recent completed when pending exists, undefined when no completed, LATEST completed not first second summary latest, deep-clone mutation isolation), ۲ FileSessionStore (persists to disk reload via new instance persistent label interactions length1 Build feature X, survives restart simulated new instance Completed.), ۹ ObservabilityLogger (writes single JSON line planId eventType timestamp epochMs, appends 3 entries created started completed, chronological order epochMs ≤, readForPlan filter plan-A 2, readForStep filter p1 s1 2, redacts sensitive keys apiKey ***REDACTED*** nested token safeField fine, convenience methods 5 entries plan:created started step:started completed completed, quality check passed info failed warn, replanning attempt 1 2), ۳ EventBus integration (auto logs agent events 3 task:created tool-call with toolName read_file usage defined, logs agent errors task:failed error TIMEOUT, stops logging after unsubscribe only 1), ۱ full lifecycle (captures all key events 9+ contains plan:created started step:started completed quality-passed completed, every entry planId lifecycle-plan, timestamps ISO regex and epochMs >0).
+  - معیار پذیرش: درخواست دوم همان session می‌تواند به گزارش قبلی ارجاع دهد via getLatestPlanSummary LATEST + get_previous_plan_summary Tool, لاگ ماندگار JSONL append-only برای اجرای کامل قابل بازخوانی و شامل توالی صحیح readAll/readForPlan/readForStep, credentialها redact recursive ***REDACTED***, EventBus integration auto logging, تست‌ها سبز — همگی تأیید.
 

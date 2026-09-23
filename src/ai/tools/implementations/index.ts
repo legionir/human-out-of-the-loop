@@ -17,3 +17,4 @@ export {
   createGetAgentResultTool,
   createGetTaskDetailsTool,
 } from './task-control-tools.js';
+export { createGetPreviousPlanSummaryTool } from './session-tools.js';

@@ -40,3 +40,11 @@ export {
   type Finding,
   type IncompleteStep,
 } from './review.js';
+export {
+  SessionSchema,
+  SessionInteractionSchema,
+  createSession,
+  createInteraction,
+  type Session,
+  type SessionInteraction,
+} from './session.js';
