@@ -1,0 +1,8 @@
+{
+  "id": "read_file",
+  "name": "Read File",
+  "description": "Reads the full contents of a file at the given path",
+  "source": "local",
+  "modulePath": "./implementations/read-file",
+  "category": "filesystem"
+}

@@ -1,0 +1,8 @@
+{
+  "id": "search_code",
+  "name": "Search Code",
+  "description": "Searches for a regex pattern across files in a directory",
+  "source": "local",
+  "modulePath": "./implementations/search-code",
+  "category": "filesystem"
+}

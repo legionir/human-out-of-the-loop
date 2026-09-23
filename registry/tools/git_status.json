@@ -1,0 +1,8 @@
+{
+  "id": "git_status",
+  "name": "Git Status",
+  "description": "Runs git status in the specified directory",
+  "source": "local",
+  "modulePath": "./implementations/git-status",
+  "category": "git"
+}

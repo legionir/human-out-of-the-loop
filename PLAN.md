@@ -32,23 +32,23 @@
 
 # پلن اجرایی
 
-## [🔴] فاز ۱: زیرساخت پایه Registry و Schemaهای مشترک
+## [🟢] فاز ۱: زیرساخت پایه Registry و Schemaهای مشترک
 
 هدف: هسته‌ی مشترک تمام Registryها — الگوی یکسان تعریف، بارگذاری، اعتبارسنجی و lookup.
 
-### [🔴] گام ۱: ساختار پوشه‌بندی پروژه
+### [🟢] گام ۱: ساختار پوشه‌بندی پروژه
 
 ساختار `src/ai/{runtime,registries,agents,skills,tools,personas,models,schemas,planning}` و پوشه‌ی داده‌محور `registry/{agents.json,personas/,skills/,tools/,mcp-servers/}` ایجاد شود.
 
-### [🔴] گام ۲: پیاده‌سازی base Registry generic
+### [🟢] گام ۲: پیاده‌سازی base Registry generic
 
 `createRegistry<T>({ schema, source })` در `src/ai/registries/base-registry.ts` با متدهای `get/list/has/register` و اعتبارسنجی zod، خطای صریح روی id تکراری یا schema نامعتبر.
 
-### [🔴] گام ۳: Zod Schemaهای پایه
+### [🟢] گام ۳: Zod Schemaهای پایه
 
 `PersonaSchema` (شامل فیلد جدید `allowedTools: string[]` طبق قانون ۱۸)، `SkillSchema`, `ToolDefinitionSchema` (شامل فیلد `source: "local" | "mcp"`)، `AgentDefinitionSchema`, `ModelConfigSchema` در `src/ai/schemas/`.
 
-### [🔴] گام ۴: مکانیزم بارگذاری فایل‌محور (loader)
+### [🟢] گام ۴: مکانیزم بارگذاری فایل‌محور (loader)
 
 خواندن فایل‌های `registry/**`، validate با schema مربوطه، تزریق به Registry؛ خطاهای بارگذاری در startup گزارش شوند نه در runtime.
 
@@ -541,3 +541,30 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
 |---|---|---|
 | ۲۰۲۶-۰۹-۲۳ | برخورد با مشکل در کد ارسالی هر فاز (خطای type، تست ناموفق، API منسوخ/ناسازگار با نسخه‌ی فعلی AI SDK، تعارض با قوانین پلن) | **اصلاح حداقلی + ثبت شفاف:** فقط کوچک‌ترین اصلاح لازم برای عبور از معیار پذیرش اعمال می‌شود و هر تغییر با دلیلش در این پیوست و در گزارش همان فاز ثبت می‌شود. |
 | ۲۰۲۶-۰۹-۲۳ | نسخه‌های toolchain (اگر کد فاز ۱ شامل `package.json`/`tsconfig` نباشد) | **آخرین نسخه‌های پایدار تأییدشده:** `ai@7.0.111`، `@ai-sdk/mcp@2.0.55`، `zod@4.6.5`، `typescript@7.0.2`، `vitest@5.0.1` روی Node 22. |
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۱
+
+- **وضعیت:** فاز ۱ از 🔴 به 🟢 ارتقا یافت؛ هر چهار گام 🟢.
+- **پیاده‌سازی:**
+  - ساختار پوشه‌بندی طبق طراحی ایجاد شد: `src/ai/{runtime,registries,agents,skills,tools,personas,models,schemas,planning,__tests__}` + `registry/{agents.json,personas/,skills/,tools/,mcp-servers/}` + `registry/skills/`.
+  - `package.json` با `type: module`، `tsconfig.json` با `module: ESNext` + `moduleResolution: Bundler` + `skipLibCheck: true`، و `vitest.config.ts` ایجاد شد؛ وابستگی‌های تأییدشده نصب شدند (ai@7.0.111، @ai-sdk/mcp@2.0.55، zod@4.6.5، typescript@7.0.2، vitest@5.0.1).
+  - `src/ai/registries/base-registry.ts`: کلاس generic `Registry<T>` با `register` (اعتبارسنجی zod + بررسی تکراری) و `tryRegister` غیرپرتابی، به‌همراه `get/has/list/size` و فکتوری `createRegistry`.
+  - `src/ai/registries/loader.ts`: `loadRegistryFromDirectory` با جمع‌آوری خطا per-file، حالت `strict`، و `loadSingleFile`.
+  - Schemaها با تغییرات پلن جدید:
+    - `persona.ts`: `allowedTools: string[]` با default `[]` + helper `personaAllowsTool` (پشتیبانی از `*` wildcard).
+    - `tool-definition.ts`: `source: "local" | "mcp"` با default `local`، `modulePath` اختیاری (الزامی برای local) و `mcpServerId` اختیاری (الزامی برای mcp) با دو `refine`.
+    - `skill.ts`, `agent-definition.ts`, `model-config.ts`: مطابق کد ارسالی.
+  - Barrelها: `src/ai/schemas/index.ts`, `src/ai/registries/index.ts`, `src/ai/index.ts` و placeholderهای `runtime/agents/skills/tools/personas/models/planning`.
+  - داده‌محور نمونه:
+    - `registry/agents.json`: `[]`.
+    - `registry/personas/`: `architect.json`, `coder.json`, `reviewer.json`, `planner.json` — هر چهار Persona با `allowedTools` صریح (planner شامل `list_personas/list_skills/list_tools/create_task/get_agent_status/get_agent_result/get_task_details`).
+    - `registry/tools/`: `read_file.json`, `search_code.json`, `write_file.json`, `git_status.json` — هرکدام با `source: local`.
+    - `registry/mcp-servers/.gitkeep` و `registry/skills/.gitkeep`.
+- **اصلاح حداقلی نسبت به کد ارسالی (طبق تصمیم کاربر minimal_fix):**
+  - تمام importهای نسبی به `*.js` تغییر یافتند تا با `moduleResolution: Bundler` و ESM سازگار باشند (الزامی برای TypeScript 7).
+  - تست `phase1.test.ts` برای ESM بازنویسی شد: `__dirname` از `fileURLToPath(import.meta.url)` ساخته شد، `require()` به `import` تبدیل شد، و تست‌های جدید برای `allowedTools` و `source` (شامل wildcard، defaultها، و بررسی `planner`/`reviewer`) اضافه شد — در مجموع ۲۷ تست.
+  - `PersonaSchema` و `ToolDefinitionSchema` مستقیماً نسخه‌ی به‌روزشده (با `allowedTools` و `source`) پیاده شدند، چون معیار پذیرش فاز ۱ صریحاً آن‌ها را می‌خواهد؛ این مطابق بخش «مطابقت‌سازی کد موجود با پلن جدید» در پیام کاربر است.
+- **راستی‌آزمایی:**
+  - `npx tsc -p tsconfig.json --noEmit`: ✅ بدون خطا.
+  - `npx vitest run src/ai/__tests__/phase1.test.ts`: ✅ ۲۷ تست سبز.
+  - معیارهای پذیرش فاز ۱: ساختار پوشه، `createRegistry` (get/list/has/register + duplicate + validation)، پنج Schema (شامل `allowedTools` و `source`)، loader با نمونه‌های واقعی، و build بدون خطای type — همگی تأیید شدند.
