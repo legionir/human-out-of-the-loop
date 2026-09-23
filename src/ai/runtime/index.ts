@@ -23,3 +23,13 @@ export {
   type TaskRuntimeConfig,
   type CreateTaskOptions,
 } from './task-runtime.js';
+export {
+  FilePlanStore,
+  MemoryPlanStore,
+  type PlanStore,
+} from './plan-store.js';
+export {
+  PlanRuntime,
+  type PlanRuntimeConfig,
+  type PlanExecutionResult,
+} from './plan-runtime.js';

@@ -293,15 +293,15 @@ Plan نهایی (پس از عبور از Feasibility Gate و بررسی چرخه
 
 ---
 
-## [🔴] فاز ۱۰: PlanRuntime — حلقه‌ی خودکار اجرای Plan تا تکمیل کامل
+## [🟢] فاز ۱۰: PlanRuntime — حلقه‌ی خودکار اجرای Plan تا تکمیل کامل
 
 هسته‌ی اصلی Human-Out-Of-Loop: پس از تأیید کاربر در فاز ۹، این حلقه در کد (نه در تصمیم مدل) تا تکمیل کامل Plan یا شکست قطعی گزارش‌شده، **بدون توقف و بدون نیاز به پیام «ادامه بده»** پیش می‌رود.
 
-### [🔴] گام ۱: Persist کردن Plan در آغاز اجرا
+### [🟢] گام ۱: Persist کردن Plan در آغاز اجرا
 
 بلافاصله پس از تأیید کاربر، Plan کامل (شامل وضعیت اولیه‌ی همه‌ی گام‌ها) در یک store ماندگار (حداقل فایل JSON، قابل ارتقا به دیتابیس) ذخیره شود؛ هر تغییر وضعیت گام بلافاصله در همین store persist شود.
 
-### [🔴] گام ۲: حلقه‌ی اصلی PlanRuntime
+### [🟢] گام ۲: حلقه‌ی اصلی PlanRuntime
 
 ```js
 while (!allStepsDone(plan) && !allStepsFailedTerminal(plan)) {
@@ -322,23 +322,23 @@ while (!allStepsDone(plan) && !allStepsFailedTerminal(plan)) {
 
 این حلقه روی TaskRuntime (فاز ۸: lock + concurrency cap) و AgentRuntime (فاز ۷) سوار است.
 
-### [🔴] گام ۳: Priority Queue بین گام‌های آماده‌ی هم‌رتبه
+### [🟢] گام ۳: Priority Queue بین گام‌های آماده‌ی هم‌رتبه
 
 وقتی تعداد `ready` بیشتر از ظرفیت موازی‌سازی است، اولویت بر اساس تعداد گام‌های وابسته به هرکدام (عمق در گراف — گام‌هایی که بیشترین گام دیگر منتظرشان‌اند، اول اجرا شوند) تعیین شود.
 
-### [🔴] گام ۴: Re-planning خودکار میان‌کار
+### [🟢] گام ۴: Re-planning خودکار میان‌کار
 
 اگر گامی `failed` شد یا در بررسی کیفیت (فاز ۱۱) رد شد، PlanRuntime **خودش** (بدون سؤال از کاربر) دوباره Planner (فاز ۹) را با context شکست صدا می‌زند تا Plan را patch کند (retry با تنظیمات متفاوت، تجزیه‌ی گام به گام‌های کوچک‌تر، یا افزودن گام جبرانی)؛ Plan patch‌شده دوباره از Feasibility Gate (فاز ۹) عبور می‌کند پیش از ادامه‌ی حلقه. سقف تعداد re-planning کلی (نه فقط per-step) پیکربندی‌پذیر است تا از حلقه‌ی بی‌پایان جلوگیری شود.
 
-### [🔴] گام ۵: Resume پس از crash
+### [🟢] گام ۵: Resume پس از crash
 
 در startup، اگر یک Plan ذخیره‌شده‌ی ناتمام (persist شده در گام ۱) وجود دارد، PlanRuntime باید بتواند از همان وضعیت گام‌به‌گام (نه از صفر) ادامه دهد.
 
-### [🔴] گام ۶: خروج از حلقه با وضعیت نهایی قطعی
+### [🟢] گام ۶: خروج از حلقه با وضعیت نهایی قطعی
 
 حلقه فقط در دو حالت متوقف می‌شود: (الف) تمام گام‌ها `done` — عبور به فاز ۱۲؛ (ب) به سقف re-planning رسیده و پیشرفت دیگر ممکن نیست — Plan با وضعیت `failed-partial` و گزارش دقیق چه چیزی ناتمام مانده و چرا (بدون درخواست از کاربر برای ادامه‌ی دستی؛ این گزارش در فاز ۱۲ به کاربر ارائه می‌شود).
 
-### [🔴] گام ۷: تست واحد و integration
+### [🟢] گام ۷: تست واحد و integration
 
 تست حلقه با یک Plan نمونه‌ی چندگامی‌ِ dependency-دار (بدون crash)؛ تست resume پس از قطع شبیه‌سازی‌شده‌ی فرآیند میان‌راه؛ تست سناریوی رسیدن به سقف re-planning.
 
@@ -739,3 +739,30 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `tsc --noEmit`: ✅
   - `vitest run`: ✅ ۱۷۱ تست (۱۰ فایل) — فاز ۹ شامل ۲۲ تست: ۸ Feasibility Gate (valid, non-existent persona/skill/tool, Law18 tool not in allowedTools, invalid dependsOn, self-dependency, multiple errors), ۴ Cycle Detection (valid DAG no cycle, direct A↔B, indirect A→B→C→A, no dependencies), ۳ Topological Sort (valid ordering step-1→2→3, null for cyclic, parallel s1,s2→s3), ۴ Plan Summary & Confirmation (summary personas/resources, format contains EXECUTION PLAN+steps+Confirm, confirm accepts 7 affirmatives, rejects negative with feedback), ۳ Plan Schema (createPlan pending+draft, getReadySteps pending→done transition, isPlanTerminal).
   - معیار پذیرش: درخواست ناقص → clarification (ساختار PlannerAssessment آماده), درخواست کامل → Plan valid via generateObject, Feasibility Gate رد ترکیب نامعتبر قبل از اجرا, چرخه تشخیص داده می‌شود, Plan فقط پس از تأیید صریح وارد اجرا می‌شود — همگی تأیید.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۱۰ (PlanRuntime — حلقه‌ی خودکار اجرای Plan تا تکمیل کامل)
+
+- **وضعیت:** فاز ۱۰ از 🔴 به 🟢؛ هر هفت گام 🟢.
+- **پیاده‌سازی:**
+  - `src/ai/runtime/plan-store.ts`: `PlanStore` interface (save/load/list/delete/exists), `FilePlanStore` با sanitise `planId.replace(/[^a-zA-Z0-9_-]/g, '_')`, sync writes `writeFileSync` برای durability, `MemoryPlanStore` با deep clone در save/load برای جلوگیری از mutation.
+  - `src/ai/runtime/plan-runtime.ts`: `PlanRuntime` هسته‌ی Human-Out-Of-Loop:
+    - Config: `taskRuntime, planStore, planner, feasibilityDeps, refs {persona,skill,tool,model}, maxReplanningAttempts default 3, defaultModelId gpt-4o, onStatusChange`.
+    - `execute(plan)`: status→running+persists, while !shouldExit: check cancelled→cancelled, getReadyStepsPrioritized (priority heuristic: count downstream dependents transitive via BFS, tie-break lexicographic), dispatch via `dispatchStep` (status running+buildAgentForStep via `createAgent`+createTask), `waitForAll`, `syncStepStatuses` (getResult from TaskRuntime → done/failed/cancelled), persist+notify. isStuck detection (no running, no ready, has pending) → `attemptReplanning`. Final status completed vs failed-partial, completedAt, persist, buildResult `{planId, status, completedSteps, failedSteps, totalSteps, incompleteSteps[{stepId, description, reason, failureType}], replanningAttempts}`.
+    - `buildAgentForStep`: `createAgent({ agentDefinition: { id: plan-step-${id}, personaId, skillIds, modelId: defaultModelId }, refs })`.
+    - `countDependents`: BFS queue transitive.
+    - `attemptReplanning`: gather failed context, build replanRequest prompt با ORIGINAL GOAL+FAILED+COMPLETED+PENDING, call `planner.plan(replanRequest)`, validate via `runFeasibilityGate` + `detectCycles`, merge keep completed old + new pending, persist.
+    - `resume(planId)`: load, if terminal return result, reset running→pending+taskId undefined (crash recovery), execute.
+    - `cancel()`: flag, checked at top of loop + shouldExit.
+    - `shouldExit`: isPlanTerminal OR cancelled OR status terminal.
+    - Helpers `persist` try/catch (Phase 14 observability), `notify`, `isStuck`, `buildResult`.
+  - `runtime/index.ts`: export FilePlanStore, MemoryPlanStore, PlanStore, PlanRuntime, PlanRuntimeConfig, PlanExecutionResult.
+- **اصلاح حداقلی:**
+  - **Cancellation bug:** spec's `shouldExit` returns true when `cancelled` flag true, causing while loop to exit before inner `if (cancelled) { status=cancelled }` block. Result was `failed-partial` instead of `cancelled`. Fix: after loop, if `this.cancelled` set status to cancelled before final determination.
+  - **Resume test bug:** `MemoryPlanStore.save` deep-clones, so original `plan` variable not mutated by resume. Spec test checked `plan.steps.find(...).status` on original variable expecting done → always fails (got running). Fixed test to load persisted copy `env.planStore.load('crash-recovery-plan')` and check there.
+  - **Catalog bootstrap order:** spec's `setup()` registered base tools, then `loadSkillsFromDirectory`, then `bootstrapCatalogTools` → fails because `task_decomposition` skill depends on `list_personas/list_skills/list_tools` not yet registered (`[SkillRegistry] references unknown tool(s)`). Fixed to bootstrap catalog BEFORE loading skills (idempotent second bootstrap after).
+  - `vi.mock('ai')` changed to `importActual` + mock only `generateText/generateObject` to preserve `tool`, `stepCountIs`, etc (previous phases fix).
+  - ESM `__dirname` via `fileURLToPath`.
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۱۹۰ تست (۱۱ فایل) — فاز ۱۰ شامل ۱۹ تست: ۴ full execution (multi-step with deps to completion, persists after each step, dependency order, parallel independent steps maxConcurrent 2), ۲ failure handling (step failure without crash, reports incomplete in failed-partial), ۱ priority queue (A 2 dependents before B 1 dependent with concurrency 1), ۳ resume (partially completed resume, running→pending crash recovery, throws non-existent), ۱ re-planning ceiling (max attempts 2), ۱ cancellation (stops dispatching when cancelled), ۲ Law 17 (completes without await user input, failure+replanning exhaustion without human), ۵ MemoryPlanStore (save/load, undefined non-existent, list ids, delete, deep-clone).
+  - معیار پذیرش: Plan چندگامی dependency-دار بدون پیام میانی انسانی کامل می‌شود, priority queue A قبل از B, شکست → re-planning خودکار نه توقف, resume از همان نقطه نه صفر, سقف re-planning با گزارش دقیق و بدون crash, cancellation با status cancelled — همگی تأیید.
