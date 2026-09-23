@@ -642,6 +642,64 @@ export class Orchestrator {
     };
   }
 
+  /**
+   * Phase 23 (CLI --dry-run): plan WITHOUT executing.
+   *
+   * Runs the same pipeline as `run()` up to the user-confirmation
+   * point — clarification check, planning, feasibility gate, cycle
+   * detection — and returns the formatted plan (or the reason it
+   * could not be planned).  Nothing is persisted, confirmed, or
+   * executed; no session interaction is recorded.
+   */
+  async previewPlan(userRequest: string): Promise<{
+    ok: boolean;
+    plan?: Plan;
+    planText?: string;
+    error?: string;
+  }> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    const planningResult = await this.planner.plan(userRequest);
+
+    if (!planningResult.isClear) {
+      const clarificationMsg =
+        planningResult.needsClarification.length > 0
+          ? planningResult.needsClarification.join('\n')
+          : planningResult.errors.join('\n');
+      return {
+        ok: false,
+        error: `The request needs clarification before a plan can be produced:\n${clarificationMsg}`,
+      };
+    }
+
+    const plan = planningResult.plan!;
+
+    const feasibility = runFeasibilityGate(plan, {
+      personaRegistry: this.personaRegistry,
+      skillRegistry: this.skillRegistry,
+      toolRegistry: this.toolRegistry,
+    });
+    if (!feasibility.feasible) {
+      const errorMsg = feasibility.errors
+        .map((e) => `[${e.stepId}] ${e.field}: ${e.message}`)
+        .join('\n');
+      return { ok: false, plan, error: `Plan failed feasibility check:\n${errorMsg}` };
+    }
+
+    const cycleCheck = detectCycles(plan);
+    if (cycleCheck.hasCycle) {
+      return {
+        ok: false,
+        plan,
+        error: `Circular dependency detected: ${cycleCheck.cyclePath?.join(' → ')}`,
+      };
+    }
+
+    return { ok: true, plan, planText: formatPlanForUser(summarizePlan(plan)) };
+  }
+
   async cancelPlan(planId: string) {
     return this.cancellationManager.cancelPlan(planId);
   }

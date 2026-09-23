@@ -116,7 +116,14 @@ export class StreamingManager {
     };
 
     if (event === 'plan:started') {
-      return { ...base, type: 'plan:started', message: `Plan "${plan.goal.slice(0, 60)}" started.` };
+      // Phase 23 (CLI): totalSteps in the payload lets the terminal
+      // renderer show a "step x/y" progress counter.
+      return {
+        ...base,
+        type: 'plan:started',
+        message: `Plan "${plan.goal.slice(0, 60)}" started.`,
+        payload: { totalSteps: plan.steps.length },
+      };
     }
     if (event === 'plan:replanning') {
       return { ...base, type: 'plan:replanning', message: 'Re-planning in progress...' };
