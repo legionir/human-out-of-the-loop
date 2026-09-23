@@ -382,7 +382,9 @@ describe('UsageAggregator', () => {
     aggregator = new UsageAggregator();
   });
 
-  function makeTask(id: string, usage?: TokenUsage, planStepId?: string): Task {
+  // Phase 20 (CORR-03): usage is bucketed by the task's real planId
+  // (previously these tests relied on record() misusing planStepId).
+  function makeTask(id: string, usage?: TokenUsage, planId?: string): Task {
     return {
       id,
       agentDefinitionOrId: 'coder',
@@ -393,7 +395,7 @@ describe('UsageAggregator', () => {
       usage,
       createdAt: Date.now(),
       completedAt: Date.now(),
-      planStepId,
+      planId,
     };
   }
 

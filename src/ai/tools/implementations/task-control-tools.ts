@@ -222,6 +222,7 @@ export function createGetTaskDetailsTool(taskRuntime: TaskRuntime) {
         startedAt: task.startedAt ?? null,
         completedAt: task.completedAt ?? null,
         planStepId: task.planStepId ?? null,
+        planId: task.planId ?? null,
       };
     },
   });

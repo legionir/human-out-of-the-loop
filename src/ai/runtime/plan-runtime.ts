@@ -15,6 +15,7 @@ import {
   isPlanTerminal,
   getReadySteps,
 } from '../schemas/plan.js';
+import type { AcceptanceChecker } from './acceptance-checker.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -35,6 +36,12 @@ export interface PlanRuntimeConfig {
   defaultModelId?: string;
   /** Callback invoked when plan status changes (for streaming — Phase 13) */
   onStatusChange?: (plan: Plan, event: string) => void;
+  /**
+   * Phase 20 (CORR-04): acceptance checker invoked from an EXPLICIT hook
+   * after each status sync — no EventBus subscription, no race with the
+   * runtime's own state updates.
+   */
+  acceptanceChecker?: AcceptanceChecker;
 }
 
 export interface PlanExecutionResult {
@@ -78,6 +85,8 @@ export class PlanRuntime {
   private readonly defaultModelId: string;
   private replanningCount = 0;
   private cancelled = false;
+  /** Phase 20 (CORR-04): steps already judged — never check twice */
+  private readonly acceptanceChecked = new Set<string>();
 
   constructor(config: PlanRuntimeConfig) {
     this.config = config as Required<
@@ -134,6 +143,8 @@ export class PlanRuntime {
         // Steps are running — wait for them
         await this.config.taskRuntime.waitForAll();
         this.syncStepStatuses(plan);
+        // Phase 20 (CORR-04): explicit acceptance hook (deterministic)
+        await this.runAcceptanceChecks(plan);
         this.persist(plan);
         continue;
       }
@@ -149,6 +160,8 @@ export class PlanRuntime {
 
       // 6. Sync statuses from TaskRuntime back to PlanSteps
       this.syncStepStatuses(plan);
+      // Phase 20 (CORR-04): explicit acceptance hook (deterministic)
+      await this.runAcceptanceChecks(plan);
       this.persist(plan);
       this.notify(plan, 'plan:steps-updated');
     }
@@ -224,6 +237,9 @@ export class PlanRuntime {
         prompt: step.description,
         claimedResources: step.claimedResources,
         planStepId: step.id,
+        // Phase 20 (CORR-03): plan id so UsageAggregator can bucket
+        // token usage per plan instead of "unassigned".
+        planId: plan.id,
       });
 
       step.taskId = taskId;
@@ -284,6 +300,50 @@ export class PlanRuntime {
           step.resultSummary = 'Task was cancelled';
           break;
         // pending/running — no change yet
+      }
+    }
+  }
+
+  // ── Private: acceptance hook (Phase 20, CORR-04) ─────────────
+
+  /**
+   * Run the acceptance check for every step that just transitioned
+   * to "done", SEQUENTIALLY and AFTER the status sync — so the checker
+   * always sees current state and parallel tasks can no longer race.
+   *
+   * A rejected verdict marks the step `failed` with `failureType:
+   * 'quality'` (distinct from 'technical') and fires the checker's
+   * onQualityFailure callback.  Downstream steps then see the failure
+   * on the next readiness evaluation (→ re-planning path).
+   */
+  private async runAcceptanceChecks(plan: Plan): Promise<void> {
+    const checker = this.config.acceptanceChecker;
+    if (!checker) return;
+
+    for (const step of plan.steps) {
+      if (step.status !== 'done') continue;
+      if (this.acceptanceChecked.has(step.id)) continue;
+      if (!step.taskId) continue;
+
+      const task = this.config.taskRuntime.getResult(step.taskId);
+      if (!task) continue;
+
+      // Mark as checked BEFORE awaiting so an interleaved re-entry
+      // (e.g. resume) cannot double-judge the same step.
+      this.acceptanceChecked.add(step.id);
+
+      const judgment = await checker.checkStep(step, task);
+
+      if (judgment.accepted) {
+        step.resultSummary = `${step.resultSummary ?? ''}\n[Acceptance: PASSED — ${judgment.reason}]`.trim();
+        this.persist(plan);
+      } else {
+        step.status = 'failed';
+        step.failureType = 'quality';
+        step.resultSummary = `[Acceptance: FAILED — ${judgment.reason}]`;
+        this.notify(plan, `step:${step.id}:failed`);
+        checker.reportQualityFailure(plan.id ?? 'unknown', step.id, judgment.reason);
+        this.persist(plan);
       }
     }
   }

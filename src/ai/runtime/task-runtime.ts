@@ -37,6 +37,8 @@ export interface CreateTaskOptions {
   claimedResources?: string[];
   /** Optional plan step id (Phase 10) */
   planStepId?: string;
+  /** Phase 20 (CORR-03): owning plan id (for usage aggregation) */
+  planId?: string;
 }
 
 // ─── Resource Lock Manager ───────────────────────────────────────
@@ -168,6 +170,7 @@ export class TaskRuntime {
       prompt: options.prompt,
       claimedResources: options.claimedResources,
       planStepId: options.planStepId,
+      planId: options.planId,
     });
 
     this.tasks.set(taskId, task);
@@ -267,6 +270,9 @@ export class TaskRuntime {
             ...(this.agentTimeoutMs !== undefined
               ? { timeoutMs: this.agentTimeoutMs }
               : {}),
+            // Phase 20 (CORR-03/05): carry plan context on emitted events
+            ...(task.planId !== undefined ? { planId: task.planId } : {}),
+            ...(task.planStepId !== undefined ? { planStepId: task.planStepId } : {}),
           })
           .then((result) => {
             this.handleRunResult(task.id, result);

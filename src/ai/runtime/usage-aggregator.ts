@@ -43,6 +43,9 @@ export class UsageAggregator {
 
   /**
    * Automatically collect usage from agent:completed events.
+   *
+   * Phase 20 (CORR-03): events now carry `planId` (set by TaskRuntime
+   * from the task), so per-plan breakdowns are no longer "unassigned".
    */
   subscribeToEventBus(eventBus: EventBus): void {
     this.unsubscribeFn = eventBus.subscribe('agent:completed', (event) => {
@@ -50,6 +53,7 @@ export class UsageAggregator {
       if (completedEvent.usage) {
         this.recordDirect({
           taskId: completedEvent.taskId,
+          planId: completedEvent.planId,
           agentId: completedEvent.agentId,
           usage: completedEvent.usage,
           timestamp: completedEvent.timestamp,
@@ -65,13 +69,16 @@ export class UsageAggregator {
 
   /**
    * Record usage from a completed task.
+   *
+   * Phase 20 (CORR-03): reads the real `task.planId` (previously
+   * misused `planStepId`, which is a STEP id, not a plan id).
    */
   record(task: Task, agentId: string, personaId?: string): void {
     if (!task.usage) return;
 
     this.records.push({
       taskId: task.id,
-      planId: task.planStepId, // Will be mapped to planId in Phase 15
+      planId: task.planId,
       agentId,
       personaId,
       usage: task.usage,

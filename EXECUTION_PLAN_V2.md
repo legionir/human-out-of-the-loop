@@ -263,7 +263,10 @@ fs.renameSync(tmp, filePath);
 
 ---
 
-### [🔴] فاز ۲۰: P1 Correctness & Security Extended
+### [🟢] فاز ۲۰: P1 Correctness & Security Extended — کامل شد 2026-09-23
+
+**نتیجه:** `tryRegister` حالا `ZodError` واقعی را بازمی‌گرداند (`RegistryValidationError`)؛ `shutdown()` اول `waitForAll()` و بعد unsubscribe می‌کند (تست: task در حال اجرا طی shutdown کامل می‌شود و usage ثبت می‌شود)؛ `Task.planId` جدید + `planId/planStepId` روی همه `AgentEvent`ها → `UsageAggregator.byPlan` و `StreamingManager` planId/stepId واقعی (ProgressEvent شامل هر سه `planId`/`stepId`/`taskId`)؛ **AcceptanceChecker بازطراحی شد**: دیگر EventBus listener ندارد — hook صریح `runAcceptanceChecks` در `PlanRuntime` بعد از هر `syncStepStatuses` (تست race با 10 task موازی: هر acceptance دقیقاً یک‌بار)؛ `clearTimeout` در `finally` برای `McpConnector.connectServer` و `AgentRuntime.run` (تست fake-timers: 0 pending timer)؛ `path-security`: چک symlink با `realpathSync` (فرار از workspace با symlink فایل/دایرکتوری بلاک می‌شود) + مقایسه case-insensitive در Windows؛ آستانه redact فرگمان‌های کوتاه در `sanitiseError` از 8 به 4؛ `redactPayload` substring match. 23 تست جدید (`phase20.test.ts`) + بازنویسی تست‌های event-driven phase11 به مدل hook = 389 تست سبز، tsc سبز.
+**انحراف ثبت‌شده:** (1) برای گام ۵ (CORR-05) به جای map جداگانه در StreamingManager، `planId/planStepId` مستقیم روی `AgentEvent` thread شد (تصویه‌تر؛ ProgressEvent شامل هر دو `planId` و `taskId` هم می‌شود — گزینه دوم معیارپذیری). (2) `wireAcceptanceChecker`/`plan-runtime-hooks.ts` حذف شد (dead code پس از hook صریح). (3) CORR-08 (`instanceof Object`) که در گام‌های فاز ۲۰ صریح نبود، در همین فاز به‌عنوان type guard واقعی (`isBareTaskRuntime`) فیکس شد.
 
 **هدف:** رفع باگ‌های منطقی و امنیتی باقی‌مانده P0/P1.
 

@@ -1,15 +1,12 @@
 import { generateObject } from 'ai';
 import { z } from 'zod';
-import type { EventBus, UnsubscribeFn } from './event-bus.js';
-import type { PlanStore } from './plan-store.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { ModelRegistry } from '../registries/model-registry.js';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
-import type { Plan, PlanStep } from '../schemas/plan.js';
+import type { PlanStep } from '../schemas/plan.js';
 import type { Task } from '../schemas/task.js';
-import type { TaskRuntime } from './task-runtime.js';
 
 export const AcceptanceResultSchema = z.object({
   accepted: z.boolean(),
@@ -24,50 +21,46 @@ export interface AcceptanceCheckerConfig {
   toolRegistry: ToolRegistry;
   modelRegistry: ModelRegistry;
   modelId?: string;
-  eventBus: EventBus;
-  planStore: PlanStore;
-  taskRuntime?: TaskRuntime;
+  /**
+   * Phase 20 (CORR-04): invoked synchronously by the PlanRuntime hook
+   * when a step's output is rejected.
+   */
   onQualityFailure?: (planId: string, stepId: string, reason: string) => void;
 }
 
+/**
+ * Phase 20 (CORR-04) — REDESIGNED.
+ *
+ * Before: this checker SUBSCRIBED to the EventBus (`agent:completed`)
+ * and mutated plan state from an async event handler that ran
+ * CONCURRENTLY with PlanRuntime's own status sync — a race where
+ * parallel tasks could double-check, check stale state, or have their
+ * quality verdict applied after dependents were already dispatched.
+ *
+ * Now: this is a PURE judgment service.  It has NO EventBus listener.
+ * PlanRuntime calls `checkStep()` from an explicit hook after its
+ * `syncStepStatuses()` (deterministic, sequential, always current
+ * state) and applies the verdict itself.
+ *
+ * Public API:
+ *   - `checkStep(step, task)` → AcceptanceResult
+ *   - `reportQualityFailure(planId, stepId, reason)` → fires the
+ *     configured callback (observability + streaming).
+ */
 export class AcceptanceChecker {
   private readonly config: AcceptanceCheckerConfig;
   private readonly modelId: string;
-  private unsubscribeFn?: UnsubscribeFn;
-  private readonly activePlans = new Map<string, Plan>();
 
   constructor(config: AcceptanceCheckerConfig) {
     this.config = config;
     this.modelId = config.modelId ?? 'gpt-4o';
   }
 
-  start(): void {
-    this.unsubscribeFn = this.config.eventBus.subscribe(
-      'agent:completed',
-      (event) => {
-        this.handleCompletion(event.taskId).catch((err) => {
-          console.error(
-            `[AcceptanceChecker] Error checking task ${event.taskId}:`,
-            err instanceof Error ? err.message : err
-          );
-        });
-      }
-    );
-  }
-
-  stop(): void {
-    this.unsubscribeFn?.();
-    this.unsubscribeFn = undefined;
-  }
-
-  registerPlan(plan: Plan): void {
-    this.activePlans.set(plan.id ?? 'unknown', plan);
-  }
-
-  unregisterPlan(planId: string): void {
-    this.activePlans.delete(planId);
-  }
-
+  /**
+   * Judge one completed step against its acceptance criteria.
+   * NEVER throws — a reviewer failure yields `accepted: false` with a
+   * descriptive reason (fail-closed).
+   */
   async checkStep(
     step: PlanStep,
     taskResult: Task
@@ -116,56 +109,12 @@ a JSON object containing "accepted" (boolean) and "reason" (string).
     }
   }
 
-  private async handleCompletion(taskId: string): Promise<void> {
-    const { plan, step } = this.findStepByTaskId(taskId);
-    if (!plan || !step) return;
-    if (step.status !== 'done') return;
-
-    let taskResult: Task | undefined;
-    if (this.config.taskRuntime) {
-      const realTask = this.config.taskRuntime.getResult(taskId);
-      if (realTask) {
-        if (realTask.status !== 'completed') return;
-        taskResult = realTask;
-      }
-    }
-
-    if (!taskResult) {
-      taskResult = {
-        id: taskId,
-        agentDefinitionOrId: step.assignedPersona,
-        prompt: step.description,
-        status: 'completed',
-        summary: step.resultSummary,
-        result: step.resultSummary,
-        claimedResources: step.claimedResources,
-        errors: [],
-        createdAt: Date.now(),
-      };
-    }
-
-    const judgment = await this.checkStep(step, taskResult);
-
-    if (judgment.accepted) {
-      step.resultSummary = `${step.resultSummary}\n[Acceptance: PASSED — ${judgment.reason}]`;
-    } else {
-      step.status = 'failed';
-      step.failureType = 'quality';
-      step.resultSummary = `[Acceptance: FAILED — ${judgment.reason}]`;
-      this.config.onQualityFailure?.(plan.id ?? 'unknown', step.id, judgment.reason);
-    }
-
-    this.config.planStore.save(plan);
-  }
-
-  private findStepByTaskId(
-    taskId: string
-  ): { plan: Plan | undefined; step: PlanStep | undefined } {
-    for (const plan of this.activePlans.values()) {
-      const step = plan.steps.find((s) => s.taskId === taskId);
-      if (step) return { plan, step };
-    }
-    return { plan: undefined, step: undefined };
+  /**
+   * Fire the configured onQualityFailure callback.  Called by the
+   * PlanRuntime hook after a rejected verdict is applied to the step.
+   */
+  reportQualityFailure(planId: string, stepId: string, reason: string): void {
+    this.config.onQualityFailure?.(planId, stepId, reason);
   }
 
   private buildReviewerAgent(): ResolvedAgent {

@@ -370,14 +370,27 @@ export class ObservabilityLogger {
   // ── Private ───────────────────────────────────────────────────
 
   /**
+   * Phase 20 (SEC-04): a key is redacted when it CONTAINS any redaction
+   * pattern (case-insensitive substring match) — previously exact match
+   * only, so `myApiKey` / `dbToken` / `accessToken` leaked through.
+   * Over-redaction is acceptable here (safer than leaking).
+   */
+  private isRedactedKey(key: string): boolean {
+    const lowerKey = key.toLowerCase();
+    for (const pattern of this.redactKeys) {
+      if (lowerKey.includes(pattern.toLowerCase())) return true;
+    }
+    return false;
+  }
+
+  /**
    * Recursively redact sensitive keys from a payload object.
    */
   private redactPayload(obj: Record<string, unknown>): Record<string, unknown> {
     const result: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(obj)) {
-      const lowerKey = key.toLowerCase();
-      if (this.redactKeys.has(lowerKey) || this.redactKeys.has(key)) {
+      if (this.isRedactedKey(key)) {
         result[key] = '***REDACTED***';
       } else if (value && typeof value === 'object' && !Array.isArray(value)) {
         result[key] = this.redactPayload(value as Record<string, unknown>);

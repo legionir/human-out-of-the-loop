@@ -39,6 +39,10 @@ export interface AgentRunOptions {
   maxSteps?: number;
   /** Timeout in milliseconds for the entire run */
   timeoutMs?: number;
+  /** Phase 20 (CORR-03/05): plan context, attached to emitted events */
+  planId?: string;
+  /** Phase 20 (CORR-05): step context, attached to emitted events */
+  planStepId?: string;
 }
 
 // ─── Constants ────────────────────────────────────────────────────
@@ -79,11 +83,19 @@ export class AgentRuntime {
       eventBus,
       maxSteps = DEFAULT_MAX_STEPS,
       timeoutMs = DEFAULT_TIMEOUT_MS,
+      planId,
+      planStepId,
     } = options;
 
     const agentId = agent.agentId;
     const toolsUsed: string[] = [];
     const errors: string[] = [];
+
+    // Phase 20 (CORR-03/05): plan context attached to every event
+    const planContext = {
+      ...(planId !== undefined ? { planId } : {}),
+      ...(planStepId !== undefined ? { planStepId } : {}),
+    };
 
     // ── Emit running event ──────────────────────────────────
     eventBus.emit({
@@ -93,7 +105,12 @@ export class AgentRuntime {
       timestamp: Date.now(),
       status: 'running',
       prompt: prompt.slice(0, 200), // Truncate for compact event
+      ...planContext,
     });
+
+    // Phase 20 (LEAK-02): the timeout timer MUST be cleared when the
+    // race settles, or it keeps the event loop alive after every run.
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 
     try {
       // ── Race execution against timeout ────────────────────
@@ -105,10 +122,11 @@ export class AgentRuntime {
         taskId,
         agentId,
         toolsUsed,
+        planContext,
       });
 
       const timeoutPromise = new Promise<never>((_, reject) => {
-        setTimeout(
+        timeoutTimer = setTimeout(
           () => reject(new TimeoutError(`Agent run timed out after ${timeoutMs}ms`)),
           timeoutMs
         );
@@ -129,6 +147,7 @@ export class AgentRuntime {
         summary,
         toolsUsed: [...new Set(toolsUsed)],
         usage: sdkResult.usage,
+        ...planContext,
       });
 
       return {
@@ -156,6 +175,7 @@ export class AgentRuntime {
         status: 'error',
         error: message,
         code,
+        ...planContext,
       });
 
       return {
@@ -169,6 +189,8 @@ export class AgentRuntime {
         usage: undefined,
         failureType: 'technical',
       };
+    } finally {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
     }
   }
 
@@ -182,8 +204,9 @@ export class AgentRuntime {
     taskId: string;
     agentId: string;
     toolsUsed: string[];
+    planContext: { planId?: string; planStepId?: string };
   }): Promise<{ text: string; usage?: TokenUsage }> {
-    const { agent, prompt, maxSteps, eventBus, taskId, agentId, toolsUsed } = params;
+    const { agent, prompt, maxSteps, eventBus, taskId, agentId, toolsUsed, planContext } = params;
 
     const hasTools = Object.keys(agent.tools).length > 0;
 
@@ -215,6 +238,7 @@ export class AgentRuntime {
               status: 'running',
               toolName,
               callId: call.toolCallId ?? call.id ?? `call-${Date.now()}`,
+              ...planContext,
             });
           }
         }

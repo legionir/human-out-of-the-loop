@@ -23,6 +23,8 @@ export interface ProgressEvent {
     | 'task:tool-call'
     | 'task:status';
   planId: string;
+  /** Phase 20 (CORR-05): the task id behind this event (planId is the real plan) */
+  taskId?: string;
   stepId?: string;
   timestamp: number;
   /** Human-readable one-line message */
@@ -154,8 +156,12 @@ export class StreamingManager {
   }
 
   private translateEvent(event: AgentEvent): ProgressEvent | null {
+    // Phase 20 (CORR-05): events now carry the real plan context from
+    // TaskRuntime — no more using the task id as the plan id.
     const base = {
-      planId: event.taskId, // Will be mapped to planId by the caller
+      planId: event.planId ?? event.taskId,
+      taskId: event.taskId,
+      stepId: event.planStepId,
       timestamp: event.timestamp,
     };
 
@@ -164,7 +170,6 @@ export class StreamingManager {
         return {
           ...base,
           type: 'plan:step-started',
-          stepId: event.taskId,
           message: `Agent "${event.agentId}" started working.`,
         };
 
@@ -172,7 +177,6 @@ export class StreamingManager {
         return {
           ...base,
           type: 'task:tool-call',
-          stepId: event.taskId,
           message: `Tool "${event.toolName}" invoked.`,
           payload: { toolName: event.toolName },
         };
@@ -181,7 +185,6 @@ export class StreamingManager {
         return {
           ...base,
           type: 'plan:step-completed',
-          stepId: event.taskId,
           message: `Agent "${event.agentId}" completed. ${event.toolsUsed.length} tool(s) used.`,
           payload: {
             toolsUsed: event.toolsUsed,
@@ -193,7 +196,6 @@ export class StreamingManager {
         return {
           ...base,
           type: 'plan:step-failed',
-          stepId: event.taskId,
           message: `Agent "${event.agentId}" failed: ${event.error.slice(0, 100)}`,
           payload: { code: event.code },
         };

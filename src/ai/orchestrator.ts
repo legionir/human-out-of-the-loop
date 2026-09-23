@@ -13,7 +13,6 @@ import { UsageAggregator } from './runtime/usage-aggregator.js';
 import { MemorySessionStore, FileSessionStore, type SessionStore } from './runtime/session-store.js';
 import { ObservabilityLogger } from './runtime/observability-logger.js';
 import { formatReviewForUser as formatFinalReview } from './runtime/review-formatter.js';
-import { wireAcceptanceChecker } from './runtime/plan-runtime-hooks.js';
 import { RetryableAgentRuntime } from './runtime/agent-runtime-retry.js';
 
 import { PersonaRegistry } from './registries/persona-registry.js';
@@ -211,14 +210,14 @@ export class Orchestrator {
       logFilePath: path.join(runtimeDir, 'observability.jsonl'),
     });
 
+    // Phase 20 (CORR-04): the checker is a pure judgment service — no
+    // EventBus/planStore/taskRuntime wiring. PlanRuntime invokes it from
+    // an explicit hook (see PlanRuntime.runAcceptanceChecks).
     this.acceptanceChecker = new AcceptanceChecker({
       personaRegistry: this.personaRegistry,
       skillRegistry: this.skillRegistry,
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
-      eventBus: this.eventBus,
-      planStore: this.planStore,
-      taskRuntime: this.taskRuntime,
       onQualityFailure: (planId, stepId, reason) => {
         this.observabilityLogger.logQualityCheck(planId, stepId, false, reason);
         this.streamingManager.emitProgress({
@@ -555,17 +554,17 @@ export class Orchestrator {
       onStatusChange: (p, event) => {
         this.streamingManager.handlePlanStatusChange(p, event);
       },
+      // Phase 20 (CORR-04): explicit acceptance hook instead of the old
+      // EventBus-subscription wiring (wireAcceptanceChecker removed).
+      acceptanceChecker: this.acceptanceChecker,
     });
 
     this.cancellationManager.registerRuntime(plan.id!, planRuntime);
-
-    const cleanupAcceptance = wireAcceptanceChecker(plan, this.acceptanceChecker);
 
     let executionResult: PlanExecutionResult;
     try {
       executionResult = await planRuntime.execute(plan);
     } finally {
-      cleanupAcceptance();
       this.cancellationManager.unregisterRuntime(plan.id!);
     }
 
@@ -640,6 +639,8 @@ export class Orchestrator {
       },
       maxReplanningAttempts: this.config.maxReplanningAttempts,
       defaultModelId: this.config.defaultModelId,
+      // Phase 20 (CORR-04): same explicit acceptance hook on resume
+      acceptanceChecker: this.acceptanceChecker,
     });
 
     const executionResult = await planRuntime.resume(planId);
@@ -656,11 +657,13 @@ export class Orchestrator {
   }
 
   async shutdown(): Promise<void> {
+    // Phase 20 (CORR-02): let in-flight tasks finish BEFORE
+    // unsubscribing — otherwise their completion events are lost.
+    await this.taskRuntime.waitForAll();
     this.streamingManager.stop();
-    this.acceptanceChecker.stop();
+    // Phase 20 (CORR-04): acceptanceChecker has no subscription to stop
     this.observabilityLogger.unsubscribeFromEventBus();
     this.usageAggregator.unsubscribe();
     this.taskRuntime.destroy();
-    await this.taskRuntime.waitForAll();
   }
 }

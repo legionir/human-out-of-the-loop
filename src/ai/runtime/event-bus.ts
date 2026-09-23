@@ -11,6 +11,13 @@ export interface AgentEventBase {
   taskId: string;
   agentId: string;
   timestamp: number;
+  /**
+   * Phase 20 (CORR-03/CORR-05): plan context carried on every event.
+   * Populated by TaskRuntime from the task's planId/planStepId so
+   * consumers (UsageAggregator, StreamingManager) no longer guess.
+   */
+  planId?: string;
+  planStepId?: string;
 }
 
 export interface AgentRunningEvent extends AgentEventBase {

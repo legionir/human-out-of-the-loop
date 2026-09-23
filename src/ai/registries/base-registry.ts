@@ -20,6 +20,24 @@ export interface RegisterError {
   zodError?: ZodError;
 }
 
+/**
+ * Thrown by `register()` when schema validation fails.
+ *
+ * Phase 20 (CORR-01): before this, `tryRegister()` could never surface
+ * the underlying `ZodError` because `register()` threw a plain `Error`
+ * and the catch checked `err instanceof ZodError` (always false).
+ * Now the ZodError travels with the exception.
+ */
+export class RegistryValidationError extends Error {
+  constructor(
+    message: string,
+    public readonly zodError: ZodError
+  ) {
+    super(message);
+    this.name = 'RegistryValidationError';
+  }
+}
+
 // ─── Registry class ──────────────────────────────────────────────
 export class Registry<T extends { id: string }> {
   private readonly entries = new Map<string, T>();
@@ -44,7 +62,11 @@ export class Registry<T extends { id: string }> {
       const issues = parsed.error.issues
         .map((i) => `  • ${i.path.join('.')}: ${i.message}`)
         .join('\n');
-      throw new Error(`[${this.label}] Validation failed:\n${issues}`);
+      // Phase 20 (CORR-01): carry the ZodError so tryRegister() can return it
+      throw new RegistryValidationError(
+        `[${this.label}] Validation failed:\n${issues}`,
+        parsed.error
+      );
     }
 
     const entry = parsed.data;
@@ -68,16 +90,20 @@ export class Registry<T extends { id: string }> {
       const entry = this.register(raw);
       return { success: true, entry };
     } catch (err) {
+      // Phase 20 (CORR-01): validation errors now carry the real ZodError
+      if (err instanceof RegistryValidationError) {
+        return {
+          success: false,
+          reason: 'validation',
+          message: err.message,
+          zodError: err.zodError,
+        };
+      }
       const message = err instanceof Error ? err.message : String(err);
       if (message.includes('Duplicate id')) {
         return { success: false, reason: 'duplicate', message };
       }
-      return {
-        success: false,
-        reason: 'validation',
-        message,
-        zodError: err instanceof ZodError ? err : undefined,
-      };
+      return { success: false, reason: 'validation', message };
     }
   }
 

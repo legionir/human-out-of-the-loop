@@ -40,8 +40,13 @@ vi.mock('ai', async () => {
   };
 });
 
-import { generateObject } from 'ai';
+import { generateObject, generateText } from 'ai';
 const mockGenerateObject = vi.mocked(generateObject);
+const mockGenerateText = vi.mocked(generateText);
+
+import { PlanRuntime } from '../runtime/plan-runtime.js';
+import { TaskRuntime } from '../runtime/task-runtime.js';
+import type { Planner } from '../planning/planner.js';
 
 // ─── Test infrastructure ─────────────────────────────────────────
 
@@ -106,6 +111,8 @@ function setup(): TestEnv {
   return { eventBus, planStore, personaRegistry, skillRegistry, toolRegistry, modelRegistry };
 }
 
+// Phase 20 (CORR-04): AcceptanceChecker is now a PURE judgment service —
+// no eventBus/planStore/taskRuntime in its config.
 function createCheckerConfig(
   env: TestEnv,
   overrides?: Partial<AcceptanceCheckerConfig>
@@ -115,10 +122,50 @@ function createCheckerConfig(
     skillRegistry: env.skillRegistry,
     toolRegistry: env.toolRegistry,
     modelRegistry: env.modelRegistry,
-    eventBus: env.eventBus,
-    planStore: env.planStore,
     ...overrides,
   };
+}
+
+/**
+ * Phase 20 (CORR-04) harness: a real PlanRuntime wired with a real
+ * TaskRuntime and an AcceptanceChecker — the acceptance check now runs
+ * from PlanRuntime's explicit hook (deterministic), so tests drive it
+ * through `execute()` with mocked generateText (step work) and
+ * generateObject (acceptance judgment).
+ */
+const stubPlanner = {
+  plan: async () => ({ isClear: false, needsClarification: [] }),
+} as unknown as Planner;
+
+function makeHookHarness(
+  env: TestEnv,
+  overrides?: Partial<AcceptanceCheckerConfig>
+) {
+  const taskRuntime = new TaskRuntime({
+    maxConcurrentTasks: 10,
+    eventBus: env.eventBus,
+  });
+  const planStore = new MemoryPlanStore();
+  const checker = new AcceptanceChecker(createCheckerConfig(env, overrides));
+  const runtime = new PlanRuntime({
+    taskRuntime,
+    planStore,
+    planner: stubPlanner,
+    feasibilityDeps: {
+      personaRegistry: env.personaRegistry,
+      skillRegistry: env.skillRegistry,
+      toolRegistry: env.toolRegistry,
+    },
+    refs: {
+      personaRegistry: env.personaRegistry,
+      skillRegistry: env.skillRegistry,
+      toolRegistry: env.toolRegistry,
+      modelRegistry: env.modelRegistry,
+    },
+    maxReplanningAttempts: 0, // tests assert verdicts, not re-planning
+    acceptanceChecker: checker,
+  });
+  return { taskRuntime, planStore, checker, runtime };
 }
 
 function createTestPlan(): Plan {
@@ -267,164 +314,208 @@ describe('AcceptanceChecker — checkStep', () => {
   });
 });
 
-// ─── AcceptanceChecker — event-driven flow ───────────────────────
+// ─── Acceptance hook — PlanRuntime-driven (Phase 20, CORR-04) ────
+//
+// The old event-driven flow (checker.start() + EventBus) was RACE-prone:
+// the checker mutated plan state from an async agent:completed handler
+// running concurrently with PlanRuntime's own sync.  Phase 20 moved the
+// check into an explicit PlanRuntime hook that runs SEQUENTIALLY after
+// syncStepStatuses.  These tests drive the hook through a real
+// PlanRuntime.execute() with mocked step execution + judgments.
 
-describe('AcceptanceChecker — event-driven flow', () => {
+describe('AcceptanceChecker — PlanRuntime hook (Phase 20)', () => {
   let env: TestEnv;
-  let checker: AcceptanceChecker;
 
   beforeEach(() => {
     vi.clearAllMocks();
     env = setup();
   });
 
-  afterEach(() => {
-    checker?.stop();
-  });
-
-  it('automatically checks step on agent:completed event', async () => {
+  it('marks step failed/quality when the judgment rejects (via hook)', async () => {
     const qualityFailures: Array<{ planId: string; stepId: string; reason: string }> = [];
-
-    checker = new AcceptanceChecker(
-      createCheckerConfig(env, {
-        onQualityFailure: (planId, stepId, reason) => {
-          qualityFailures.push({ planId, stepId, reason });
-        },
-      })
-    );
-
-    const plan = createTestPlan();
-    plan.id = 'event-test-plan';
-    plan.steps[0].status = 'done';
-    plan.steps[0].taskId = 'task-step-1';
-    plan.steps[0].resultSummary = 'Created user model with name field only.';
-
-    checker.registerPlan(plan);
-    checker.start();
-
-    // Mock the reviewer to reject
-    mockGenerateObject.mockResolvedValueOnce({
-      object: {
-        accepted: false,
-        reason: 'Email field is missing.',
+    const { runtime } = makeHookHarness(env, {
+      onQualityFailure: (planId, stepId, reason) => {
+        qualityFailures.push({ planId, stepId, reason });
       },
-    } as any);
-
-    // Simulate agent:completed event
-    env.eventBus.emit({
-      type: 'agent:completed',
-      taskId: 'task-step-1',
-      agentId: 'coder',
-      timestamp: Date.now(),
-      status: 'completed',
-      summary: 'Created user model.',
-      toolsUsed: ['write_file'],
     });
 
-    // Wait for async handler
-    await new Promise((r) => setTimeout(r, 100));
+    const plan = createPlan('Hook rejection test', [
+      {
+        id: 'step-1',
+        description: 'Create a user model',
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: ['file_management'],
+        assignedTools: ['read_file'],
+        claimedResources: [],
+        acceptanceCriteria: 'User type with name and email.',
+        status: 'pending',
+      },
+    ]);
+    plan.id = 'hook-reject-plan';
 
-    // Step should now be failed with quality failureType
+    // Step execution succeeds; acceptance judgment REJECTS
+    mockGenerateText.mockResolvedValue({
+      text: 'Created user model with name field only.',
+      usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 },
+      steps: [],
+    } as any);
+    mockGenerateObject.mockResolvedValue({
+      object: { accepted: false, reason: 'Email field is missing.' },
+    } as any);
+
+    const result = await runtime.execute(plan);
+
+    // Step is failed with QUALITY failure type (not technical)
     expect(plan.steps[0].status).toBe('failed');
     expect(plan.steps[0].failureType).toBe('quality');
     expect(plan.steps[0].resultSummary).toContain('FAILED');
     expect(plan.steps[0].resultSummary).toContain('Email field is missing');
+    expect(result.status).toBe('failed-partial');
 
-    // Quality failure callback should have been invoked
+    // Quality failure callback invoked exactly once with correct args
     expect(qualityFailures).toHaveLength(1);
+    expect(qualityFailures[0].planId).toBe('hook-reject-plan');
     expect(qualityFailures[0].stepId).toBe('step-1');
+
+    // Judgment ran exactly once — no double check (determinism)
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps step as done when acceptance passes', async () => {
-    const qualityFailures: any[] = [];
+  it('keeps step done and appends PASSED when the judgment accepts', async () => {
+    const { runtime } = makeHookHarness(env);
 
-    checker = new AcceptanceChecker(
-      createCheckerConfig(env, {
-        onQualityFailure: (planId, stepId, reason) => {
-          qualityFailures.push({ planId, stepId, reason });
-        },
-      })
-    );
-
-    const plan = createTestPlan();
-    plan.id = 'pass-test-plan';
-    plan.steps[0].status = 'done';
-    plan.steps[0].taskId = 'task-step-1-pass';
-    plan.steps[0].resultSummary = 'Created user model with name and email.';
-
-    checker.registerPlan(plan);
-    checker.start();
-
-    mockGenerateObject.mockResolvedValueOnce({
-      object: {
-        accepted: true,
-        reason: 'All criteria met.',
+    const plan = createPlan('Hook acceptance test', [
+      {
+        id: 'step-1',
+        description: 'Create a user model',
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: ['file_management'],
+        assignedTools: ['read_file'],
+        claimedResources: [],
+        acceptanceCriteria: 'User type with name and email.',
+        status: 'pending',
       },
+    ]);
+
+    mockGenerateText.mockResolvedValue({
+      text: 'Created user model with name and email fields.',
+      usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 },
+      steps: [],
+    } as any);
+    mockGenerateObject.mockResolvedValue({
+      object: { accepted: true, reason: 'All criteria met.' },
     } as any);
 
-    env.eventBus.emit({
-      type: 'agent:completed',
-      taskId: 'task-step-1-pass',
-      agentId: 'coder',
-      timestamp: Date.now(),
-      status: 'completed',
-      summary: 'Done.',
-      toolsUsed: [],
-    });
-
-    await new Promise((r) => setTimeout(r, 100));
+    const result = await runtime.execute(plan);
 
     expect(plan.steps[0].status).toBe('done');
     expect(plan.steps[0].failureType).toBeUndefined();
-    expect(qualityFailures).toHaveLength(0);
+    expect(plan.steps[0].resultSummary).toContain('Acceptance: PASSED');
+    expect(result.status).toBe('completed');
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
   });
 
-  it('ignores events for tasks not associated with any plan', async () => {
-    checker = new AcceptanceChecker(createCheckerConfig(env));
-    checker.start();
+  it('does NOT check steps that failed technically', async () => {
+    const { runtime } = makeHookHarness(env);
 
-    // Emit event for an unknown task
-    env.eventBus.emit({
-      type: 'agent:completed',
-      taskId: 'orphan-task',
-      agentId: 'coder',
-      timestamp: Date.now(),
-      status: 'completed',
-      summary: 'Done.',
-      toolsUsed: [],
-    });
+    const plan = createPlan('No check on technical failure', [
+      {
+        id: 'step-1',
+        description: 'Step that will crash',
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: ['file_management'],
+        assignedTools: ['read_file'],
+        claimedResources: [],
+        acceptanceCriteria: 'Anything.',
+        status: 'pending',
+      },
+    ]);
 
-    await new Promise((r) => setTimeout(r, 50));
+    // Step execution FAILS → task failed/technical → no acceptance check
+    mockGenerateText.mockRejectedValue(new Error('Provider exploded'));
 
-    // Should not throw or call generateObject
+    const result = await runtime.execute(plan);
+
+    expect(plan.steps[0].status).toBe('failed');
+    expect(plan.steps[0].failureType).toBe('technical');
+    // The reviewer was never invoked for a technically-failed step
     expect(mockGenerateObject).not.toHaveBeenCalled();
+    expect(result.status).toBe('failed-partial');
   });
 
-  it('ignores steps that are not in "done" status', async () => {
-    checker = new AcceptanceChecker(createCheckerConfig(env));
+  it('race test: 10 parallel tasks → every acceptance check runs exactly once', async () => {
+    const { runtime } = makeHookHarness(env);
 
-    const plan = createTestPlan();
-    plan.id = 'not-done-plan';
-    plan.steps[0].status = 'running'; // Not done yet
-    plan.steps[0].taskId = 'task-running';
+    // 10 INDEPENDENT steps → all dispatched in parallel (maxConcurrent=10)
+    const steps = Array.from({ length: 10 }, (_, i) => ({
+      id: `step-${i + 1}`,
+      description: `Parallel step ${i + 1}`,
+      dependsOn: [] as string[],
+      assignedPersona: 'coder',
+      assignedSkills: ['file_management'],
+      assignedTools: ['read_file'],
+      claimedResources: [],
+      acceptanceCriteria: 'Output is non-empty.',
+      status: 'pending' as const,
+    }));
+    const plan = createPlan('Ten parallel steps', steps);
 
-    checker.registerPlan(plan);
-    checker.start();
+    mockGenerateText.mockResolvedValue({
+      text: 'Step output ok.',
+      usage: { promptTokens: 2, completionTokens: 2, totalTokens: 4 },
+      steps: [],
+    } as any);
+    mockGenerateObject.mockResolvedValue({
+      object: { accepted: true, reason: 'ok' },
+    } as any);
 
-    env.eventBus.emit({
-      type: 'agent:completed',
-      taskId: 'task-running',
-      agentId: 'coder',
-      timestamp: Date.now(),
-      status: 'completed',
-      summary: 'Done.',
-      toolsUsed: [],
-    });
+    const result = await runtime.execute(plan);
 
-    await new Promise((r) => setTimeout(r, 50));
+    expect(result.status).toBe('completed');
+    expect(result.completedSteps).toBe(10);
+    // EXACTLY 10 judgments — one per task, never more (no double-check)
+    expect(mockGenerateObject).toHaveBeenCalledTimes(10);
+    // Every step carries the PASSED marker
+    for (const step of plan.steps) {
+      expect(step.status).toBe('done');
+      expect(step.resultSummary).toContain('Acceptance: PASSED');
+    }
+  });
 
-    // Should not check — step is "running", not "done"
-    expect(mockGenerateObject).not.toHaveBeenCalled();
+  it('judgment prompt contains the ACTUAL task output (no stale state)', async () => {
+    const { runtime } = makeHookHarness(env);
+
+    const plan = createPlan('Output wiring', [
+      {
+        id: 'step-1',
+        description: 'Emit a distinctive string',
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: ['file_management'],
+        assignedTools: ['read_file'],
+        claimedResources: [],
+        acceptanceCriteria: 'Contains MARKER-XYZ-123.',
+        status: 'pending',
+      },
+    ]);
+
+    mockGenerateText.mockResolvedValue({
+      text: 'The output contains MARKER-XYZ-123 as required.',
+      usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 },
+      steps: [],
+    } as any);
+    mockGenerateObject.mockResolvedValue({
+      object: { accepted: true, reason: 'Marker found.' },
+    } as any);
+
+    await runtime.execute(plan);
+
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+    const judgePrompt = mockGenerateObject.mock.calls[0]![0] as { prompt: string };
+    expect(judgePrompt.prompt).toContain('MARKER-XYZ-123');
   });
 });
 
@@ -487,49 +578,46 @@ describe('Failure type distinction', () => {
 // ─── Integration: quality failure triggers re-planning path ──────
 
 describe('Quality failure → re-planning integration', () => {
-  it('onQualityFailure callback is invoked with correct args', async () => {
+  it('onQualityFailure callback is invoked with correct args (Phase 20 hook)', async () => {
     vi.clearAllMocks();
     const env = setup();
     const failures: any[] = [];
 
-    const checker = new AcceptanceChecker(
-      createCheckerConfig(env, {
-        onQualityFailure: (planId, stepId, reason) => {
-          failures.push({ planId, stepId, reason });
-        },
-      })
-    );
+    const { runtime } = makeHookHarness(env, {
+      onQualityFailure: (planId, stepId, reason) => {
+        failures.push({ planId, stepId, reason });
+      },
+    });
 
-    const plan = createTestPlan();
+    const plan = createPlan('Replan trigger', [
+      {
+        id: 'step-1',
+        description: 'Add validation to the user model',
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: ['file_management'],
+        assignedTools: ['read_file'],
+        claimedResources: [],
+        acceptanceCriteria: 'Validation logic present.',
+        status: 'pending',
+      },
+    ]);
     plan.id = 'replan-test';
-    plan.steps[0].status = 'done';
-    plan.steps[0].taskId = 'task-r1';
-    plan.steps[0].resultSummary = 'Bad output';
 
-    checker.registerPlan(plan);
-    checker.start();
-
+    mockGenerateText.mockResolvedValue({
+      text: 'Done (no validation).',
+      usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 },
+      steps: [],
+    } as any);
     mockGenerateObject.mockResolvedValueOnce({
       object: { accepted: false, reason: 'Missing validation logic.' },
     } as any);
 
-    env.eventBus.emit({
-      type: 'agent:completed',
-      taskId: 'task-r1',
-      agentId: 'coder',
-      timestamp: Date.now(),
-      status: 'completed',
-      summary: 'Done.',
-      toolsUsed: [],
-    });
-
-    await new Promise((r) => setTimeout(r, 100));
+    await runtime.execute(plan);
 
     expect(failures).toHaveLength(1);
     expect(failures[0].planId).toBe('replan-test');
     expect(failures[0].stepId).toBe('step-1');
     expect(failures[0].reason).toContain('validation');
-
-    checker.stop();
   });
 });

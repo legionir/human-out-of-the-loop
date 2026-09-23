@@ -96,10 +96,12 @@ function sanitiseError(err: unknown, credentials: Record<string, string>): strin
     }
     // For api-key or other cases, also redact substrings that might be the raw value alone
     // (already covered by full value, but we also handle if error contains raw without prefix)
-    // Split by space and redact each long token piece as extra safety
+    // Split by space and redact each token piece as extra safety.
+    // Phase 20 (SEC-03): threshold lowered from 8 to 4 — a 5-8 char secret
+    // fragment previously slipped through.
     const parts = value.split(/\s+/);
     for (const part of parts) {
-      if (part.length > 8) {
+      if (part.length > 4) {
         msg = msg.split(part).join('***REDACTED***');
       }
     }
@@ -209,6 +211,11 @@ export class McpConnector {
       return false;
     }
 
+    // Phase 20 (LEAK-01): the timeout timer MUST be cleared when the
+    // race settles, or every successful connection leaves a pending
+    // timer that keeps the process alive.
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+
     try {
       // Race the connection against the configured timeout
       const client = await Promise.race([
@@ -216,15 +223,15 @@ export class McpConnector {
           transport: this.createTransport(config),
           name: config.id,
         }),
-        new Promise<never>((_, reject) =>
-          setTimeout(
+        new Promise<never>((_, reject) => {
+          timeoutTimer = setTimeout(
             () =>
               reject(
                 new Error(`Connection timeout after ${config.connectTimeoutMs}ms`)
               ),
             config.connectTimeoutMs
-          )
-        ),
+          );
+        }),
       ]);
 
       state.client = client;
@@ -264,6 +271,8 @@ export class McpConnector {
       state.status = 'unavailable';
       state.lastError = sanitiseError(err, credentials);
       return false;
+    } finally {
+      if (timeoutTimer) clearTimeout(timeoutTimer);
     }
   }
 

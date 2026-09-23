@@ -48,6 +48,11 @@ export const TaskSchema = z.object({
   completedAt: z.number().optional(),
   /** Optional plan step id this task is associated with (Phase 10) */
   planStepId: z.string().optional(),
+  /**
+   * Phase 20 (CORR-03): the plan this task belongs to.  Used by the
+   * UsageAggregator for correct per-plan token breakdowns.
+   */
+  planId: z.string().optional(),
 });
 
 export type Task = z.infer<typeof TaskSchema>;
@@ -61,6 +66,7 @@ export function createTaskRecord(params: {
   prompt: string;
   claimedResources?: string[];
   planStepId?: string;
+  planId?: string;
 }): Task {
   return {
     id: params.id,
@@ -71,5 +77,6 @@ export function createTaskRecord(params: {
     errors: [],
     createdAt: Date.now(),
     planStepId: params.planStepId,
+    planId: params.planId,
   };
 }

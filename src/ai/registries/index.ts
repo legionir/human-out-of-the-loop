@@ -1,5 +1,6 @@
 export {
   Registry,
+  RegistryValidationError,
   createRegistry,
   type RegistryOptions,
   type RegisterResult,
