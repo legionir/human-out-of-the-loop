@@ -32,3 +32,11 @@ export {
   type PlannerAssessment,
   type FeasibilityCheckResult,
 } from './plan.js';
+export {
+  ReviewSchema,
+  FindingSchema,
+  IncompleteStepSchema,
+  type Review,
+  type Finding,
+  type IncompleteStep,
+} from './review.js';

@@ -40,3 +40,11 @@ export {
   type AcceptanceResult,
 } from './acceptance-checker.js';
 export { wireAcceptanceChecker } from './plan-runtime-hooks.js';
+export {
+  FinalReviewer,
+  type FinalReviewerConfig,
+} from './final-reviewer.js';
+export {
+  formatReviewForUser,
+  formatReviewOneLine,
+} from './review-formatter.js';

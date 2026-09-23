@@ -372,17 +372,17 @@ while (!allStepsDone(plan) && !allStepsFailedTerminal(plan)) {
 
 ---
 
-## [🔴] فاز ۱۲: بازبینی نهایی و گزارش ساختاریافته به کاربر
+## [🟢] فاز ۱۲: بازبینی نهایی و گزارش ساختاریافته به کاربر
 
-### [🔴] گام ۱: zod schema بازبینی نهایی
+### [🟢] گام ۱: zod schema بازبینی نهایی
 
 `reviewSchema` (`acceptedFindings`, `rejectedFindings`, `finalSummary`, و فیلد جدید `incompleteSteps` برای حالت `failed-partial` از فاز ۱۰).
 
-### [🔴] گام ۲: فراخوانی خودکار Review در پایان حلقه‌ی PlanRuntime
+### [🟢] گام ۲: فراخوانی خودکار Review در پایان حلقه‌ی PlanRuntime
 
 بلافاصله پس از خروج حلقه‌ی فاز ۱۰ (چه با موفقیت کامل چه با `failed-partial`)، بدون نیاز به triggerِ انسانی، Main Agent با `Output.object({ schema: reviewSchema })` روی خلاصه‌ی خروجی تمام PlanStepها فراخوانی می‌شود.
 
-### [🔴] گام ۳: تولید گزارش نهایی
+### [🟢] گام ۳: تولید گزارش نهایی
 
 خروجی نهایی به فرمت قابل‌ارائه تبدیل و به کاربر بازگردانده می‌شود؛ در حالت `failed-partial`، گزارش باید دقیقاً مشخص کند کدام گام‌ها ناتمام ماندند و چرا (خروجی گام ۶ فاز ۱۰).
 
@@ -788,4 +788,27 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `tsc --noEmit`: ✅
   - `vitest run`: ✅ ۲۰۴ تست (۱۲ فایل) — فاز ۱۱ شامل ۱۴ تست: ۳ AcceptanceResultSchema (valid, rejection, empty reason throws), ۳ checkStep (accepted true meets criteria, accepted false missing field, reviewer fails → accepted false), ۴ event-driven (auto check on completed event → failed quality + FAILED + callback, keeps done when passes, ignores orphan task no generateObject, ignores running not done), ۳ failure type distinction (technical from runtime, quality from checker, dependent steps not ready when quality-failed via getReadySteps), ۱ integration quality→replanning (onQualityFailure callback invoked with planId/stepId/reason).
   - معیار پذیرش: هر گام پیش از done از acceptance check خودکار عبور می‌کند, شکست کیفی failureType quality vs فنی technical, گام وابسته به rejected ready نمی‌شود (getReadySteps خالی), مسیر بدون دخالت انسانی به re-planning via onQualityFailure callback — همگی تأیید.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۱۲ (بازبینی نهایی و گزارش ساختاریافته به کاربر)
+
+- **وضعیت:** فاز ۱۲ از 🔴 به 🟢؛ هر سه گام 🟢.
+- **پیاده‌سازی:**
+  - `src/ai/schemas/review.ts`: `FindingSchema` {stepId, title, description, severity critical|warning|info default info}, `IncompleteStepSchema` {stepId, description, reason, failureType technical|quality optional}, `ReviewSchema` {planId, goal, outcome success|partial-success|failure|cancelled, acceptedFindings default [], rejectedFindings default [], incompleteSteps default [], finalSummary min1, usage optional {totalPromptTokens, totalCompletionTokens, totalTokens}}.
+  - `schemas/index.ts`: export ReviewSchema, FindingSchema, IncompleteStepSchema, types.
+  - `src/ai/runtime/final-reviewer.ts`: `FinalReviewer` با config {personaRegistry, skillRegistry, toolRegistry, modelRegistry, modelId default gpt-4o}:
+    - `review(plan, executionResult)`: classifyOutcome (cancelled→cancelled, completed→success, completed>0 && <total→partial-success, 0→failure), buildStepSummaries (filter done|failed, compact resultSummary slice 800), if summaries empty OR outcome cancelled → buildMinimalReview (summary cancelled/failure/no results, no model call), else generateReviewViaModel with fallback.
+    - `generateReviewViaModel`: buildReviewerAgent `reviewer + [] + modelId`, buildReviewPrompt با goal, execution summary (plan id, outcome, completed/total, failed, replanningAttempts), stepsBlock (Step id persona description criteria status+failureType result), incompleteBlock, task "Populate acceptedFindings/rejectedFindings/incompleteSteps/finalSummary", `generateObject({ model, system, prompt, schema: ReviewSchema, schemaName FinalReview })`, ensure planId/goal/outcome match + incompleteSteps fallback to executionResult.incompleteSteps.
+    - `buildMinimalReview`: summary based on outcome, accepted/rejected empty, incompleteSteps from result.
+    - `buildFallbackReview`: mechanical from plan state — accepted from done steps (title slice 80, description resultSummary, severity info), rejected from failed quality steps (title Quality check failed slice 60, severity warning), summary with completed/total + failed + incomplete + fallback note with errorMessage.
+    - Helpers `classifyOutcome`, `buildStepSummaries`, `buildReviewPrompt`, `buildReviewerAgent`.
+  - `review-formatter.ts`: `formatReviewForUser(review)` deterministic, no model, icons success ✅ partial ⚠️ failure ❌ cancelled 🛑, lines with FINAL REPORT, Plan/Goal/Outcome/Usage, Summary, Accepted Findings with severity [!]/[~]/[i], Rejected Findings, Incomplete Steps with failureType, `formatReviewOneLine` compact `[outcome] planId — X accepted, Y rejected, Z incomplete`.
+  - `runtime/index.ts`: export FinalReviewer, formatReviewForUser, formatReviewOneLine.
+- **اصلاح حداقلی:**
+  - **Catalog bootstrap:** phase12 setup only read_file/search_code → file_management/write_file and git_operations/git_status fail on loadSkills. Added write_file/git_status + bootstrap catalog BEFORE loadSkills (same fix as phases 10-11).
+  - **vi.mock:** importActual + mock only generateText/generateObject to preserve tool.
+  - ESM __dirname via fileURLToPath.
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۲۱۹ تست (۱۳ فایل) — فاز ۱۲ شامل ۱۵ تست: ۵ ReviewSchema (full valid, partial with incomplete, invalid outcome throws, empty finalSummary throws, defaults arrays), ۲ successful plan (produces valid review completed, output always valid against schema), ۱ partial-success (reports incomplete steps clearly failed-partial with quality), ۱ cancelled (minimal review without calling model), ۳ fallback (fallback when generateObject fails → valid + fallback note, accepted from done steps 2, rejected quality-failed step-2), ۳ formatter (readable success contains FINAL REPORT+SUCCESS+goal+title+summary, incomplete steps partial-success contains Incomplete Steps+s3+quality+reason, oneLine compact contains outcome+planId+counts).
+  - معیار پذیرش: خروجی بازبینی همیشه مطابق reviewSchema (generateObject + fallback), بدون درخواست انسانی خودکار پس از PlanRuntime (review() direct call), failed-partial گزارش گام‌های ناتمام با دلیل و failureType, fallback بدون crash, cancelled بدون فراخوانی مدل — همگی تأیید.
 
