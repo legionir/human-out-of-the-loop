@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Human Out of the Loop</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ── Sidebar ─────────────────────────────────────────── -->
+    <aside id="sidebar">
+      <div class="brand">
+        <span class="brand-mark">⏻</span>
+        <div>
+          <h1>Human Out of the Loop</h1>
+          <p class="tagline">Confirm once. Walk away.</p>
+        </div>
+      </div>
+      <button id="new-session-btn" class="btn primary wide">+ New session</button>
+      <div class="sessions-label">Sessions</div>
+      <ul id="session-list" class="session-list"></ul>
+      <footer class="sidebar-footer" id="sidebar-footer"></footer>
+    </aside>
+
+    <!-- ── Main ────────────────────────────────────────────── -->
+    <main id="main">
+      <header id="main-header">
+        <div id="session-title">New session</div>
+        <div id="run-controls" class="hidden">
+          <span id="run-state" class="run-state"></span>
+          <button id="cancel-run-btn" class="btn danger small">Cancel run</button>
+        </div>
+      </header>
+
+      <div id="chat" class="chat">
+        <div class="empty-state" id="empty-state">
+          <p>Describe a goal below — the runtime plans it, you confirm once, and it executes Human-Out-Of-Loop.</p>
+        </div>
+      </div>
+
+      <div id="composer">
+        <textarea
+          id="goal-input"
+          rows="2"
+          placeholder='e.g. "Build a REST endpoint for user registration with validation and tests"'
+        ></textarea>
+        <div class="composer-actions">
+          <label class="auto-confirm">
+            <input type="checkbox" id="auto-confirm" />
+            run without confirmation
+          </label>
+          <button id="run-btn" class="btn primary">Run ▸</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ── Plan confirmation modal ───────────────────────────── -->
+  <div id="plan-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <h2>Review the plan</h2>
+      <p class="modal-sub">You are asked exactly once. After confirming, the runtime executes without you.</p>
+      <div id="plan-summary" class="plan-summary"></div>
+      <div id="plan-table-wrap"></div>
+      <div class="feedback-row">
+        <textarea id="plan-feedback" rows="2" placeholder="Optional feedback for the planner…"></textarea>
+        <div class="modal-actions">
+          <button id="plan-reject-btn" class="btn danger">Reject</button>
+          <button id="plan-confirm-btn" class="btn primary">Confirm &amp; run</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

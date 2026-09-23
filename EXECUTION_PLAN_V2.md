@@ -8,7 +8,7 @@
 - `messages.md` (تاریخچه بحث CLI/UI/Session)
 
 **وضعیت فعلی:** 17/17 فاز 🟢، 334 تست سبز، اما 40+ باگ/بهبود شناسایی شده
-**پیشرفت (2026-09-24):** فازهای ۱۸ تا ۲۳ این پلن کامل 🟢 — 439 تست سبز (26 فایل)، tsc سبز. باقی‌مانده: ۲۴ (UI ساده)، ۲۵ (مستندات).
+**پیشرفت (2026-09-24):** فازهای ۱۸ تا ۲۴ این پلن کامل 🟢 — 450 تست سبز (27 فایل)، tsc سبز. باقی‌مانده: ۲۵ (مستندات و delivery).
 **سیاست Breaking:** ✅ مجاز (طبق تصمیم کاربر) — `randomUUID()`, حذف `globalEventBus` fallback, الزامی شدن `projectRoot`
 
 ---
@@ -496,7 +496,10 @@ human-out-of-the-loop logs --tail 100
 
 ---
 
-### [🔴] فاز ۲۴: UI ساده — Express + SSE + HTML (قابل ارتقا)
+### [🟢] فاز ۲۴: UI ساده — Express + SSE + HTML (قابل ارتقا) — کامل شد 2026-09-24
+
+**نتیجه:** UI کامل و ساده (بدون React، طبق تصمیم کاربر) با `npm run server` روی http://localhost:3000 بالا می‌آید (زنده تست شد: health، HTML، static assets، sessions). ساختار دقیقاً طبق پلن: `src/server.ts` (factory + entry) + `src/server/sse.ts` (hub per-plan) + `src/server/routes/{sessions,plans,stream,run}.ts` + `src/server/types.ts` + `public/{index.html,app.js,style.css}`. همه 11 endpoint پلن پیاده و تست‌شده: sessions list/get/delete، plans list/get/cancel/resume/confirm، `GET /api/stream/:planId` (SSE واقعی — heartbeat، resync-safe)، `POST /api/run` + `GET /api/runs/:runId` (state machine: planning → awaiting-confirmation → running → done/error)، `GET /api/observability?planId&tail`. Frontend: sidebar sessionها (Continue from previous با کلیک)، chat history از interactions، input + Run (Ctrl+Enter)، checkbox «run without confirmation» (حالت HOOL)، **Plan modal با جدول steps** (persona/skills/tools/resources/acceptance) + دکمه Confirm/Reject + feedback، live timeline از SSE (رنگ‌بندی done/failed/running مطابق پلن)، report نهایی با render مارک‌داون امن (escape-first)، دکمه Cancel run. `express ^5.2.1` (stable جاری)؛ `supertest` + `tsx` devDependencies. امنیت (گام ۴): `projectRoot` فقط از config سرور (env `HOTL_PROJECT_ROOT`/flag) — تست صریح که تزریق `projectRoot` در body بی‌اثر است و store در روت attacker ساخته نمی‌شود؛ SSE فقط `toolName` دارد (بدون args — Law 14)؛ credentialها هرگز serialize نمی‌شوند. 11 تست جدید (`server.test.ts`) با supertest + fetch بومی برای SSE — e2e کامل با mock مدل: auto-run تا report + persistence، reject-confirm → cancelled بدون execute، SSE زنده `plan:started…plan:completed` + بررسی JSON payload، cancel/resume/observability/sessions، static frontend = **450 تست سبز (27 فایل)** + tsc سبز.
+**انحراف ثبت‌شده:** (1) پلن endpoint «run state» نداشت؛ flow تعاملی بدون آن غیرقابل‌پیاده‌سازی بود (UI باید planId را پیش از confirm پیدا کند) — `POST /api/run` با 202 + `runId` و `GET /api/runs/:runId` اضافه شد. (2) امضای `confirmCallback` یک پارامتر اختیاری دوم `plan` گرفت (additive؛ CLI و callbackهای قدیمی بی‌تأثیر). (3) plan حالا در زمان **ساخت** (پیش از confirm) persist می‌شود تا مودال و plans list آن را ببینند؛ planهای rejectشده با status `draft` می‌مانند — عاقبت، `resumePlan` روی planهای `draft` refuse می‌کند (plan تأییدنشده executable نمی‌شود). (4) express 5 نصب شد (async handlers به‌طور خودی rejection را forward می‌کنند). (5) `npm run server` از `tsx` (devDep) روی src اجرا می‌شود؛ نسخه کامپایل‌شده `node dist/src/server.js` هم کار می‌کند. (6) گام ۵ «eventsource mock» با fetch بومی Node 22 + stream reader پیاده شد (بدون dependency اضافی). (7) دایرکتوری static با walk-up تا `public/index.html` پیدا می‌شود (عمق `src/` و `dist/src/` فرق دارد).
 
 **هدف:** UI ساده ولی extensible، طبق تصمیم کاربر.
 

@@ -89,7 +89,13 @@ export interface OrchestratorRunOptions {
    * REQUIRED — Law 17 mandates explicit user approval before execution.
    * Receives the formatted plan text, returns confirmation result.
    */
-  confirmCallback: (planText: string) => Promise<{ confirmed: boolean; feedback?: string }>;
+  // Phase 24 (UI): the plan is passed as an optional second argument so
+  // interactive confirmations can be keyed by plan id.  Existing
+  // single-argument callbacks are unaffected.
+  confirmCallback: (
+    planText: string,
+    plan?: Plan,
+  ) => Promise<{ confirmed: boolean; feedback?: string }>;
 }
 
 export interface OrchestratorResult {
@@ -464,6 +470,10 @@ export class Orchestrator {
 
     const plan = planningResult.plan!;
     this.observabilityLogger.logPlanCreated(plan);
+    // Phase 24 (UI): persist at creation so the plan is visible to the
+    // user WHILE the confirmation is pending (UI modal / plans list).
+    // Rejected plans remain in the store as 'draft'.
+    this.planStore.save(plan);
 
     const feasibility = runFeasibilityGate(plan, {
       personaRegistry: this.personaRegistry,
@@ -541,7 +551,7 @@ export class Orchestrator {
     const summary = summarizePlan(plan);
     const planText = formatPlanForUser(summary);
 
-    const confirmation = await options.confirmCallback(planText);
+    const confirmation = await options.confirmCallback(planText, plan);
     if (!confirmation.confirmed) {
       return {
         review: {
@@ -722,6 +732,10 @@ export class Orchestrator {
   async resumePlan(planId: string): Promise<OrchestratorResult | undefined> {
     const plan = this.planStore.load(planId);
     if (!plan) return undefined;
+    // Phase 24: a plan that was never confirmed (still 'draft' — created
+    // at plan time, rejected before execution) must not become
+    // resumable without confirmation.
+    if (plan.status === 'draft') return undefined;
 
     const planRuntime = new PlanRuntime({
       taskRuntime: this.taskRuntime,

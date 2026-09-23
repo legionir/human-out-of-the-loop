@@ -1,0 +1,203 @@
+#!/usr/bin/env node
+/**
+ * Phase 24 (UI): the web server — Express + SSE + vanilla frontend.
+ *
+ *   npm run server
+ *   → http://localhost:3000  (HOTL_PORT to change)
+ *
+ * Structure (per plan, step 1):
+ *   src/server.ts                — app factory + entry point (this file)
+ *   src/server/sse.ts            — per-plan SSE hub
+ *   src/server/routes/sessions.ts
+ *   src/server/routes/plans.ts   (incl. /api/observability)
+ *   src/server/routes/run.ts
+ *   src/server/routes/stream.ts
+ *   public/index.html / app.js / style.css
+ *
+ * Security (step 4):
+ *   - `projectRoot` comes ONLY from server config (env/arg) — never from
+ *     a query param or request body.
+ *   - SSE payloads carry tool NAMES, never arguments (Law 14).
+ *   - Credentials live in env vars the provider reads server-side; they
+ *     are never serialized to the frontend.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import express, { type Express } from 'express';
+import { Orchestrator } from './ai/orchestrator.js';
+import { SseHub } from './server/sse.js';
+import { sessionsRouter } from './server/routes/sessions.js';
+import { plansRouter } from './server/routes/plans.js';
+import { runRouter } from './server/routes/run.js';
+import { streamRouter } from './server/routes/stream.js';
+import type { ServerContext } from './server/types.js';
+
+export interface ServerOptions {
+  /** Directory that is allowed as the agent workspace (default: cwd). */
+  projectRoot?: string;
+  /** UI mode keeps its history — default true here (override for tests). */
+  persistent?: boolean;
+}
+
+export interface CreatedServer {
+  app: Express;
+  ctx: ServerContext;
+  /** Stop the orchestrator (call on server shutdown / in tests). */
+  close: () => Promise<void>;
+}
+
+export function createApp(options: ServerOptions = {}): CreatedServer {
+  const projectRoot = path.resolve(options.projectRoot ?? process.env.HOTL_PROJECT_ROOT ?? process.cwd());
+  const runtimeDir = path.join(projectRoot, '.ai-runtime');
+  const persistent = options.persistent ?? true;
+
+  const orchestrator = new Orchestrator({
+    projectRoot,
+    persistent,
+  });
+
+  const hub = new SseHub();
+
+  // Progress events → SSE (compact payloads only — see stream.ts).
+  // Subscribing to the StreamingManager (post-construction) works
+  // identically to the onProgress config hook.
+  orchestrator.streamingManager.subscribe((event) => {
+    const payload: Record<string, unknown> = {
+      planId: event.planId,
+      message: event.message,
+      timestamp: event.timestamp,
+    };
+    if (event.stepId !== undefined) payload.stepId = event.stepId;
+    if (event.taskId !== undefined) payload.taskId = event.taskId;
+    // tool-call events carry only the tool NAME (Law 14) — the
+    // ProgressEvent payload itself never contains arguments.
+    if (event.type === 'task:tool-call' && event.payload?.toolName !== undefined) {
+      payload.toolName = event.payload.toolName;
+    }
+    hub.emit(event.planId, event.type, payload);
+  });
+
+  const app = express();
+  app.use(express.json({ limit: '1mb' }));
+
+  const ctx: ServerContext = {
+    app,
+    orchestrator,
+    hub,
+    runs: new Map(),
+    projectRoot,
+    runtimeDir,
+    logFilePath: path.join(runtimeDir, 'observability.jsonl'),
+    ready: orchestrator.initialize().catch((err) => {
+      // Surface initialization failures on the first request instead of
+      // crashing the process.
+      throw err instanceof Error ? err : new Error(String(err));
+    }),
+  };
+
+  // Lazy init: the first request awaits a single shared initialization.
+  app.use((req, res, next) => {
+    ctx.ready.then(() => next(), (err) => {
+      res.status(500).json({ error: `Server initialization failed: ${err.message}` });
+    });
+  });
+
+  // API routers
+  app.use(sessionsRouter(ctx));
+  app.use(plansRouter(ctx));
+  app.use(runRouter(ctx));
+  app.use(streamRouter(ctx));
+
+  app.get('/api/health', (req, res) => {
+    res.json({ ok: true, projectRoot });
+  });
+
+  // Static frontend — public/ lives at the package root, but this module
+  // runs from either src/ (tsx) or dist/src/ (tsc), so walk up until
+  // public/index.html is found.
+  app.use(express.static(findPublicDir()));
+
+  const close = async (): Promise<void> => {
+    await orchestrator.shutdown();
+  };
+
+  return { app, ctx, close };
+}
+
+/** Walk up from this file until public/index.html is found (package root). */
+function findPublicDir(): string {
+  let dir = path.dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 6; i++) {
+    const candidate = path.join(dir, 'public');
+    if (fs.existsSync(path.join(candidate, 'index.html'))) return candidate;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return path.join(path.dirname(fileURLToPath(import.meta.url)), 'public');
+}
+
+export interface ServeOptions extends ServerOptions {
+  port?: number;
+  host?: string;
+}
+
+export async function startServer(options: ServeOptions = {}): Promise<CreatedServer> {
+  const { app, ctx, close } = createApp(options);
+  const port = options.port ?? Number(process.env.HOTL_PORT ?? 3000);
+  const host = options.host ?? '0.0.0.0';
+
+  await new Promise<void>((resolve, reject) => {
+    const server = app.listen(port, host, () => resolve());
+    server.on('error', reject);
+  });
+  // eslint-disable-next-line no-console
+  console.log(`[hotl-ui] http://localhost:${port}  (project root: ${ctx.projectRoot})`);
+  return { app, ctx, close };
+}
+
+// ─── Entry point ─────────────────────────────────────────────────
+
+function isDirectlyInvoked(): boolean {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  try {
+    return import.meta.url === pathToFileURL(fs.realpathSync(entry)).href;
+  } catch {
+    return false;
+  }
+}
+
+function parseArgs(argv: string[]): Partial<ServeOptions> {
+  const options: Partial<ServeOptions> = {};
+  for (let i = 2; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--project-root' && argv[i + 1]) {
+      options.projectRoot = argv[++i];
+    } else if (arg === '--port' && argv[i + 1]) {
+      options.port = Number(argv[++i]);
+    } else if (arg === '--host' && argv[i + 1]) {
+      options.host = argv[++i];
+    }
+  }
+  return options;
+}
+
+if (isDirectlyInvoked()) {
+  const options = parseArgs(process.argv);
+  startServer(options)
+    .then(({ close }) => {
+      const shutdown = async (): Promise<void> => {
+        await close();
+        process.exit(0);
+      };
+      process.on('SIGINT', () => void shutdown());
+      process.on('SIGTERM', () => void shutdown());
+    })
+    .catch((err) => {
+      // eslint-disable-next-line no-console
+      console.error('[hotl-ui] failed to start:', err instanceof Error ? err.message : err);
+      process.exitCode = 1;
+    });
+}
