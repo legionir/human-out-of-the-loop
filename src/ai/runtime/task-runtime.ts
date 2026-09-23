@@ -1,14 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import {
-  EventBus,
-  globalEventBus,
-  type AgentEvent,
-} from './event-bus.js';
-import {
-  AgentRuntime,
-  agentRuntime,
-  type AgentRunResult,
-} from './agent-runtime.js';
+import { EventBus, type AgentEvent } from './event-bus.js';
+import { AgentRuntime, type AgentRunResult } from './agent-runtime.js';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { createTaskRecord, type Task, type TaskStatus } from '../schemas/task.js';
 
@@ -17,10 +9,23 @@ import { createTaskRecord, type Task, type TaskStatus } from '../schemas/task.js
 export interface TaskRuntimeConfig {
   /** Maximum number of tasks running concurrently (default: 5) */
   maxConcurrentTasks: number;
-  /** EventBus instance (default: globalEventBus) */
-  eventBus?: EventBus;
-  /** AgentRuntime instance (default: agentRuntime singleton) */
+  /**
+   * EventBus instance.
+   * Phase 19 (SING-01): now REQUIRED — no global fallback, so events
+   * stay isolated per Orchestrator.
+   */
+  eventBus: EventBus;
+  /**
+   * AgentRuntime instance.  Phase 19 (SING-02): when omitted a FRESH
+   * `new AgentRuntime()` is created (never the shared singleton).
+   */
   agentRuntime?: AgentRuntime;
+  /**
+   * Phase 19 (CFG-05): per-agent timeout in ms, forwarded to every
+   * `AgentRuntime.run()` call.  Sourced from
+   * `OrchestratorConfig.agentTimeoutMs`.
+   */
+  agentTimeoutMs?: number;
 }
 
 export interface CreateTaskOptions {
@@ -130,20 +135,18 @@ export class TaskRuntime {
   private readonly tasks = new Map<string, Task>();
   private readonly agents = new Map<string, ResolvedAgent>();
   private readonly lockManager = new ResourceLockManager();
-  private readonly config: Required<TaskRuntimeConfig>;
+  private readonly maxConcurrentTasks: number;
+  private readonly agentTimeoutMs?: number;
   private readonly eventBus: EventBus;
   private readonly runtime: AgentRuntime;
   private readonly runningPromises = new Map<string, Promise<AgentRunResult>>();
   private unsubscribeFn?: () => void;
 
-  constructor(config?: Partial<TaskRuntimeConfig>) {
-    this.config = {
-      maxConcurrentTasks: config?.maxConcurrentTasks ?? 5,
-      eventBus: config?.eventBus ?? globalEventBus,
-      agentRuntime: config?.agentRuntime ?? agentRuntime,
-    };
-    this.eventBus = this.config.eventBus;
-    this.runtime = this.config.agentRuntime;
+  constructor(config: Pick<TaskRuntimeConfig, 'eventBus'> & Partial<TaskRuntimeConfig>) {
+    this.maxConcurrentTasks = config.maxConcurrentTasks ?? 5;
+    this.agentTimeoutMs = config.agentTimeoutMs;
+    this.eventBus = config.eventBus;
+    this.runtime = config.agentRuntime ?? new AgentRuntime();
 
     // Subscribe to agent events for status sync
     this.unsubscribeFn = this.eventBus.subscribe('*', (event) =>
@@ -222,7 +225,7 @@ export class TaskRuntime {
    */
   private scheduleNext(): void {
     const runningCount = this.getRunningCount();
-    const availableSlots = this.config.maxConcurrentTasks - runningCount;
+    const availableSlots = this.maxConcurrentTasks - runningCount;
 
     if (availableSlots <= 0) return;
 
@@ -260,6 +263,10 @@ export class TaskRuntime {
             taskId: task.id,
             prompt: task.prompt,
             eventBus: this.eventBus,
+            // Phase 19 (CFG-05): the configured agent timeout actually applies
+            ...(this.agentTimeoutMs !== undefined
+              ? { timeoutMs: this.agentTimeoutMs }
+              : {}),
           })
           .then((result) => {
             this.handleRunResult(task.id, result);

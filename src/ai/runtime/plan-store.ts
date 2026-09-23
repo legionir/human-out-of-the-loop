@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Plan } from '../schemas/plan.js';
+import { atomicWriteFileSync } from './atomic-write.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -48,8 +49,10 @@ export class FilePlanStore implements PlanStore {
   }
 
   save(plan: Plan): void {
+    // Phase 19 (PERS-01): atomic write — a crash mid-save can never
+    // leave a corrupted (truncated) plan file behind.
     const data = JSON.stringify(plan, null, 2);
-    fs.writeFileSync(this.filePath(plan.id ?? 'unknown'), data, 'utf-8');
+    atomicWriteFileSync(this.filePath(plan.id ?? 'unknown'), data);
   }
 
   load(planId: string): Plan | undefined {
@@ -89,13 +92,14 @@ export class MemoryPlanStore implements PlanStore {
   private readonly plans = new Map<string, Plan>();
 
   save(plan: Plan): void {
-    // Deep clone to prevent mutation
-    this.plans.set(plan.id ?? 'unknown', JSON.parse(JSON.stringify(plan)));
+    // Phase 19 (PERS-03): structuredClone — faster than a JSON round-trip
+    // and preserves Date/Map/Set types (JSON silently degrades them).
+    this.plans.set(plan.id ?? 'unknown', structuredClone(plan));
   }
 
   load(planId: string): Plan | undefined {
     const p = this.plans.get(planId);
-    return p ? JSON.parse(JSON.stringify(p)) : undefined;
+    return p ? structuredClone(p) : undefined;
   }
 
   list(): string[] {

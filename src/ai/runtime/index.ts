@@ -88,3 +88,4 @@ export {
   DelegationGuard,
   type DelegationGuardConfig,
 } from './delegation-guard.js';
+export { atomicWriteFileSync, cleanupStaleTempFiles } from './atomic-write.js';

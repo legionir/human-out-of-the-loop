@@ -35,11 +35,8 @@ import { bootstrapDelegateTask } from './tools/delegate-bootstrap.js';
 import type { DelegateTaskDeps } from './tools/implementations/delegate-task.js';
 import { bootstrapTaskControlTools } from './tools/task-control-bootstrap.js';
 import { bootstrapMcpServers } from './tools/mcp-bootstrap.js';
-
-import { createReadFileTool } from './tools/implementations/read-file.js';
-import { createSearchCodeTool } from './tools/implementations/search-code.js';
-import { createWriteFileTool } from './tools/implementations/write-file.js';
-import { createGitStatusTool } from './tools/implementations/git-status.js';
+import { bootstrapTools } from './tools/bootstrap.js';
+import { DelegationGuard } from './runtime/delegation-guard.js';
 
 import {
   openaiProviderFactory,
@@ -61,6 +58,14 @@ export interface OrchestratorConfig {
   defaultModelId?: string;
   agentTimeoutMs?: number;
   maxDelegationDepth?: number;
+  /** Phase 19 (CFG-06): RateLimiter config — max concurrent requests per provider */
+  maxConcurrentPerProvider?: number;
+  /** Phase 19 (CFG-06): RateLimiter config — max retry attempts on rate-limit */
+  maxRetries?: number;
+  /** Phase 19 (CFG-06): RateLimiter config — base backoff delay (ms) */
+  baseBackoffMs?: number;
+  /** Phase 19 (CFG-06): RateLimiter config — max backoff delay (ms) */
+  maxBackoffMs?: number;
   onProgress?: (event: ProgressEvent) => void;
 }
 
@@ -134,6 +139,7 @@ export class Orchestrator {
   readonly acceptanceChecker: AcceptanceChecker;
   readonly finalReviewer: FinalReviewer;
   readonly planner: Planner;
+  readonly delegationGuard: DelegationGuard;
 
   private initialized = false;
 
@@ -147,6 +153,11 @@ export class Orchestrator {
       defaultModelId: config.defaultModelId ?? 'gpt-4o',
       agentTimeoutMs: config.agentTimeoutMs ?? 120_000,
       maxDelegationDepth: config.maxDelegationDepth ?? 1,
+      // Phase 19 (CFG-06): RateLimiter settings now come from config
+      maxConcurrentPerProvider: config.maxConcurrentPerProvider ?? 5,
+      maxRetries: config.maxRetries ?? 3,
+      baseBackoffMs: config.baseBackoffMs ?? 1_000,
+      maxBackoffMs: config.maxBackoffMs ?? 30_000,
       onProgress: config.onProgress ?? (() => {}),
     };
 
@@ -156,9 +167,17 @@ export class Orchestrator {
     this.modelRegistry = new ModelRegistry();
     this.agentRegistry = new AgentRegistry();
 
+    // Phase 19 (SING-01/02): each Orchestrator owns its bus/runtime —
+    // no shared singletons, full isolation between instances.
     this.eventBus = new EventBus();
     this.agentRuntime = new AgentRuntime();
-    this.rateLimiter = new RateLimiter();
+    // Phase 19 (CFG-06): RateLimiter constructed from config
+    this.rateLimiter = new RateLimiter({
+      maxConcurrentPerProvider: this.config.maxConcurrentPerProvider,
+      maxRetries: this.config.maxRetries,
+      baseBackoffMs: this.config.baseBackoffMs,
+      maxBackoffMs: this.config.maxBackoffMs,
+    });
     this.retryableAgentRuntime = new RetryableAgentRuntime(
       this.agentRuntime,
       this.rateLimiter
@@ -167,6 +186,14 @@ export class Orchestrator {
       maxConcurrentTasks: this.config.maxConcurrentTasks,
       eventBus: this.eventBus,
       agentRuntime: this.agentRuntime,
+      // Phase 19 (CFG-05): the configured timeout is actually applied
+      agentTimeoutMs: this.config.agentTimeoutMs,
+    });
+    // Phase 19 (CFG-03/04): DelegationGuard instantiated from config
+    // and wired into the delegate_task tool.
+    this.delegationGuard = new DelegationGuard({
+      maxDepth: this.config.maxDelegationDepth,
+      personaRegistry: this.personaRegistry,
     });
 
     const runtimeDir = this.config.runtimeDir;
@@ -232,25 +259,19 @@ export class Orchestrator {
       true
     );
 
-    const localToolDefs = [
-      { id: 'read_file', name: 'Read File', description: 'Reads file contents', source: 'local' as const, modulePath: './read-file', category: 'filesystem' },
-      { id: 'search_code', name: 'Search Code', description: 'Searches code patterns', source: 'local' as const, modulePath: './search-code', category: 'filesystem' },
-      { id: 'write_file', name: 'Write File', description: 'Writes file contents', source: 'local' as const, modulePath: './write-file', category: 'filesystem' },
-      { id: 'git_status', name: 'Git Status', description: 'Runs git status', source: 'local' as const, modulePath: './git-status', category: 'git' },
-    ];
-    for (const d of localToolDefs) this.toolRegistry.registerDefinition(d);
-    // Phase 18 (PATH-01..04): tools are created bound to the
-    // Orchestrator's projectRoot — never to process.cwd().
-    this.toolRegistry.registerImplementation('read_file', createReadFileTool(root));
-    this.toolRegistry.registerImplementation('search_code', createSearchCodeTool(root));
-    this.toolRegistry.registerImplementation('write_file', createWriteFileTool(root));
-    this.toolRegistry.registerImplementation('git_status', createGitStatusTool(root));
+    // Phase 19 (CFG-01/CFG-02, Law 16): tool metadata comes from
+    // registry/tools/*.json (single source of truth) and implementations
+    // are bound to projectRoot by bootstrapTools — no hardcoded defs,
+    // no duplicated catalog bootstrap.
+    bootstrapTools(path.join(registryDir, 'tools'), this.toolRegistry, root);
 
     await bootstrapMcpServers(
       path.join(registryDir, 'mcp-servers'),
       this.toolRegistry
     );
 
+    // Catalog tools must exist before skills load (skills cross-validate
+    // their tool references against the ToolRegistry).
     bootstrapCatalogTools({
       toolRegistry: this.toolRegistry,
       personaRegistry: this.personaRegistry,
@@ -262,12 +283,6 @@ export class Orchestrator {
       this.skillRegistry,
       true
     );
-
-    bootstrapCatalogTools({
-      toolRegistry: this.toolRegistry,
-      personaRegistry: this.personaRegistry,
-      skillRegistry: this.skillRegistry,
-    });
 
     this.modelRegistry.registerProvider(openaiProviderFactory);
     this.modelRegistry.registerProvider(anthropicProviderFactory);
@@ -300,6 +315,9 @@ export class Orchestrator {
         });
       },
       resolveAgentId: (id: string) => this.agentRegistry.get(id),
+      // Phase 19 (CFG-04): the guard is actually enforced now
+      delegationGuard: this.delegationGuard,
+      currentDelegationDepth: 0,
     };
     bootstrapDelegateTask(this.toolRegistry, delegateDeps);
 

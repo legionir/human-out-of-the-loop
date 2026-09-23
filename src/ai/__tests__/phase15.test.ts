@@ -20,6 +20,7 @@ import { generateText, generateObject } from 'ai';
 import { Orchestrator } from '../orchestrator.js';
 import { DelegationGuard } from '../runtime/delegation-guard.js';
 import { RetryableAgentRuntime } from '../runtime/agent-runtime-retry.js';
+import { EventBus } from '../runtime/event-bus.js';
 
 const mockGenerateText = vi.mocked(generateText);
 const mockGenerateObject = vi.mocked(generateObject);
@@ -152,6 +153,8 @@ describe('RetryableAgentRuntime', () => {
       agent: mockAgent,
       taskId: 't1',
       prompt: 'Test',
+      // Phase 19: eventBus is now required (no global fallback)
+      eventBus: new EventBus(),
     });
 
     expect(result.success).toBe(true);
@@ -184,6 +187,8 @@ describe('RetryableAgentRuntime', () => {
       agent: mockAgent,
       taskId: 't2',
       prompt: 'Test',
+      // Phase 19: eventBus is now required (no global fallback)
+      eventBus: new EventBus(),
       maxRetries: 1,
     });
 
@@ -211,6 +216,8 @@ describe('RetryableAgentRuntime', () => {
       agent: mockAgent,
       taskId: 't3',
       prompt: 'Test',
+      // Phase 19: eventBus is now required (no global fallback)
+      eventBus: new EventBus(),
       maxRetries: 2,
     });
 
@@ -239,6 +246,8 @@ describe('RetryableAgentRuntime', () => {
       agent: mockAgent,
       taskId: 't4',
       prompt: 'Test',
+      // Phase 19: eventBus is now required (no global fallback)
+      eventBus: new EventBus(),
       maxRetries: 2,
     });
 

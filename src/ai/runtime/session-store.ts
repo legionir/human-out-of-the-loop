@@ -6,6 +6,7 @@ import {
   createSession,
   createInteraction,
 } from '../schemas/session.js';
+import { atomicWriteFileSync } from './atomic-write.js';
 
 // ─── Interface ────────────────────────────────────────────────────
 
@@ -71,11 +72,13 @@ export class FileSessionStore implements SessionStore {
   }
 
   saveSession(session: Session): void {
-    session.lastActiveAt = Date.now();
-    fs.writeFileSync(
+    // Phase 19 (PERS-02): do NOT mutate the caller's object — operate on
+    // a clone, and (PERS-01) write atomically.
+    const snapshot: Session = structuredClone(session);
+    snapshot.lastActiveAt = Date.now();
+    atomicWriteFileSync(
       this.filePath(session.id),
-      JSON.stringify(session, null, 2),
-      'utf-8'
+      JSON.stringify(snapshot, null, 2)
     );
   }
 
@@ -139,18 +142,21 @@ export class MemorySessionStore implements SessionStore {
 
   createSession(label?: string): string {
     const session = createSession(label);
-    this.sessions.set(session.id, JSON.parse(JSON.stringify(session)));
+    // Phase 19 (PERS-03): structuredClone instead of JSON round-trip
+    this.sessions.set(session.id, structuredClone(session));
     return session.id;
   }
 
   getSession(sessionId: string): Session | undefined {
     const s = this.sessions.get(sessionId);
-    return s ? JSON.parse(JSON.stringify(s)) : undefined;
+    return s ? structuredClone(s) : undefined;
   }
 
   saveSession(session: Session): void {
-    session.lastActiveAt = Date.now();
-    this.sessions.set(session.id, JSON.parse(JSON.stringify(session)));
+    // Phase 19 (PERS-02): no input mutation
+    const snapshot: Session = structuredClone(session);
+    snapshot.lastActiveAt = Date.now();
+    this.sessions.set(session.id, snapshot);
   }
 
   listSessions(): string[] {

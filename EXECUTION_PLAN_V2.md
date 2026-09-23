@@ -209,7 +209,9 @@
 
 ---
 
-### [🔴] فاز ۱۹: P0 Config Wiring, Singleton Removal, Atomic Persistence
+### [🟢] فاز ۱۹: P0 Config Wiring, Singleton Removal, Atomic Persistence — کامل شد 2026-09-23
+
+**نتیجه:** `eventBus` در `TaskRuntimeConfig` و `AgentRunOptions` الزامی شد (fallback‌های `?? globalEventBus` حذف)؛ `TaskRuntime` بدون config → `new AgentRuntime()` تازه (نه singleton)؛ `DelegationGuard` instantiate و به `delegate_task` وصل شد (`maxDelegationDepth` اعمال می‌شود)؛ `agentTimeoutMs` از OrchestratorConfig → TaskRuntime → `AgentRuntime.run`؛ `RateLimiter` با config ساخته می‌شود (۴ فیلد جدید در `OrchestratorConfig`)؛ `atomicWriteFileSync` (tmp+uuid+rename) در PlanStore/SessionStore + `structuredClone` + `saveSession` دیگر ورودی را mutate نمی‌کند؛ `bootstrapTools(registry/tools, registry, projectRoot)` جایگزین `localToolDefs` هاردکد شد (Law 16) و bootstrap catalog تکراری حذف شد. 13 تست جدید (`phase19.test.ts`) — 365 تست سبز، tsc سبز.
 
 **هدف:** رفع دوگانگی پیکربندی و شکست ایزولاسیون.
 

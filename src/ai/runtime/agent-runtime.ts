@@ -1,10 +1,6 @@
 import { generateText, stepCountIs } from 'ai';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
-import {
-  EventBus,
-  globalEventBus,
-  type TokenUsage,
-} from './event-bus.js';
+import { EventBus, type TokenUsage } from './event-bus.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -33,8 +29,12 @@ export interface AgentRunOptions {
   taskId: string;
   /** The prompt to execute */
   prompt: string;
-  /** EventBus instance (defaults to globalEventBus) */
-  eventBus?: EventBus;
+  /**
+   * EventBus instance.
+   * Phase 19 (SING-01): now REQUIRED — there is no global fallback,
+   * so events never leak between Orchestrator instances.
+   */
+  eventBus: EventBus;
   /** Maximum number of tool-call iterations (safety limit) */
   maxSteps?: number;
   /** Timeout in milliseconds for the entire run */
@@ -76,7 +76,7 @@ export class AgentRuntime {
       agent,
       taskId,
       prompt,
-      eventBus = globalEventBus,
+      eventBus,
       maxSteps = DEFAULT_MAX_STEPS,
       timeoutMs = DEFAULT_TIMEOUT_MS,
     } = options;
@@ -296,6 +296,10 @@ class TimeoutError extends Error {
 }
 
 /**
- * Singleton instance for convenience.
+ * @deprecated Phase 19 (SING-02): a shared AgentRuntime breaks
+ * isolation between Orchestrator instances.  Each Orchestrator creates
+ * its own `new AgentRuntime()`; TaskRuntime also creates a fresh
+ * instance when none is configured.  Kept only for source
+ * compatibility — do not use in new code.
  */
 export const agentRuntime = new AgentRuntime();

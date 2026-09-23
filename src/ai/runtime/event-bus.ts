@@ -141,8 +141,10 @@ export class EventBus {
 }
 
 /**
- * Global singleton EventBus instance.
- * All phases share this single bus so that TaskRuntime (Phase 8)
- * can subscribe to events from AgentRuntime (Phase 7).
+ * @deprecated Phase 19 (SING-01): a shared bus breaks isolation between
+ * Orchestrator instances — events from one run leaked into another.
+ * Every Orchestrator now creates its own `new EventBus()` and passes it
+ * explicitly to TaskRuntime/AgentRuntime.  This export is kept only so
+ * older code keeps compiling; it must NOT be used by new code.
  */
 export const globalEventBus = new EventBus();
