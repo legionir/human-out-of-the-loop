@@ -33,3 +33,10 @@ export {
   type PlanRuntimeConfig,
   type PlanExecutionResult,
 } from './plan-runtime.js';
+export {
+  AcceptanceChecker,
+  AcceptanceResultSchema,
+  type AcceptanceCheckerConfig,
+  type AcceptanceResult,
+} from './acceptance-checker.js';
+export { wireAcceptanceChecker } from './plan-runtime-hooks.js';

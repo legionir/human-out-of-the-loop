@@ -1,0 +1,9 @@
+{
+  "id": "acceptance_check",
+  "name": "Acceptance Check",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": ["read_file", "search_code"],
+  "priority": 95,
+  "description": "Verifies that a completed step's output meets its acceptance criteria"
+}

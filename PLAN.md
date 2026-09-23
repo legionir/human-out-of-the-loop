@@ -347,23 +347,23 @@ while (!allStepsDone(plan) && !allStepsFailedTerminal(plan)) {
 
 ---
 
-## [🔴] فاز ۱۱: بررسی کیفیت خودکار هر گام (Per-Step Acceptance Check)
+## [🟢] فاز ۱۱: بررسی کیفیت خودکار هر گام (Per-Step Acceptance Check)
 
 هدف: کشف شکست کیفی (نه فقط فنی) بلافاصله پس از هر گام، پیش از آزادشدن گام‌های وابسته — بدون دخالت انسان.
 
-### [🔴] گام ۱: Persona/Skill `reviewer` برای بررسی per-step
+### [🟢] گام ۱: Persona/Skill `reviewer` برای بررسی per-step
 
 از Persona `reviewer` موجود (فاز ۴) با Skill جدید `acceptance_check` استفاده شود؛ instructions آن معیار پذیرش خودِ PlanStep (که Planner در فاز ۹ برای هر گام تولید می‌کند — لازم است `PlanStep` schema فیلد `acceptanceCriteria: string` نیز داشته باشد؛ این فیلد به schema فاز ۹ اضافه شود) را در برابر خروجی واقعی Sub-Agent بسنجد.
 
-### [🔴] گام ۲: فراخوانی خودکار acceptance check پس از هر تکمیل فنی گام
+### [🟢] گام ۲: فراخوانی خودکار acceptance check پس از هر تکمیل فنی گام
 
 در EventBus (فاز ۷)، هنگام دریافت `agent:completed` برای یک Task مرتبط با یک PlanStep، پیش از تغییر وضعیت PlanStep به `done`، PlanRuntime به‌صورت خودکار `reviewer` را روی خروجی آن گام اجرا می‌کند.
 
-### [🔴] گام ۳: تفکیک شکست فنی از شکست کیفی
+### [🟢] گام ۳: تفکیک شکست فنی از شکست کیفی
 
 خروجی `reviewer` باید `{ accepted: boolean, reason?: string }` (با `Output.object()`) باشد؛ اگر `accepted: false`، PlanStep به‌جای `done` به `failed` (با `failureType: "quality"` در تمایز از `failureType: "technical"` که از فاز ۷/۸ می‌آید) تغییر می‌کند و مسیر re-planning خودکار فاز ۱۰-گام۴ فعال می‌شود.
 
-### [🔴] گام ۴: تست واحد
+### [🟢] گام ۴: تست واحد
 
 تست با خروجی Sub-Agent mock معتبر (accepted) و mock نامعتبر (rejected)؛ بررسی این‌که در حالت rejected، گام‌های وابسته `ready` نمی‌شوند.
 
@@ -766,3 +766,26 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `tsc --noEmit`: ✅
   - `vitest run`: ✅ ۱۹۰ تست (۱۱ فایل) — فاز ۱۰ شامل ۱۹ تست: ۴ full execution (multi-step with deps to completion, persists after each step, dependency order, parallel independent steps maxConcurrent 2), ۲ failure handling (step failure without crash, reports incomplete in failed-partial), ۱ priority queue (A 2 dependents before B 1 dependent with concurrency 1), ۳ resume (partially completed resume, running→pending crash recovery, throws non-existent), ۱ re-planning ceiling (max attempts 2), ۱ cancellation (stops dispatching when cancelled), ۲ Law 17 (completes without await user input, failure+replanning exhaustion without human), ۵ MemoryPlanStore (save/load, undefined non-existent, list ids, delete, deep-clone).
   - معیار پذیرش: Plan چندگامی dependency-دار بدون پیام میانی انسانی کامل می‌شود, priority queue A قبل از B, شکست → re-planning خودکار نه توقف, resume از همان نقطه نه صفر, سقف re-planning با گزارش دقیق و بدون crash, cancellation با status cancelled — همگی تأیید.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۱۱ (بررسی کیفیت خودکار هر گام — Per-Step Acceptance Check)
+
+- **وضعیت:** فاز ۱۱ از 🔴 به 🟢؛ هر چهار گام 🟢.
+- **پیاده‌سازی:**
+  - `registry/skills/acceptance_check/{skill.json,SKILL.md}`: Skill جدید priority 95, tools [read_file, search_code], SKILL.md با Purpose/Input/Process/Judgment Guidelines/Output JSON {accepted, reason}.
+  - `src/ai/runtime/acceptance-checker.ts`: `AcceptanceResultSchema` {accepted boolean, reason min1}, `AcceptanceChecker` با config {personaRegistry, skillRegistry, toolRegistry, modelRegistry, modelId default gpt-4o, eventBus, planStore, onQualityFailure callback}:
+    - `activePlans Map planId→Plan`, `registerPlan/unregisterPlan`, `start()` subscribe `agent:completed` → `handleCompletion(taskId)` async, `stop()`.
+    - `checkStep(step, taskResult)`: build reviewer agent `reviewer + acceptance_check + modelId` via `createAgent`, prompt شامل Step Description + Acceptance Criteria + summary/result/errors, `generateObject({ model, system, prompt, schema: AcceptanceResultSchema, schemaName AcceptanceJudgment })`, catch → accepted false + reason Acceptance check itself failed.
+    - `handleCompletion`: findStepByTaskId via activePlans, only if step.status done, reconstruct Task {id, agentDefinitionOrId, prompt, status completed, summary/result from resultSummary, claimedResources, errors [], createdAt}, run checkStep, if accepted → resultSummary += [Acceptance: PASSED], else → status failed, failureType quality, resultSummary [Acceptance: FAILED], onQualityFailure callback, planStore.save.
+    - `findStepByTaskId`, `buildReviewerAgent`.
+  - `plan-runtime-hooks.ts`: `wireAcceptanceChecker(plan, checker)` → registerPlan+start, return cleanup stop+unregister.
+  - `runtime/index.ts`: export AcceptanceChecker, AcceptanceResultSchema, AcceptanceCheckerConfig, AcceptanceResult, wireAcceptanceChecker.
+- **اصلاح حداقلی:**
+  - **Skill dependencies:** acceptance_check + task_decomposition هر دو به catalog tools وابسته‌اند. Setup تست فاز ۱۱ فقط read_file/search_code ثبت می‌کرد → file_management (write_file) و git_operations (git_status) fail. به ۴ ابزار پایه + catalog bootstrap قبل از loadSkills تغییر یافت (مثل فاز ۱۰).
+  - **CommonJS require:** تست spec از `require('../schemas/plan')` برای getReadySteps استفاده می‌کرد → ESM fail. به `import { getReadySteps }` تغییر یافت.
+  - **vi.mock:** به `importActual` + mock فقط generateText/generateObject برای حفظ tool واقعی (Law 12/14).
+  - ESM `__dirname` via `fileURLToPath`.
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۲۰۴ تست (۱۲ فایل) — فاز ۱۱ شامل ۱۴ تست: ۳ AcceptanceResultSchema (valid, rejection, empty reason throws), ۳ checkStep (accepted true meets criteria, accepted false missing field, reviewer fails → accepted false), ۴ event-driven (auto check on completed event → failed quality + FAILED + callback, keeps done when passes, ignores orphan task no generateObject, ignores running not done), ۳ failure type distinction (technical from runtime, quality from checker, dependent steps not ready when quality-failed via getReadySteps), ۱ integration quality→replanning (onQualityFailure callback invoked with planId/stepId/reason).
+  - معیار پذیرش: هر گام پیش از done از acceptance check خودکار عبور می‌کند, شکست کیفی failureType quality vs فنی technical, گام وابسته به rejected ready نمی‌شود (getReadySteps خالی), مسیر بدون دخالت انسانی به re-planning via onQualityFailure callback — همگی تأیید.
+
