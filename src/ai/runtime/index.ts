@@ -80,3 +80,11 @@ export {
   type LogEntry,
   type ObservabilityLoggerConfig,
 } from './observability-logger.js';
+export {
+  RetryableAgentRuntime,
+  type RetryableAgentRunOptions,
+} from './agent-runtime-retry.js';
+export {
+  DelegationGuard,
+  type DelegationGuardConfig,
+} from './delegation-guard.js';

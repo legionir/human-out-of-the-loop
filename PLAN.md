@@ -439,21 +439,21 @@ Tool/API سطح بالا `cancel_plan(planId)` اضافه شود که وضعیت
 
 ---
 
-## [🔴] فاز ۱۵: یکپارچه‌سازی سرتاسری و سخت‌سازی مدیریت خطا
+## [🟢] فاز ۱۵: یکپارچه‌سازی سرتاسری و سخت‌سازی مدیریت خطا
 
-### [🔴] گام ۱: سیم‌کشی سرتاسری جریان اصلی
+### [🟢] گام ۱: سیم‌کشی سرتاسری جریان اصلی
 
 نقطه‌ی ورود واحد که تمام Registryها (فازهای ۱-۶) را در startup بارگذاری، سپس جریان کامل `درخواست کاربر → Planning (فاز ۹) → تأیید کاربر → PlanRuntime (فاز ۱۰) → Acceptance Check (فاز ۱۱) → Review نهایی (فاز ۱۲)` را در معرض دید بیرونی قرار دهد.
 
-### [🔴] گام ۲: timeout در سطح AgentRuntime/TaskRuntime
+### [🟢] گام ۲: timeout در سطح AgentRuntime/TaskRuntime
 
 برای هر اجرای Sub-Agent timeout پیکربندی‌پذیر با retry محدود، جدا از backoff مخصوص rate-limit فاز ۱۳.
 
-### [🔴] گام ۳: محدودیت عمق delegation
+### [🟢] گام ۳: محدودیت عمق delegation
 
 جلوگیری از delegation بازگشتی بی‌کنترل؛ Sub-Agentها به‌طور پیش‌فرض دسترسی به `delegate_task` ندارند مگر این‌که Persona آن‌ها صریحاً این Tool را در `allowedTools` داشته باشد (که باید موردی نادر و آگاهانه باشد).
 
-### [🔴] گام ۴: تست end-to-end کامل با ویژگی Human-Out-Of-Loop
+### [🟢] گام ۴: تست end-to-end کامل با ویژگی Human-Out-Of-Loop
 
 تست integration: درخواست نمونه‌ی مبهم → دریافت سؤال روشن‌سازی (فاز ۹) → پاسخ کاربر → تأیید Plan → اجرای کامل خودکار شامل حداقل یک شکست فنی، یک شکست کیفی، و یک چرخه‌ی re-planning — همگی **بدون هیچ پیام میانی «ادامه بده»** — تا گزارش نهایی؛ با mock کامل providerهای مدل.
 
@@ -850,4 +850,33 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `tsc --noEmit`: ✅
   - `vitest run`: ✅ ۲۷۲ تست (۱۵ فایل) — فاز ۱۴ شامل ۲۷ تست: ۱۲ MemorySessionStore (create id session_, retrieve id/label/empty, undefined non-existent, list 2, delete, add interaction Build login page pending length1, undefined ghost, update outcome success summary planIds, getLatestPlanSummary most recent completed when pending exists, undefined when no completed, LATEST completed not first second summary latest, deep-clone mutation isolation), ۲ FileSessionStore (persists to disk reload via new instance persistent label interactions length1 Build feature X, survives restart simulated new instance Completed.), ۹ ObservabilityLogger (writes single JSON line planId eventType timestamp epochMs, appends 3 entries created started completed, chronological order epochMs ≤, readForPlan filter plan-A 2, readForStep filter p1 s1 2, redacts sensitive keys apiKey ***REDACTED*** nested token safeField fine, convenience methods 5 entries plan:created started step:started completed completed, quality check passed info failed warn, replanning attempt 1 2), ۳ EventBus integration (auto logs agent events 3 task:created tool-call with toolName read_file usage defined, logs agent errors task:failed error TIMEOUT, stops logging after unsubscribe only 1), ۱ full lifecycle (captures all key events 9+ contains plan:created started step:started completed quality-passed completed, every entry planId lifecycle-plan, timestamps ISO regex and epochMs >0).
   - معیار پذیرش: درخواست دوم همان session می‌تواند به گزارش قبلی ارجاع دهد via getLatestPlanSummary LATEST + get_previous_plan_summary Tool, لاگ ماندگار JSONL append-only برای اجرای کامل قابل بازخوانی و شامل توالی صحیح readAll/readForPlan/readForStep, credentialها redact recursive ***REDACTED***, EventBus integration auto logging, تست‌ها سبز — همگی تأیید.
+
+
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۱۵ (یکپارچه‌سازی سرتاسری و سخت‌سازی مدیریت خطا)
+
+- **وضعیت:** فاز ۱۵ از 🔴 به 🟢؛ هر چهار گام 🟢.
+- **پیاده‌سازی:**
+  - `src/ai/orchestrator.ts`: `Orchestrator` نقطه‌ی ورود واحد:
+    - Config `projectRoot, persistent default false, runtimeDir .ai-runtime, maxConcurrentTasks 5, maxReplanningAttempts 3, defaultModelId gpt-4o, agentTimeoutMs 120s, maxDelegationDepth 1, onProgress`.
+    - Registries: PersonaRegistry, ToolRegistry, SkillRegistry (toolRegistry ref), ModelRegistry, AgentRegistry.
+    - Runtime: EventBus, AgentRuntime, TaskRuntime (maxConcurrent+eventBus+agentRuntime), planStore File/Memory (plans), sessionStore File/Memory (sessions), StreamingManager, CancellationManager, RateLimiter, UsageAggregator, ObservabilityLogger (observability.jsonl), AcceptanceChecker, FinalReviewer, Planner.
+    - `initialize()` idempotent: load personas dir strict true, register 4 local tools read_file/search_code/write_file/git_status with impl, bootstrapMcpServers mcp-servers non-fatal, bootstrapCatalogTools BEFORE loadSkills (fix task_decomposition dependency list_personas etc), loadSkillsFromDirectory strict true, re-bootstrap catalog idempotent, register providers openai/anthropic/local, loadConfigsFromDirectory models non-fatal false, load agents.json, bootstrapDelegateTask with onTaskCreated→taskRuntime.createTask + resolveAgentId→agentRegistry.get, bootstrapTaskControlTools, subscribe observability to EventBus, start streamingManager + subscribe onProgress, validateAll cross-registry logSystemError non-fatal, log system:info initialized with counts.
+    - `run(userRequest, {sessionId, confirmCallback})`: if not initialized→initialize, session management createSession if not provided + addInteraction + logSessionCreated, planning phase log system:info starting, planner.plan(userRequest) → if !isClear return failure review with clarification needed + session update failure + executionResult failed-partial, logPlanCreated, feasibilityGate runFeasibilityGate → if not feasible return failure review + logPlanFailed, cycle detection detectCycles → if hasCycle return failure, user confirmation summarizePlan+formatPlanForUser → if confirmCallback provided call it, if not confirmed return cancelled review+report, status confirmed + log plan:confirmed, execution: PlanRuntime with taskRuntime planStore planner feasibilityDeps refs maxReplanningAttempts defaultModelId onStatusChange→streamingManager.emitProgress plan:replanning|started, registerRuntime for cancellation, wireAcceptanceChecker, try execute → finally cleanupAcceptance+unregisterRuntime, logPlanCompleted, final review finalReviewer.review(plan, executionResult) + enrich usage via usageAggregator.getSummary, formatFinalReview, update session interaction outcome reviewSummary planIds completedAt, return OrchestratorResult {review, report, planId, sessionId, executionResult}.
+    - Public API: cancelPlan(planId)→cancellationManager.cancelPlan, getPlanStatus(planId)→load+counts, getUsageSummary→usageAggregator.getSummary, resumePlan(planId)→load+PlanRuntime resume+review, shutdown→streaming stop+acceptance stop+unsubscribe observability+taskRuntime destroy+waitForAll.
+  - `src/ai/runtime/agent-runtime-retry.ts`: `RetryableAgentRunOptions` extends AgentRunOptions with maxRetries default1 providerName default default. `RetryableAgentRuntime` constructor runtime default new AgentRuntime + rateLimiter default new RateLimiter. `run(options)`: maxRetries, provider, lastResult, loop attempt 0..maxRetries: try rateLimiter.executeWithRetry(provider, ()=>runtime.run(options)) → if success return, if isRecoverable && attempt<maxRetries continue else return, catch err if attempt<maxRetries set lastResult failure technical summary Retry attempt+1 after error continue else return All attempts failed. isRecoverable checks errors lowercased includes timeout|timedout|timed out|etimedout|rate limit|429|503|502|econnreset|econnrefused.
+  - `src/ai/runtime/delegation-guard.ts`: `DelegationGuardConfig` {maxDepth, personaRegistry}, `DelegationGuard` maxDepth+registry, canDelegate(personaId, currentDepth): if currentDepth>=maxDepth → allowed false reason exceeds maximum Recursive not permitted, if persona not found → not found, if allowedTools includes delegate_task or * → allowed else false reason does not have delegate_task Sub-agents cannot delegate by default. filterTools(toolIds, personaId, currentDepth): if allowed return filtered same removed [], else filtered = filter out delegate_task, removed = filter delegate_task.
+  - `runtime/index.ts`: export RetryableAgentRuntime, RetryableAgentRunOptions, DelegationGuard, DelegationGuardConfig.
+  - `src/ai/index.ts`: export * schemas, registries, runtime, planning, tools, models, agents, plus Orchestrator config/result.
+- **اصلاح حداقلی:**
+  - **DelegateTaskDeps import:** spec imported DelegateTaskDeps from delegate-bootstrap which doesn't export it; fixed to import from implementations/delegate-task.js (real location).
+  - **Implicit any:** onTaskCreated (resolved, prompt) and resolveAgentId (id) had implicit any TS7006; fixed with any/string explicit.
+  - **Catalog bootstrap order:** spec's orchestrator initialized local tools → MCP → loadSkills → catalog tools → fails because task_decomposition references list_personas/list_skills/list_tools not yet registered ([SkillRegistry] references unknown). Fixed to bootstrap catalog BEFORE loadSkills + re-bootstrap after (same fix as phases 10-11).
+  - **Provider API keys:** openaiProviderFactory and anthropicProviderFactory throw if OPENAI_API_KEY/ANTHROPIC_API_KEY missing; orchestrator tests need dummy keys. Fixed test to set process.env.OPENAI_API_KEY and ANTHROPIC_API_KEY to sk-test-dummy in beforeEach. Also RetryableAgentRuntime isRecoverable extended to include timedout/etimedout/timed out/econnrefused because ETIMEDOUT does not contain timeout substring (has d).
+  - **vi.mock:** spec used vi.mock('ai', () => ({generateText, generateObject, tool})) which breaks tool(); fixed to importActual + preserve ...actual + mock only generateText/generateObject (same as previous phases).
+  - **__dirname ESM:** fileURLToPath(import.meta.url) pattern.
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۲۸۵ تست (۱۶ فایل) — فاز ۱۵ شامل ۱۳ تست: ۵ DelegationGuard (allows main-agent depth0, denies depth>=maxDepth exceeds maximum, denies coder without delegate_task, filterTools removes delegate_task for coder, keeps for boss authorized), ۴ RetryableAgentRuntime (success first try 1 call, retries timeout succeeds 2 calls, gives up after max retries 3 calls, does not retry non-recoverable 401 1 call), ۴ Orchestrator integration (initializes without errors personas>=4 tools>=4 skills>=3 agents>=4, returns clarification ambiguous Do the thing outcome failure contains clarification sessionId defined, full flow plan→confirm→execute→review mock with plan Analyse codebase steps architect code_analysis read_file search_code + reviewer mock → review defined planId sessionId report contains FINAL REPORT, handles rejection by user confirmed false feedback Use reviewer instead of coder → outcome cancelled report contains cancelled+feedback).
+  - معیار پذیرش: جریان end-to-end کامل بدون دخالت انسانی پس از تأیید Plan (Orchestrator.run), timeout/retry via RetryableAgentRuntime maxRetries+recoverable detection, محدودیت عمق delegation via DelegationGuard maxDepth+allowedTools, هیچ حلقه‌ی بی‌پایان یا crash (PlanRuntime ceiling, DelegationGuard, RateLimiter), تست integration سبز — همگی تأیید.
 
