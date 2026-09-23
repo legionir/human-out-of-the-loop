@@ -189,21 +189,21 @@ Agentهای نمونه با ترکیب صحیح و فیلترشده (طبق allo
 
 ---
 
-## [🔴] فاز ۷: Agent Runtime و Event Bus
+## [🟢] فاز ۷: Agent Runtime و Event Bus
 
-### [🔴] گام ۱: EventBus
+### [🟢] گام ۱: EventBus
 
 pub/sub برای `agent:running`, `agent:tool_call`, `agent:completed`, `agent:error`.
 
-### [🔴] گام ۲: AgentRuntime.run(agentDefinitionOrId, prompt)
+### [🟢] گام ۲: AgentRuntime.run(agentDefinitionOrId, prompt)
 
 اجرا از طریق Agent Factory (فاز ۵/۶)، emit رویدادها در حین اجرا، خروجی خلاصه‌شده (`summary`, `result`, `toolsUsed`, `errors`, و **`usage`** از خروجی خام AI SDK برای مصرف در فاز ۱۳).
 
-### [🔴] گام ۳: مدیریت خطای اجرای هر Agent
+### [🟢] گام ۳: مدیریت خطای اجرای هر Agent
 
 گرفتن خطاها، emit `agent:error`، بازگرداندن نتیجه‌ی خطادار ساختاریافته به‌جای crash.
 
-### [🔴] گام ۴: تست با mock model/provider
+### [🟢] گام ۴: تست با mock model/provider
 
 تست مسیر موفق و توالی رویدادها؛ تست مسیر خطا.
 
@@ -675,3 +675,19 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `tsc --noEmit`: ✅
   - `vitest run`: ✅ ۱۱۸ تست (۲۷+۱۲+۱۷+۹+۲۰+۱۷+۱۶) — فاز ۶ شامل ۱۶ تست: ۴ catalog (personas lightweight بدون system, skills با tools+priority بدون instructions, tools all+filter by source), ۴ authorization (allowed, denied, unknown persona, wildcard *), ۶ dynamic (valid composition, unauthorized tool → AUTHORIZATION_DENIED + no task created, persona/skill/model/tool not found), ۲ static (delegate to pre-registered, non-existent agent).
   - معیار پذیرش: catalog کامل و سبک، delegate_task در هر دو حالت کار می‌کند، ترکیب پویا با Tool غیرمجاز رد و گزارش ساختاریافته می‌شود نه crash — همگی تأیید.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۷ (Agent Runtime + EventBus)
+
+- **وضعیت:** فاز ۷ از 🔴 به 🟢؛ هر چهار گام 🟢.
+- **پیاده‌سازی:**
+  - `src/ai/runtime/event-bus.ts`: `EventBus` با `Map<type, Set<handler>>`, `subscribe(type|*): UnsubscribeFn`, `emit` synchronous با catch per-subscriber (resilient), `clear`, `subscriberCount`, و `globalEventBus` singleton. Event types: `agent:running {prompt truncated}`, `agent:tool_call {toolName, callId only no args}`, `agent:completed {summary, toolsUsed, usage}`, `agent:error {error, code}`. Law 14 compliance: compact events فقط tool name، بدون args/results.
+  - `src/ai/runtime/agent-runtime.ts`: `AgentRuntime.run({ agent: ResolvedAgent, taskId, prompt, eventBus, maxSteps 20, timeoutMs 120s })` → `generateText({ model, system, prompt, stopWhen: stepCountIs(maxSteps), tools })`, استخراج toolCalls از `result.steps` برای emit `tool_call` compact، usage mapping با سازگاری old/new (`promptTokens/inputTokens`, `completionTokens/outputTokens`), summary truncate 400 chars + tool list, `buildSummary`, `classifyError` (TIMEOUT, RATE_LIMIT 429, AUTH_ERROR 401, PROVIDER_ERROR), race با timeout Promise, NEVER throws — همیشه `AgentRunResult { success, summary, result, toolsUsed unique, errors, usage, failureType technical|null }`.
+  - `runtime/index.ts` barrel.
+- **اصلاح حداقلی:**
+  - `maxSteps` در `generateText` در AI SDK 7 وجود ندارد (error TS2353) → به `stopWhen: stepCountIs(maxSteps)` تغییر یافت (طبق migration guide فاز ۷). `stepCountIs` از `ai` import شد.
+  - `LanguageModelUsage` در v7 فیلدهای `promptTokens/completionTokens` ندارد بلکه `inputTokens/outputTokens/totalTokens` دارد (error TS2339) → mapping دوگانه `promptTokens ?? inputTokens` و `completionTokens ?? outputTokens` پیاده شد تا هم تست mock (old naming) و هم SDK واقعی (new naming) کار کند.
+  - تست `phase7.test.ts`: `vi.mock('ai', () => ({ generateText, tool }))` باعث `No stepCountIs export` در runtime می‌شد → به `vi.mock` با `importActual` و `...actual` + `generateText: vi.fn()` + `stepCountIs: actual.stepCountIs` تغییر یافت.
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۱۳۳ تست (۸ فایل) — فاز ۷ شامل ۱۵ تست: ۴ EventBus (matching, wildcard *, unsubscribe, error resilience), ۴ success (compact result with usage totalTokens 195, event sequence running→completed, tool_call name only no args, summary truncated <600 for 2000 chars), ۶ error (provider error no crash, emits error event, timeout 100ms with 5s mock, auth error, sequence running→error no completed, toolsUsed array on partial), ۱ Law14 (no raw args/results like /etc/passwd, SECRET_DATA_HERE in events).
+  - معیار پذیرش: run با mock خروجی معتبر شامل usage، توالی صحیح، در خطا crash نمی‌کند، context خام نشت نمی‌کند (compact only) — همگی تأیید.
