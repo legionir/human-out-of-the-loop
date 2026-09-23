@@ -1,5 +1,6 @@
 import type { TokenUsage } from './event-bus.js';
 import type { Task } from '../schemas/task.js';
+import type { EventBus, UnsubscribeFn, AgentCompletedEvent } from './event-bus.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -38,6 +39,29 @@ export interface UsageSummary {
  */
 export class UsageAggregator {
   private readonly records: UsageRecord[] = [];
+  private unsubscribeFn?: UnsubscribeFn;
+
+  /**
+   * Automatically collect usage from agent:completed events.
+   */
+  subscribeToEventBus(eventBus: EventBus): void {
+    this.unsubscribeFn = eventBus.subscribe('agent:completed', (event) => {
+      const completedEvent = event as AgentCompletedEvent;
+      if (completedEvent.usage) {
+        this.recordDirect({
+          taskId: completedEvent.taskId,
+          agentId: completedEvent.agentId,
+          usage: completedEvent.usage,
+          timestamp: completedEvent.timestamp,
+        });
+      }
+    });
+  }
+
+  unsubscribe(): void {
+    this.unsubscribeFn?.();
+    this.unsubscribeFn = undefined;
+  }
 
   /**
    * Record usage from a completed task.

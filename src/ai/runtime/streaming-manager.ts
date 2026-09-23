@@ -2,6 +2,7 @@ import {
   EventBus,
   type AgentEvent,
 } from './event-bus.js';
+import type { Plan } from '../schemas/plan.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -94,6 +95,50 @@ export class StreamingManager {
    */
   emitProgress(event: ProgressEvent): void {
     this.emit(event);
+  }
+
+  /**
+   * Translate PlanRuntime status changes into ProgressEvents.
+   */
+  handlePlanStatusChange(plan: Plan, event: string): void {
+    const progress = this.translatePlanEvent(plan, event);
+    if (progress) {
+      this.emit(progress);
+    }
+  }
+
+  private translatePlanEvent(plan: Plan, event: string): ProgressEvent | null {
+    const base = {
+      planId: plan.id ?? 'unknown',
+      timestamp: Date.now(),
+    };
+
+    if (event === 'plan:started') {
+      return { ...base, type: 'plan:started', message: `Plan "${plan.goal.slice(0, 60)}" started.` };
+    }
+    if (event === 'plan:replanning') {
+      return { ...base, type: 'plan:replanning', message: 'Re-planning in progress...' };
+    }
+    if (event === 'plan:finished') {
+      const done = plan.steps.filter((s) => s.status === 'done').length;
+      return {
+        ...base,
+        type: plan.status === 'completed' ? 'plan:completed' : 'plan:failed',
+        message: `Plan ${plan.status}. ${done}/${plan.steps.length} steps completed.`,
+      };
+    }
+    if (event.startsWith('step:')) {
+      const stepId = event.split(':')[1]?.split(':')[0];
+      const action = event.split(':').pop();
+      return {
+        ...base,
+        type: action === 'done' ? 'plan:step-completed' : action === 'failed' ? 'plan:step-failed' : 'plan:step-started',
+        stepId,
+        message: `Step ${stepId}: ${action}`,
+      };
+    }
+
+    return null;
   }
 
   // ── Private ───────────────────────────────────────────────────

@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import fs from 'node:fs/promises';
-import path from 'node:path';
+import { validateWorkspacePath } from './path-security.js';
 
 const inputSchema = z.object({
   filePath: z.string().min(1, 'filePath must not be empty'),
@@ -13,11 +13,20 @@ export const readFileTool = tool({
   inputSchema,
   execute: async ({ filePath, encoding }) => {
     try {
-      const resolved = path.resolve(process.cwd(), filePath);
-      const content = await fs.readFile(resolved, { encoding: encoding as BufferEncoding });
+      // Security: validate path is within workspace
+      const validation = validateWorkspacePath(filePath);
+      if (!validation.safe) {
+        return {
+          success: false as const,
+          error: validation.reason!,
+          code: 'PATH_TRAVERSAL_BLOCKED',
+        };
+      }
+
+      const content = await fs.readFile(validation.resolvedPath, { encoding: encoding as BufferEncoding });
       return {
         success: true as const,
-        filePath: resolved,
+        filePath: validation.resolvedPath,
         content: content as string,
         sizeBytes: Buffer.byteLength(content as string, encoding as BufferEncoding),
       };

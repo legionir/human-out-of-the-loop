@@ -6,6 +6,7 @@ import { personaAllowsTool } from '../schemas/persona.js';
 import type { ResolvedSkill } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { ModelRegistry } from '../registries/model-registry.js';
+import type { DelegationGuard } from '../runtime/delegation-guard.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -52,6 +53,10 @@ export interface CreateAgentOptions {
    * to the model's known limit or 120_000 chars (~30k tokens).
    */
   contextBudgetChars?: number;
+  /** Current delegation depth (default: 0) */
+  delegationDepth?: number;
+  /** Delegation guard instance */
+  delegationGuard?: DelegationGuard;
 }
 
 // ─── Constants ────────────────────────────────────────────────────
@@ -94,7 +99,7 @@ const KNOWN_MODEL_LIMITS: Record<string, number> = {
  * that the runtime can consume.
  */
 export function createAgent(options: CreateAgentOptions): ResolvedAgent {
-  const { agentDefinition: def, refs } = options;
+  const { agentDefinition: def, refs, delegationDepth = 0, delegationGuard } = options;
 
   // ── 1. Resolve references ───────────────────────────────────
 
@@ -126,19 +131,39 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
   // ── 2. Collect and filter tools ─────────────────────────────
 
   const toolWarnings: ToolFilterWarning[] = [];
-  const allowedToolIds = new Set<string>();
+  let requestedToolIds = new Set<string>();
 
   for (const skill of skills) {
     for (const toolId of skill.resolvedTools) {
-      if (personaAllowsTool(persona, toolId)) {
-        allowedToolIds.add(toolId);
-      } else {
-        toolWarnings.push({
-          toolId,
-          skillId: skill.id,
-          reason: 'not-in-allowedTools',
-        });
-      }
+      requestedToolIds.add(toolId);
+    }
+  }
+
+  // Apply DelegationGuard if provided
+  if (delegationGuard) {
+    const { filtered, removed } = delegationGuard.filterTools(
+      Array.from(requestedToolIds),
+      def.personaId,
+      delegationDepth
+    );
+    requestedToolIds = new Set(filtered);
+    for (const r of removed) {
+      toolWarnings.push({ toolId: r, skillId: 'delegation-guard', reason: 'not-in-allowedTools' });
+    }
+  }
+
+  const allowedToolIds = new Set<string>();
+  for (const toolId of requestedToolIds) {
+    // Find which skill requested this tool for warning context
+    const requestingSkill = skills.find((s) => s.resolvedTools.includes(toolId));
+    if (personaAllowsTool(persona, toolId)) {
+      allowedToolIds.add(toolId);
+    } else {
+      toolWarnings.push({
+        toolId,
+        skillId: requestingSkill?.id ?? 'unknown',
+        reason: 'not-in-allowedTools',
+      });
     }
   }
 

@@ -1,4 +1,4 @@
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import {
   EventBus,
   globalEventBus,
@@ -158,7 +158,7 @@ export class TaskRuntime {
    * Returns the task id immediately; execution happens asynchronously.
    */
   createTask(options: CreateTaskOptions): string {
-    const taskId = `task_${uuidv4().slice(0, 8)}`;
+    const taskId = `task_${randomUUID().slice(0, 8)}`;
     const task = createTaskRecord({
       id: taskId,
       agentDefinitionOrId: options.agent.agentId,

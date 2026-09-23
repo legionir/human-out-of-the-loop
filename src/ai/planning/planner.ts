@@ -1,4 +1,4 @@
-import { generateText } from 'ai';
+import { generateObject } from 'ai';
 import { z } from 'zod';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
@@ -40,17 +40,7 @@ export interface PlanningResult {
  * The Planner uses the `planner` persona + `task_decomposition` skill
  * to convert a user request into a structured execution Plan.
  *
- * Two-phase process:
- *   1. **Assessment**: Is the request clear enough? If not, return
- *      clarification questions (the ONLY point where human input
- *      is requested before execution — Law 17).
- *   2. **Plan generation**: Produce a Plan via `Output.object()`
- *      with the PlanSchema.
- *
- * The Planner itself runs as a single AI SDK call with structured
- * output — it does NOT use the AgentRuntime loop (no tool calls
- * needed beyond the catalog tools which are injected into the
- * system prompt as context).
+ * Uses generateObject for guaranteed schema compliance.
  */
 export class Planner {
   private readonly config: PlannerConfig;
@@ -61,7 +51,7 @@ export class Planner {
 
   /**
    * Phase 1: Assess whether the request is clear enough.
-   * Returns clarification questions if not.
+   * Uses generateObject for guaranteed schema compliance.
    */
   async assess(userRequest: string): Promise<PlannerAssessment> {
     const agent = this.buildPlannerAgent();
@@ -75,36 +65,30 @@ USER REQUEST:
 ${userRequest}
 """
 
-If the request is vague, ambiguous, or missing critical information
-(e.g. which files to modify, what the expected output format is,
-what constraints apply), set isClear=false and list specific
-clarification questions.
+If the request is vague, ambiguous, or missing critical information,
+set isClear=false and list specific clarification questions.
 
-If the request is clear enough to decompose into concrete steps,
-set isClear=true and provide the full plan.
-
-Respond in the exact JSON schema provided.
+If the request is clear enough, set isClear=true and provide the full plan.
 `.trim();
 
     try {
-      const result = await generateText({
+      const { object } = await generateObject({
         model: agent.model,
         system: agent.systemPrompt,
         prompt: assessmentPrompt,
-        // Use structured output for reliable parsing
-        // Note: In production, use Output.object() from AI SDK.
-        // Here we use JSON mode as a compatible fallback.
+        schema: PlannerAssessmentSchema,
+        schemaName: 'PlannerAssessment',
+        schemaDescription:
+          'Assessment of whether a user request is clear enough to plan, ' +
+          'with optional clarification questions or a full plan.',
       });
 
-      // Parse the response as JSON
-      const parsed = this.parseJsonResponse(result.text, PlannerAssessmentSchema);
-      return parsed;
-    } catch (_err) {
-      // If structured parsing fails, treat as unclear
+      return object;
+    } catch {
       return {
         isClear: false,
         needsClarification: [
-          'The planner was unable to parse the request. Please provide more details about what you want to accomplish.',
+          'The planner was unable to process the request. Please provide more details.',
         ],
       };
     }
@@ -112,6 +96,7 @@ Respond in the exact JSON schema provided.
 
   /**
    * Phase 2: Generate a full Plan from a clear (or clarified) request.
+   * Uses generateObject for guaranteed schema compliance.
    */
   async generatePlan(
     userRequest: string,
@@ -135,37 +120,22 @@ ${userRequest}
       }
     }
 
-    prompt += `
-Produce a plan with atomic, dependency-aware steps.
-Each step must have:
-- A unique id (e.g. "step-1", "step-2")
-- A clear description of the single deliverable
-- dependsOn: array of step ids that must complete first
-- assignedPersona: a persona id from the catalog
-- assignedSkills: skill ids from the catalog
-- assignedTools: tool ids that are in the persona's allowedTools
-- claimedResources: files/resources this step will modify
-- acceptanceCriteria: a testable statement for when the step is done
-
-Respond in the exact JSON schema provided.
-`.trim();
-
-    const result = await generateText({
+    const { object } = await generateObject({
       model: agent.model,
       system: agent.systemPrompt,
       prompt,
+      schema: PlanSchema,
+      schemaName: 'ExecutionPlan',
+      schemaDescription: 'A dependency-aware execution plan with atomic steps.',
     });
 
-    const parsed = this.parseJsonResponse(result.text, PlanSchema);
-
-    // Ensure all steps start as "pending"
-    for (const step of parsed.steps) {
+    for (const step of object.steps) {
       step.status = 'pending';
     }
 
     return {
-      ...parsed,
-      id: parsed.id ?? `plan_${Date.now()}`,
+      ...object,
+      id: object.id ?? `plan_${Date.now()}`,
       status: 'draft',
       createdAt: Date.now(),
     };
@@ -173,8 +143,6 @@ Respond in the exact JSON schema provided.
 
   /**
    * Combined assess + generate in one call.
-   * If the request is unclear, returns clarification questions.
-   * If clear, returns the plan directly.
    */
   async plan(userRequest: string): Promise<PlanningResult> {
     try {
@@ -197,7 +165,6 @@ Respond in the exact JSON schema provided.
         };
       }
 
-      // isClear but no plan in assessment — generate separately
       const plan = await this.generatePlan(userRequest);
       return {
         isClear: true,
@@ -240,16 +207,15 @@ Respond in the exact JSON schema provided.
   /**
    * Parse a JSON response from the model, extracting the JSON
    * block if it's wrapped in markdown code fences.
+   * Kept for backward compatibility / fallback parsing.
    */
   private parseJsonResponse<T>(text: string, schema: z.ZodType<T>): T {
-    // Try to extract JSON from markdown code blocks
     let jsonStr = text.trim();
     const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
     if (codeBlockMatch) {
       jsonStr = codeBlockMatch[1].trim();
     }
 
-    // Try to find the first { or [ in the text
     const firstBrace = jsonStr.indexOf('{');
     const firstBracket = jsonStr.indexOf('[');
     if (firstBrace === -1 && firstBracket === -1) {

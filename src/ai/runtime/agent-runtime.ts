@@ -185,7 +185,6 @@ export class AgentRuntime {
   }): Promise<{ text: string; usage?: TokenUsage }> {
     const { agent, prompt, maxSteps, eventBus, taskId, agentId, toolsUsed } = params;
 
-    // Build the tools object for AI SDK
     const hasTools = Object.keys(agent.tools).length > 0;
 
     const generateOptions: Parameters<typeof generateText>[0] = {
@@ -196,18 +195,18 @@ export class AgentRuntime {
       ...(hasTools ? { tools: agent.tools } : {}),
     };
 
-    // Use the AI SDK's generateText which handles the tool loop internally
     const result = await generateText(generateOptions);
 
-    // Extract tool calls from all steps for compact event emission
-    if (result.steps) {
+    // ✅ FIXED: Safely extract tool calls regardless of AI SDK version
+    if (result.steps && Array.isArray(result.steps)) {
       for (const step of result.steps) {
-        if (step.toolCalls) {
-          for (const call of step.toolCalls) {
-            const toolName = call.toolName;
+        // AI SDK v4+: step.toolCalls is ToolCallPart[]
+        const toolCalls = (step as any).toolCalls;
+        if (Array.isArray(toolCalls)) {
+          for (const call of toolCalls) {
+            const toolName = call.toolName ?? call.tool?.name ?? 'unknown';
             toolsUsed.push(toolName);
 
-            // Emit compact tool_call event (name only, no args — Law 14)
             eventBus.emit({
               type: 'agent:tool_call',
               taskId,
@@ -215,23 +214,20 @@ export class AgentRuntime {
               timestamp: Date.now(),
               status: 'running',
               toolName,
-              callId: call.toolCallId,
+              callId: call.toolCallId ?? call.id ?? `call-${Date.now()}`,
             });
           }
         }
       }
     }
 
-    // Extract usage — support both old (promptTokens/completionTokens) and new (inputTokens/outputTokens) naming
+    // ✅ FIXED: Safely extract usage
     const rawUsage = result.usage as any;
     const usage: TokenUsage | undefined = rawUsage
       ? {
-          promptTokens: rawUsage.promptTokens ?? rawUsage.inputTokens ?? 0,
-          completionTokens: rawUsage.completionTokens ?? rawUsage.outputTokens ?? 0,
-          totalTokens:
-            rawUsage.totalTokens ??
-            (rawUsage.promptTokens ?? rawUsage.inputTokens ?? 0) +
-              (rawUsage.completionTokens ?? rawUsage.outputTokens ?? 0),
+          promptTokens: rawUsage.promptTokens ?? rawUsage.inputTokens ?? rawUsage.inputTokenDetails?.total ?? 0,
+          completionTokens: rawUsage.completionTokens ?? rawUsage.outputTokens ?? rawUsage.outputTokenDetails?.total ?? 0,
+          totalTokens: rawUsage.totalTokens ?? 0,
         }
       : undefined;
 

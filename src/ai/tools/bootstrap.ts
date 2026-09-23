@@ -32,7 +32,7 @@ const IMPLEMENTATIONS: Record<string, Tool> = {
  */
 export function bootstrapTools(toolsDir: string, registry: ToolRegistry): void {
   // 1. Load metadata into the underlying registry
-  const metaRegistry = registry._getMetadataRegistry();
+  const metaRegistry = registry.getMetadataRegistry();
   const result = loadRegistryFromDirectory({
     directory: toolsDir,
     registry: metaRegistry,

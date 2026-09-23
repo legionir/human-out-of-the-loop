@@ -14,6 +14,7 @@ import { MemorySessionStore, FileSessionStore, type SessionStore } from './runti
 import { ObservabilityLogger } from './runtime/observability-logger.js';
 import { formatReviewForUser as formatFinalReview } from './runtime/review-formatter.js';
 import { wireAcceptanceChecker } from './runtime/plan-runtime-hooks.js';
+import { RetryableAgentRuntime } from './runtime/agent-runtime-retry.js';
 
 import { PersonaRegistry } from './registries/persona-registry.js';
 import { SkillRegistry, loadSkillsFromDirectory } from './registries/skill-registry.js';
@@ -52,78 +53,76 @@ import type { Review } from './schemas/review.js';
 // ─── Types ────────────────────────────────────────────────────────
 
 export interface OrchestratorConfig {
-  /** Root directory of the project (for resolving registry paths) */
   projectRoot: string;
-  /** Use file-based persistence (default: false = in-memory for dev) */
   persistent?: boolean;
-  /** Directory for plan/session/log storage (default: .ai-runtime/) */
   runtimeDir?: string;
-  /** Maximum concurrent tasks (default: 5) */
   maxConcurrentTasks?: number;
-  /** Maximum re-planning attempts (default: 3) */
   maxReplanningAttempts?: number;
-  /** Default model id (default: "gpt-4o") */
   defaultModelId?: string;
-  /** Agent timeout in ms (default: 120000) */
   agentTimeoutMs?: number;
-  /** Maximum delegation depth (default: 1 — sub-agents cannot delegate) */
   maxDelegationDepth?: number;
-  /** Progress event callback (for streaming to user) */
   onProgress?: (event: ProgressEvent) => void;
 }
 
+export interface OrchestratorRunOptions {
+  sessionId?: string;
+  /**
+   * Callback to get user confirmation of the plan.
+   * REQUIRED — Law 17 mandates explicit user approval before execution.
+   * Receives the formatted plan text, returns confirmation result.
+   */
+  confirmCallback: (planText: string) => Promise<{ confirmed: boolean; feedback?: string }>;
+}
+
 export interface OrchestratorResult {
-  /** The final review (structured output — Law 15) */
   review: Review;
-  /** Human-readable report */
   report: string;
-  /** Plan id for reference */
   planId: string;
-  /** Session id for continuity */
   sessionId: string;
-  /** Execution result details */
   executionResult: PlanExecutionResult;
+}
+
+// ─── Default CLI confirm callback ────────────────────────────────
+
+export function createCliConfirmCallback(): (planText: string) => Promise<{ confirmed: boolean; feedback?: string }> {
+  return async (planText: string) => {
+    const readline = await import('node:readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout,
+    });
+
+    return new Promise((resolve) => {
+      console.log('\n' + planText + '\n');
+      rl.question('Confirm this plan? (yes/no/feedback): ', (answer) => {
+        rl.close();
+        const normalized = answer.trim().toLowerCase();
+        if (['yes', 'y', 'confirm', 'ok', 'go'].includes(normalized)) {
+          resolve({ confirmed: true });
+        } else if (['no', 'n', 'reject', 'cancel'].includes(normalized)) {
+          resolve({ confirmed: false, feedback: 'User rejected the plan.' });
+        } else {
+          resolve({ confirmed: false, feedback: answer.trim() });
+        }
+      });
+    });
+  };
 }
 
 // ─── Orchestrator ────────────────────────────────────────────────
 
-/**
- * The Orchestrator is the single entry point that wires all 14
- * phases together into a complete end-to-end flow:
- *
- *   User Request
- *     → Planning (Phase 9: assess → clarify → plan → feasibility → cycles)
- *     → User Confirmation (Phase 9, Step 7)
- *     → PlanRuntime (Phase 10: execute → priority → re-plan)
- *     → Acceptance Check (Phase 11: per-step quality gate)
- *     → Final Review (Phase 12: structured output)
- *     → Report to User
- *
- * All operational layers are active throughout:
- *   - Streaming (Phase 13): progress events to the user
- *   - Cancellation (Phase 13): user can stop at any time
- *   - Rate-limiting (Phase 13): per-provider backoff
- *   - Usage tracking (Phase 13): token aggregation
- *   - Session persistence (Phase 14): cross-request continuity
- *   - Observability (Phase 14): structured JSONL logging
- *
- * Law 17 (Human-Out-Of-Loop): after the user confirms the plan,
- * the entire execution runs to completion without any human
- * intervention.  The only permitted interaction is cancellation.
- */
 export class Orchestrator {
   private readonly config: Required<OrchestratorConfig>;
 
-  // Registries (Phases 1-6)
   readonly personaRegistry: PersonaRegistry;
   readonly skillRegistry: SkillRegistry;
   readonly toolRegistry: ToolRegistry;
   readonly modelRegistry: ModelRegistry;
   readonly agentRegistry: AgentRegistry;
 
-  // Runtime components (Phases 7-14)
   readonly eventBus: EventBus;
   readonly agentRuntime: AgentRuntime;
+  readonly retryableAgentRuntime: RetryableAgentRuntime;
   readonly taskRuntime: TaskRuntime;
   readonly planStore: PlanStore;
   readonly sessionStore: SessionStore;
@@ -151,16 +150,19 @@ export class Orchestrator {
       onProgress: config.onProgress ?? (() => {}),
     };
 
-    // ── Instantiate registries ──────────────────────────────
     this.personaRegistry = new PersonaRegistry();
     this.toolRegistry = new ToolRegistry();
     this.skillRegistry = new SkillRegistry({ toolRegistry: this.toolRegistry });
     this.modelRegistry = new ModelRegistry();
     this.agentRegistry = new AgentRegistry();
 
-    // ── Instantiate runtime ─────────────────────────────────
     this.eventBus = new EventBus();
     this.agentRuntime = new AgentRuntime();
+    this.rateLimiter = new RateLimiter();
+    this.retryableAgentRuntime = new RetryableAgentRuntime(
+      this.agentRuntime,
+      this.rateLimiter
+    );
     this.taskRuntime = new TaskRuntime({
       maxConcurrentTasks: this.config.maxConcurrentTasks,
       eventBus: this.eventBus,
@@ -177,7 +179,6 @@ export class Orchestrator {
 
     this.streamingManager = new StreamingManager({ eventBus: this.eventBus });
     this.cancellationManager = new CancellationManager(this.planStore, this.taskRuntime);
-    this.rateLimiter = new RateLimiter();
     this.usageAggregator = new UsageAggregator();
     this.observabilityLogger = new ObservabilityLogger({
       logFilePath: path.join(runtimeDir, 'observability.jsonl'),
@@ -190,6 +191,17 @@ export class Orchestrator {
       modelRegistry: this.modelRegistry,
       eventBus: this.eventBus,
       planStore: this.planStore,
+      taskRuntime: this.taskRuntime,
+      onQualityFailure: (planId, stepId, reason) => {
+        this.observabilityLogger.logQualityCheck(planId, stepId, false, reason);
+        this.streamingManager.emitProgress({
+          type: 'plan:step-failed',
+          planId,
+          stepId,
+          timestamp: Date.now(),
+          message: `Quality check failed for step "${stepId}": ${reason}`,
+        });
+      },
     });
 
     this.finalReviewer = new FinalReviewer({
@@ -209,25 +221,17 @@ export class Orchestrator {
     });
   }
 
-  // ── Initialization ────────────────────────────────────────────
-
-  /**
-   * Bootstrap all registries and tools.  Must be called once
-   * before `run()`.  Idempotent.
-   */
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
     const root = this.config.projectRoot;
     const registryDir = path.join(root, 'registry');
 
-    // 1. Load personas
     this.personaRegistry.loadFromDirectory(
       path.join(registryDir, 'personas'),
       true
     );
 
-    // 2. Load local tools
     const localToolDefs = [
       { id: 'read_file', name: 'Read File', description: 'Reads file contents', source: 'local' as const, modulePath: './read-file', category: 'filesystem' },
       { id: 'search_code', name: 'Search Code', description: 'Searches code patterns', source: 'local' as const, modulePath: './search-code', category: 'filesystem' },
@@ -240,46 +244,48 @@ export class Orchestrator {
     this.toolRegistry.registerImplementation('write_file', writeFileTool);
     this.toolRegistry.registerImplementation('git_status', gitStatusTool);
 
-    // 3. Load MCP servers (non-fatal if none configured)
     await bootstrapMcpServers(
       path.join(registryDir, 'mcp-servers'),
       this.toolRegistry
     );
 
-    // 4. Bootstrap catalog tools BEFORE loading skills (task_decomposition depends on them)
     bootstrapCatalogTools({
       toolRegistry: this.toolRegistry,
       personaRegistry: this.personaRegistry,
       skillRegistry: this.skillRegistry,
     });
 
-    // 5. Load skills
     loadSkillsFromDirectory(
       path.join(registryDir, 'skills'),
       this.skillRegistry,
       true
     );
 
-    // 6. Re-bootstrap catalog tools idempotently (ensures impl registered after skill load)
     bootstrapCatalogTools({
       toolRegistry: this.toolRegistry,
       personaRegistry: this.personaRegistry,
       skillRegistry: this.skillRegistry,
     });
 
-    // 7. Load models
     this.modelRegistry.registerProvider(openaiProviderFactory);
     this.modelRegistry.registerProvider(anthropicProviderFactory);
     this.modelRegistry.registerProvider(localProviderFactory);
     this.modelRegistry.loadConfigsFromDirectory(
       path.join(registryDir, 'models'),
-      false // Non-fatal: some providers may lack API keys
+      false
     );
 
-    // 8. Load agents
+    try {
+      this.modelRegistry.resolveAll(false);
+    } catch (err) {
+      this.observabilityLogger.logSystemError(
+        'model-resolution',
+        `Some models could not be resolved: ${err instanceof Error ? err.message : String(err)}`
+      );
+    }
+
     this.agentRegistry.loadFromFile(path.join(registryDir, 'agents.json'));
 
-    // 9. Bootstrap delegate_task
     const delegateDeps: DelegateTaskDeps = {
       personaRegistry: this.personaRegistry,
       skillRegistry: this.skillRegistry,
@@ -295,17 +301,22 @@ export class Orchestrator {
     };
     bootstrapDelegateTask(this.toolRegistry, delegateDeps);
 
-    // 10. Bootstrap task control tools
-    bootstrapTaskControlTools(this.toolRegistry, this.taskRuntime);
+    bootstrapTaskControlTools({
+      toolRegistry: this.toolRegistry,
+      taskRuntime: this.taskRuntime,
+      agentRegistry: this.agentRegistry,
+      personaRegistry: this.personaRegistry,
+      skillRegistry: this.skillRegistry,
+      modelRegistry: this.modelRegistry,
+    });
 
-    // 11. Wire observability
     this.observabilityLogger.subscribeToEventBus(this.eventBus);
 
-    // 12. Wire streaming
     this.streamingManager.start();
     this.streamingManager.subscribe(this.config.onProgress);
 
-    // 13. Validate cross-registry references
+    this.usageAggregator.subscribeToEventBus(this.eventBus);
+
     const validation = this.agentRegistry.validateAll({
       personaRegistry: this.personaRegistry,
       skillRegistry: this.skillRegistry,
@@ -320,7 +331,6 @@ export class Orchestrator {
         'initialization',
         `Cross-registry validation errors: ${errors.join('; ')}`
       );
-      // Log but don't throw — some agents may still work
     }
 
     this.initialized = true;
@@ -338,35 +348,18 @@ export class Orchestrator {
     });
   }
 
-  // ── Main execution flow ───────────────────────────────────────
-
-  /**
-   * Execute the full flow for a user request.
-   *
-   * @param userRequest  The user's natural-language request.
-   * @param sessionId    Optional existing session id for continuity.
-   * @param confirmCallback  Callback to get user confirmation of the plan.
-   *                         Receives the formatted plan text, returns
-   *                         true (confirmed) or false + feedback.
-   *                         This is the ONLY human interaction point.
-   */
   async run(
     userRequest: string,
-    options?: {
-      sessionId?: string;
-      confirmCallback?: (planText: string) => Promise<{ confirmed: boolean; feedback?: string }>;
-    }
+    options: OrchestratorRunOptions
   ): Promise<OrchestratorResult> {
     if (!this.initialized) {
       await this.initialize();
     }
 
-    // ── Session management ──────────────────────────────────
     const sessionId = options?.sessionId ?? this.sessionStore.createSession();
     const interaction = this.sessionStore.addInteraction(sessionId, userRequest);
     this.observabilityLogger.logSessionCreated(sessionId);
 
-    // ── Phase 9: Planning ───────────────────────────────────
     this.observabilityLogger.log({
       eventType: 'system:info',
       message: 'Starting planning phase.',
@@ -375,7 +368,6 @@ export class Orchestrator {
 
     const planningResult = await this.planner.plan(userRequest);
 
-    // Handle ambiguity
     if (!planningResult.isClear) {
       const clarificationMsg = planningResult.needsClarification.join('\n');
       if (interaction) {
@@ -414,7 +406,6 @@ export class Orchestrator {
     const plan = planningResult.plan!;
     this.observabilityLogger.logPlanCreated(plan);
 
-    // ── Feasibility Gate ────────────────────────────────────
     const feasibility = runFeasibilityGate(plan, {
       personaRegistry: this.personaRegistry,
       skillRegistry: this.skillRegistry,
@@ -456,7 +447,6 @@ export class Orchestrator {
       };
     }
 
-    // ── Cycle Detection ─────────────────────────────────────
     const cycleCheck = detectCycles(plan);
     if (cycleCheck.hasCycle) {
       const cycleMsg = `Circular dependency detected: ${cycleCheck.cyclePath?.join(' → ')}`;
@@ -487,37 +477,34 @@ export class Orchestrator {
       };
     }
 
-    // ── User Confirmation (Law 17: the ONLY human touchpoint) ──
     const summary = summarizePlan(plan);
     const planText = formatPlanForUser(summary);
 
-    if (options?.confirmCallback) {
-      const confirmation = await options.confirmCallback(planText);
-      if (!confirmation.confirmed) {
-        return {
-          review: {
-            planId: plan.id ?? 'unknown',
-            goal: plan.goal,
-            outcome: 'cancelled',
-            acceptedFindings: [],
-            rejectedFindings: [],
-            incompleteSteps: [],
-            finalSummary: `Plan was not confirmed by user. Feedback: ${confirmation.feedback ?? 'none'}`,
-          },
-          report: `🛑 Plan cancelled by user.\nFeedback: ${confirmation.feedback ?? 'none'}`,
+    const confirmation = await options.confirmCallback(planText);
+    if (!confirmation.confirmed) {
+      return {
+        review: {
           planId: plan.id ?? 'unknown',
-          sessionId,
-          executionResult: {
-            planId: plan.id ?? 'unknown',
-            status: 'cancelled',
-            completedSteps: 0,
-            failedSteps: 0,
-            totalSteps: plan.steps.length,
-            incompleteSteps: [],
-            replanningAttempts: 0,
-          },
-        };
-      }
+          goal: plan.goal,
+          outcome: 'cancelled',
+          acceptedFindings: [],
+          rejectedFindings: [],
+          incompleteSteps: [],
+          finalSummary: `Plan was not confirmed by user. Feedback: ${confirmation.feedback ?? 'none'}`,
+        },
+        report: `🛑 Plan cancelled by user.\nFeedback: ${confirmation.feedback ?? 'none'}`,
+        planId: plan.id ?? 'unknown',
+        sessionId,
+        executionResult: {
+          planId: plan.id ?? 'unknown',
+          status: 'cancelled',
+          completedSteps: 0,
+          failedSteps: 0,
+          totalSteps: plan.steps.length,
+          incompleteSteps: [],
+          replanningAttempts: 0,
+        },
+      };
     }
 
     plan.status = 'confirmed';
@@ -528,7 +515,6 @@ export class Orchestrator {
       level: 'info',
     });
 
-    // ── Phase 10-11: Execution ──────────────────────────────
     const planRuntime = new PlanRuntime({
       taskRuntime: this.taskRuntime,
       planStore: this.planStore,
@@ -547,19 +533,12 @@ export class Orchestrator {
       maxReplanningAttempts: this.config.maxReplanningAttempts,
       defaultModelId: this.config.defaultModelId,
       onStatusChange: (p, event) => {
-        this.streamingManager.emitProgress({
-          type: event.includes('replanning') ? 'plan:replanning' : 'plan:started',
-          planId: p.id ?? 'unknown',
-          timestamp: Date.now(),
-          message: event,
-        });
+        this.streamingManager.handlePlanStatusChange(p, event);
       },
     });
 
-    // Register for cancellation
     this.cancellationManager.registerRuntime(plan.id!, planRuntime);
 
-    // Wire acceptance checker
     const cleanupAcceptance = wireAcceptanceChecker(plan, this.acceptanceChecker);
 
     let executionResult: PlanExecutionResult;
@@ -572,10 +551,8 @@ export class Orchestrator {
 
     this.observabilityLogger.logPlanCompleted(plan);
 
-    // ── Phase 12: Final Review ──────────────────────────────
     const review = await this.finalReviewer.review(plan, executionResult);
 
-    // Enrich with usage data
     const usageSummary = this.usageAggregator.getSummary();
     review.usage = {
       totalPromptTokens: usageSummary.totalPromptTokens,
@@ -585,7 +562,6 @@ export class Orchestrator {
 
     const report = formatFinalReview(review);
 
-    // ── Update session ──────────────────────────────────────
     if (interaction) {
       this.sessionStore.updateInteraction(sessionId, interaction.id, {
         outcome: review.outcome,
@@ -604,18 +580,10 @@ export class Orchestrator {
     };
   }
 
-  // ── Public API ────────────────────────────────────────────────
-
-  /**
-   * Cancel a running plan.
-   */
   async cancelPlan(planId: string) {
     return this.cancellationManager.cancelPlan(planId);
   }
 
-  /**
-   * Get the current status of a plan.
-   */
   getPlanStatus(planId: string) {
     const plan = this.planStore.load(planId);
     if (!plan) return undefined;
@@ -627,16 +595,10 @@ export class Orchestrator {
     };
   }
 
-  /**
-   * Get usage summary for the current session.
-   */
   getUsageSummary() {
     return this.usageAggregator.getSummary();
   }
 
-  /**
-   * Resume a previously interrupted plan.
-   */
   async resumePlan(planId: string): Promise<OrchestratorResult | undefined> {
     const plan = this.planStore.load(planId);
     if (!plan) return undefined;
@@ -673,13 +635,11 @@ export class Orchestrator {
     };
   }
 
-  /**
-   * Graceful shutdown.
-   */
   async shutdown(): Promise<void> {
     this.streamingManager.stop();
     this.acceptanceChecker.stop();
     this.observabilityLogger.unsubscribeFromEventBus();
+    this.usageAggregator.unsubscribe();
     this.taskRuntime.destroy();
     await this.taskRuntime.waitForAll();
   }

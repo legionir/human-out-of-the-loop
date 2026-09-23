@@ -1,16 +1,12 @@
-import { createRequire } from 'node:module';
 import type { ProviderFactory } from '../../registries/model-registry.js';
 import type { ModelConfig } from '../../schemas/model-config.js';
 import type { LanguageModel } from 'ai';
-
-const require = createRequire(import.meta.url);
 
 /**
  * OpenAI provider factory.
  *
  * Requires `OPENAI_API_KEY` environment variable.
- * Uses dynamic require so that `@ai-sdk/openai` is only loaded
- * when this provider is actually used.
+ * Uses lazy-loaded SDK with caching and error handling.
  */
 export const openaiProviderFactory: ProviderFactory = {
   name: 'openai',
@@ -21,9 +17,7 @@ export const openaiProviderFactory: ProviderFactory = {
       throw new Error(`[openaiProvider] OPENAI_API_KEY environment variable is not set.`);
     }
 
-    const { createOpenAI } = require('@ai-sdk/openai') as {
-      createOpenAI: (opts: unknown) => (model: string) => LanguageModel;
-    };
+    const { createOpenAI } = getOpenAISdk();
 
     const openai = createOpenAI({
       apiKey,
@@ -33,3 +27,19 @@ export const openaiProviderFactory: ProviderFactory = {
     return openai(config.model) as unknown as LanguageModel;
   },
 };
+
+// Lazy-loaded SDK cache
+let _openaiSdk: any = null;
+function getOpenAISdk(): typeof import('@ai-sdk/openai') {
+  if (!_openaiSdk) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      _openaiSdk = require('@ai-sdk/openai');
+    } catch {
+      throw new Error(
+        '[openaiProvider] @ai-sdk/openai is not installed. Run: npm install @ai-sdk/openai'
+      );
+    }
+  }
+  return _openaiSdk as typeof import('@ai-sdk/openai');
+}

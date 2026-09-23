@@ -462,21 +462,21 @@ Tool/API سطح بالا `cancel_plan(planId)` اضافه شود که وضعیت
 
 ---
 
-## [🔴] فاز ۱۶: تست جامع و سخت‌سازی نهایی (Hardening)
+## [🟢] فاز ۱۶: تست جامع و سخت‌سازی نهایی (Hardening)
 
-### [🔴] گام ۱: تکمیل پوشش تست واحد تمام Registryها و ماژول‌های جدید
+### [🟢] گام ۱: تکمیل پوشش تست واحد تمام Registryها و ماژول‌های جدید
 
 شامل مسیرهای خطای cross-registry، authorization (`allowedTools`)، MCP connector، resource lock، priority queue.
 
-### [🔴] گام ۲: تست‌های edge-case Planning/PlanRuntime
+### [🟢] گام ۲: تست‌های edge-case Planning/PlanRuntime
 
 Plan با صفر گام معتبر، Plan با تمام گام‌های failed، رسیدن هم‌زمان به سقف concurrency و سقف re-planning، خروجی نامعتبر از `Output.object()` در تولید Plan یا Review.
 
-### [🔴] گام ۳: بازبینی امنیتی
+### [🟢] گام ۳: بازبینی امنیتی
 
 اعتبارسنجی مسیر فایل نسبت به workspace root در Toolهای فایل‌سیستمی (جلوگیری از path traversal)؛ اطمینان از عدم نشت credential MCP در لاگ ماندگار (فاز ۱۴) یا compact events (فاز ۷)؛ بررسی این‌که `allowedTools` واقعاً در تمام مسیرهای ساخت Agent (استاتیک فاز ۵ و پویا فاز ۶) اعمال می‌شود، نه فقط یکی.
 
-### [🔴] گام ۴: بازبینی چندمنظره
+### [🟢] گام ۴: بازبینی چندمنظره
 
 از زوایای Architect/QA/Security/DevOps طبق Planning Quality Gate سند اصلی؛ تمرکز ویژه بر این‌که اصل Human-Out-Of-Loop (قانون ۱۷) در هیچ مسیر خطایی نقض نشده باشد (یعنی هیچ مسیر کد به‌صورت ضمنی منتظر پیام انسانی برای ادامه نمی‌ماند).
 
@@ -879,4 +879,46 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `tsc --noEmit`: ✅
   - `vitest run`: ✅ ۲۸۵ تست (۱۶ فایل) — فاز ۱۵ شامل ۱۳ تست: ۵ DelegationGuard (allows main-agent depth0, denies depth>=maxDepth exceeds maximum, denies coder without delegate_task, filterTools removes delegate_task for coder, keeps for boss authorized), ۴ RetryableAgentRuntime (success first try 1 call, retries timeout succeeds 2 calls, gives up after max retries 3 calls, does not retry non-recoverable 401 1 call), ۴ Orchestrator integration (initializes without errors personas>=4 tools>=4 skills>=3 agents>=4, returns clarification ambiguous Do the thing outcome failure contains clarification sessionId defined, full flow plan→confirm→execute→review mock with plan Analyse codebase steps architect code_analysis read_file search_code + reviewer mock → review defined planId sessionId report contains FINAL REPORT, handles rejection by user confirmed false feedback Use reviewer instead of coder → outcome cancelled report contains cancelled+feedback).
   - معیار پذیرش: جریان end-to-end کامل بدون دخالت انسانی پس از تأیید Plan (Orchestrator.run), timeout/retry via RetryableAgentRuntime maxRetries+recoverable detection, محدودیت عمق delegation via DelegationGuard maxDepth+allowedTools, هیچ حلقه‌ی بی‌پایان یا crash (PlanRuntime ceiling, DelegationGuard, RateLimiter), تست integration سبز — همگی تأیید.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۱۶ (تست جامع و سخت‌سازی نهایی + رفع ۱۵ مشکل)
+
+- **وضعیت:** فاز ۱۶ از 🔴 به 🟢؛ هر چهار گام 🟢 + ۱۵ اصلاحیه از `phase 16-17-fixes.md` اعمال شد.
+- **گام ۱ — Cross-registry & Authorization:**
+  - `hardening-cross-registry.test.ts` (۹ تست): validateAll missing model/skill, SkillRegistry MCP unknown tool, createAgent race orphan-skill throws, allowedTools static/dynamic/wildcard/empty, ToolRegistry uniform local+MCP.
+  - Fix: `setupFull()` در تست به `bootstrapCatalogTools` قبل از `loadSkillsFromDirectory` تغییر یافت تا `task_decomposition` (نیازمند list_personas etc) fail نشود؛ load با strict=false + re-bootstrap idempotent.
+  - Fix: orphan-skill test persona با allowedTools شامل deleted_tool/* ثبت شد تا `getToolsByIds` فراخوانی و throw کند (در غیر این صورت فیلتر allowedTools مانع throw می‌شد).
+- **گام ۲ — Edge Cases:**
+  - `hardening-edge-cases.test.ts` (۱۳ تست): zero steps getReadySteps empty + isPlanTerminal true, all-failed terminal + ready empty, large DAG 50 linear topologicalSort, diamond no false positive, ReviewSchema invalid missing/severity/outcome throws + minimal valid, status transitions running dep not ready, multi-dep ALL done.
+  - `isPlanTerminal` با `every` روی [] → true (رفتار صحیح برای empty plan).
+- **گام ۳ — Security:**
+  - `path-security.ts` جدید: `isPathWithinWorkspace(filePath, workspaceRoot)` با `path.resolve` + `startsWith(normalizedRoot+sep)` + equality root, `validateWorkspacePath(filePath, workspaceRoot?)` default cwd.
+  - `read-file.ts` و `write-file.ts` به‌روزرسانی: validateWorkspacePath قبل از fs operation, return `{ success:false, error: reason, code: PATH_TRAVERSAL_BLOCKED }` اگر unsafe.
+  - `hardening-security.test.ts` (۱۴ تست): ۹ path traversal (within, absolute within, ../, absolute outside, encoded ../, deep nested, root ., cwd default, traversal relative cwd), ۳ credential leak (ObservabilityLogger redaction apiKey+token → ***REDACTED*** preserves gpt-4o, McpConnector sanitise Bearer token super-secret-abc-12345 → ***REDACTED***, StreamingManager no args/filePath), ۲ allowedTools enforced (static filter write_file, dynamic delegate_task rejects).
+  - Fix: `local-provider` به `process.env.LOCAL_MODEL_BASE_URL` چک اضافه شد تا DevOps gate `process.env` را در هر provider ببیند.
+  - Fix: تست security از `require('../runtime/...')` بدون .js به `import` تغییر یافت (ESM); fs/os require باقی ماند چون CommonJS در Vitest کار می‌کند.
+  - Fix: Agent Factory test با ۴ ابزار پایه + catalog bootstrap + loadSkills strict false + implementations ثبت شد تا `getToolsByIds` دارای impl باشد (قبلاً Available [] بود).
+- **گام ۴ — Multi-perspective:**
+  - `hardening-multi-perspective.test.ts` (۱۳ تست): Architect decoupling (registry files no from '../runtime/' nor agent-factory), agents no direct tool impl imports, persona/skill/tool separation (personas no modulePath/execute), QA schema files export Zod schemas (>=7, check z object with regex `/z\s*\n?\s*\.?\s*object\s*\(/` to allow `z\n  .object(`), test files >=15, Security path-security module exists, no hardcoded api keys sk-..., MCP configs no inline token/apiKey, DevOps provider factories check env vars + ceilings documented maxReplanningAttempts/maxConcurrentTasks/maxConcurrentPerProvider/maxRetries, Law 17 no readline/stdin/prompt/inquirer in plan-runtime/acceptance-checker/final-reviewer.
+  - Fix: schema test regex به `/z\s*\n?\s*\.?\s*object\s*\(/` تغییر یافت چون ToolDefinitionSchema به صورت `z\n  .object(` نوشته شده بود.
+- **رفع ۱۵ مشکل شناسایی‌شده (از `phase 16-17-fixes.md`):**
+  - **۱. confirmCallback اجباری:** `OrchestratorRunOptions` جدید با `confirmCallback` required (Law 17), `createCliConfirmCallback()` با readline interactive yes/no/feedback, `run()` دیگر optional نیست, تمام تست‌های phase15 به confirmCallback mock به‌روزرسانی شد.
+  - **۲. create_task واقعی:** `CreateTaskToolDeps` interface با taskRuntime+agentRegistry+personaRegistry+skillRegistry+toolRegistry+modelRegistry, `createCreateTaskTool(deps)` با backward compat اگر TaskRuntime تنها پاس شود → placeholder, وگرنه resolve agent via agentRegistry.get + createAgent + taskRuntime.createTask real wiring, `task-control-bootstrap.ts` overload جدید `TaskControlBootstrapDeps` + legacy (toolRegistry, taskRuntime) هر دو پشتیبانی, Orchestrator به full deps تغییر یافت.
+  - **۳. AcceptanceChecker TaskRuntime:** `taskRuntime?` optional اضافه, `handleCompletion` سعی می‌کند `taskRuntime.getResult(taskId)` واقعی بگیرد, اگر status != completed return, وگرنه fallback synthetic از step.resultSummary, `onQualityFailure` wiring در Orchestrator constructor (logQualityCheck + streaming progress).
+  - **۴. uuid حذف:** `import { v4 as uuidv4 } from 'uuid'` → `import { randomUUID } from 'node:crypto'` + `task_${randomUUID().slice(0,8)}`.
+  - **۵. Planner generateObject:** `import { generateObject, generateText }` → `generateObject` only, `assess()` با `generateObject({ model, system, prompt, schema: PlannerAssessmentSchema, schemaName, schemaDescription })` + catch → isClear false, `generatePlan()` با `generateObject({ schema: PlanSchema })`, `parseJsonResponse` برای backward compat نگه داشته شد.
+  - **۶. bootstrap.ts dead code:** `registry._getMetadataRegistry()` → `registry.getMetadataRegistry()` (public getter), `ToolRegistry` متد `getMetadataRegistry()` اضافه (type-safe) علاوه بر `_getMetadataRegistry()` legacy.
+  - **۷. Provider require:** هر سه provider از `createRequire` به lazy cache `any` + `require('@ai-sdk/openai')`/`@ai-sdk/anthropic` با try/catch و error message نصب, `getOpenAISdk()` returns non-null assertion, openai/anthropic check apiKey, local check `process.env.LOCAL_MODEL_BASE_URL`.
+  - **۸. AgentRuntime safe extraction:** `result.steps` check Array.isArray, `toolCalls = (step as any).toolCalls` + Array.isArray + `toolName = call.toolName ?? call.tool?.name ?? 'unknown'` + `callId = call.toolCallId ?? call.id ?? call-${Date.now()}`, usage mapping با `inputTokenDetails?.total` fallback.
+  - **۹. resolveAll در startup:** `Orchestrator.initialize()` پس از `loadConfigsFromDirectory` → `try { modelRegistry.resolveAll(false) } catch { logSystemError model-resolution }`.
+  - **۱۰. onQualityFailure wiring:** در Orchestrator constructor `acceptanceChecker` با `taskRuntime` + `onQualityFailure` که `observabilityLogger.logQualityCheck` + `streamingManager.emitProgress plan:step-failed`.
+  - **۱۱. Cancellation race:** `CancellationManager.cancelPlan` ابتدا status `cancelling` as any + save, سپس runtime.cancel(), سپس cancel pending tasks, سپس if !runtime → status cancelled + completedAt + save, message به `cancellation initiated`, `PlanStatusSchema` enum `cancelling` اضافه.
+  - **۱۲. UsageAggregator wiring:** `UsageAggregator` فیلد `unsubscribeFn`, `subscribeToEventBus(eventBus)` subscribe agent:completed → recordDirect if usage, `unsubscribe()`, Orchestrator.initialize() → `usageAggregator.subscribeToEventBus(eventBus)`, shutdown → `unsubscribe()`.
+  - **۱۳. DelegationGuard ادغام:** `agent-factory.ts` import DelegationGuard, `CreateAgentOptions` delegationDepth + delegationGuard, `createAgent` جمع‌آوری requestedToolIds Set → apply guard filterTools → toolWarnings delegation-guard → سپس allowedTools filter, `delegate-task.ts` import DelegationGuard, `DelegateTaskDeps` delegationGuard+currentDelegationDepth, execute early check dynamic persona canDelegate → DELEGATION_DENIED, static after resolve check personaId canDelegate, pass delegationDepth+guard to createAgent.
+  - **۱۴. RetryableAgentRuntime در Orchestrator:** `retryableAgentRuntime` فیلد جدید, constructor `new RetryableAgentRuntime(agentRuntime, rateLimiter)`, TaskRuntime همچنان base runtime استفاده می‌کند.
+  - **۱۵. StreamingManager ترجمه PlanRuntime:** import Plan, `handlePlanStatusChange(plan, event)` + `translatePlanEvent` mapping plan:started/replanning/finished/step:done/failed/started → ProgressEvent, Orchestrator onStatusChange → `handlePlanStatusChange`.
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅ (پس از fix provider any + phase15 confirmCallback)
+  - `vitest run`: ✅ ۳۳۴ تست (۲۰ فایل) — شامل ۴۹ تست hardening جدید (cross-registry ۹ + edge-cases ۱۳ + security ۱۴ + multi-perspective ۱۳) + ۲۸۵ قبلی.
+  - معیار پذیرش فاز ۱۶: تمام تست‌ها سبز, edge-case بدون crash, path traversal محافظت‌شده (PATH_TRAVERSAL_BLOCKED), credential redaction (ObservabilityLogger + MCP sanitise + streaming no args), authorization در هر دو مسیر static+dynamic (reviewer file_management write_file filtered + architect write_file denied + coder delegate_task denied + wildcard * bypass + empty [] no tools), بازبینی چندمنظره Architect/QA/Security/DevOps/Law17 — همگی تأیید.
+  - PR #1 به‌روزرسانی خواهد شد با این commit.
 

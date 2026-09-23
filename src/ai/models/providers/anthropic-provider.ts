@@ -1,9 +1,6 @@
-import { createRequire } from 'node:module';
 import type { ProviderFactory } from '../../registries/model-registry.js';
 import type { ModelConfig } from '../../schemas/model-config.js';
 import type { LanguageModel } from 'ai';
-
-const require = createRequire(import.meta.url);
 
 /**
  * Anthropic provider factory.
@@ -19,11 +16,24 @@ export const anthropicProviderFactory: ProviderFactory = {
       throw new Error(`[anthropicProvider] ANTHROPIC_API_KEY environment variable is not set.`);
     }
 
-    const { createAnthropic } = require('@ai-sdk/anthropic') as {
-      createAnthropic: (opts: unknown) => (model: string) => LanguageModel;
-    };
+    const { createAnthropic } = getAnthropicSdk();
 
     const anthropic = createAnthropic({ apiKey });
     return anthropic(config.model) as unknown as LanguageModel;
   },
 };
+
+let _anthropicSdk: any = null;
+function getAnthropicSdk(): typeof import('@ai-sdk/anthropic') {
+  if (!_anthropicSdk) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      _anthropicSdk = require('@ai-sdk/anthropic');
+    } catch {
+      throw new Error(
+        '[anthropicProvider] @ai-sdk/anthropic is not installed. Run: npm install @ai-sdk/anthropic'
+      );
+    }
+  }
+  return _anthropicSdk as typeof import('@ai-sdk/anthropic');
+}

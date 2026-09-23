@@ -7,8 +7,6 @@ import type { LanguageModel } from 'ai';
 import { PersonaRegistry } from '../registries/persona-registry.js';
 import type { Persona } from '../schemas/persona.js';
 
-// ─── Mock AI SDK ─────────────────────────────────────────────────
-
 vi.mock('ai', async () => {
   const actual = (await vi.importActual('ai')) as any;
   return {
@@ -28,8 +26,6 @@ const mockGenerateObject = vi.mocked(generateObject);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-// ─── DelegationGuard tests ───────────────────────────────────────
 
 describe('DelegationGuard', () => {
   let personaRegistry: PersonaRegistry;
@@ -82,7 +78,6 @@ describe('DelegationGuard', () => {
       personaRegistry,
     });
 
-    // coder persona does NOT have delegate_task
     const result = guard.canDelegate('coder', 0);
     expect(result.allowed).toBe(false);
     expect(result.reason).toContain('does not have "delegate_task"');
@@ -96,7 +91,7 @@ describe('DelegationGuard', () => {
 
     const { filtered, removed } = guard.filterTools(
       ['read_file', 'delegate_task', 'write_file'],
-      'coder', // coder cannot delegate
+      'coder',
       0
     );
 
@@ -127,8 +122,6 @@ describe('DelegationGuard', () => {
     expect(removed).toEqual([]);
   });
 });
-
-// ─── RetryableAgentRuntime tests ─────────────────────────────────
 
 describe('RetryableAgentRuntime', () => {
   beforeEach(() => {
@@ -222,22 +215,10 @@ describe('RetryableAgentRuntime', () => {
     });
 
     expect(result.success).toBe(false);
-    expect(mockGenerateText).toHaveBeenCalledTimes(3); // 1 + 2 retries
+    expect(mockGenerateText).toHaveBeenCalledTimes(3);
   });
 
   it('does not retry non-recoverable errors', async () => {
-    // AgentRuntime catches errors and returns failure result, not throw
-    // For 401, it returns success:false with error message
-    // RetryableAgentRuntime checks result.errors for recoverable patterns
-    mockGenerateText.mockResolvedValueOnce({
-      text: '',
-      usage: undefined,
-      steps: [],
-    } as any);
-    // Actually we need to mock generateText to throw 401, then AgentRuntime will catch and return failure
-    // But RetryableAgentRuntime's isRecoverable checks result.errors, not thrown error
-    // So we simulate: first generateText throws 401 -> AgentRuntime returns failure with 401 message
-    // Then RetryableAgentRuntime should NOT retry because 401 is not recoverable
     mockGenerateText.mockReset();
     mockGenerateText.mockRejectedValue(new Error('Invalid API key (401)'));
 
@@ -262,12 +243,9 @@ describe('RetryableAgentRuntime', () => {
     });
 
     expect(result.success).toBe(false);
-    // 401 is not recoverable — should be 1 call only
     expect(mockGenerateText).toHaveBeenCalledTimes(1);
   });
 });
-
-// ─── Orchestrator integration tests ──────────────────────────────
 
 describe('Orchestrator — integration', () => {
   let tmpDir: string;
@@ -275,7 +253,6 @@ describe('Orchestrator — integration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orch-test-'));
-    // Provide dummy API keys so provider factories can create models without throwing
     process.env.OPENAI_API_KEY = 'sk-test-dummy';
     process.env.ANTHROPIC_API_KEY = 'sk-test-dummy';
   });
@@ -307,17 +284,16 @@ describe('Orchestrator — integration', () => {
     });
     await orchestrator.initialize();
 
-    // Mock planner to return "not clear"
-    mockGenerateText.mockResolvedValueOnce({
-      text: JSON.stringify({
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
         isClear: false,
         needsClarification: ['What specific files should be analysed?'],
-      }),
-      usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
-      steps: [],
+      },
     } as any);
 
-    const result = await orchestrator.run('Do the thing');
+    const result = await orchestrator.run('Do the thing', {
+      confirmCallback: async () => ({ confirmed: true }),
+    });
 
     expect(result.review.outcome).toBe('failure');
     expect(result.review.finalSummary).toContain('clarification');
@@ -333,9 +309,8 @@ describe('Orchestrator — integration', () => {
     });
     await orchestrator.initialize();
 
-    // Mock planner: returns a valid plan
-    mockGenerateText.mockResolvedValue({
-      text: JSON.stringify({
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
         isClear: true,
         needsClarification: [],
         plan: {
@@ -354,12 +329,9 @@ describe('Orchestrator — integration', () => {
             },
           ],
         },
-      }),
-      usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 },
-      steps: [],
+      },
     } as any);
 
-    // Mock final reviewer
     mockGenerateObject.mockResolvedValueOnce({
       object: {
         planId: 'test',
@@ -394,8 +366,8 @@ describe('Orchestrator — integration', () => {
     });
     await orchestrator.initialize();
 
-    mockGenerateText.mockResolvedValue({
-      text: JSON.stringify({
+    mockGenerateObject.mockResolvedValueOnce({
+      object: {
         isClear: true,
         needsClarification: [],
         plan: {
@@ -414,9 +386,7 @@ describe('Orchestrator — integration', () => {
             },
           ],
         },
-      }),
-      usage: { promptTokens: 50, completionTokens: 20, totalTokens: 70 },
-      steps: [],
+      },
     } as any);
 
     const result = await orchestrator.run('Do X', {

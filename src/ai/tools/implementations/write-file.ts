@@ -2,6 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { validateWorkspacePath } from './path-security.js';
 
 const inputSchema = z.object({
   filePath: z.string().min(1, 'filePath must not be empty'),
@@ -18,9 +19,18 @@ export const writeFileTool = tool({
   inputSchema,
   execute: async ({ filePath, content, overwrite }) => {
     try {
-      const resolved = path.resolve(process.cwd(), filePath);
+      // Security: validate path is within workspace
+      const validation = validateWorkspacePath(filePath);
+      if (!validation.safe) {
+        return {
+          success: false as const,
+          error: validation.reason!,
+          code: 'PATH_TRAVERSAL_BLOCKED',
+        };
+      }
 
-      // Check existence when overwrite is false
+      const resolved = validation.resolvedPath;
+
       if (!overwrite) {
         try {
           await fs.access(resolved);
@@ -34,7 +44,6 @@ export const writeFileTool = tool({
         }
       }
 
-      // Ensure parent directories
       await fs.mkdir(path.dirname(resolved), { recursive: true });
       await fs.writeFile(resolved, content, 'utf-8');
 

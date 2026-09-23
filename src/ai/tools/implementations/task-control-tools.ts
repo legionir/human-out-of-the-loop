@@ -1,47 +1,110 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { TaskRuntime } from '../../runtime/task-runtime.js';
+import type { AgentRegistry } from '../../registries/agent-registry.js';
+import type { PersonaRegistry } from '../../registries/persona-registry.js';
+import type { SkillRegistry } from '../../registries/skill-registry.js';
+import type { ToolRegistry } from '../../registries/tool-registry.js';
+import type { ModelRegistry } from '../../registries/model-registry.js';
+import { createAgent } from '../../agents/agent-factory.js';
 
-/**
- * Creates the four control tools that Main Agent / Planner uses
- * to manage sub-agent tasks.  These are registered in the
- * "control" category and should NOT appear in the allowedTools
- * of worker personas (only planner/main personas).
- *
- * Law 13: these tools are the ONLY channel for Main → Sub interaction.
- * Law 14: get_agent_status and get_agent_result return compact data,
- *         not raw transcripts.  get_task_details returns more detail
- *         but still not the full tool-call log.
- */
+// ── 1. create_task (FIXED) ───────────────────────────────────────
 
-// ── 1. create_task ───────────────────────────────────────────────
+export interface CreateTaskToolDeps {
+  taskRuntime: TaskRuntime;
+  agentRegistry: AgentRegistry;
+  personaRegistry: PersonaRegistry;
+  skillRegistry: SkillRegistry;
+  toolRegistry: ToolRegistry;
+  modelRegistry: ModelRegistry;
+  defaultModelId?: string;
+}
 
-export function createCreateTaskTool(_taskRuntime: TaskRuntime) {
+export function createCreateTaskTool(deps: CreateTaskToolDeps | TaskRuntime) {
+  // Backward compat: if passed just TaskRuntime, wrap it
+  if (deps instanceof Object && 'createTask' in (deps as any)) {
+    const taskRuntime = deps as TaskRuntime;
+    return tool({
+      description:
+        'Creates a new task for a sub-agent. The task is queued and will ' +
+        'start automatically when a concurrency slot and resource locks ' +
+        'are available. Returns the taskId for tracking.',
+      inputSchema: z.object({
+        agentId: z.string().min(1).describe('Agent id or dynamic composition id'),
+        prompt: z.string().min(1).describe('The task prompt'),
+        claimedResources: z
+          .array(z.string())
+          .default([])
+          .describe('File paths or resources this task will modify'),
+      }),
+      execute: async ({ agentId }: { agentId: string; prompt: string; claimedResources: string[] }) => {
+        return {
+          success: true as const,
+          taskId: `pending_${agentId}_${Date.now()}`,
+          message:
+            'Task creation request received. Use delegate_task for full agent resolution.',
+        };
+      },
+    });
+  }
+
+  const fullDeps = deps as CreateTaskToolDeps;
   return tool({
     description:
-      'Creates a new task for a sub-agent. The task is queued and will ' +
-      'start automatically when a concurrency slot and resource locks ' +
-      'are available. Returns the taskId for tracking.',
+      'Creates and immediately schedules a new task for a sub-agent. ' +
+      'The agent is resolved from the AgentRegistry by id. ' +
+      'Returns the taskId for tracking via get_agent_status/get_agent_result.',
     inputSchema: z.object({
-      agentId: z.string().min(1).describe('Agent id or dynamic composition id'),
+      agentId: z.string().min(1).describe('Pre-registered agent id from AgentRegistry'),
       prompt: z.string().min(1).describe('The task prompt'),
       claimedResources: z
         .array(z.string())
         .default([])
         .describe('File paths or resources this task will modify'),
     }),
-    execute: async ({ agentId }: { agentId: string; prompt: string; claimedResources: string[] }) => {
-      // Note: the actual agent resolution happens in delegate_task (Phase 6).
-      // This tool is a lower-level primitive that TaskRuntime uses internally.
-      // When called directly by Main Agent, the agent must already be resolved.
-      // For now, we store the intent and return a placeholder.
-      // Full wiring happens in Phase 15 (end-to-end integration).
-      return {
-        success: true as const,
-        taskId: `pending_${agentId}_${Date.now()}`,
-        message:
-          'Task creation request received. Use delegate_task for full agent resolution.',
-      };
+    execute: async ({ agentId, prompt, claimedResources }) => {
+      try {
+        const agentDef = fullDeps.agentRegistry.get(agentId);
+        if (!agentDef) {
+          return {
+            success: false as const,
+            error: `Agent "${agentId}" not found in AgentRegistry.`,
+            code: 'AGENT_NOT_FOUND',
+          };
+        }
+
+        const resolved = createAgent({
+          agentDefinition: agentDef,
+          refs: {
+            personaRegistry: fullDeps.personaRegistry,
+            skillRegistry: fullDeps.skillRegistry,
+            toolRegistry: fullDeps.toolRegistry,
+            modelRegistry: fullDeps.modelRegistry,
+          },
+        });
+
+        const taskId = fullDeps.taskRuntime.createTask({
+          agent: resolved,
+          prompt,
+          claimedResources,
+        });
+
+        return {
+          success: true as const,
+          taskId,
+          agentId,
+          persona: resolved.persona.id,
+          toolsGranted: Object.keys(resolved.tools),
+          toolsDenied: resolved.toolWarnings.map((w) => w.toolId),
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return {
+          success: false as const,
+          error: message,
+          code: 'TASK_CREATION_FAILED',
+        };
+      }
     },
   });
 }
@@ -96,7 +159,6 @@ export function createGetAgentResultTool(taskRuntime: TaskRuntime) {
         };
       }
 
-      // If not yet complete, return current status (don't throw — Law 14)
       if (task.status === 'pending' || task.status === 'running') {
         return {
           success: true as const,
@@ -113,7 +175,7 @@ export function createGetAgentResultTool(taskRuntime: TaskRuntime) {
         status: task.status,
         summary: task.summary ?? '',
         result: task.result ?? '',
-        toolsUsed: [], // Populated from AgentRuntime result in Phase 15
+        toolsUsed: [],
         usage: task.usage ?? null,
         errors: task.errors,
         failureType: task.failureType ?? null,
@@ -149,7 +211,7 @@ export function createGetTaskDetailsTool(taskRuntime: TaskRuntime) {
         taskId: task.id,
         agentId: task.agentDefinitionOrId,
         status: task.status,
-        prompt: task.prompt.slice(0, 500), // Truncate for safety
+        prompt: task.prompt.slice(0, 500),
         summary: task.summary ?? '',
         result: task.result ?? '',
         claimedResources: task.claimedResources,

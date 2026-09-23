@@ -49,6 +49,7 @@ export const PlanStatusSchema = z.enum([
   'draft',
   'confirmed',
   'running',
+  'cancelling',
   'completed',
   'failed-partial',
   'cancelled',

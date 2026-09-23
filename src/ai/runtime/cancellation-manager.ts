@@ -90,6 +90,11 @@ export class CancellationManager {
       };
     }
 
+    // ✅ FIXED: Set "cancelling" first (PlanRuntime checks this)
+    // Do NOT set "cancelled" yet — let PlanRuntime do it after cleanup
+    plan.status = 'cancelling' as any;
+    this.planStore.save(plan);
+
     // Signal the PlanRuntime to stop dispatching
     const runtime = this.activeRuntimes.get(planId);
     if (runtime) {
@@ -107,9 +112,14 @@ export class CancellationManager {
       }
     }
 
-    plan.status = 'cancelled';
-    plan.completedAt = Date.now();
-    this.planStore.save(plan);
+    // ✅ FIXED: Only set "cancelled" after PlanRuntime has been signalled
+    // The PlanRuntime loop will see the cancel flag and set final status
+    // But if PlanRuntime is not running (edge case), we set it here
+    if (!runtime) {
+      plan.status = 'cancelled';
+      plan.completedAt = Date.now();
+      this.planStore.save(plan);
+    }
 
     const completedCount = plan.steps.filter((s) => s.status === 'done').length;
 
@@ -120,9 +130,7 @@ export class CancellationManager {
       newStatus: 'cancelled',
       completedSteps: completedCount,
       cancelledSteps: cancelledCount,
-      message:
-        `Plan cancelled. ${completedCount} step(s) completed, ` +
-        `${cancelledCount} step(s) cancelled.`,
+      message: `Plan cancellation initiated. ${completedCount} step(s) completed, ${cancelledCount} step(s) cancelled.`,
     };
   }
 }

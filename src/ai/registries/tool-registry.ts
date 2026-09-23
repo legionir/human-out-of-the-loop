@@ -117,4 +117,9 @@ export class ToolRegistry {
   _getMetadataRegistry(): Registry<ToolDefinition> {
     return this.metadata;
   }
+
+  /** Public getter for metadata registry (type-safe replacement for _getMetadataRegistry). */
+  getMetadataRegistry(): Registry<ToolDefinition> {
+    return this.metadata;
+  }
 }

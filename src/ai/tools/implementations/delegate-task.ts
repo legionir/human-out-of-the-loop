@@ -7,40 +7,22 @@ import type { ToolRegistry } from '../../registries/tool-registry.js';
 import type { ModelRegistry } from '../../registries/model-registry.js';
 import type { AgentDefinition } from '../../schemas/agent-definition.js';
 import { createAgent, type ResolvedAgent } from '../../agents/agent-factory.js';
+import type { DelegationGuard } from '../../runtime/delegation-guard.js';
 
-// ─── Types ────────────────────────────────────────────────────────
-
-/**
- * Two modes of delegation:
- *   1. Static: provide an `agentId` that exists in AgentRegistry.
- *   2. Dynamic: provide `persona`, `skills`, `tools`, and `model`
- *      to compose an agent on the fly without pre-registration.
- *
- * The discriminated union enforces that exactly one mode is used.
- */
 const StaticDelegation = z.object({
   mode: z.literal('static').default('static'),
-  /** Pre-registered agent id from AgentRegistry */
   agentId: z.string().min(1),
-  /** The task prompt to give the agent */
   prompt: z.string().min(1),
-  /** Optional extra context */
   context: z.string().optional(),
 });
 
 const DynamicDelegation = z.object({
   mode: z.literal('dynamic'),
-  /** Persona id (must exist in PersonaRegistry) */
   persona: z.string().min(1),
-  /** Skill ids (must exist in SkillRegistry) */
   skills: z.array(z.string().min(1)).default([]),
-  /** Tool ids to grant (must be in persona.allowedTools) */
   tools: z.array(z.string().min(1)).default([]),
-  /** Model id (must exist in ModelRegistry) */
   model: z.string().min(1),
-  /** The task prompt */
   prompt: z.string().min(1),
-  /** Optional extra context */
   context: z.string().optional(),
 });
 
@@ -49,23 +31,12 @@ const DelegateTaskInput = z.discriminatedUnion('mode', [
   DynamicDelegation,
 ]);
 
-// ─── Authorization Gate ──────────────────────────────────────────
-
 export interface AuthorizationResult {
   authorized: boolean;
-  /** Tools that were requested but not in persona.allowedTools */
   deniedTools: string[];
-  /** Tools that passed the gate */
   allowedTools: string[];
 }
 
-/**
- * Check every requested tool against the persona's allowedTools.
- * Returns a structured result — never throws.
- *
- * Law 18: this gate runs BOTH at agent creation (Phase 5) and
- * here at delegation time for dynamic compositions.
- */
 export function checkAuthorization(
   personaId: string,
   requestedToolIds: string[],
@@ -98,39 +69,17 @@ export function checkAuthorization(
   };
 }
 
-// ─── Delegate Task Tool Factory ──────────────────────────────────
-
 export interface DelegateTaskDeps {
   personaRegistry: PersonaRegistry;
   skillRegistry: SkillRegistry;
   toolRegistry: ToolRegistry;
   modelRegistry: ModelRegistry;
-  /**
-   * Callback invoked when a task is successfully created.
-   * In Phase 8 this will be wired to TaskRuntime.createTask.
-   * For now it returns a placeholder taskId.
-   */
   onTaskCreated: (resolved: ResolvedAgent, prompt: string) => string | Promise<string>;
-  /**
-   * Callback to resolve a static agentId to an AgentDefinition.
-   * In Phase 8 this will query AgentRegistry.
-   */
   resolveAgentId?: (agentId: string) => AgentDefinition | undefined;
+  delegationGuard?: DelegationGuard;
+  currentDelegationDepth?: number;
 }
 
-/**
- * Creates the `delegate_task` tool — the ONLY permitted channel
- * for Main Agent → Sub-Agent communication (Law 13).
- *
- * Supports two modes:
- *   - `static`: delegate to a pre-registered agent by id.
- *   - `dynamic`: compose a new agent on the fly from persona +
- *     skills + tools + model, with full authorization checking.
- *
- * On authorization failure, returns a structured error to the
- * caller (Main Agent / Planner) so it can adjust the composition.
- * Never throws — all failures are returned as structured results.
- */
 export function createDelegateTaskTool(deps: DelegateTaskDeps) {
   return tool({
     description:
@@ -145,8 +94,21 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
       try {
         let agentDef: AgentDefinition;
 
+        if (input.mode === 'dynamic' && deps.delegationGuard) {
+          const check = deps.delegationGuard.canDelegate(
+            input.persona,
+            deps.currentDelegationDepth ?? 0
+          );
+          if (!check.allowed) {
+            return {
+              success: false as const,
+              error: check.reason!,
+              code: 'DELEGATION_DENIED',
+            };
+          }
+        }
+
         if (input.mode === 'static') {
-          // ── Static mode ─────────────────────────────────────
           if (!deps.resolveAgentId) {
             return {
               success: false as const,
@@ -161,14 +123,25 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
               success: false as const,
               error: `Agent "${input.agentId}" not found in AgentRegistry.`,
               code: 'AGENT_NOT_FOUND',
-              availableAgents: [], // Populated by caller if needed
+              availableAgents: [],
             };
           }
           agentDef = def;
-        } else {
-          // ── Dynamic mode ────────────────────────────────────
 
-          // 1. Validate persona exists
+          if (deps.delegationGuard) {
+            const check = deps.delegationGuard.canDelegate(
+              agentDef.personaId,
+              deps.currentDelegationDepth ?? 0
+            );
+            if (!check.allowed) {
+              return {
+                success: false as const,
+                error: check.reason!,
+                code: 'DELEGATION_DENIED',
+              };
+            }
+          }
+        } else {
           if (!deps.personaRegistry.has(input.persona)) {
             return {
               success: false as const,
@@ -177,7 +150,6 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
             };
           }
 
-          // 2. Validate skills exist
           for (const skillId of input.skills) {
             if (!deps.skillRegistry.has(skillId)) {
               return {
@@ -189,7 +161,6 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
             }
           }
 
-          // 3. Validate model exists
           if (!deps.modelRegistry.hasConfig(input.model)) {
             return {
               success: false as const,
@@ -198,7 +169,6 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
             };
           }
 
-          // 4. Validate tools exist in ToolRegistry (before auth, so we report NOT_FOUND not DENIED for unknown tools)
           for (const toolId of input.tools) {
             if (!deps.toolRegistry.hasDefinition(toolId)) {
               return {
@@ -210,7 +180,6 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
             }
           }
 
-          // 5. Authorization gate (Law 18)
           const authResult = checkAuthorization(
             input.persona,
             input.tools,
@@ -230,7 +199,6 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
             };
           }
 
-          // 6. Build temporary AgentDefinition
           agentDef = {
             id: `dynamic_${input.persona}_${Date.now()}`,
             name: `Dynamic ${input.persona}`,
@@ -240,7 +208,6 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
           };
         }
 
-        // ── Create the resolved agent ─────────────────────────
         const resolved = createAgent({
           agentDefinition: agentDef,
           refs: {
@@ -249,15 +216,10 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
             toolRegistry: deps.toolRegistry,
             modelRegistry: deps.modelRegistry,
           },
+          delegationDepth: deps.currentDelegationDepth ?? 0,
+          delegationGuard: deps.delegationGuard,
         });
 
-        // Log any tool warnings (tools filtered by allowedTools in static mode)
-        if (resolved.toolWarnings.length > 0) {
-          // In a real system this goes to the observability log (Phase 14).
-          // For now we include it in the response for the caller's awareness.
-        }
-
-        // ── Create the task ───────────────────────────────────
         const fullPrompt = input.context
           ? `${input.prompt}\n\n--- Context ---\n${input.context}`
           : input.prompt;
