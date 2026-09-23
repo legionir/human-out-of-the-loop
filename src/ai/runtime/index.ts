@@ -48,3 +48,25 @@ export {
   formatReviewForUser,
   formatReviewOneLine,
 } from './review-formatter.js';
+export {
+  StreamingManager,
+  formatAsSSE,
+  createArrayCollector,
+  type ProgressEvent,
+  type ProgressSubscriber,
+  type UnsubscribeProgress,
+  type StreamingManagerConfig,
+} from './streaming-manager.js';
+export {
+  CancellationManager,
+  type CancellationResult,
+} from './cancellation-manager.js';
+export {
+  RateLimiter,
+  type RateLimiterConfig,
+} from './rate-limiter.js';
+export {
+  UsageAggregator,
+  type UsageRecord,
+  type UsageSummary,
+} from './usage-aggregator.js';

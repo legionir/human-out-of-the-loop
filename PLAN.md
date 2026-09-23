@@ -391,27 +391,27 @@ while (!allStepsDone(plan) && !allStepsFailedTerminal(plan)) {
 
 ---
 
-## [🔴] فاز ۱۳: قابلیت‌های عملیاتی Runtime — Streaming، Cancellation، Concurrency/Rate-limit، Usage Tracking
+## [🟢] فاز ۱۳: قابلیت‌های عملیاتی Runtime — Streaming، Cancellation، Concurrency/Rate-limit، Usage Tracking
 
 این چهار قابلیت همگی لایه‌ای عملیاتی روی TaskRuntime/AgentRuntime موجود هستند و برای این‌که «اجرای بی‌وقفه» از دید کاربر قابل‌مشاهده، قابل‌توقف، و قابل‌اتکا (از نظر هزینه و نرخ درخواست) باشد لازم‌اند؛ در یک فاز منسجم قرار گرفته‌اند تا فاز اضافی بی‌دلیل ایجاد نشود.
 
-### [🔴] گام ۱: Streaming پیشرفت به کاربر
+### [🟢] گام ۱: Streaming پیشرفت به کاربر
 
 از `streamText`/`streamObject` AI SDK برای stream کردن رویدادهای compact (فاز ۷) و به‌روزرسانی وضعیت Plan (فاز ۱۰) به یک کانال قابل‌مشاهده‌ی کاربر (مثلاً SSE/WebSocket) استفاده شود؛ این جایگزین «سکوت طولانی در حین اجرای خودکار» است.
 
-### [🔴] گام ۲: Cancellation صریح
+### [🟢] گام ۲: Cancellation صریح
 
 Tool/API سطح بالا `cancel_plan(planId)` اضافه شود که وضعیت Plan را به `cancelling` می‌برد؛ PlanRuntime در ابتدای هر iteration این وضعیت را چک می‌کند و در صورت `cancelling`، هیچ گام جدیدی dispatch نمی‌کند، منتظر تکمیل Taskهای در حال اجرا می‌ماند (یا timeout اجباری)، و وضعیت نهایی را `cancelled` با گزارش گام‌های تکمیل‌شده ثبت می‌کند.
 
-### [🔴] گام ۳: سقف Concurrency در سطح Provider و Rate-limit
+### [🟢] گام ۳: سقف Concurrency در سطح Provider و Rate-limit
 
 علاوه بر `maxConcurrentTasks` (فاز ۸، در سطح کل سیستم)، سقف جداگانه per-provider (مثلاً حداکثر N درخواست هم‌زمان به OpenAI) اضافه شود؛ در صورت برخورد به rate-limit provider (کد خطای ۴۲۹ یا معادل)، آن Task به‌جای `failed` قطعی، با backoff به صف بازگردانده شود (تا سقف retry مشخص).
 
-### [🔴] گام ۴: ردیابی و تجمیع Token Usage/هزینه
+### [🟢] گام ۴: ردیابی و تجمیع Token Usage/هزینه
 
 هر خروجی `AgentRuntime.run` (فاز ۷، شامل `usage`) در یک aggregator ذخیره شود که usage را per-task، per-plan و per-agent-type جمع می‌زند؛ در گزارش نهایی (فاز ۱۲) خلاصه‌ی هزینه/usage کل Plan نیز درج شود.
 
-### [🔴] گام ۵: تست واحد
+### [🟢] گام ۵: تست واحد
 
 تست streaming با mock؛ تست cancellation میان‌راه یک Plan چندگامی؛ تست backoff روی خطای rate-limit شبیه‌سازی‌شده؛ تست صحت تجمیع usage.
 
@@ -811,4 +811,21 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `tsc --noEmit`: ✅
   - `vitest run`: ✅ ۲۱۹ تست (۱۳ فایل) — فاز ۱۲ شامل ۱۵ تست: ۵ ReviewSchema (full valid, partial with incomplete, invalid outcome throws, empty finalSummary throws, defaults arrays), ۲ successful plan (produces valid review completed, output always valid against schema), ۱ partial-success (reports incomplete steps clearly failed-partial with quality), ۱ cancelled (minimal review without calling model), ۳ fallback (fallback when generateObject fails → valid + fallback note, accepted from done steps 2, rejected quality-failed step-2), ۳ formatter (readable success contains FINAL REPORT+SUCCESS+goal+title+summary, incomplete steps partial-success contains Incomplete Steps+s3+quality+reason, oneLine compact contains outcome+planId+counts).
   - معیار پذیرش: خروجی بازبینی همیشه مطابق reviewSchema (generateObject + fallback), بدون درخواست انسانی خودکار پس از PlanRuntime (review() direct call), failed-partial گزارش گام‌های ناتمام با دلیل و failureType, fallback بدون crash, cancelled بدون فراخوانی مدل — همگی تأیید.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۱۳ (قابلیت‌های عملیاتی — Streaming، Cancellation، Rate-limit، Usage Tracking)
+
+- **وضعیت:** فاز ۱۳ از 🔴 به 🟢؛ هر پنج گام 🟢.
+- **پیاده‌سازی:**
+  - `streaming-manager.ts`: `ProgressEvent` type plan:started|step-started|step-completed|step-failed|replanning|completed|cancelled|failed|task:tool-call|task:status با planId/stepId/timestamp/message/payload, `StreamingManager` {eventBus, subscribers Set, unsubscribes}, `start()` subscribe * → translateEvent → emit, `stop()`, `subscribe()` returns Unsubscribe, `emitProgress()`, `translateEvent` agent:running→step-started, tool_call→tool-call (toolName only Law14), completed→step-completed with usage, error→step-failed truncated 100, `formatAsSSE` event: type\ndata: json\n\n, `createArrayCollector` handler+events array.
+  - `cancellation-manager.ts`: `CancellationResult` {success, planId, previousStatus, newStatus, completedSteps, cancelledSteps, message}, `CancellationManager` {planStore, taskRuntime, activeRuntimes Map}, `registerRuntime/unregisterRuntime`, `cancelPlan(planId)`: load, if not found → success false unknown, if terminal (completed/cancelled/failed-partial) → success false terminal state, else runtime.cancel() signal, cancel pending tasks with taskId via taskRuntime.cancelTask + status failed + Cancelled by user, status cancelled + completedAt + save, return success true with counts.
+  - `rate-limiter.ts`: `RateLimiterConfig` {maxConcurrentPerProvider default 5, baseBackoffMs 1000, maxBackoffMs 30000, maxRetries 3}, `ProviderState` {activeRequests, queue}, `RateLimiter` methods: `acquire(provider)` if active < max → increment else Promise queue, `release(provider)` decrement + wake next, `getBackoffDelay(attempt)` base*2^attempt + jitter ±25% capped maxBackoffMs, `shouldRetry(attempt) < maxRetries`, `isRateLimitError` checks 429|rate limit|too many requests|throttl case-insensitive, `executeWithRetry(provider, fn)` loop acquire → try fn → success return, catch rate-limit && shouldRetry → backoff sleep attempt++ continue, else throw, finally release, `getStats(provider)` active/queued.
+  - `usage-aggregator.ts`: `UsageRecord` {taskId, planId?, agentId, personaId?, usage TokenUsage, timestamp}, `UsageSummary` {totalPromptTokens, totalCompletionTokens, totalTokens, taskCount, byAgent Record<agentId, TokenUsage+count>, byPlan Record<planId, TokenUsage+count>}, `UsageAggregator` records array, `record(task, agentId, personaId)` if usage exists push with planId from planStepId, `recordDirect`, `getSummary()` aggregate totals + byAgent + byPlan (unassigned key), `getPlanUsage(planId)` filter + reduce, `getRecords()`, `clear()`.
+  - `runtime/index.ts`: export StreamingManager, formatAsSSE, createArrayCollector, ProgressEvent, CancellationManager, RateLimiter, UsageAggregator.
+- **اصلاح حداقلی:**
+  - **toEndWith:** spec test used `expect(sse).toEndWith('\n\n')` which is not vitest/jest matcher (TS2339). Fixed to `expect(sse.endsWith('\n\n')).toBe(true)`.
+  - No catalog bootstrap needed (phase13 tests don't load skills), but previous phases fixes preserved.
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۲۴۵ تست (۱۴ فایل) — فاز ۱۳ شامل ۲۶ تست: ۶ StreamingManager (running→step-started, tool_call name only no args leak, completed with usage, error truncated <200, multiple subscribers, subscriber error resilience), ۱ SSE (formats event+data+json+\n\n), ۴ CancellationManager (cancels running plan with runtime.cancel called, non-existent not found, already-completed terminal state, persists cancelled status+completedAt), ۸ RateLimiter (allows within limit 2 active, queues beyond limit, detects 429/rate limit, backoff exponential with jitter 37-63 for attempt0, caps at maxBackoffMs 500, retries on rate-limit succeeds attempt 2, throws after exhausting 3 attempts, no retry non-rate-limit), ۷ UsageAggregator (records aggregates 300/150/450, byAgent breakdown coder 450 count2 reviewer 75, byPlan plan-A 450 plan-B 75, getPlanUsage plan-X 450 count2, ignores tasks without usage, clear resets, getRecords raw).
+  - معیار پذیرش: streaming live progress via ProgressEvent+SSES, cancel_plan without crash with persisted cancelled, rate-limit retry with backoff not immediate failure, final report usage summary via UsageAggregator — همگی تأیید.
 
