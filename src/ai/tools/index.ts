@@ -7,3 +7,11 @@ export {
 } from './mcp-connector.js';
 export { loadMcpServerConfigs, bootstrapMcpServers } from './mcp-bootstrap.js';
 export { bootstrapTools } from './bootstrap.js';
+export { bootstrapCatalogTools, type CatalogBootstrapDeps } from './catalog-bootstrap.js';
+export { bootstrapDelegateTask } from './delegate-bootstrap.js';
+export {
+  checkAuthorization,
+  createDelegateTaskTool,
+  type DelegateTaskDeps,
+  type AuthorizationResult,
+} from './implementations/delegate-task.js';

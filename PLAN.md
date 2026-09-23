@@ -164,23 +164,23 @@ Agentهای نمونه با ترکیب صحیح و فیلترشده (طبق allo
 
 ---
 
-## [🔴] فاز ۶: کاتالوگ پویا برای Main Agent و ترکیب پویای Agent
+## [🟢] فاز ۶: کاتالوگ پویا برای Main Agent و ترکیب پویای Agent
 
 هدف: رفع gap اصلی — دادن دید کامل کاتالوگ به Main Agent/Planner و امکان ساخت ترکیب جدید Persona+Skill+Tool در لحظه، بدون ثبت از‌پیش در `agents.json`، همراه با اعمال authorization.
 
-### [🔴] گام ۱: سه Tool فقط‌خواندنی کاتالوگ
+### [🟢] گام ۱: سه Tool فقط‌خواندنی کاتالوگ
 
 `list_personas()`, `list_skills()`, `list_tools()` — هرکدام summary سبک (id + description + برای skill: لیست toolها) برمی‌گردانند، نه محتوای کامل instructions/schema، تا context مصرف نشود.
 
-### [🔴] گام ۲: حالت ترکیب پویا در `delegate_task`
+### [🟢] گام ۲: حالت ترکیب پویا در `delegate_task`
 
 `delegate_task` علاوه بر `agentId` ثابت، ورودی جایگزین `{ persona, skills[], tools[], prompt }` را نیز بپذیرد؛ در این حالت یک `AgentDefinition` موقت در لحظه ساخته و به `createAgent` (فاز ۵) داده می‌شود — بدون نیاز به ثبت در `agents.json`.
 
-### [🔴] گام ۳: اجرای authorization gate روی ترکیب پویا
+### [🟢] گام ۳: اجرای authorization gate روی ترکیب پویا
 
 پیش از فراخوانی `createAgent` در مسیر پویا، هر tool درخواستی در برابر `persona.allowedTools` بررسی شود؛ اگر Tool غیرمجازی درخواست شده باشد، `delegate_task` باید بدون اجرای Agent، خطای ساختاریافته (نه throw خام) به Main Agent/Planner برگرداند تا بتواند ترکیب را اصلاح کند.
 
-### [🔴] گام ۴: تست واحد
+### [🟢] گام ۴: تست واحد
 
 تست ساخت Agent پویا با ترکیب معتبر؛ تست رد‌شدن ترکیب پویا با tool غیرمجاز برای persona انتخابی.
 
@@ -653,3 +653,25 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `tsc --noEmit`: ✅
   - `vitest run`: ✅ ۱۰۲ تست (۲۷+۱۲+۱۷+۹+۲۰+۱۷) — فاز ۵ شامل ۱۷ تست: ۴ AgentRegistry (load, missing persona/skill, valid), ۶ createAgent (combined instructions, allowedTools include, filter with warning, architect cannot use write_file, missing persona/model), ۴ trimming (no trim, low-priority first, never trim persona, log records), ۳ cache (cache hit, invalidation on change, manual invalidate).
   - معیار پذیرش: ترکیب صحیح و فیلترشده طبق allowedTools, trimming بدون از‌دست‌رفتن persona.system و قابل‌ردیابی در log, caching درست — همگی تأیید.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۶ (کاتالوگ پویا + ترکیب پویای Agent)
+
+- **وضعیت:** فاز ۶ از 🔴 به 🟢؛ هر چهار گام 🟢.
+- **پیاده‌سازی:**
+  - `src/ai/tools/implementations/list-personas.ts`: `createListPersonasTool(personaRegistry)` → lightweight `{ id, name, description, allowedTools }` بدون `system`.
+  - `list-skills.ts`: `createListSkillsTool(skillRegistry)` → `{ id, name, version, description, tools: resolvedTools, priority }` بدون `resolvedInstructions`.
+  - `list-tools.ts`: `createListToolsTool(toolRegistry)` با `inputSchema { source: local|mcp|all default all }` → فیلتر و `{ id, name, description, source, category, hasImplementation }`.
+  - `src/ai/tools/catalog-bootstrap.ts`: `bootstrapCatalogTools` سه Tool کاتالوگ را idempotent در ToolRegistry ثبت می‌کند (category: catalog).
+  - `src/ai/tools/implementations/delegate-task.ts`:
+    - `StaticDelegation` و `DynamicDelegation` discriminated union با `mode`, `checkAuthorization(personaId, requestedToolIds, registry)` → `{ authorized, deniedTools, allowedTools }` با wildcard `*` پشتیبانی.
+    - `createDelegateTaskTool(deps)`: static (resolveAgentId) و dynamic (persona/skills/model validation + tool existence + authorization gate). Dynamic: `AgentDefinition` موقت `dynamic_${persona}_${Date.now()}` ساخته و به `createAgent` داده می‌شود. تمام خطاها ساختاریافته `{ success:false, code, error, ... }` — هرگز throw خام به Main Agent نمی‌رود. `onTaskCreated` callback برای Phase 8 TaskRuntime.
+  - `delegate-bootstrap.ts`: `bootstrapDelegateTask` ثبت `delegate_task` category control.
+  - `implementations/index.ts` و `tools/index.ts` به‌روزرسانی برای export.
+- **اصلاح حداقلی:**
+  - `parameters` → `inputSchema` در هر چهار Tool جدید (AI SDK v7).
+  - ترتیب اعتبارسنجی در dynamic mode: در کد ارسالی authorization قبل از tool existence بود؛ تست `rejects dynamic composition with non-existent tool` با persona coder (allowedTools محدود) باعث می‌شد `AUTHORIZATION_DENIED` به‌جای `TOOL_NOT_FOUND` برگردد. ترتیب به **existence قبل از authorization** تغییر یافت تا `TOOL_NOT_FOUND` دقیق‌تر گزارش شود (منطقی‌تر: اگر Tool وجود ندارد، گزارش عدم وجود مهم‌تر از عدم مجوز است). این minimal fix در Execution Log ثبت شد.
+  - `__dirname` ESM via `fileURLToPath(import.meta.url)`.
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۱۱۸ تست (۲۷+۱۲+۱۷+۹+۲۰+۱۷+۱۶) — فاز ۶ شامل ۱۶ تست: ۴ catalog (personas lightweight بدون system, skills با tools+priority بدون instructions, tools all+filter by source), ۴ authorization (allowed, denied, unknown persona, wildcard *), ۶ dynamic (valid composition, unauthorized tool → AUTHORIZATION_DENIED + no task created, persona/skill/model/tool not found), ۲ static (delegate to pre-registered, non-existent agent).
+  - معیار پذیرش: catalog کامل و سبک، delegate_task در هر دو حالت کار می‌کند، ترکیب پویا با Tool غیرمجاز رد و گزارش ساختاریافته می‌شود نه crash — همگی تأیید.
