@@ -35,6 +35,13 @@ export class ToolRegistry {
   private readonly metadata: Registry<ToolDefinition>;
   private readonly implementations = new Map<string, Tool>();
 
+  // Phase 21 (PERF-07): LRU cache for getToolsByIds — the same tool
+  // set is requested repeatedly (every createAgent call), and building
+  // a fresh Record each time is pure waste.  Map preserves insertion
+  // order, so delete+re-set implements MRU ordering.
+  private readonly toolsCache = new Map<string, Record<string, Tool>>();
+  private static readonly MAX_CACHED_COMBOS = 64;
+
   constructor(options?: ToolRegistryOptions) {
     this.metadata =
       options?.baseRegistry ??
@@ -77,6 +84,8 @@ export class ToolRegistry {
       );
     }
     this.implementations.set(id, implementation);
+    // Phase 21 (PERF-07): any cached combo containing this id is stale
+    this.toolsCache.clear();
   }
 
   getImplementation(id: string): Tool | undefined {
@@ -92,6 +101,15 @@ export class ToolRegistry {
    * @throws if any id lacks a registered implementation.
    */
   getToolsByIds(ids: string[]): Record<string, Tool> {
+    // Phase 21 (PERF-07): LRU hit check — same ids array → same object
+    const key = ids.join(',');
+    const cached = this.toolsCache.get(key);
+    if (cached) {
+      this.toolsCache.delete(key); // touch → MRU
+      this.toolsCache.set(key, cached);
+      return cached;
+    }
+
     const result: Record<string, Tool> = {};
 
     for (const id of ids) {
@@ -103,6 +121,13 @@ export class ToolRegistry {
         );
       }
       result[id] = impl;
+    }
+
+    this.toolsCache.set(key, result);
+    while (this.toolsCache.size > ToolRegistry.MAX_CACHED_COMBOS) {
+      const oldest = this.toolsCache.keys().next().value; // insertion order = LRU
+      if (oldest === undefined) break;
+      this.toolsCache.delete(oldest);
     }
 
     return result;

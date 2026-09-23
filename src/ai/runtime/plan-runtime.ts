@@ -360,11 +360,10 @@ export class PlanRuntime {
   private getReadyStepsPrioritized(plan: Plan): PlanStep[] {
     const ready = getReadySteps(plan);
 
-    // Count how many steps (transitively) depend on each ready step
-    const dependentCount = new Map<string, number>();
-    for (const step of ready) {
-      dependentCount.set(step.id, this.countDependents(plan, step.id));
-    }
+    // Phase 21 (PERF-01): compute transitive dependent counts for ALL
+    // steps in ONE O(V+E) pass (memoized DFS over the reverse graph)
+    // instead of the old O(R·V·E) per-ready-step BFS.
+    const dependentCount = this.computeTransitiveDependentCounts(plan);
 
     return ready.sort((a, b) => {
       const countA = dependentCount.get(a.id) ?? 0;
@@ -375,24 +374,55 @@ export class PlanRuntime {
   }
 
   /**
-   * Count the total number of steps that (directly or transitively)
-   * depend on the given step id.
+   * Phase 21 (PERF-01): count of distinct transitive dependents for
+   * every step, computed in a single memoized DFS (each edge visited
+   * at most twice).  Replaces the per-call `countDependents` BFS that
+   * re-scanned the whole step list for every ready step on every loop
+   * iteration.
+   *
+   * `memo(stepId)` = the set of all steps that (directly or
+   * transitively) depend on `stepId`.  Cycle-safe: the feasibility
+   * gate rejects cycles, but a back-edge simply contributes nothing.
    */
-  private countDependents(plan: Plan, stepId: string): number {
-    const visited = new Set<string>();
-    const queue = [stepId];
-
-    while (queue.length > 0) {
-      const current = queue.shift()!;
-      for (const step of plan.steps) {
-        if (step.dependsOn.includes(current) && !visited.has(step.id)) {
-          visited.add(step.id);
-          queue.push(step.id);
+  private computeTransitiveDependentCounts(plan: Plan): Map<string, number> {
+    // Reverse adjacency: stepId → steps that directly depend on it
+    const direct = new Map<string, string[]>();
+    for (const step of plan.steps) {
+      for (const dep of step.dependsOn) {
+        let list = direct.get(dep);
+        if (!list) {
+          list = [];
+          direct.set(dep, list);
         }
+        list.push(step.id);
       }
     }
 
-    return visited.size;
+    const memo = new Map<string, Set<string>>();
+    const visiting = new Set<string>();
+
+    const dfs = (id: string): Set<string> => {
+      const hit = memo.get(id);
+      if (hit) return hit;
+      if (visiting.has(id)) return new Set(); // cycle guard
+      visiting.add(id);
+
+      const all = new Set<string>();
+      for (const child of direct.get(id) ?? []) {
+        all.add(child);
+        for (const transitive of dfs(child)) all.add(transitive);
+      }
+
+      visiting.delete(id);
+      memo.set(id, all);
+      return all;
+    };
+
+    const counts = new Map<string, number>();
+    for (const step of plan.steps) {
+      counts.set(step.id, dfs(step.id).size);
+    }
+    return counts;
   }
 
   // ── Private: re-planning ──────────────────────────────────────

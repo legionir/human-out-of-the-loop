@@ -101,6 +101,14 @@ export class ObservabilityLogger {
   private readonly consoleOutput: boolean;
   private readonly redactKeys: Set<string>;
   private unsubscribeFn?: () => void;
+  /**
+   * Phase 21 (PERF-04): the log file descriptor, opened ONCE and
+   * reused for every entry.  `fs.appendFileSync` does open+write+close
+   * (3 syscalls) per line; `openSync` + `writeSync` reduces that to a
+   * single write syscall per entry while keeping synchronous durability
+   * (a crash right after `log()` still finds the entry on disk).
+   */
+  private logFd: number | null = null;
 
   constructor(config: ObservabilityLoggerConfig) {
     this.logFilePath = config.logFilePath;
@@ -108,9 +116,28 @@ export class ObservabilityLogger {
     this.redactKeys = new Set(config.redactKeys ?? DEFAULT_REDACT_KEYS);
 
     // Ensure the log directory exists
-    const dir = path.dirname(this.logFilePath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(path.dirname(this.logFilePath), { recursive: true });
+  }
+
+  private ensureFd(): number {
+    if (this.logFd === null) {
+      this.logFd = fs.openSync(this.logFilePath, 'a');
+    }
+    return this.logFd;
+  }
+
+  /**
+   * Close the underlying file descriptor (flush + release the fd).
+   * Safe to call multiple times; call during Orchestrator shutdown.
+   */
+  close(): void {
+    if (this.logFd !== null) {
+      try {
+        fs.closeSync(this.logFd);
+      } catch {
+        // best-effort close
+      }
+      this.logFd = null;
     }
   }
 
@@ -131,7 +158,8 @@ export class ObservabilityLogger {
     const line = JSON.stringify(fullEntry) + '\n';
 
     try {
-      fs.appendFileSync(this.logFilePath, line, 'utf-8');
+      // Phase 21 (PERF-04): single write syscall on a reused fd
+      fs.writeSync(this.ensureFd(), line, null, 'utf-8');
     } catch (err) {
       // If we can't write to the log file, fall back to console
       console.error('[ObservabilityLogger] Failed to write log:', err);

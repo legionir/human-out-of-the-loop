@@ -21,30 +21,63 @@ interface Match {
   text: string;
 }
 
+const NOISE_DIRS = new Set(['node_modules', '.git', 'dist', '.next']);
+
 /**
- * Recursively walks `dir` and returns files matching the optional extension.
+ * Phase 21 (PERF-05): single-pass search with EARLY EXIT.
+ *
+ * The old design was two-phase: `walkDir` collected EVERY file first
+ * (O(entire tree) syscalls) and only then did the matching loop stop
+ * at `maxResults`.  Now walking and matching are one recursion that
+ * aborts the moment `maxResults` matches are collected — a tree of
+ * 10k files with a match in the first directory costs ~1 readdir +
+ * 1 readFile instead of 10k+ reads.
  */
-async function walkDir(dir: string, ext?: string): Promise<string[]> {
-  const results: string[] = [];
+interface SearchOptions {
+  ext?: string;
+  regex: RegExp;
+  maxResults: number;
+  projectRoot: string;
+  matches: Match[];
+}
+
+async function searchFiles(dir: string, opts: SearchOptions): Promise<void> {
+  // Early exit: a parent call found enough matches while we were recursing
+  if (opts.matches.length >= opts.maxResults) return;
+
   let entries: import('node:fs').Dirent[];
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
   } catch {
-    return results;
+    return;
   }
   for (const entry of entries) {
+    if (opts.matches.length >= opts.maxResults) return; // early exit
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      // Skip common noise directories
-      if (['node_modules', '.git', 'dist', '.next'].includes(entry.name)) continue;
-      results.push(...(await walkDir(full, ext)));
+      if (NOISE_DIRS.has(entry.name)) continue;
+      await searchFiles(full, opts);
     } else if (entry.isFile()) {
-      if (!ext || entry.name.endsWith(ext)) {
-        results.push(full);
+      if (opts.ext && !entry.name.endsWith(opts.ext)) continue;
+      try {
+        const content = await fs.readFile(full, 'utf-8');
+        const lines = content.split('\n');
+        for (let i = 0; i < lines.length && opts.matches.length < opts.maxResults; i++) {
+          if (opts.regex.test(lines[i])) {
+            opts.matches.push({
+              file: path.relative(opts.projectRoot, full),
+              line: i + 1,
+              text: lines[i].trim().slice(0, 200),
+            });
+          }
+          // Reset regex lastIndex for global flag
+          opts.regex.lastIndex = 0;
+        }
+      } catch {
+        // Skip unreadable files silently
       }
     }
   }
-  return results;
 }
 
 /**
@@ -102,30 +135,15 @@ export function createSearchCodeTool(projectRoot: string) {
           };
         }
 
-        const files = await walkDir(resolvedDir, fileExtension);
+        // Phase 21 (PERF-05): walk + match in one pass, stopping early
         const matches: Match[] = [];
-
-        for (const file of files) {
-          if (matches.length >= maxResults) break;
-          try {
-            const content = await fs.readFile(file, 'utf-8');
-            const lines = content.split('\n');
-            for (let i = 0; i < lines.length; i++) {
-              if (regex.test(lines[i])) {
-                matches.push({
-                  file: path.relative(projectRoot, file),
-                  line: i + 1,
-                  text: lines[i].trim().slice(0, 200),
-                });
-                if (matches.length >= maxResults) break;
-              }
-              // Reset regex lastIndex for global flag
-              regex.lastIndex = 0;
-            }
-          } catch {
-            // Skip unreadable files silently
-          }
-        }
+        await searchFiles(resolvedDir, {
+          ext: fileExtension,
+          regex,
+          maxResults,
+          projectRoot,
+          matches,
+        });
 
         return {
           success: true as const,

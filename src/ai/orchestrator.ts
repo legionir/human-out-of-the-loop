@@ -663,6 +663,8 @@ export class Orchestrator {
     this.streamingManager.stop();
     // Phase 20 (CORR-04): acceptanceChecker has no subscription to stop
     this.observabilityLogger.unsubscribeFromEventBus();
+    // Phase 21 (PERF-04): release the reused log fd
+    this.observabilityLogger.close();
     this.usageAggregator.unsubscribe();
     this.taskRuntime.destroy();
   }

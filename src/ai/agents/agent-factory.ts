@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Tool, LanguageModel } from 'ai';
 import type { AgentRegistry, CrossRegistryRefs } from '../registries/agent-registry.js';
 import type { AgentDefinition } from '../schemas/agent-definition.js';
@@ -331,12 +332,42 @@ function buildSystemPrompt(opts: BuildPromptOptions): BuildPromptResult {
 // ─── Agent Cache ──────────────────────────────────────────────────
 
 /**
+ * Phase 21 (PERF-02): canonical (key-sorted) serialization.
+ * `JSON.stringify` alone is order-sensitive — two definitions with
+ * the same fields in different key orders would hash differently.
+ * Sorting keys recursively makes the hash depend only on CONTENT.
+ */
+export function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== 'object') {
+    return JSON.stringify(value) ?? 'null';
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`;
+  }
+  const record = value as Record<string, unknown>;
+  const keys = Object.keys(record).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(record[k])}`).join(',')}}`;
+}
+
+/** Phase 21 (PERF-02): sha256 of the canonical form — cheap to store, fast to compare. */
+export function hashAgentDefinition(def: AgentDefinition): string {
+  return createHash('sha256').update(stableStringify(def)).digest('hex');
+}
+
+/**
  * Simple cache for resolved agents.  Keyed by a hash of the
  * agent definition so that changes to the underlying registries
  * (e.g. a new skill version) invalidate the cache.
+ *
+ * Phase 21 (PERF-02): the hit check used to be
+ * `JSON.stringify(cached.def) !== JSON.stringify(currentDef)` — an
+ * O(size) serialization of BOTH objects on every lookup.  Now each
+ * `set` stores a sha256 of the canonical form and a `get` compares a
+ * precomputed 64-char hash (one hash of the incoming def, constant
+ * work regardless of def size).
  */
 export class AgentCache {
-  private readonly cache = new Map<string, { def: AgentDefinition; resolved: ResolvedAgent }>();
+  private readonly cache = new Map<string, { hash: string; resolved: ResolvedAgent }>();
 
   /**
    * Get a cached agent if the definition hasn't changed.
@@ -346,9 +377,7 @@ export class AgentCache {
     const cached = this.cache.get(id);
     if (!cached) return undefined;
 
-    // Simple structural comparison — if the definition JSON differs,
-    // the cache is stale.
-    if (JSON.stringify(cached.def) !== JSON.stringify(currentDef)) {
+    if (cached.hash !== hashAgentDefinition(currentDef)) {
       this.cache.delete(id);
       return undefined;
     }
@@ -357,7 +386,7 @@ export class AgentCache {
   }
 
   set(id: string, def: AgentDefinition, resolved: ResolvedAgent): void {
-    this.cache.set(id, { def, resolved });
+    this.cache.set(id, { hash: hashAgentDefinition(def), resolved });
   }
 
   invalidate(id: string): void {

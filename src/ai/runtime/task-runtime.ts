@@ -142,6 +142,10 @@ export class TaskRuntime {
   private readonly eventBus: EventBus;
   private readonly runtime: AgentRuntime;
   private readonly runningPromises = new Map<string, Promise<AgentRunResult>>();
+  // Phase 21 (PERF-03): O(1) count helpers + O(k) pending iteration.
+  // Maintained at every status transition — no tasks.values() scans.
+  private readonly pendingIds = new Set<string>();
+  private readonly runningIds = new Set<string>();
   private unsubscribeFn?: () => void;
 
   constructor(config: Pick<TaskRuntimeConfig, 'eventBus'> & Partial<TaskRuntimeConfig>) {
@@ -175,6 +179,7 @@ export class TaskRuntime {
 
     this.tasks.set(taskId, task);
     this.agents.set(taskId, options.agent);
+    this.pendingIds.add(taskId);
 
     // Try to start immediately (respecting concurrency + locks)
     this.scheduleNext();
@@ -205,19 +210,11 @@ export class TaskRuntime {
   }
 
   getRunningCount(): number {
-    let count = 0;
-    for (const task of this.tasks.values()) {
-      if (task.status === 'running') count++;
-    }
-    return count;
+    return this.runningIds.size;
   }
 
   getPendingCount(): number {
-    let count = 0;
-    for (const task of this.tasks.values()) {
-      if (task.status === 'pending') count++;
-    }
-    return count;
+    return this.pendingIds.size;
   }
 
   // ── Scheduling ────────────────────────────────────────────────
@@ -232,9 +229,12 @@ export class TaskRuntime {
 
     if (availableSlots <= 0) return;
 
-    const pendingTasks = Array.from(this.tasks.values()).filter(
-      (t) => t.status === 'pending'
-    );
+    const pendingTasks: Task[] = [];
+    for (const id of this.pendingIds) {
+      // Phase 21 (PERF-03): iterate the pending index, not the whole map
+      const task = this.tasks.get(id);
+      if (task && task.status === 'pending') pendingTasks.push(task);
+    }
 
     let started = 0;
     for (const task of pendingTasks) {
@@ -255,6 +255,8 @@ export class TaskRuntime {
 
       task.status = 'running';
       task.startedAt = Date.now();
+      this.pendingIds.delete(task.id);
+      this.runningIds.add(task.id);
       started++;
 
       // Fire-and-forget execution
@@ -310,6 +312,7 @@ export class TaskRuntime {
     // Release resource locks
     this.lockManager.release(taskId);
     this.runningPromises.delete(taskId);
+    this.runningIds.delete(taskId);
 
     if (result.success) {
       task.status = 'completed';
@@ -367,6 +370,7 @@ export class TaskRuntime {
     if (task.status === 'pending') {
       task.status = 'cancelled';
       task.completedAt = Date.now();
+      this.pendingIds.delete(taskId);
       return true;
     }
 
@@ -376,6 +380,7 @@ export class TaskRuntime {
       task.status = 'cancelled';
       task.completedAt = Date.now();
       this.lockManager.release(taskId);
+      this.runningIds.delete(taskId);
       this.scheduleNext();
       return true;
     }
