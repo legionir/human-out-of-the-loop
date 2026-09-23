@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   type Session,
   type SessionInteraction,
@@ -51,8 +52,11 @@ export class FileSessionStore implements SessionStore {
   }
 
   private filePath(sessionId: string): string {
-    const safe = sessionId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    return path.join(this.dir, `${safe}.json`);
+    // Phase 22 (STORE-01): hash-based filename — same collision/traversal
+    // fix as FilePlanStore.  The hash is a pure function of the id, so
+    // no separate id→filename map is required.
+    const hash = createHash('sha256').update(sessionId).digest('hex').slice(0, 16);
+    return path.join(this.dir, `${hash}.json`);
   }
 
   createSession(label?: string): string {
@@ -84,10 +88,21 @@ export class FileSessionStore implements SessionStore {
 
   listSessions(): string[] {
     if (!fs.existsSync(this.dir)) return [];
-    return fs
-      .readdirSync(this.dir)
-      .filter((f) => f.endsWith('.json'))
-      .map((f) => f.replace(/\.json$/, ''));
+    // Phase 22: filenames are hashes — the real id lives inside each
+    // file's JSON.  Corrupt/unreadable files are skipped, not fatal.
+    const ids: string[] = [];
+    for (const f of fs.readdirSync(this.dir)) {
+      if (!f.endsWith('.json')) continue;
+      try {
+        const raw = JSON.parse(
+          fs.readFileSync(path.join(this.dir, f), 'utf-8')
+        ) as { id?: unknown };
+        if (typeof raw.id === 'string') ids.push(raw.id);
+      } catch {
+        // Skip corrupt file
+      }
+    }
+    return ids;
   }
 
   deleteSession(sessionId: string): void {

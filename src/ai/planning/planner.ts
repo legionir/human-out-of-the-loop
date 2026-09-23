@@ -1,5 +1,4 @@
 import { generateObject } from 'ai';
-import { z } from 'zod';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
@@ -204,34 +203,4 @@ ${userRequest}
     });
   }
 
-  /**
-   * Parse a JSON response from the model, extracting the JSON
-   * block if it's wrapped in markdown code fences.
-   * Kept for backward compatibility / fallback parsing.
-   */
-  private parseJsonResponse<T>(text: string, schema: z.ZodType<T>): T {
-    let jsonStr = text.trim();
-    const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
-    if (codeBlockMatch) {
-      jsonStr = codeBlockMatch[1].trim();
-    }
-
-    const firstBrace = jsonStr.indexOf('{');
-    const firstBracket = jsonStr.indexOf('[');
-    if (firstBrace === -1 && firstBracket === -1) {
-      throw new Error('No JSON found in model response');
-    }
-
-    const startIdx =
-      firstBrace === -1
-        ? firstBracket
-        : firstBracket === -1
-          ? firstBrace
-          : Math.min(firstBrace, firstBracket);
-
-    jsonStr = jsonStr.slice(startIdx);
-
-    const raw = JSON.parse(jsonStr);
-    return schema.parse(raw);
-  }
 }

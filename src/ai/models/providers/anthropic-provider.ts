@@ -23,17 +23,19 @@ export const anthropicProviderFactory: ProviderFactory = {
   },
 };
 
-let _anthropicSdk: any = null;
-function getAnthropicSdk(): typeof import('@ai-sdk/anthropic') {
+// Phase 22: typed (was `any`) — the package is installed.
+type AnthropicSdk = typeof import('@ai-sdk/anthropic');
+let _anthropicSdk: AnthropicSdk | null = null;
+function getAnthropicSdk(): AnthropicSdk {
   if (!_anthropicSdk) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      _anthropicSdk = require('@ai-sdk/anthropic');
+      _anthropicSdk = require('@ai-sdk/anthropic') as AnthropicSdk;
     } catch {
       throw new Error(
         '[anthropicProvider] @ai-sdk/anthropic is not installed. Run: npm install @ai-sdk/anthropic'
       );
     }
   }
-  return _anthropicSdk as typeof import('@ai-sdk/anthropic');
+  return _anthropicSdk;
 }

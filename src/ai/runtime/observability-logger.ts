@@ -89,7 +89,7 @@ const DEFAULT_REDACT_KEYS = [
  *      to the file.  No overwrites, no deletions.
  *   2. **Synchronous writes**: guarantees durability even if the
  *      process crashes immediately after.
- *   3. **Credential redaction**: any payload key matching the
+ *   3. **Credential redaction**: every payload key matching the
  *      redact list is replaced with `"***REDACTED***"`.
  *   4. **No raw transcripts**: tool call arguments and results
  *      are never logged — only tool names and status.
@@ -160,15 +160,20 @@ export class ObservabilityLogger {
     try {
       // Phase 21 (PERF-04): single write syscall on a reused fd
       fs.writeSync(this.ensureFd(), line, null, 'utf-8');
-    } catch (err) {
-      // If we can't write to the log file, fall back to console
-      console.error('[ObservabilityLogger] Failed to write log:', err);
+    } catch {
+      // Phase 22: best-effort and SILENT — the log file is the only
+      // durable sink and a write failure must never crash the run.
+      // (The runtime must not use the console API; the Orchestrator's
+      // own failures surface through its callbacks / the review.)
     }
 
     if (this.consoleOutput) {
+      // Phase 22: the configured console-output mode writes straight to
+      // stdout — this is an explicit user-facing output channel, not
+      // observability, but it must not use the console API either.
       const prefix = { info: 'ℹ️', warn: '⚠️', error: '❌' }[fullEntry.level];
-      console.log(
-        `${prefix} [${fullEntry.timestamp}] ${fullEntry.eventType}: ${fullEntry.message}`
+      process.stdout.write(
+        `${prefix} [${fullEntry.timestamp}] ${fullEntry.eventType}: ${fullEntry.message}\n`
       );
     }
   }

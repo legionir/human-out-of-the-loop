@@ -28,18 +28,20 @@ export const openaiProviderFactory: ProviderFactory = {
   },
 };
 
-// Lazy-loaded SDK cache
-let _openaiSdk: any = null;
-function getOpenAISdk(): typeof import('@ai-sdk/openai') {
+// Lazy-loaded SDK cache.  Phase 22: typed (was `any`) — the package is
+// installed, so the module type resolves.
+type OpenAiSdk = typeof import('@ai-sdk/openai');
+let _openaiSdk: OpenAiSdk | null = null;
+function getOpenAISdk(): OpenAiSdk {
   if (!_openaiSdk) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      _openaiSdk = require('@ai-sdk/openai');
+      _openaiSdk = require('@ai-sdk/openai') as OpenAiSdk;
     } catch {
       throw new Error(
         '[openaiProvider] @ai-sdk/openai is not installed. Run: npm install @ai-sdk/openai'
       );
     }
   }
-  return _openaiSdk as typeof import('@ai-sdk/openai');
+  return _openaiSdk;
 }

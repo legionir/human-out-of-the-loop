@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 vi.mock('ai', async () => {
@@ -245,12 +246,14 @@ describe('Phase 19 — RateLimiter config comes from OrchestratorConfig', () => 
   it('Orchestrator applies maxRetries / maxBackoffMs / concurrency cap', async () => {
     const projectRoot = makeTempProject();
     try {
+      // Phase 22: values must satisfy the zod-validated
+      // OrchestratorConfig (maxBackoffMs min is now 1000).
       const orch = new Orchestrator({
         projectRoot,
         maxConcurrentPerProvider: 2,
         maxRetries: 1,
         baseBackoffMs: 100,
-        maxBackoffMs: 200,
+        maxBackoffMs: 1000,
       });
 
       const rl = orch.rateLimiter as RateLimiter;
@@ -258,7 +261,7 @@ describe('Phase 19 — RateLimiter config comes from OrchestratorConfig', () => 
       expect(rl.shouldRetry(0)).toBe(true);
       expect(rl.shouldRetry(1)).toBe(false);
       // backoff capped at maxBackoffMs
-      expect(rl.getBackoffDelay(5)).toBeLessThanOrEqual(200);
+      expect(rl.getBackoffDelay(5)).toBeLessThanOrEqual(1000);
 
       // concurrency cap = 2 → the third acquire queues
       await rl.acquire('p');
@@ -327,8 +330,12 @@ describe('Phase 19 — atomic persistence', () => {
 
     const files = fs.readdirSync(dir);
     expect(files.filter((f) => f.includes('.tmp-'))).toHaveLength(0);
-    expect(files).toContain('p1.json');
-    const loaded = JSON.parse(fs.readFileSync(path.join(dir, 'p1.json'), 'utf-8'));
+    // Phase 22: filenames are sha256(id).slice(0,16) — no raw-id
+    // sanitisation (which could collide: 'a/b' and 'a_b').
+    const expectedName =
+      createHash('sha256').update('p1').digest('hex').slice(0, 16) + '.json';
+    expect(files).toContain(expectedName);
+    const loaded = JSON.parse(fs.readFileSync(path.join(dir, expectedName), 'utf-8'));
     expect(loaded.goal).toBe('goal');
   });
 

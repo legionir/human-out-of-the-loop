@@ -4,7 +4,7 @@ import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { ModelRegistry } from '../registries/model-registry.js';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
-import { ReviewSchema, type Review } from '../schemas/review.js';
+import { ReviewSchema, emptyReviewUsage, type Review } from '../schemas/review.js';
 import type { Plan } from '../schemas/plan.js';
 import type { PlanExecutionResult } from './plan-runtime.js';
 
@@ -250,6 +250,9 @@ Be honest and specific. Do not invent findings that aren't in the results.
       rejectedFindings: [],
       incompleteSteps: result.incompleteSteps,
       finalSummary: summary,
+      // Phase 22: usage is required — zero until the orchestrator
+      // overwrites it with the real aggregation.
+      usage: emptyReviewUsage,
     };
   }
 
@@ -296,6 +299,9 @@ Be honest and specific. Do not invent findings that aren't in the results.
       rejectedFindings: rejected,
       incompleteSteps: result.incompleteSteps,
       finalSummary: summary,
+      // Phase 22: usage is required — zero until the orchestrator
+      // overwrites it with the real aggregation.
+      usage: emptyReviewUsage,
     };
   }
 

@@ -87,6 +87,14 @@ export class EventBus {
   private readonly listeners = new Map<string, Set<EventSubscriber>>();
 
   /**
+   * Phase 22: optional sink for errors thrown by subscribers.
+   * The Orchestrator wires this to the ObservabilityLogger so the
+   * runtime never touches the console API directly.  When unset,
+   * subscriber errors are swallowed (the bus must stay resilient).
+   */
+  onSubscriberError?: (event: AgentEvent, error: unknown) => void;
+
+  /**
    * Subscribe to a specific event type or "*" for all events.
    * Returns an unsubscribe function.
    */
@@ -123,11 +131,11 @@ export class EventBus {
       try {
         handler(event);
       } catch (err) {
-        // Log but don't throw — EventBus must be resilient
-        console.error(
-          `[EventBus] Subscriber error for event "${event.type}":`,
-          err instanceof Error ? err.message : err
-        );
+        // Phase 22: subscriber errors are routed to an injected handler
+        // (the Orchestrator wires this to the ObservabilityLogger)
+        // instead of the console API.  If none is set, the error is
+        // swallowed — one bad subscriber must never break the bus.
+        this.onSubscriberError?.(event, err);
       }
     }
   }

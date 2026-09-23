@@ -20,10 +20,22 @@ export interface CreateTaskToolDeps {
   defaultModelId?: string;
 }
 
+/**
+ * Phase 22: structural type guard (was `instanceof Object` plus an
+ * unsafe cast).  An object is treated as a bare TaskRuntime when it
+ * exposes a `createTask` function — the only shape the compat branch
+ * needs.
+ */
+function isBareTaskRuntime(value: unknown): value is TaskRuntime {
+  if (typeof value !== 'object' || value === null) return false;
+  if (!('createTask' in value)) return false;
+  return typeof value.createTask === 'function';
+}
+
 export function createCreateTaskTool(deps: CreateTaskToolDeps | TaskRuntime) {
   // Backward compat: if passed just TaskRuntime, wrap it
-  if (deps instanceof Object && 'createTask' in (deps as any)) {
-    const taskRuntime = deps as TaskRuntime;
+  if (isBareTaskRuntime(deps)) {
+    const taskRuntime = deps;
     return tool({
       description:
         'Creates a new task for a sub-agent. The task is queued and will ' +
@@ -48,7 +60,9 @@ export function createCreateTaskTool(deps: CreateTaskToolDeps | TaskRuntime) {
     });
   }
 
-  const fullDeps = deps as CreateTaskToolDeps;
+  // Phase 22: `deps` is already narrowed to CreateTaskToolDeps by the
+  // type guard above — no cast needed.
+  const fullDeps: CreateTaskToolDeps = deps;
   return tool({
     description:
       'Creates and immediately schedules a new task for a sub-agent. ' +

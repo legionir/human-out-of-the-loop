@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import type { LanguageModel } from 'ai';
 import { FinalReviewer } from '../runtime/final-reviewer.js';
 import { formatReviewForUser, formatReviewOneLine } from '../runtime/review-formatter.js';
-import { ReviewSchema, type Review } from '../schemas/review.js';
+import { ReviewSchema, emptyReviewUsage, type Review } from '../schemas/review.js';
 import { PersonaRegistry } from '../registries/persona-registry.js';
 import { SkillRegistry, loadSkillsFromDirectory } from '../registries/skill-registry.js';
 import { ToolRegistry } from '../registries/tool-registry.js';
@@ -174,6 +174,7 @@ describe('ReviewSchema', () => {
       rejectedFindings: [],
       incompleteSteps: [],
       finalSummary: 'All done.',
+      usage: emptyReviewUsage,
     };
     expect(() => ReviewSchema.parse(review)).not.toThrow();
   });
@@ -194,6 +195,7 @@ describe('ReviewSchema', () => {
         },
       ],
       finalSummary: 'Steps 1 and 3 done. Step 2 could not be completed.',
+      usage: emptyReviewUsage,
     };
     expect(() => ReviewSchema.parse(review)).not.toThrow();
   });
@@ -458,6 +460,7 @@ describe('formatReviewForUser', () => {
       rejectedFindings: [],
       incompleteSteps: [],
       finalSummary: 'Feature X built successfully.',
+      usage: emptyReviewUsage,
     };
 
     const output = formatReviewForUser(review);
@@ -485,6 +488,7 @@ describe('formatReviewForUser', () => {
         },
       ],
       finalSummary: 'Partial only.',
+      usage: emptyReviewUsage,
     };
 
     const output = formatReviewForUser(review);
@@ -510,6 +514,7 @@ describe('formatReviewForUser', () => {
         { stepId: 's3', description: 'c', reason: 'stuck' },
       ],
       finalSummary: 'ok',
+      usage: emptyReviewUsage,
     };
 
     const oneLine = formatReviewOneLine(review);

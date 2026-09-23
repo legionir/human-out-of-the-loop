@@ -58,14 +58,32 @@ export const ReviewSchema = z.object({
   incompleteSteps: z.array(IncompleteStepSchema).default([]),
   /** Human-readable summary of what was accomplished and what wasn't */
   finalSummary: z.string().min(1),
-  /** Usage/cost aggregation (populated in Phase 13) */
+  /**
+   * Usage/cost aggregation.
+   * Phase 22: REQUIRED with a zero default — the orchestrator always
+   * overwrites it with the real aggregation, and every code path that
+   * builds a Review (model, fallback, minimal) now carries a well-
+   * typed usage object instead of an optional hole.
+   */
   usage: z
     .object({
       totalPromptTokens: z.number(),
       totalCompletionTokens: z.number(),
       totalTokens: z.number(),
     })
-    .optional(),
+    .default({ totalPromptTokens: 0, totalCompletionTokens: 0, totalTokens: 0 }),
 });
 
 export type Review = z.infer<typeof ReviewSchema>;
+
+/**
+ * Phase 22: the zero-usage value used by Review builders that run
+ * before/without the orchestrator's real usage aggregation.  Kept as a
+ * single source of truth so the schema default and manual builders
+ * never drift apart.
+ */
+export const emptyReviewUsage: Review['usage'] = {
+  totalPromptTokens: 0,
+  totalCompletionTokens: 0,
+  totalTokens: 0,
+};

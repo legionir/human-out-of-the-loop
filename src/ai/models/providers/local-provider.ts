@@ -27,17 +27,19 @@ export const localProviderFactory: ProviderFactory = {
   },
 };
 
-let _localOpenAISdk: any = null;
-function getOpenAISdkLocal(): typeof import('@ai-sdk/openai') {
+// Phase 22: typed (was `any`) — the package is installed.
+type LocalOpenAiSdk = typeof import('@ai-sdk/openai');
+let _localOpenAISdk: LocalOpenAiSdk | null = null;
+function getOpenAISdkLocal(): LocalOpenAiSdk {
   if (!_localOpenAISdk) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      _localOpenAISdk = require('@ai-sdk/openai');
+      _localOpenAISdk = require('@ai-sdk/openai') as LocalOpenAiSdk;
     } catch {
       throw new Error(
         '[localProvider] @ai-sdk/openai is not installed. Run: npm install @ai-sdk/openai'
       );
     }
   }
-  return _localOpenAISdk as typeof import('@ai-sdk/openai');
+  return _localOpenAISdk;
 }

@@ -146,6 +146,9 @@ export class TaskRuntime {
   // Maintained at every status transition — no tasks.values() scans.
   private readonly pendingIds = new Set<string>();
   private readonly runningIds = new Set<string>();
+  // Phase 22: per-task abort controllers — cancelTask on a RUNNING task
+  // now truly aborts the in-flight generateText (not just bookkeeping).
+  private readonly abortControllers = new Map<string, AbortController>();
   private unsubscribeFn?: () => void;
 
   constructor(config: Pick<TaskRuntimeConfig, 'eventBus'> & Partial<TaskRuntimeConfig>) {
@@ -262,12 +265,17 @@ export class TaskRuntime {
       // Fire-and-forget execution
       const agent = this.agents.get(task.id);
       if (agent) {
+        // Phase 22: every running task gets its own AbortController so
+        // cancelTask can truly abort the in-flight model call.
+        const controller = new AbortController();
+        this.abortControllers.set(task.id, controller);
         const promise = this.runtime
           .run({
             agent,
             taskId: task.id,
             prompt: task.prompt,
             eventBus: this.eventBus,
+            signal: controller.signal,
             // Phase 19 (CFG-05): the configured agent timeout actually applies
             ...(this.agentTimeoutMs !== undefined
               ? { timeoutMs: this.agentTimeoutMs }
@@ -313,17 +321,23 @@ export class TaskRuntime {
     this.lockManager.release(taskId);
     this.runningPromises.delete(taskId);
     this.runningIds.delete(taskId);
+    // Phase 22: drop the (now settable) controller
+    this.abortControllers.delete(taskId);
 
-    if (result.success) {
-      task.status = 'completed';
-      task.summary = result.summary;
-      task.result = result.result;
-      task.usage = result.usage;
-    } else {
-      task.status = 'failed';
-      task.summary = result.summary;
-      task.errors = result.errors;
-      task.failureType = result.failureType ?? 'technical';
+    // Phase 22: a task cancelled by the user is ALREADY in its final
+    // state — the aborted run's failure result must not overwrite it.
+    if (task.status !== 'cancelled') {
+      if (result.success) {
+        task.status = 'completed';
+        task.summary = result.summary;
+        task.result = result.result;
+        task.usage = result.usage;
+      } else {
+        task.status = 'failed';
+        task.summary = result.summary;
+        task.errors = result.errors;
+        task.failureType = result.failureType ?? 'technical';
+      }
     }
     task.completedAt = Date.now();
 
@@ -375,12 +389,15 @@ export class TaskRuntime {
     }
 
     if (task.status === 'running') {
-      // In Phase 13 this will signal the AgentRuntime to abort.
-      // For now, mark as cancelled and release locks.
+      // Phase 22: REAL cancellation — abort the in-flight model call
+      // (AgentRuntime forwards the signal to generateText as
+      // abortSignal).  The run rejects with an AbortError; since the
+      // task is already "cancelled", handleRunResult keeps that status.
       task.status = 'cancelled';
       task.completedAt = Date.now();
       this.lockManager.release(taskId);
       this.runningIds.delete(taskId);
+      this.abortControllers.get(taskId)?.abort();
       this.scheduleNext();
       return true;
     }

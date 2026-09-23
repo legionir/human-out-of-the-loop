@@ -91,8 +91,9 @@ export class CancellationManager {
     }
 
     // ✅ FIXED: Set "cancelling" first (PlanRuntime checks this)
-    // Do NOT set "cancelled" yet — let PlanRuntime do it after cleanup
-    plan.status = 'cancelling' as any;
+    // Do NOT set "cancelled" yet — let PlanRuntime do it after cleanup.
+    // Phase 22: no cast needed — "cancelling" is part of PlanStatus.
+    plan.status = 'cancelling';
     this.planStore.save(plan);
 
     // Signal the PlanRuntime to stop dispatching

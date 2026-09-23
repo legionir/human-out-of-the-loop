@@ -84,7 +84,7 @@ export class ToolRegistry {
       );
     }
     this.implementations.set(id, implementation);
-    // Phase 21 (PERF-07): any cached combo containing this id is stale
+    // Phase 21 (PERF-07): every cached combo containing this id is stale
     this.toolsCache.clear();
   }
 

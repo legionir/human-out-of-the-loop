@@ -1,4 +1,4 @@
-import { generateText, stepCountIs } from 'ai';
+import { generateText, stepCountIs, type LanguageModelUsage } from 'ai';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { EventBus, type TokenUsage } from './event-bus.js';
 
@@ -43,6 +43,12 @@ export interface AgentRunOptions {
   planId?: string;
   /** Phase 20 (CORR-05): step context, attached to emitted events */
   planStepId?: string;
+  /**
+   * Phase 22: cancellation signal.  Forwarded to `generateText` as
+   * `abortSignal` — aborting it rejects the run with an AbortError,
+   * which is surfaced as a structured failure (code "ABORTED").
+   */
+  signal?: AbortSignal;
 }
 
 // ─── Constants ────────────────────────────────────────────────────
@@ -85,6 +91,7 @@ export class AgentRuntime {
       timeoutMs = DEFAULT_TIMEOUT_MS,
       planId,
       planStepId,
+      signal,
     } = options;
 
     const agentId = agent.agentId;
@@ -123,6 +130,7 @@ export class AgentRuntime {
         agentId,
         toolsUsed,
         planContext,
+        signal,
       });
 
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -205,8 +213,11 @@ export class AgentRuntime {
     agentId: string;
     toolsUsed: string[];
     planContext: { planId?: string; planStepId?: string };
+    /** Phase 22: cancellation signal, forwarded to generateText */
+    signal?: AbortSignal;
   }): Promise<{ text: string; usage?: TokenUsage }> {
-    const { agent, prompt, maxSteps, eventBus, taskId, agentId, toolsUsed, planContext } = params;
+    const { agent, prompt, maxSteps, eventBus, taskId, agentId, toolsUsed, planContext, signal } =
+      params;
 
     const hasTools = Object.keys(agent.tools).length > 0;
 
@@ -216,18 +227,21 @@ export class AgentRuntime {
       prompt,
       stopWhen: stepCountIs(maxSteps),
       ...(hasTools ? { tools: agent.tools } : {}),
+      // Phase 22: real cancellation — aborting rejects generateText
+      ...(signal ? { abortSignal: signal } : {}),
     };
 
     const result = await generateText(generateOptions);
 
-    // ✅ FIXED: Safely extract tool calls regardless of AI SDK version
+    // Phase 22: `step.toolCalls` is fully typed (Array<TypedToolCall>)
+    // in AI SDK v7 — no unsafe cast needed.  The Array.isArray guard
+    // stays as a runtime safety net for partial test mocks.
     if (result.steps && Array.isArray(result.steps)) {
       for (const step of result.steps) {
-        // AI SDK v4+: step.toolCalls is ToolCallPart[]
-        const toolCalls = (step as any).toolCalls;
+        const toolCalls = step.toolCalls;
         if (Array.isArray(toolCalls)) {
           for (const call of toolCalls) {
-            const toolName = call.toolName ?? call.tool?.name ?? 'unknown';
+            const toolName = call.toolName ?? 'unknown';
             toolsUsed.push(toolName);
 
             eventBus.emit({
@@ -237,7 +251,7 @@ export class AgentRuntime {
               timestamp: Date.now(),
               status: 'running',
               toolName,
-              callId: call.toolCallId ?? call.id ?? `call-${Date.now()}`,
+              callId: call.toolCallId ?? `call-${Date.now()}`,
               ...planContext,
             });
           }
@@ -245,12 +259,16 @@ export class AgentRuntime {
       }
     }
 
-    // ✅ FIXED: Safely extract usage
-    const rawUsage = result.usage as any;
+    // Phase 22: typed usage extraction.  `LanguageModelUsage` is the
+    // AI SDK v7 shape (inputTokens/outputTokens/totalTokens); the
+    // promptTokens/completionTokens fallback keeps compatibility with
+    // test mocks built against the older SDK shape.
+    type LegacyUsageShape = { promptTokens?: number; completionTokens?: number };
+    const rawUsage = result.usage as (LanguageModelUsage & LegacyUsageShape) | undefined;
     const usage: TokenUsage | undefined = rawUsage
       ? {
-          promptTokens: rawUsage.promptTokens ?? rawUsage.inputTokens ?? rawUsage.inputTokenDetails?.total ?? 0,
-          completionTokens: rawUsage.completionTokens ?? rawUsage.outputTokens ?? rawUsage.outputTokenDetails?.total ?? 0,
+          promptTokens: rawUsage.promptTokens ?? rawUsage.inputTokens ?? 0,
+          completionTokens: rawUsage.completionTokens ?? rawUsage.outputTokens ?? 0,
           totalTokens: rawUsage.totalTokens ?? 0,
         }
       : undefined;
@@ -292,6 +310,12 @@ export class AgentRuntime {
     }
 
     if (err instanceof Error) {
+      // Phase 22: cancellation — an aborted run is a controlled failure,
+      // not a provider error.
+      if (err.name === 'AbortError' || /abort/i.test(err.message)) {
+        return { message: err.message, code: 'ABORTED' };
+      }
+
       // AI SDK provider errors often have a `cause` or specific message patterns
       const msg = err.message;
       if (msg.includes('rate limit') || msg.includes('429')) {

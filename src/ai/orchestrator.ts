@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { z } from 'zod';
 import { EventBus } from './runtime/event-bus.js';
 import { AgentRuntime } from './runtime/agent-runtime.js';
 import { TaskRuntime } from './runtime/task-runtime.js';
@@ -44,29 +45,42 @@ import {
 } from './models/providers/index.js';
 
 import type { Plan } from './schemas/plan.js';
-import type { Review } from './schemas/review.js';
+import { emptyReviewUsage, type Review } from './schemas/review.js';
+import type { ResolvedAgent } from './agents/agent-factory.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
-export interface OrchestratorConfig {
-  projectRoot: string;
-  persistent?: boolean;
-  runtimeDir?: string;
-  maxConcurrentTasks?: number;
-  maxReplanningAttempts?: number;
-  defaultModelId?: string;
-  agentTimeoutMs?: number;
-  maxDelegationDepth?: number;
-  /** Phase 19 (CFG-06): RateLimiter config — max concurrent requests per provider */
-  maxConcurrentPerProvider?: number;
-  /** Phase 19 (CFG-06): RateLimiter config — max retry attempts on rate-limit */
-  maxRetries?: number;
-  /** Phase 19 (CFG-06): RateLimiter config — base backoff delay (ms) */
-  baseBackoffMs?: number;
-  /** Phase 19 (CFG-06): RateLimiter config — max backoff delay (ms) */
-  maxBackoffMs?: number;
+/**
+ * Phase 22: the OrchestratorConfig is now VALIDATED with zod — the
+ * constructor throws a `ZodError` for out-of-range values instead of
+ * silently accepting them (e.g. maxConcurrentTasks: 0, agentTimeoutMs: 50).
+ */
+export const OrchestratorConfigSchema = z.object({
+  projectRoot: z.string().min(1),
+  persistent: z.boolean().default(false),
+  runtimeDir: z.string().optional(),
+  maxConcurrentTasks: z.number().int().min(1).max(100).default(5),
+  maxConcurrentPerProvider: z.number().int().min(1).max(50).default(5),
+  maxReplanningAttempts: z.number().int().min(0).max(10).default(3),
+  agentTimeoutMs: z.number().int().min(1000).max(600000).default(120000),
+  maxDelegationDepth: z.number().int().min(0).max(5).default(1),
+  maxRetries: z.number().int().min(0).max(10).default(3),
+  baseBackoffMs: z.number().int().min(100).default(1000),
+  maxBackoffMs: z.number().int().min(1000).default(30000),
+  maxSteps: z.number().int().min(1).max(100).default(20),
+  contextBudgetChars: z.number().int().min(1000).default(120000),
+  connectTimeoutMs: z.number().int().min(1000).default(10000),
+  defaultModelId: z.string().default('gpt-4o'),
+});
+
+/**
+ * Config shape accepted by the constructor (input type — everything
+ * except `projectRoot` is optional).  `onProgress` (Phase 19) is a
+ * callback and is validated structurally, not via the base schema.
+ */
+export type OrchestratorConfig = z.input<typeof OrchestratorConfigSchema> & {
   onProgress?: (event: ProgressEvent) => void;
-}
+};
 
 export interface OrchestratorRunOptions {
   sessionId?: string;
@@ -97,7 +111,10 @@ export function createCliConfirmCallback(): (planText: string) => Promise<{ conf
     });
 
     return new Promise((resolve) => {
-      console.log('\n' + planText + '\n');
+      // Phase 22: the runtime must not use the console API — direct
+      // stdout for the interactive prompt (user-facing UI, not
+      // observability).
+      process.stdout.write('\n' + planText + '\n');
       rl.question('Confirm this plan? (yes/no/feedback): ', (answer) => {
         rl.close();
         const normalized = answer.trim().toLowerCase();
@@ -143,20 +160,32 @@ export class Orchestrator {
   private initialized = false;
 
   constructor(config: OrchestratorConfig) {
+    // Phase 22: validate FIRST — out-of-range config throws a ZodError
+    // immediately instead of producing a silently misbehaving runtime.
+    const parsed = OrchestratorConfigSchema.safeParse(config);
+    if (!parsed.success) {
+      throw parsed.error;
+    }
+    const data = parsed.data;
     this.config = {
-      projectRoot: config.projectRoot,
-      persistent: config.persistent ?? false,
-      runtimeDir: config.runtimeDir ?? path.join(config.projectRoot, '.ai-runtime'),
-      maxConcurrentTasks: config.maxConcurrentTasks ?? 5,
-      maxReplanningAttempts: config.maxReplanningAttempts ?? 3,
-      defaultModelId: config.defaultModelId ?? 'gpt-4o',
-      agentTimeoutMs: config.agentTimeoutMs ?? 120_000,
-      maxDelegationDepth: config.maxDelegationDepth ?? 1,
+      projectRoot: data.projectRoot,
+      persistent: data.persistent,
+      // runtimeDir is optional in the schema — derive the default here
+      // (it depends on projectRoot, so it cannot live in the schema).
+      runtimeDir: data.runtimeDir ?? path.join(data.projectRoot, '.ai-runtime'),
+      maxConcurrentTasks: data.maxConcurrentTasks,
+      maxReplanningAttempts: data.maxReplanningAttempts,
+      defaultModelId: data.defaultModelId,
+      agentTimeoutMs: data.agentTimeoutMs,
+      maxDelegationDepth: data.maxDelegationDepth,
       // Phase 19 (CFG-06): RateLimiter settings now come from config
-      maxConcurrentPerProvider: config.maxConcurrentPerProvider ?? 5,
-      maxRetries: config.maxRetries ?? 3,
-      baseBackoffMs: config.baseBackoffMs ?? 1_000,
-      maxBackoffMs: config.maxBackoffMs ?? 30_000,
+      maxConcurrentPerProvider: data.maxConcurrentPerProvider,
+      maxRetries: data.maxRetries,
+      baseBackoffMs: data.baseBackoffMs,
+      maxBackoffMs: data.maxBackoffMs,
+      maxSteps: data.maxSteps,
+      contextBudgetChars: data.contextBudgetChars,
+      connectTimeoutMs: data.connectTimeoutMs,
       onProgress: config.onProgress ?? (() => {}),
     };
 
@@ -209,6 +238,15 @@ export class Orchestrator {
     this.observabilityLogger = new ObservabilityLogger({
       logFilePath: path.join(runtimeDir, 'observability.jsonl'),
     });
+
+    // Phase 22: subscriber errors go to the observability log —
+    // the runtime makes zero direct console calls.
+    this.eventBus.onSubscriberError = (event, error) => {
+      this.observabilityLogger.logSystemError(
+        `event-bus:${event.type}`,
+        `Subscriber error: ${error instanceof Error ? error.message : String(error)}`
+      );
+    };
 
     // Phase 20 (CORR-04): the checker is a pure judgment service — no
     // EventBus/planStore/taskRuntime wiring. PlanRuntime invokes it from
@@ -307,7 +345,8 @@ export class Orchestrator {
       skillRegistry: this.skillRegistry,
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
-      onTaskCreated: async (resolved: any, prompt: string) => {
+      // Phase 22: typed (was `any`)
+      onTaskCreated: async (resolved: ResolvedAgent, prompt: string) => {
         return this.taskRuntime.createTask({
           agent: resolved,
           prompt,
@@ -406,6 +445,7 @@ export class Orchestrator {
           rejectedFindings: [],
           incompleteSteps: [],
           finalSummary: `The request needs clarification before a plan can be produced:\n${clarificationMsg}`,
+          usage: emptyReviewUsage,
         },
         report: `⚠️ Clarification needed:\n${clarificationMsg}`,
         planId: 'none',
@@ -446,6 +486,7 @@ export class Orchestrator {
           rejectedFindings: [],
           incompleteSteps: [],
           finalSummary: `Plan failed feasibility check:\n${errorMsg}`,
+          usage: emptyReviewUsage,
         },
         report: `❌ Plan infeasible:\n${errorMsg}`,
         planId: plan.id ?? 'unknown',
@@ -480,6 +521,7 @@ export class Orchestrator {
           rejectedFindings: [],
           incompleteSteps: [],
           finalSummary: cycleMsg,
+          usage: emptyReviewUsage,
         },
         report: `❌ ${cycleMsg}`,
         planId: plan.id ?? 'unknown',
@@ -510,6 +552,7 @@ export class Orchestrator {
           rejectedFindings: [],
           incompleteSteps: [],
           finalSummary: `Plan was not confirmed by user. Feedback: ${confirmation.feedback ?? 'none'}`,
+          usage: emptyReviewUsage,
         },
         report: `🛑 Plan cancelled by user.\nFeedback: ${confirmation.feedback ?? 'none'}`,
         planId: plan.id ?? 'unknown',

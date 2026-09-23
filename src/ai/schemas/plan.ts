@@ -123,12 +123,22 @@ export function createPlan(goal: string, steps: Array<Omit<PlanStep, 'status'> &
 }
 
 /**
- * Check if all steps are in a terminal state (done or failed).
+ * Check if the plan's execution is terminal.
+ *
+ * Phase 22: a PLAN-LEVEL terminal status (completed / failed-partial /
+ * cancelled) is terminal on its own — a cancelled plan with un-
+ * dispatched "pending" steps must not be treated as resumable.
+ * When the status is still non-terminal, the per-step check applies.
  */
 export function isPlanTerminal(plan: Plan): boolean {
-  return plan.steps.every(
-    (s) => s.status === 'done' || s.status === 'failed'
-  );
+  if (
+    plan.status === 'completed' ||
+    plan.status === 'failed-partial' ||
+    plan.status === 'cancelled'
+  ) {
+    return true;
+  }
+  return plan.steps.every((s) => s.status === 'done' || s.status === 'failed');
 }
 
 /**
