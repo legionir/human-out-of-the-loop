@@ -9,3 +9,10 @@ export {
   type McpServerConfig,
   type McpAuth,
 } from './mcp-server.js';
+export {
+  TaskSchema,
+  TaskStatusSchema,
+  createTaskRecord,
+  type Task,
+  type TaskStatus,
+} from './task.js';

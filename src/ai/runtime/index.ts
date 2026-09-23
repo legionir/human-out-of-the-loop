@@ -18,3 +18,8 @@ export {
   type AgentRunResult,
   type AgentRunOptions,
 } from './agent-runtime.js';
+export {
+  TaskRuntime,
+  type TaskRuntimeConfig,
+  type CreateTaskOptions,
+} from './task-runtime.js';

@@ -212,29 +212,29 @@ pub/sub برای `agent:running`, `agent:tool_call`, `agent:completed`, `agent:e
 
 ---
 
-## [🔴] فاز ۸: Task Runtime — کنترل اجرا، Resource Lock و Concurrency Cap
+## [🟢] فاز ۸: Task Runtime — کنترل اجرا، Resource Lock و Concurrency Cap
 
-### [🔴] گام ۱: مدل داده Task
+### [🟢] گام ۱: مدل داده Task
 
 `Task { id, agentDefinitionOrId, prompt, status, summary, claimedResources?, startedAt, completedAt }`.
 
-### [🔴] گام ۲: TaskRuntime پایه
+### [🟢] گام ۲: TaskRuntime پایه
 
 `createTask`, subscribe به EventBus فاز ۷ برای همگام‌سازی وضعیت، `getStatus`, `getResult`, `getDetails`.
 
-### [🔴] گام ۳: Resource Lock / Claim Mechanism
+### [🟢] گام ۳: Resource Lock / Claim Mechanism
 
 هر Task هنگام ایجاد می‌تواند فهرست منابعی (مثلاً مسیرهای فایلی) را که قرار است لمس کند اعلام کند (`claimedResources: string[]`)؛ TaskRuntime پیش از اجرای هم‌زمان دو Task با overlap در `claimedResources`، یکی را صف (queue) می‌کند نه اینکه هم‌زمان اجرا کند — جلوگیری از race condition روی منابع مشترک.
 
-### [🔴] گام ۴: سقف Concurrency
+### [🟢] گام ۴: سقف Concurrency
 
 پارامتر پیکربندی‌پذیر `maxConcurrentTasks` اضافه شود؛ TaskRuntime هرگز بیش از این سقف را هم‌زمان اجرا نکند؛ Taskهای مازاد در صف بمانند.
 
-### [🔴] گام ۵: چهار Tool کنترلی برای Main Agent
+### [🟢] گام ۵: چهار Tool کنترلی برای Main Agent
 
 `create_task`, `get_agent_status`, `get_agent_result`, `get_task_details` — با `tool()` و `inputSchema` مناسب، در ToolRegistry به‌عنوان دسته‌ی کنترلی (خارج از `allowedTools` عمومی Personaهای Sub-Agent).
 
-### [🔴] گام ۶: تست واحد
+### [🟢] گام ۶: تست واحد
 
 تست lock: دو Task با `claimedResources` هم‌پوشان نباید هم‌زمان اجرا شوند؛ تست سقف concurrency با تعداد Task بیشتر از سقف؛ تست چرخه‌ی وضعیت.
 
@@ -691,3 +691,30 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `tsc --noEmit`: ✅
   - `vitest run`: ✅ ۱۳۳ تست (۸ فایل) — فاز ۷ شامل ۱۵ تست: ۴ EventBus (matching, wildcard *, unsubscribe, error resilience), ۴ success (compact result with usage totalTokens 195, event sequence running→completed, tool_call name only no args, summary truncated <600 for 2000 chars), ۶ error (provider error no crash, emits error event, timeout 100ms with 5s mock, auth error, sequence running→error no completed, toolsUsed array on partial), ۱ Law14 (no raw args/results like /etc/passwd, SECRET_DATA_HERE in events).
   - معیار پذیرش: run با mock خروجی معتبر شامل usage، توالی صحیح، در خطا crash نمی‌کند، context خام نشت نمی‌کند (compact only) — همگی تأیید.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۸ (Task Runtime + Resource Lock + Concurrency)
+
+- **وضعیت:** فاز ۸ از 🔴 به 🟢؛ هر شش گام 🟢.
+- **پیاده‌سازی:**
+  - `src/ai/schemas/task.ts`: `TaskStatusSchema` enum pending|running|completed|failed|cancelled, `TaskSchema` با `id, agentDefinitionOrId, prompt, status default pending, summary?, result?, claimedResources default [], usage?, errors default [], failureType?, createdAt, startedAt?, completedAt?, planStepId?`, و `createTaskRecord` factory.
+  - `schemas/index.ts` export Task.
+  - `src/ai/runtime/task-runtime.ts`:
+    - `ResourceLockManager`: `Map resource→taskId`, `tryAcquire` all-or-nothing, `release`, `hasConflict`, `getLockedResources`.
+    - `TaskRuntime`: `tasks Map id→Task`, `agents Map id→ResolvedAgent`, `runningPromises Map`, `config maxConcurrentTasks default 5`, `eventBus` (global), `agentRuntime` singleton, subscribe `*` → `handleAgentEvent` (sync status running). `createTask` → uuid `task_<8chars>`, `createTaskRecord`, `agents.set`, `scheduleNext`. `scheduleNext`: `availableSlots = maxConcurrent - runningCount`, pending filter, `hasConflict` check → skip, `tryAcquire` + status running + startedAt + fire-and-forget `runtime.run().then(handleRunResult)`. `handleRunResult`: release locks, delete promise, set completed/failed + summary/result/usage/errors/failureType + completedAt, `scheduleNext`. `getStatus/getResult/getDetails/getAllTasks/getRunningCount/getPendingCount`, `waitForAll` loop until no running+pending (handles queued tasks that start after completion), `cancelTask` pending→cancelled, running→cancelled+release+scheduleNext, `destroy` unsubscribe.
+  - `task-control-tools.ts`: چهار Tool کنترلی با `inputSchema`:
+    - `create_task` (placeholder برای Phase 15, returns pending_{agentId}_{timestamp})
+    - `get_agent_status` → status+summary یا TASK_NOT_FOUND
+    - `get_agent_result` → اگر pending/running → status+message result null (no throw Law14), اگر completed/failed → summary/result/usage/errors/failureType
+    - `get_task_details` → full record truncated prompt 500
+  - `task-control-bootstrap.ts`: `bootstrapTaskControlTools` idempotent category control.
+  - Barrelها: `implementations/index.ts`, `tools/index.ts`, `runtime/index.ts` به‌روزرسانی.
+- **اصلاح حداقلی:**
+  - `uuid` dependency اضافه شد (۱۱.۰.۰ + @types/uuid ۱۰) چون کد ارسالی `v4` از `uuid` استفاده می‌کند و در package.json نبود.
+  - `parameters` → `inputSchema` در چهار Tool کنترلی (AI SDK v7).
+  - `waitForAll` در کد ارسالی فقط `Promise.allSettled(runningPromises)` می‌کرد — برای تسک‌های queued به‌دلیل concurrency cap یا resource lock، پس از اتمام اولین batch برمی‌گشت و تسک‌های pending را رها می‌کرد (تست‌های resource lock و concurrency cap fail می‌شدند). به loop تا quiescent (no running+pending) تغییر یافت تا تمام queued tasks اجرا شوند.
+  - `vi.mock('ai', () => ({ generateText, tool }))` در phase8.test.ts باعث می‌شد `tool()` واقعی mock شود و `createGetAgentStatusTool` → `tool()` → undefined → `execute` undefined (7 تست fail). به `vi.mock` با `importActual` و فقط `generateText: vi.fn()` تغییر یافت تا `tool` واقعی باقی بماند. همین fix برای phase7.test.ts نیز اعمال شد.
+  - تست‌های کنترلی از `require('../tools/implementations/task-control-tools')` (CommonJS) به `await import(...js)` (ESM) تغییر یافتند.
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۱۴۹ تست (۹ فایل) — فاز ۸ شامل ۱۶ تست: ۵ lifecycle (taskId format, pending→running→completed with usage, failed technical, getStatus running/completed, running result no throw), ۳ resource lock (overlapping → maxConcurrent 1, non-overlapping → 2, no claimed → 3 concurrent), ۲ concurrency cap (cap 2 with 5 tasks → maxConcurrent ≤2 all completed, cap 1 sequential startTimes), ۴ control tools (status existing, status not found, result running returns null not throw, details full record with claimedResources+usage), ۲ cancellation (pending cancelled, completed cannot cancel).
+  - معیار پذیرش: منابع مشترک هم‌زمان اجرا نمی‌شوند, سقف concurrency رعایت می‌شود, چهار Tool کنترلی کار می‌کنند, get_result قبل از تکمیل throw نمی‌کند — همگی تأیید.
