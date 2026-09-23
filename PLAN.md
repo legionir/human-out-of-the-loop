@@ -485,17 +485,17 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
 
 ---
 
-## [🔴] فاز ۱۷: مستندسازی و تحویل نهایی
+## [🟢] فاز ۱۷: مستندسازی و تحویل نهایی
 
-### [🔴] گام ۱: README معماری
+### [🟢] گام ۱: README معماری
 
 مستندسازی معماری نهایی شامل: لایه‌ها، جریان Planning→PlanRuntime→Review، تفاوت Persona/Skill/Tool، مدل authorization (`allowedTools`)، مدل MCP integration.
 
-### [🔴] گام ۲: راهنمای افزودن Persona/Skill/Tool/Agent/MCP Server جدید
+### [🟢] گام ۲: راهنمای افزودن Persona/Skill/Tool/Agent/MCP Server جدید
 
 راهنمای گام‌به‌گام، شامل نحوه‌ی تنظیم `allowedTools` برای Personaهای جدید و نحوه‌ی افزودن یک MCP server جدید در `registry/mcp-servers/`.
 
-### [🔴] گام ۳: مستندسازی پیکربندی
+### [🟢] گام ۳: مستندسازی پیکربندی
 
 تمام متغیرهای محیطی (providerها، credential MCP)، سقف‌های پیکربندی‌پذیر (`maxConcurrentTasks`، سقف per-provider، سقف re-planning، سقف زمانی timeout، سقف iteration کلی PlanRuntime) در یک مکان مرکزی مستند شوند.
 
@@ -921,4 +921,62 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `vitest run`: ✅ ۳۳۴ تست (۲۰ فایل) — شامل ۴۹ تست hardening جدید (cross-registry ۹ + edge-cases ۱۳ + security ۱۴ + multi-perspective ۱۳) + ۲۸۵ قبلی.
   - معیار پذیرش فاز ۱۶: تمام تست‌ها سبز, edge-case بدون crash, path traversal محافظت‌شده (PATH_TRAVERSAL_BLOCKED), credential redaction (ObservabilityLogger + MCP sanitise + streaming no args), authorization در هر دو مسیر static+dynamic (reviewer file_management write_file filtered + architect write_file denied + coder delegate_task denied + wildcard * bypass + empty [] no tools), بازبینی چندمنظره Architect/QA/Security/DevOps/Law17 — همگی تأیید.
   - PR #1 به‌روزرسانی خواهد شد با این commit.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۱۷ (مستندسازی و تحویل نهایی)
+
+- **وضعیت:** فاز ۱۷ از 🔴 به 🟢؛ هر سه گام 🟢 — پروژه کامل ۱۷/۱۷ فاز.
+- **پیاده‌سازی:**
+  - `src/ai/README.md` (معماری):
+    - دیاگرام ASCII کامل: User → Orchestrator → Planning/PlanRuntime/Review → Acceptance → TaskRuntime → AgentRuntime → AI SDK + Operational Layers
+    - جدول لایه‌ها (Registry, Agent Factory, Planning, PlanRuntime, Acceptance, Review, Task Runtime, Agent Runtime, Operational) با فاز
+    - جدول Persona/Skill/Tool تفاوت (قانون ۱۲) با مثال‌ها
+    - مدل Authorization: allowedTools صریح, دو نقطه بررسی Factory+delegate_task, wildcard *
+    - مدل MCP Integration: registry/mcp-servers/*.json, credential env var only, unavailable not crash, source mcp
+    - جریان داده: assess → clarification → generatePlan → feasibility → cycles → confirm (ONLY human touchpoint) → execute loop ready→prioritize→dispatch→Task→Agent→AI SDK→Acceptance→re-plan auto → review → report
+    - اصل Human-Out-Of-Loop: شکست فنی retry, کیفی re-planning, rate-limit backoff, تنها cancellation مجاز
+  - `src/ai/CONTRIBUTING.md` (راهنمای افزودن):
+    - Tool جدید: implementations/my-tool.ts با tool()+zod+validateWorkspacePath, registry/tools/my_tool.json metadata source local modulePath category, bootstrap.ts IMPLEMENTATIONS map + orchestrator direct register, allowedTools در personas
+    - Skill جدید: registry/skills/my_skill/{skill.json, SKILL.md} با id/name/version/instructions/tools/priority/description, SKILL.md Purpose/Process/Tools, بدون تغییر کد auto-load
+    - Persona جدید: registry/personas/my_persona.json id/name/system/allowedTools/description, توضیح empty [] vs * vs explicit, دو نقطه بررسی static/dynamic
+    - Agent جدید: registry/agents.json entry id/name/personaId/skillIds/modelId/description, cross-validation validateAll, context budget trimming
+    - MCP Server جدید: registry/mcp-servers/my_server.json id/name/transport/url/auth bearer/api-key/none/toolPrefix/connectTimeoutMs, env var export, بدون تغییر کد auto bootstrap, failure unavailable, sanitiseError ***REDACTED***, getToolsByIds uniform, mock test example, نکات امنیتی path-security + credential + allowedTools + redaction
+  - `src/ai/CONFIGURATION.md` (پیکربندی):
+    - جدول env vars: OPENAI_API_KEY, ANTHROPIC_API_KEY, OPENAI_BASE_URL, LOCAL_MODEL_BASE_URL, MCP token/key vars
+    - جدول سقف‌ها: maxConcurrentTasks 5, maxConcurrentPerProvider 5, maxReplanningAttempts 3, agentTimeoutMs 120s, maxRetries 3, baseBackoffMs 1s, maxBackoffMs 30s, maxDelegationDepth 1, maxSteps 20, contextBudgetChars 120k, connectTimeoutMs 10s, additionalTasksCeiling 2
+    - فرمول backoff delay = min(base*2^attempt+jitter, max) + isRateLimitError + isRecoverable لیست
+    - ساختار فایل‌های registry/ با نمونه‌های کامل JSON برای persona/skill/tool/model/mcp/agent
+    - دایرکتوری runtime .ai-runtime/ plans/sessions/observability.jsonl با توضیح persistent false Memory vs true File + ObservabilityLogger append-only + redact list
+    - جریان پیکربندی در Orchestrator با کد نمونه TypeScript
+    - Scope Audit جدول نگاشت ۱۸ نیازمندی به فازها (MCP 2, context 5, dynamic agent 6, planning 9, auth 4,5,6,9,16, feasibility 9, per-step quality 11, resource lock 8, persistence 10,14, priority 10, qualitative failure 11, ابهام‌زدایی 9, streaming 13, cancellation 13, concurrency/rate-limit 8,13, usage 13, session 14, observability 14, human-out-of-loop 9,10,16) — همه نگاشت شده ✅
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۳۳۴ تست سبز (۲۰ فایل) — بدون تغییر نسبت به فاز ۱۶
+  - معیار پذیرش فاز ۱۷:
+    - سند معماری کامل و منطبق با پیاده‌سازی نهایی (README.md دیاگرام + لایه‌ها + جریان + Persona/Skill/Tool + auth + MCP) 🟢
+    - راهنمای افزودن اجزا (CONTRIBUTING.md با مثال گام‌به‌گام برای Tool/Skill/Persona/Agent/MCP) قابل اجرا بدون خواندن Runtime 🟢
+    - تمام متغیرها/سقف‌ها مستند (CONFIGURATION.md ۳ جدول env vars + ceilings + file structure + .ai-runtime + code sample) 🟢
+    - Scope audit نهایی ۱۸ نیازمندی نگاشت شده 🟢
+  - وضعیت نهایی پروژه: **۱۷/۱۷ فاز 🟢** — تمام لایه‌ها، تست‌ها، مستندسازی کامل.
+
+## 🏁 پروژه کامل — ۱۷ فاز 🟢
+
+| فاز | عنوان | وضعیت |
+|---|---|---:|
+| ۱ | زیرساخت پایه Registry و Schemaها | 🟢 |
+| ۲ | Tool Registry (محلی + MCP) | 🟢 |
+| ۳ | Skill Registry | 🟢 |
+| ۴ | Persona (با policy) + Model Registry | 🟢 |
+| ۵ | Agent Registry + Factory + Context Budget | 🟢 |
+| ۶ | کاتالوگ پویا + ترکیب پویای Agent | 🟢 |
+| ۷ | Agent Runtime + EventBus | 🟢 |
+| ۸ | Task Runtime + Resource Lock + Concurrency | 🟢 |
+| ۹ | Planning Layer | 🟢 |
+| ۱۰ | PlanRuntime (Human-Out-Of-Loop) | 🟢 |
+| ۱۱ | Per-Step Acceptance Check | 🟢 |
+| ۱۲ | Review نهایی + گزارش | 🟢 |
+| ۱۳ | Streaming/Cancellation/Rate-limit/Usage | 🟢 |
+| ۱۴ | Session persistence + Observability | 🟢 |
+| ۱۵ | یکپارچه‌سازی سرتاسری | 🟢 |
+| ۱۶ | تست جامع و Hardening | 🟢 |
+| ۱۷ | مستندسازی و تحویل | 🟢 |
 
