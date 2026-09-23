@@ -4,5 +4,6 @@
   "version": "1.0.0",
   "instructions": "SKILL.md",
   "tools": ["read_file", "write_file", "search_code"],
+  "priority": 60,
   "description": "Reads, writes, and searches files in the workspace"
 }

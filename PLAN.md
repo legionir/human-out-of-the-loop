@@ -137,25 +137,25 @@ ToolRegistry هم Toolهای محلی و هم Toolهای یک MCP server mock ر
 
 ---
 
-## [🔴] فاز ۵: Agent Registry، Agent Factory و مدیریت Context/Token Budget
+## [🟢] فاز ۵: Agent Registry، Agent Factory و مدیریت Context/Token Budget
 
-### [🔴] گام ۱: AgentRegistry داده‌محور
+### [🟢] گام ۱: AgentRegistry داده‌محور
 
 `registry/agents.json` + اعتبارسنجی cross-registry ارجاعات persona/skills/tools/model.
 
-### [🔴] گام ۲: createAgent (Agent Factory) با اعمال `allowedTools`
+### [🟢] گام ۲: createAgent (Agent Factory) با اعمال `allowedTools`
 
 ترکیب `persona.system` + `skill.instructions`های مرتبط؛ تبدیل toolIds به آبجکت tools واقعی از ToolRegistry — **اما پیش از ساخت نهایی، هر toolId درخواستی باید در `persona.allowedTools` نیز باشد؛ در غیر این صورت آن Tool از مجموعه‌ی نهایی حذف و یک warning ساختاریافته (نه throw خاموش) ثبت شود.**
 
-### [🔴] گام ۳: مدیریت Context/Token Budget در ترکیب instructions
+### [🟢] گام ۳: مدیریت Context/Token Budget در ترکیب instructions
 
 تابعی نوشته شود که پیش از ساخت نهایی Agent، طول ترکیب‌شده‌ی `persona.system + skills.instructions` را نسبت به سقف context مدل انتخابی (از ModelRegistry) بسنجد؛ در صورت عبور از سقف، بر اساس اولویت (persona.system همیشه کامل حفظ شود؛ instructions هر Skill بر اساس یک فیلد `priority` اختیاری در `skill.json` خلاصه/حذف شود از کم‌اولویت به پراولویت) trimming انجام و در لاگ ثبت شود کدام بخش کوتاه شده است.
 
-### [🔴] گام ۴: caching نمونه‌ی Agentها
+### [🟢] گام ۴: caching نمونه‌ی Agentها
 
 Cache برای agentId با تعریف ثابت (لغو cache در صورت تغییر تعریف Registry).
 
-### [🔴] گام ۵: تست واحد
+### [🟢] گام ۵: تست واحد
 
 تست رد‌شدن Tool غیرمجاز از ترکیب نهایی؛ تست trimming زمانی که مجموع instructions از یک سقف آزمایشی کوچک رد می‌شود.
 
@@ -629,3 +629,27 @@ Plan با صفر گام معتبر، Plan با تمام گام‌های failed،
   - `src/ai/registries/index.ts`, `src/ai/personas/index.ts`, `src/ai/models/index.ts` به‌روزرسانی.
 - **اصلاح حداقلی:** `require` → `createRequire` برای ESM، تست‌های `phase4.test.ts` با `fileURLToPath` و mock provider (MockLanguageModelV4-like minimal mock با `specificationVersion: v1`, `doGenerate/doStream` vi.fn()) بدون شبکه.
 - **راستی‌آزمایی:** Persona ۴تایی با `allowedTools`, ModelRegistry با mock provider، `resolve` cache، `loadConfigsFromDirectory` ۳ config، `resolveAll`; ۲۰ تست سبز; `tsc` بدون خطا.
+
+## ۲۰۲۶-۰۹-۲۳ — اجرای فاز ۵ (Agent Registry + Factory + Context Budget)
+
+- **وضعیت:** فاز ۵ از 🔴 به 🟢؛ هر پنج گام 🟢.
+- **پیش‌نیاز — SkillSchema priority:**
+  - `src/ai/schemas/skill.ts` فیلد `priority: number 0–100 default 50` اضافه شد (طبق فاز ۵ گام ۳).
+  - سه فایل `registry/skills/*/skill.json` به‌روزرسانی: `code_analysis` ۷۰، `file_management` ۶۰، `git_operations` ۳۰.
+- **پیاده‌سازی:**
+  - `registry/agents.json`: ۴ Agent نمونه (`coder` → coder + [code_analysis,file_management] + gpt-4o, `researcher` → architect + [code_analysis,git_operations], `reviewer` → reviewer + [code_analysis] + claude-sonnet, `planner` → planner + []).
+  - `src/ai/registries/agent-registry.ts`: `AgentRegistry` با `Registry<AgentDefinition>`, `loadFromFile` (array یا single), `validateAgent` (بررسی persona/skill/model/tool via skill.resolvedTools), `validateAll`.
+  - `src/ai/agents/agent-factory.ts`:
+    - `createAgent`: resolve persona/skills/model (hasConfig check قبل از get برای پیام خطای سازگار با تست), جمع‌آوری `resolvedTools` از skills، فیلتر با `personaAllowsTool` (wildcard *)، `toolWarnings` ساختاریافته `{ toolId, skillId, reason: not-in-allowedTools }`, `getToolsByIds` فقط برای allowedها, تعیین budget از `KNOWN_MODEL_LIMITS` یا `config.maxContextTokens` یا ۳۰k default * ۴ chars/token, `buildSystemPrompt` که persona.system را هرگز trim نمی‌کند، skills را بر اساس priority نزولی نگه می‌دارد و کم‌اولویت‌ها را truncate (`[... truncated due to context budget ...]`) یا skip می‌کند و `trimmingLog` می‌سازد.
+    - `AgentCache`: Map `id → { def, resolved }`, `get` با `JSON.stringify` مقایسه برای invalidation, `set/invalidate/clear/size`, و `createAgentCached`.
+  - `src/ai/agents/index.ts` و `src/ai/registries/index.ts` به‌روزرسانی برای export.
+- **اصلاح حداقلی:**
+  - `SkillSchema` priority اضافه شد (الزامی برای trimming).
+  - تست `phase5.test.ts` از `require('../registries/skill-registry')` به `import { loadSkillsFromDirectory }` تبدیل شد (ESM).
+  - `fakeTool` از `parameters` به `inputSchema` تغییر یافت.
+  - `ModelRegistry.get` در `createAgent` قبل از throw، `hasConfig` چک می‌کند تا پیام `[AgentFactory] Model "... not found"` تولید شود (تست `throws on missing model` در ابتدا fail می‌شد چون `ModelRegistry` مستقیم throw می‌کرد با پیام متفاوت).
+  - `CrossRegistryRefs` import در تست از `agent-factory` به `agent-registry` منتقل شد (TS2459).
+- **راستی‌آزمایی:**
+  - `tsc --noEmit`: ✅
+  - `vitest run`: ✅ ۱۰۲ تست (۲۷+۱۲+۱۷+۹+۲۰+۱۷) — فاز ۵ شامل ۱۷ تست: ۴ AgentRegistry (load, missing persona/skill, valid), ۶ createAgent (combined instructions, allowedTools include, filter with warning, architect cannot use write_file, missing persona/model), ۴ trimming (no trim, low-priority first, never trim persona, log records), ۳ cache (cache hit, invalidation on change, manual invalidate).
+  - معیار پذیرش: ترکیب صحیح و فیلترشده طبق allowedTools, trimming بدون از‌دست‌رفتن persona.system و قابل‌ردیابی در log, caching درست — همگی تأیید.

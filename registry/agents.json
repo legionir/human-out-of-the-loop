@@ -1,1 +1,34 @@
-[]
+[
+  {
+    "id": "coder",
+    "name": "Coder Agent",
+    "personaId": "coder",
+    "skillIds": ["code_analysis", "file_management"],
+    "modelId": "gpt-4o",
+    "description": "Full-stack coding agent with analysis and file management skills"
+  },
+  {
+    "id": "researcher",
+    "name": "Researcher Agent",
+    "personaId": "architect",
+    "skillIds": ["code_analysis", "git_operations"],
+    "modelId": "gpt-4o",
+    "description": "Architecture research agent that analyses code and git state"
+  },
+  {
+    "id": "reviewer",
+    "name": "Reviewer Agent",
+    "personaId": "reviewer",
+    "skillIds": ["code_analysis"],
+    "modelId": "claude-sonnet",
+    "description": "Code review agent focused on quality and security"
+  },
+  {
+    "id": "planner",
+    "name": "Planner Agent",
+    "personaId": "planner",
+    "skillIds": [],
+    "modelId": "gpt-4o",
+    "description": "Task decomposition and planning agent"
+  }
+]

@@ -19,4 +19,13 @@ export {
   type SkillRegistryOptions,
 } from './skill-registry.js';
 export { PersonaRegistry } from './persona-registry.js';
-export { ModelRegistry, type ProviderFactory, type ResolvedModel } from './model-registry.js';
+export {
+  ModelRegistry,
+  type ProviderFactory,
+  type ResolvedModel,
+} from './model-registry.js';
+export {
+  AgentRegistry,
+  type CrossRegistryRefs,
+  type AgentValidationResult,
+} from './agent-registry.js';

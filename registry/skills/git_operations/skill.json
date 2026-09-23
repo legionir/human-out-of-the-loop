@@ -4,5 +4,6 @@
   "version": "1.0.0",
   "instructions": "SKILL.md",
   "tools": ["git_status"],
+  "priority": 30,
   "description": "Inspects and reports on the state of the git working tree"
 }

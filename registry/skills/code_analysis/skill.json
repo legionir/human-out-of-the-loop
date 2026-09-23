@@ -4,5 +4,6 @@
   "version": "1.0.0",
   "instructions": "SKILL.md",
   "tools": ["read_file", "search_code"],
+  "priority": 70,
   "description": "Analyses source code for bugs, anti-patterns, and quality issues"
 }
