@@ -11,10 +11,17 @@ import { PersonaRegistry } from '../registries/persona-registry';
 import { SkillRegistry, loadSkillsFromDirectory } from '../registries/skill-registry';
 import { ModelRegistry } from '../registries/model-registry';
 import { checkAuthorization } from '../tools/implementations/delegate-task';
-import { readFileTool } from '../tools/implementations/read-file';
-import { writeFileTool } from '../tools/implementations/write-file';
-import { searchCodeTool } from '../tools/implementations/search-code';
-import { gitStatusTool } from '../tools/implementations/git-status';
+import { createReadFileTool } from '../tools/implementations/read-file';
+import { createWriteFileTool } from '../tools/implementations/write-file';
+import { createSearchCodeTool } from '../tools/implementations/search-code';
+import { createGitStatusTool } from '../tools/implementations/git-status';
+
+// Phase 18: filesystem tools are factories bound to a workspace root.
+const TEST_ROOT = process.cwd();
+const readFileTool = createReadFileTool(TEST_ROOT);
+const searchCodeTool = createSearchCodeTool(TEST_ROOT);
+const writeFileTool = createWriteFileTool(TEST_ROOT);
+const gitStatusTool = createGitStatusTool(TEST_ROOT);
 import { bootstrapCatalogTools } from '../tools/catalog-bootstrap';
 
 // ─── Path Traversal Protection ───────────────────────────────────
@@ -59,14 +66,14 @@ describe('Path Traversal Protection', () => {
     expect(result.safe).toBe(true);
   });
 
-  it('validateWorkspacePath uses process.cwd() as default', () => {
-    const result = validateWorkspacePath('src/main.ts');
+  it('validateWorkspacePath requires an explicit workspace root (phase 18 — no process.cwd() fallback)', () => {
+    const result = validateWorkspacePath('src/main.ts', workspaceRoot);
     expect(result.safe).toBe(true);
-    expect(result.resolvedPath).toContain('src/main.ts');
+    expect(result.resolvedPath).toBe('/home/user/project/src/main.ts');
   });
 
-  it('validateWorkspacePath blocks traversal relative to cwd', () => {
-    const result = validateWorkspacePath('../../../../etc/passwd');
+  it('validateWorkspacePath blocks traversal relative to the given root', () => {
+    const result = validateWorkspacePath('../../../../etc/passwd', workspaceRoot);
     expect(result.safe).toBe(false);
   });
 });

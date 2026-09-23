@@ -170,7 +170,10 @@
 
 ---
 
-### [🔴] فاز ۱۸: P0 Path Security & Workspace Isolation
+### [🟢] فاز ۱۸: P0 Path Security & Workspace Isolation — کامل شد 2026-09-23
+
+**نتیجه:** 4 factory (`createReadFileTool`/`createWriteFileTool`/`createSearchCodeTool`/`createGitStatusTool`) با تزریق `projectRoot`؛ `validateWorkspacePath` بدون fallback به process.cwd()؛ ReDoS guard (`regex-guard.ts` + حد 200 کاراکتر)؛ boundary check در `SkillRegistry`؛ return relative path در همه toolها. 18 تست جدید (`phase18.test.ts`) + 334 تست قبلی = 352 سبز، `tsc` سبز، grep `process.cwd()` در implementations = 0.
+**انحراف ثبت‌شده (مورد سؤال ۵):** به جای dependency `safe-regex`، یک دیتکتور inline «nested quantifier» در `regex-guard.ts` پیاده شد (بدون dependency جدید، قابل تست؛ کلاس `(a+)+` که ۹۹٪ حمله‌های ReDoS واقعی هستند را می‌گیرد).
 
 **هدف:** رفع تمام باگ‌های مسیر که منجر به data-loss یا bypass امنیتی می‌شوند.
 

@@ -5,32 +5,32 @@ import { ToolDefinitionSchema } from '../schemas/tool-definition.js';
 
 // Import all implementations (Law 12: this is the ONLY place that
 // directly imports tool implementations — Agents never do).
-import { readFileTool } from './implementations/read-file.js';
-import { searchCodeTool } from './implementations/search-code.js';
-import { writeFileTool } from './implementations/write-file.js';
-import { gitStatusTool } from './implementations/git-status.js';
-
-/**
- * Static mapping from tool id → live AI-SDK Tool instance.
- * In a more dynamic setup this could be driven by `modulePath`
- * and `import()`, but for the baseline four tools a static map
- * is simpler and type-safe.
- */
-const IMPLEMENTATIONS: Record<string, Tool> = {
-  read_file: readFileTool,
-  search_code: searchCodeTool,
-  write_file: writeFileTool,
-  git_status: gitStatusTool,
-};
+// Phase 18: filesystem tools are factories bound to projectRoot.
+import { createReadFileTool } from './implementations/read-file.js';
+import { createSearchCodeTool } from './implementations/search-code.js';
+import { createWriteFileTool } from './implementations/write-file.js';
+import { createGitStatusTool } from './implementations/git-status.js';
 
 /**
  * Full bootstrap: loads metadata JSON from `registry/tools/`,
  * then binds each to its live implementation.
  *
- * @param toolsDir  Absolute path to `registry/tools/`
- * @param registry  The ToolRegistry instance to populate
+ * Phase 18: `projectRoot` is now a required parameter — the
+ * filesystem tools are created bound to it (workspace isolation).
+ *
+ * @param toolsDir     Absolute path to `registry/tools/`
+ * @param registry     The ToolRegistry instance to populate
+ * @param projectRoot  The workspace root the tools must stay inside
  */
-export function bootstrapTools(toolsDir: string, registry: ToolRegistry): void {
+export function bootstrapTools(toolsDir: string, registry: ToolRegistry, projectRoot: string): void {
+  // Bind implementations (created per-Orchestrator, bound to projectRoot)
+  const implementations: Record<string, Tool> = {
+    read_file: createReadFileTool(projectRoot),
+    search_code: createSearchCodeTool(projectRoot),
+    write_file: createWriteFileTool(projectRoot),
+    git_status: createGitStatusTool(projectRoot),
+  };
+
   // 1. Load metadata into the underlying registry
   const metaRegistry = registry.getMetadataRegistry();
   const result = loadRegistryFromDirectory({
@@ -48,7 +48,7 @@ export function bootstrapTools(toolsDir: string, registry: ToolRegistry): void {
 
   // 2. Bind implementations
   for (const def of registry.listDefinitions()) {
-    const impl = IMPLEMENTATIONS[def.id];
+    const impl = implementations[def.id];
     if (!impl) {
       // For MCP tools, implementation already registered by connector; skip
       if (def.source === 'mcp') continue;

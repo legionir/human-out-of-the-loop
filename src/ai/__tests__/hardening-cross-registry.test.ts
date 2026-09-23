@@ -9,10 +9,17 @@ import { AgentRegistry } from '../registries/agent-registry';
 import { createAgent } from '../agents/agent-factory';
 import { personaAllowsTool } from '../schemas/persona';
 import { bootstrapCatalogTools } from '../tools/catalog-bootstrap';
-import { readFileTool } from '../tools/implementations/read-file';
-import { searchCodeTool } from '../tools/implementations/search-code';
-import { writeFileTool } from '../tools/implementations/write-file';
-import { gitStatusTool } from '../tools/implementations/git-status';
+import { createReadFileTool } from '../tools/implementations/read-file';
+import { createSearchCodeTool } from '../tools/implementations/search-code';
+import { createWriteFileTool } from '../tools/implementations/write-file';
+import { createGitStatusTool } from '../tools/implementations/git-status';
+
+// Phase 18: filesystem tools are factories bound to a workspace root.
+const TEST_ROOT = process.cwd();
+const readFileTool = createReadFileTool(TEST_ROOT);
+const searchCodeTool = createSearchCodeTool(TEST_ROOT);
+const writeFileTool = createWriteFileTool(TEST_ROOT);
+const gitStatusTool = createGitStatusTool(TEST_ROOT);
 
 const PERSONAS_DIR = path.resolve(__dirname, '../../../registry/personas');
 const SKILLS_DIR = path.resolve(__dirname, '../../../registry/skills');

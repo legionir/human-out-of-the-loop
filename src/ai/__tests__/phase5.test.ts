@@ -9,10 +9,18 @@ import { ToolRegistry } from '../registries/tool-registry.js';
 import { ModelRegistry, type ProviderFactory } from '../registries/model-registry.js';
 import { createAgent, createAgentCached, AgentCache } from '../agents/agent-factory.js';
 import type { CrossRegistryRefs } from '../registries/agent-registry.js';
-import { readFileTool } from '../tools/implementations/read-file.js';
-import { searchCodeTool } from '../tools/implementations/search-code.js';
-import { writeFileTool } from '../tools/implementations/write-file.js';
-import { gitStatusTool } from '../tools/implementations/git-status.js';
+import { createReadFileTool } from '../tools/implementations/read-file.js';
+import { createSearchCodeTool } from '../tools/implementations/search-code.js';
+import { createWriteFileTool } from '../tools/implementations/write-file.js';
+import { createGitStatusTool } from '../tools/implementations/git-status.js';
+
+// Phase 18: filesystem tools are factories bound to a workspace root.
+// Tests run from the repo root, so binding to process.cwd() keeps behavior identical.
+const TEST_ROOT = process.cwd();
+const readFileTool = createReadFileTool(TEST_ROOT);
+const searchCodeTool = createSearchCodeTool(TEST_ROOT);
+const writeFileTool = createWriteFileTool(TEST_ROOT);
+const gitStatusTool = createGitStatusTool(TEST_ROOT);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);

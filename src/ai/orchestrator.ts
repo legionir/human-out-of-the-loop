@@ -36,10 +36,10 @@ import type { DelegateTaskDeps } from './tools/implementations/delegate-task.js'
 import { bootstrapTaskControlTools } from './tools/task-control-bootstrap.js';
 import { bootstrapMcpServers } from './tools/mcp-bootstrap.js';
 
-import { readFileTool } from './tools/implementations/read-file.js';
-import { searchCodeTool } from './tools/implementations/search-code.js';
-import { writeFileTool } from './tools/implementations/write-file.js';
-import { gitStatusTool } from './tools/implementations/git-status.js';
+import { createReadFileTool } from './tools/implementations/read-file.js';
+import { createSearchCodeTool } from './tools/implementations/search-code.js';
+import { createWriteFileTool } from './tools/implementations/write-file.js';
+import { createGitStatusTool } from './tools/implementations/git-status.js';
 
 import {
   openaiProviderFactory,
@@ -239,10 +239,12 @@ export class Orchestrator {
       { id: 'git_status', name: 'Git Status', description: 'Runs git status', source: 'local' as const, modulePath: './git-status', category: 'git' },
     ];
     for (const d of localToolDefs) this.toolRegistry.registerDefinition(d);
-    this.toolRegistry.registerImplementation('read_file', readFileTool);
-    this.toolRegistry.registerImplementation('search_code', searchCodeTool);
-    this.toolRegistry.registerImplementation('write_file', writeFileTool);
-    this.toolRegistry.registerImplementation('git_status', gitStatusTool);
+    // Phase 18 (PATH-01..04): tools are created bound to the
+    // Orchestrator's projectRoot — never to process.cwd().
+    this.toolRegistry.registerImplementation('read_file', createReadFileTool(root));
+    this.toolRegistry.registerImplementation('search_code', createSearchCodeTool(root));
+    this.toolRegistry.registerImplementation('write_file', createWriteFileTool(root));
+    this.toolRegistry.registerImplementation('git_status', createGitStatusTool(root));
 
     await bootstrapMcpServers(
       path.join(registryDir, 'mcp-servers'),

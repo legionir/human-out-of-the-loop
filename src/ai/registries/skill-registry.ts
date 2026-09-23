@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createRegistry, Registry } from './base-registry.js';
 import { SkillSchema, type Skill } from '../schemas/skill.js';
 import type { ToolRegistry } from './tool-registry.js';
+import { isPathWithinWorkspace } from '../tools/implementations/path-security.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -110,6 +111,16 @@ export class SkillRegistry {
     // Case 1: reference to a markdown file
     if (instr.endsWith('.md')) {
       const mdPath = path.resolve(skillDir, instr);
+      // Phase 18 (PATH-05): the instructions file must stay inside the
+      // skill's own directory — a crafted skill.json must not be able
+      // to read arbitrary files via `../../etc/passwd.md`.
+      const boundary = isPathWithinWorkspace(mdPath, skillDir);
+      if (!boundary.safe) {
+        throw new Error(
+          `[SkillRegistry] Skill "${skill.id}" instructions path "${instr}" ` +
+            `resolves outside the skill directory (path traversal blocked).`
+        );
+      }
       if (!fs.existsSync(mdPath)) {
         throw new Error(
           `[SkillRegistry] Skill "${skill.id}" references instructions file ` +
