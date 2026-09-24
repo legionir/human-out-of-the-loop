@@ -8,6 +8,8 @@
  *   human-out-of-the-loop plans list|show|cancel|resume
  *   human-out-of-the-loop mcp list|test <id>
  *   human-out-of-the-loop models|personas|skills|tools [--json]
+ *   human-out-of-the-loop usage [--plan X] [--json]
+ *   human-out-of-the-loop tasks list [--plan X] | tasks show <taskId>
  *   human-out-of-the-loop logs [--plan X] [--tail N] [--follow]
  *
  * The heavy lifting lives in src/ai (the Orchestrator); this layer only
@@ -37,6 +39,8 @@ import {
   skillsCommand,
   toolsCommand,
 } from './cli/commands/registry.js';
+import { usageCommand } from './cli/commands/usage.js';
+import { tasksListCommand, tasksShowCommand } from './cli/commands/tasks.js';
 import { err } from './cli/utils/output.js';
 
 export function createProgram(): Command {
@@ -199,6 +203,49 @@ export function createProgram(): Command {
         json: opts.json === true,
       });
     }));
+
+  // ── usage + tasks (C2) ───────────────────────────────────────
+  program
+    .command('usage')
+    .description('Token usage per plan (from the observability log)')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .option('--plan <planId>', 'show only this plan')
+    .option('--json', 'machine-readable output')
+    .action(async (opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await usageCommand({
+        projectRoot: opts.projectRoot as string | undefined,
+        plan: opts.plan as string | undefined,
+        json: opts.json === true,
+      });
+    });
+
+  const tasksCmd = program
+    .command('tasks')
+    .description('Inspect tasks from the observability log (read-only)');
+
+  tasksCmd
+    .command('list')
+    .description('List tasks (optionally scoped to one plan)')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .option('--plan <planId>', 'only tasks of this plan')
+    .option('--json', 'machine-readable output')
+    .action(async (opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await tasksListCommand({
+        projectRoot: opts.projectRoot as string | undefined,
+        plan: opts.plan as string | undefined,
+        json: opts.json === true,
+      });
+    });
+
+  tasksCmd
+    .command('show <taskId>')
+    .description('Show every log entry for one task')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .action(async (taskId: string, opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await tasksShowCommand(taskId, {
+        projectRoot: opts.projectRoot as string | undefined,
+      });
+    });
 
   program
     .command('logs')

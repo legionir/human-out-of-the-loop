@@ -37,7 +37,7 @@ import { FileSessionStore } from '../../ai/runtime/session-store.js';
 import { FilePlanStore } from '../../ai/runtime/plan-store.js';
 import { loadGlobalConfig, loadDotEnv } from '../../cli/utils/config.js';
 import { followLog } from '../../cli/commands/logs.js';
-import type { Plan } from '../../ai/schemas/plan.js';
+import { createPlan, type Plan } from '../../ai/schemas/plan.js';
 import type { LogEntry } from '../../ai/runtime/observability-logger.js';
 
 const mockGenerateObject = vi.mocked(generateObject);
@@ -733,5 +733,153 @@ describe('C1 — registry introspection (models/personas/skills/tools)', () => {
     expect(code).toBe(1);
     expect(out).toContain('gpt-4o'); // valid entries still shown
     expect(out).toContain('broken.json'); // the bad file is named
+  });
+});
+
+// ─── C2: usage + tasks commands (durable data) ──────────────────
+
+describe('C2 — usage + tasks commands (from the observability log)', () => {
+  let projectRoot: string;
+  const PLAN_A = 'plan_11111111-aaaa-4111-8111-111111111111';
+  const PLAN_B = 'plan_22222222-bbbb-4222-8222-222222222222';
+
+  const step = {
+    id: 'step-1',
+    description: 'do it',
+    dependsOn: [],
+    assignedPersona: 'coder',
+    assignedSkills: [],
+    assignedTools: [],
+    claimedResources: [],
+    acceptanceCriteria: 'done',
+  };
+
+  let epoch = 1_000_000;
+  function entry(
+    partial: Record<string, unknown>,
+  ): string {
+    epoch += 1000;
+    return JSON.stringify({
+      timestamp: new Date(epoch).toISOString(),
+      epochMs: epoch,
+      level: 'info',
+      ...partial,
+    });
+  }
+
+  beforeEach(() => {
+    projectRoot = makeTempProject('phase23-c2-');
+    const runtimeDir = path.join(projectRoot, '.ai-runtime');
+    const store = new FilePlanStore(path.join(runtimeDir, 'plans'));
+    const mkPlan = (id: string, goal: string, status: string): void => {
+      const p = createPlan(goal, [step]);
+      p.id = id;
+      p.status = status as never;
+      store.save(p);
+    };
+    mkPlan(PLAN_A, 'Build a login page', 'completed');
+    mkPlan(PLAN_B, 'Write docs', 'cancelled');
+
+    fs.writeFileSync(
+      path.join(runtimeDir, 'observability.jsonl'),
+      [
+        // Plan A: two completed tasks (100/50/150 + 200/100/300)
+        entry({ planId: PLAN_A, stepId: 'step-1', taskId: 'task_1', eventType: 'task:created', message: 'Agent a started for task "task_1".' }),
+        entry({ planId: PLAN_A, stepId: 'step-1', taskId: 'task_1', eventType: 'task:tool-call', message: 'Tool "read_file" called.', payload: { toolName: 'read_file' } }),
+        entry({ planId: PLAN_A, stepId: 'step-1', taskId: 'task_1', eventType: 'task:completed', message: 'Task "task_1" completed.', payload: { toolsUsed: ['read_file'], usage: { promptTokens: 100, completionTokens: 50, totalTokens: 150 } } }),
+        entry({ planId: PLAN_A, stepId: 'step-2', taskId: 'task_2', eventType: 'task:created', message: 'started' }),
+        entry({ planId: PLAN_A, stepId: 'step-2', taskId: 'task_2', eventType: 'task:completed', message: 'done', payload: { toolsUsed: ['write_file'], usage: { promptTokens: 200, completionTokens: 100, totalTokens: 300 } } }),
+        // Plan B: one failed, one never finished
+        entry({ planId: PLAN_B, stepId: 'step-1', taskId: 'task_3', eventType: 'task:created', message: 'started' }),
+        entry({ planId: PLAN_B, stepId: 'step-1', taskId: 'task_3', eventType: 'task:failed', level: 'error', message: 'Task "task_3" failed: boom', payload: { code: 'TIMEOUT' } }),
+        entry({ planId: PLAN_B, stepId: 'step-2', taskId: 'task_4', eventType: 'task:created', message: 'started' }),
+        // legacy entry without planId (pre-fix log)
+        entry({ taskId: 'task_legacy', eventType: 'task:created', message: 'started' }),
+      ].join('\n') + '\n',
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it('usage lists both plans with per-plan totals + grand total', async () => {
+    const { code, out } = await runCli(['usage', '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    // table cells truncate long ids to 15 chars
+    expect(out).toContain('plan_11111111-a');
+    expect(out).toContain('plan_22222222-b');
+    // Plan A: 100+200 prompt, 50+100 completion, 450 total
+    expect(out).toContain('300');
+    expect(out).toContain('450');
+    expect(out).toContain('Build a login page');
+    expect(out).toMatch(/Totals: 300 prompt \+ 150 completion = 450 tokens across 2 task/);
+  });
+
+  it('usage --plan filters to one plan; unknown plan → exit 1', async () => {
+    const { code, out } = await runCli(['usage', '--plan', PLAN_A, '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    expect(out).toContain('plan_11111111-aaaa');
+    expect(out).not.toContain('plan_22222222-bbbb');
+
+    const bad = await runCli(['usage', '--plan', 'plan_nope', '--project-root', projectRoot]);
+    expect(bad.code).toBe(1);
+  });
+
+  it('usage --json is machine-readable (plans + totals)', async () => {
+    const { code, out } = await runCli(['usage', '--json', '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(out) as {
+      plans: Array<{ planId: string; totalTokens: number }>;
+      totals: { totalTokens: number; taskCount: number };
+    };
+    expect(parsed.plans).toHaveLength(2);
+    const a = parsed.plans.find((p) => p.planId === PLAN_A);
+    expect(a?.totalTokens).toBe(450);
+    expect(parsed.totals).toEqual({
+      promptTokens: 300,
+      completionTokens: 150,
+      totalTokens: 450,
+      taskCount: 2,
+    });
+  });
+
+  it('tasks list shows 5 tasks with derived statuses', async () => {
+    const { code, out } = await runCli(['tasks', 'list', '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    expect(out).toContain('task_1');
+    expect(out).toContain('task_3');
+    expect(out).toContain('task_legacy'); // plan-less legacy entry still listed globally
+    expect(out).toMatch(/5 task\(s\): 2 done, 3 other/);
+  });
+
+  it('tasks list --plan filters (and legacy plan-less entries are excluded)', async () => {
+    const { code, out } = await runCli(['tasks', 'list', '--plan', PLAN_A, '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    expect(out).toContain('task_1');
+    expect(out).toContain('task_2');
+    expect(out).not.toContain('task_3');
+    expect(out).not.toContain('task_legacy');
+  });
+
+  it('tasks list --plan with no matches explains the planId limitation', async () => {
+    const { code, out } = await runCli(['tasks', 'list', '--plan', 'plan_missing', '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    expect(out).toContain('No task events for plan');
+  });
+
+  it('tasks show prints every log entry for one task (incl. payload)', async () => {
+    const { code, out } = await runCli(['tasks', 'show', 'task_1', '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    expect(out).toContain('task:created');
+    expect(out).toContain('task:tool-call');
+    expect(out).toContain('task:completed');
+    expect(out).toContain('read_file');
+  });
+
+  it('tasks show for an unknown task → exit 1', async () => {
+    const { code, errOut } = await runCli(['tasks', 'show', 'task_nope', '--project-root', projectRoot]);
+    expect(code).toBe(1);
+    expect(errOut).toContain('No log entries');
   });
 });

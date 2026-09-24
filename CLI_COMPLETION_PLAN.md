@@ -159,7 +159,7 @@
 | فاز | وضعیت | نتیجه / انحراف |
 |---|---|---|
 | C1 registry list | 🟢 | کامل شد 2026-09-24 — 4 دستور (models/personas/skills/tools) با `--json`؛ ۷ تست جدید؛ انحراف: layout «directory-per-skill» نیاز به لودر جدا داشت |
-| C2 usage + tasks | ⬜ | |
+| C2 usage + tasks | 🟢 | کامل شد 2026-09-24 — `usage [--plan] [--json]` + `tasks list/show` از لاگ پایدار؛ ۸ تست؛ انحراف‌ها ثبت شده (review در plan.json نبود؛ planId روی task-events لاگ گم شده بود → فیکس شد) |
 | C3 run flags | ⬜ | |
 | C4 clarification | ⬜ | |
 | C5 docs + regression | ⬜ | |

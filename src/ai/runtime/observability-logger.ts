@@ -323,6 +323,10 @@ export class ObservabilityLogger {
       case 'agent:running':
         this.log({
           taskId: event.taskId,
+          // C2: task events must carry planId/stepId so per-plan
+          // filtering (CLI `tasks --plan`, usage fallback) works.
+          planId: event.planId,
+          stepId: event.planStepId,
           eventType: 'task:created',
           message: `Agent "${event.agentId}" started for task "${event.taskId}".`,
           level: 'info',
@@ -331,6 +335,8 @@ export class ObservabilityLogger {
       case 'agent:tool_call':
         this.log({
           taskId: event.taskId,
+          planId: event.planId,
+          stepId: event.planStepId,
           eventType: 'task:tool-call',
           message: `Tool "${event.toolName}" called by "${event.agentId}".`,
           level: 'info',
@@ -340,6 +346,8 @@ export class ObservabilityLogger {
       case 'agent:completed':
         this.log({
           taskId: event.taskId,
+          planId: event.planId,
+          stepId: event.planStepId,
           eventType: 'task:completed',
           message: `Task "${event.taskId}" completed. ${event.toolsUsed.length} tools used.`,
           level: 'info',
@@ -352,6 +360,8 @@ export class ObservabilityLogger {
       case 'agent:error':
         this.log({
           taskId: event.taskId,
+          planId: event.planId,
+          stepId: event.planStepId,
           eventType: 'task:failed',
           message: `Task "${event.taskId}" failed: ${event.error.slice(0, 200)}`,
           level: 'error',
