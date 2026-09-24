@@ -40,6 +40,7 @@ import { followLog } from '../../cli/commands/logs.js';
 import { createPlan, type Plan } from '../../ai/schemas/plan.js';
 import { Orchestrator } from '../../ai/orchestrator.js';
 import type { LogEntry } from '../../ai/runtime/observability-logger.js';
+import { useIsolatedHome } from '../../test-utils/isolated-home.js';
 
 const mockGenerateObject = vi.mocked(generateObject);
 const mockGenerateText = vi.mocked(generateText);
@@ -600,19 +601,21 @@ describe('Phase 23 — CLI: mcp + logs', () => {
 describe('Phase 23 — CLI: configuration (global config + .env)', () => {
   let projectRoot: string;
   let homeDir: string;
-  const realHome = process.env.HOME;
+  // HOME alone is not enough on Windows (os.homedir() reads USERPROFILE).
+  let restoreHome: () => void;
 
   beforeEach(() => {
     projectRoot = makeTempProject('phase23-cfg-');
-    homeDir = fs.mkdtempSync(path.join(os.tmpdir(), 'phase23-home-'));
-    process.env.HOME = homeDir;
+    const isolated = useIsolatedHome('phase23-home-');
+    homeDir = isolated.home;
+    restoreHome = isolated.restore;
     installModelMocks();
     mockGenerateObject.mockClear();
     mockGenerateText.mockClear();
   });
 
   afterEach(() => {
-    process.env.HOME = realHome;
+    restoreHome();
     fs.rmSync(projectRoot, { recursive: true, force: true });
     fs.rmSync(homeDir, { recursive: true, force: true });
   });

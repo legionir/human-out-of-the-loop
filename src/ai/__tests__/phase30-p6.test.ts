@@ -215,6 +215,16 @@ describe('Phase 30 / P6 — MCP tool failures reach the acceptance judge', () =>
   });
 });
 
+/**
+ * On POSIX the test server's own `SIGTERM` handler writes the marker file.
+ * Windows has no signals: `child.kill('SIGTERM')` is `TerminateProcess`, no
+ * JavaScript handler runs, so the marker can never appear there.  The
+ * transport still kills the child on Windows — that part is covered by the
+ * spawn/terminate tests — so the marker is asserted *absent* instead, and the
+ * difference is stated rather than silently skipped.
+ */
+const SIGTERM_HANDLER_RUNS = process.platform !== 'win32';
+
 // ─── 2. The stdio transport itself ───────────────────────────────
 
 describe('Phase 30 / P6 — stdio transport', () => {
@@ -248,7 +258,12 @@ describe('Phase 30 / P6 — stdio transport', () => {
     await transport.close();
     expect(closeCount).toBe(1);
     // The child really received SIGTERM (proved by its own marker file).
-    expect(fs.existsSync(marker)).toBe(true);
+    if (SIGTERM_HANDLER_RUNS) {
+      expect(fs.existsSync(marker)).toBe(true);
+    } else {
+      // Windows: killed, but no JavaScript handler could run.
+      expect(fs.existsSync(marker)).toBe(false);
+    }
   });
 
   it('uses a shell on Windows only (`.cmd` shims like npx need one)', () => {
@@ -358,7 +373,8 @@ describe('Phase 30 / P6 — connector over a real stdio child', () => {
     expect(toolRegistry.getImplementation('p6_echo')).toBeDefined();
 
     await connector.closeAll();
-    expect(fs.existsSync(marker)).toBe(true);
+    if (SIGTERM_HANDLER_RUNS) expect(fs.existsSync(marker)).toBe(true);
+    else expect(fs.existsSync(marker)).toBe(false);
   });
 });
 
@@ -455,6 +471,7 @@ describe('Phase 30 / P6 — `mcp test` does not leave the child running', () => 
     expect(code).toBe(0);
     // No `closeAll()` in the command → no SIGTERM → no marker file
     // (this is what made the CLI hang for 60s in the real E2E run).
-    expect(fs.existsSync(marker)).toBe(true);
+    if (SIGTERM_HANDLER_RUNS) expect(fs.existsSync(marker)).toBe(true);
+    else expect(fs.existsSync(marker)).toBe(false);
   });
 });

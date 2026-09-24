@@ -21,6 +21,7 @@ import { fileURLToPath } from 'node:url';
 import request from 'supertest';
 import type { Server } from 'node:http';
 import type { Express } from 'express';
+import { useIsolatedHome } from '../../test-utils/isolated-home.js';
 
 vi.mock('ai', async () => {
   const actual = (await vi.importActual('ai')) as Record<string, unknown>;
@@ -496,14 +497,17 @@ describe('Phase 24 — API: plans cancel + observability + sessions', () => {
 // ─── U1: config parity (.env + global config) ────────────────────
 
 describe('U1 — server config parity (.env + global config)', () => {
-  const savedHome = process.env.HOME;
+  // os.homedir() reads USERPROFILE on Windows: isolate both (and restore both).
+  let restoreIsolatedHome: (() => void) | undefined;
   const savedOpenAi = process.env.OPENAI_API_KEY;
   const savedHotlModel = process.env.HOTL_MODEL;
   const savedRedact = process.env.HOTL_REDACT_KEYS;
   const savedHotlProjectRoot = process.env.HOTL_PROJECT_ROOT;
 
   function withIsolatedHome(config: Record<string, unknown> | null): string {
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'phase24-home-'));
+    const isolated = useIsolatedHome('phase24-home-');
+    restoreIsolatedHome = isolated.restore;
+    const home = isolated.home;
     if (config !== null) {
       fs.mkdirSync(path.join(home, '.human-out-of-the-loop'), { recursive: true });
       fs.writeFileSync(
@@ -511,7 +515,6 @@ describe('U1 — server config parity (.env + global config)', () => {
         JSON.stringify(config),
       );
     }
-    process.env.HOME = home;
     return home;
   }
 
@@ -523,8 +526,8 @@ describe('U1 — server config parity (.env + global config)', () => {
   }
 
   function restoreEnv(): void {
-    if (savedHome === undefined) delete process.env.HOME;
-    else process.env.HOME = savedHome;
+    restoreIsolatedHome?.();
+    restoreIsolatedHome = undefined;
     if (savedOpenAi === undefined) delete process.env.OPENAI_API_KEY;
     else process.env.OPENAI_API_KEY = savedOpenAi;
     if (savedHotlModel === undefined) delete process.env.HOTL_MODEL;

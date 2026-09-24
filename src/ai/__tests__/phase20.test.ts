@@ -389,6 +389,32 @@ describe('Phase 20 — no pending timers after run/connect (LEAK-01/02)', () => 
 
 // ─── PATH-07/08: symlink escape + case-insensitive compare ───────
 
+/**
+ * Creating a symlink needs a privilege Windows does not grant by default
+ * (`SeCreateSymbolicLinkPrivilege`), so the OS answers EPERM.  That is a
+ * property of the machine, not of the code under test: probe it once and skip
+ * the symlink cases with a reason instead of reporting a red build for a
+ * capability the runner does not have.  The lexical checks below still run
+ * everywhere, and the symlink defense is exercised on POSIX and macOS.
+ */
+function symlinksAreSupported(): boolean {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'phase20-probe-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'target.txt'), 'x');
+    fs.symlinkSync(path.join(dir, 'target.txt'), path.join(dir, 'link.txt'));
+    return true;
+  } catch {
+    return false;
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+const SYMLINK_SUPPORTED = symlinksAreSupported();
+const symlinkSkip = SYMLINK_SUPPORTED
+  ? false
+  : 'this machine cannot create symlinks (Windows without SeCreateSymbolicLinkPrivilege)';
+
 describe('Phase 20 — path security: symlinks cannot escape the workspace (PATH-07)', () => {
   let outside: string;
   let root: string;
@@ -403,7 +429,7 @@ describe('Phase 20 — path security: symlinks cannot escape the workspace (PATH
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  it('file symlink pointing outside is blocked', () => {
+  it.skipIf(symlinkSkip)('file symlink pointing outside is blocked', () => {
     fs.writeFileSync(path.join(outside, 'secret.txt'), 'top-secret');
     fs.symlinkSync(path.join(outside, 'secret.txt'), path.join(root, 'link'));
 
@@ -412,7 +438,7 @@ describe('Phase 20 — path security: symlinks cannot escape the workspace (PATH
     expect(check.reason).toContain('via symlink');
   });
 
-  it('directory symlink used to write a NEW file outside is blocked', () => {
+  it.skipIf(symlinkSkip)('directory symlink used to write a NEW file outside is blocked', () => {
     fs.mkdirSync(path.join(outside, 'dir'));
     fs.writeFileSync(path.join(outside, 'dir', 'inner.txt'), 'x');
     fs.symlinkSync(path.join(outside, 'dir'), path.join(root, 'dirlink'));
@@ -436,7 +462,7 @@ describe('Phase 20 — path security: symlinks cannot escape the workspace (PATH
     expect(check.safe).toBe(true);
   });
 
-  it('a workspace root that is itself a symlink still works', () => {
+  it.skipIf(symlinkSkip)('a workspace root that is itself a symlink still works', () => {
     const realDir = fs.mkdtempSync(path.join(os.tmpdir(), 'phase20-real-'));
     fs.writeFileSync(path.join(realDir, 'f.txt'), 'x');
     const symlinkedRoot = path.join(outside, 'root-link');

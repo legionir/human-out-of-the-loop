@@ -5,6 +5,34 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.12] — 2026-09-24 — the suite is honest on Windows (the new matrix found it)
+
+The first CI matrix run made four legs green (Ubuntu 22/24/26, macOS 22/24)
+and three red: **windows-latest / node 22 and 24**, while the e2e job passed
+on Windows.  The failures were not in the product — they were tests that
+silently assumed POSIX:
+
+- **`os.homedir()` is not `HOME` on Windows.** Two suites isolated "the
+  user's home" by setting `process.env.HOME` only; Windows reads
+  `USERPROFILE`, so they kept using the runner's real home.  New
+  `src/test-utils/isolated-home.ts` sets and restores `HOME`, `USERPROFILE`,
+  `HOMEDRIVE` and `HOMEPATH` together.
+- **Windows has no signals.** `child.kill('SIGTERM')` is `TerminateProcess`:
+  the child's JavaScript handler never runs, so the marker file those tests
+  waited for could never appear.  The transport still terminates the child;
+  the tests now assert the marker *absent* on Windows and say why, instead of
+  failing for a platform fact.
+- **Creating a symlink needs a privilege Windows does not grant by default**
+  (`SeCreateSymbolicLinkPrivilege` → `EPERM`).  The symlink escape tests in
+  `phase20` now probe the capability once and skip with a reason; the lexical
+  path checks still run everywhere, and the symlink defense still runs on
+  POSIX and macOS.
+
+Also added: `scripts/ci-test.mjs` — the suite now runs through it in CI so
+every failing test is published as a check-run **annotation** (file, test
+name, first line of the assertion).  The Windows job log was not downloadable
+when this was investigated, which is exactly the situation annotations fix.
+
 ## [27.2.11] — 2026-09-24 — CI: the real provider from secrets, and a real Windows/macOS matrix
 
 ### Added
