@@ -14,3 +14,4 @@ e2e/.stub.log
 
 # e2e scenario artifacts
 e2e/.artifacts/
+.ci/

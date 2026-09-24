@@ -282,6 +282,40 @@ curl -s -X PATCH localhost:3000/api/sessions/session_5c1d -H 'Content-Type: appl
 
 > **In-memory vs persisted:** `/api/usage` and `/api/runs/:runId/tasks` reflect *this server process* (restart resets them). The durable per-plan totals live in `plan.json` (`review.usage`, exposed via `GET /api/plans/:id`), and sessions/plans/logs persist in `.ai-runtime/`.
 
+## CI
+
+Two GitHub Actions workflows ship with the repository.
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| [`real-provider.yml`](./.github/workflows/real-provider.yml) | manual (`workflow_dispatch`) + weekly | Runs `hootl run` against a **real** model. The endpoint and the key come from repository secrets — never from the workflow file. |
+| [`ci.yml`](./.github/workflows/ci.yml) | every push and pull request | Type check, the full test suite, build, global install and the committed e2e scenarios on **Ubuntu, Windows and macOS** (Node 22/24, plus Node 26 on Linux). No key needed: the e2e scenarios use the local stub. |
+
+### Setting up the real-provider run
+
+Add these under **Settings → Secrets and variables → Actions**:
+
+| Secret | Required | Meaning |
+|---|---|---|
+| `HOTL_API_KEY` | yes | the provider key (`OPENAI_API_KEY` for the run) |
+| `HOTL_BASE_URL` | no | OpenAI-compatible base URL, e.g. `https://api.openai.com/v1` (default: the provider's own endpoint) |
+| `HOTL_MODEL` | no | model id, e.g. `gpt-4o-mini` (default: `gpt-4o`) |
+| `HOTL_ANTHROPIC_API_KEY` | no | only if the model config needs an Anthropic key |
+
+Optionally set the repository **variable** `HOTL_RUN_GOAL` to change the goal
+(default: create `notes/provider-check.txt`). Then run
+**Actions → Real provider (P1) → Run workflow**.
+
+The job fails loudly when `HOTL_API_KEY` is missing, and it only reports
+success when the run really talked to the model:
+
+- a plan was persisted under `.ai-runtime/plans`,
+- the provider reported **non-zero tokens** (a run that never reached the
+  model cannot pass),
+- the goal's file exists,
+- the key appears **nowhere** under `.ai-runtime` — the run log is uploaded as
+  an artifact only after that check passes.
+
 ## Architecture
 
 See [src/ai/README.md](./src/ai/README.md) for full architecture diagram, layers, data flow, Persona/Skill/Tool differences, authorization model, MCP integration, and Human-Out-Of-Loop principle.
@@ -319,7 +353,7 @@ See [src/ai/CONFIGURATION.md](./src/ai/CONFIGURATION.md) for env vars, configura
 | C1–C5 | CLI completion plan (`CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**527 tests green (36 files), 0 tsc errors** (phases 18–26 complete — see `EXECUTION_PLAN_V2.md`; CLI + UI completion plans: `CLI_COMPLETION_PLAN.md`, `UI_COMPLETION_PLAN.md`)
+**670 tests green (49 files), 0 tsc errors — plus 32 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `EXECUTION_PLAN_V2.md`; CLI + UI completion plans: `CLI_COMPLETION_PLAN.md`, `UI_COMPLETION_PLAN.md`)
 
 ## Law Compliance
 

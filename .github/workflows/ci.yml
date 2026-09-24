@@ -49,8 +49,10 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # Failures are re-published as check-run annotations, so a red matrix
+      # leg is readable without the (sometimes unavailable) job log.
       - name: Unit + integration suite
-        run: npm test
+        run: node scripts/ci-test.mjs
 
       - name: Build the CLI
         run: npm run build
