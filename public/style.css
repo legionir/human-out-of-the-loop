@@ -430,3 +430,37 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; 
   color: var(--text-dim);
   padding: 6px 2px 0;
 }
+
+/* ── U7: session rename + log follow ──────────────────────────── */
+.session-rename-btn {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 4px;
+  opacity: 0;
+}
+.session-item:hover .session-rename-btn { opacity: 1; }
+.session-rename-btn:hover { color: var(--accent); }
+.session-id-sub { font-size: 10px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; }
+.log-panel {
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-dim);
+  padding: 6px 14px;
+}
+.log-panel > summary { cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.log-body {
+  max-height: 22vh;
+  overflow: auto;
+  margin: 6px 0 0;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

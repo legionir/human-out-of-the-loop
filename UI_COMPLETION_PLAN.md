@@ -263,11 +263,27 @@ UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>`
 **تست‌ها:** PATCH label persist (store reload) + label خالی/طولانی ۴۰۰؛ stream: خطوط اولیه + خط جدید بعد از log (تست با نوشتن همزمان) + abort تمیز؛ delete با label رگرسیون.
 
 **معیارهای پذیرش:**
-- [ ] label بعد از restart server حفظ است (persist تست‌شده)
-- [ ] SSE follow حداقل ۱ خط جدید را می‌فرستد (تست race-free)
-- [ ] ≥۴ تست جدید سبز
+- [x] label بعد از restart server حفظ است (persist تست‌شده)
+- [x] SSE follow حداقل ۱ خط جدید را می‌فرستد (تست race-free)
+- [x] ≥۴ تست جدید سبز
 
 **فایل‌ها:** `src/server/routes/{sessions,stream}.ts`، `public/app.js`، `src/ai/runtime/session-store.ts` (اگر C3 نباشد)، تست
+
+---
+
+### [🟢] فاز U7 — نتیجه (2026-09-24)
+
+**نتیجه:**
+- `PATCH /api/sessions/:id {label}` → همان `sessionStore.setLabel` فاز C3 (یک implementation مشترک CLI/UI)؛ label trim می‌شود، `""` پاکش می‌کند، `>120` کاراکتر → 400، session ناشناس → 404. persist سنکرون است (`saveSession` → `session.json`) و تست با store تازه از دیسک تأییدش می‌کند.
+- `DELETE /api/sessions/:id` حالا `label: null` را در پاسخ برمی‌گرداند و تست رگرسیون ثابت می‌کند label با session می‌رود (store فایل را پاک می‌کند).
+- `GET /api/observability/stream[?planId]` — SSE با **همان `followLog` CLI** (`src/cli/commands/logs.ts`؛ فقط `readEntries` export شد تا یک implementation مشترک باشد): پیام‌های `entry` برای backlog محدود (۵۰ خط آخر، فیلتر planId)، سپس `tail-end` و بعد خطوط جدید زنده از `fs.watch` (با re-sync روی truncation/rotation) + heartbeat ۱۵ ثانیه‌ای.
+- **UI:** rename اینلاین در sidebar (آیکون ✎ روی hover، `window.prompt`، سپس refresh؛ عنوان header هم label را نشان می‌دهد)، و پنل تاشوی «Observability log» بالای chat با دکمه‌های Follow/Stop و Clear (EventSource؛ اگر run فعالی planId داشته باشد خودکار روی همان plan فیلتر می‌شود).
+
+**تست‌ها (۵ عدد، `src/server/__tests__/u7-label-follow.test.ts`):** set/persist (با `FileSessionStore` تازه از دیسک) + trim + پاک‌کردن؛ ۴ حالت خطا (بدنه‌ی بی‌label، label غیر-string، >120، session ناشناس) و بی‌اثر بودنشان؛ DELETE + regression label؛ استریم: backlog فیلترشده (خط plan دیگر نمی‌آید) + `tail-end` + **خط جدید زنده بدون reconnect** (تست race-free با polling) + abort تمیز؛ `planId` بدشکل → 400.
+**Regression:** 527/527 تست سبز (36 فایل) + tsc سبز. **Smoke زنده:** PATCH واقعی (200 + label)، 400/404، استریم با `tail-end` و 400 برای planId خالی.
+
+**انحراف ثبت‌شده:** (1) `readEntries` از `src/cli/commands/logs.ts` export شد (additive) تا منطق parse/tail تک‌نسخه بماند. (2) rename با `window.prompt` انجام می‌شود (پلن «rename inline» گفته بود) — بدون input درون‌خطی، سازگار با سبک vanilla و کم‌ریسک؛ UX آن یک کامنت بالای تابع مستند شده است. (3) پنل log برای فیلتر خودکار به planId همان run فعال وصل می‌شود (پلن فقط «دکمه Follow log در جزئیات plan» گفته بود؛ اینجا پنل مستقل با فیلتر خودکار پیاده شد).
+
 
 ---
 
@@ -321,7 +337,7 @@ UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>`
 | U4 preview | 🟢 | کامل شد 2026-09-24 — `POST /api/preview` (planId:null، صفر side-effect) + دکمه «Plan only» و مودال read-only با feasibility/cycles؛ ۵ تست |
 | U5 clarification | 🟢 | کامل شد 2026-09-24 — state `awaiting-clarification` + endpoint پاسخ‌ها + رویداد SSE روی کانال runId + مودال سؤال‌ها؛ ۶ تست؛ باگ رفع‌شده: round خالی وقتی planner «unclear بدون سؤال» برمی‌گرداند |
 | U6 usage + tasks | 🟢 | کامل شد 2026-09-24 — `/api/usage[?planId]` + `/api/runs/:id/tasks` + cancel واقعی task؛ پنل Tasks و شمارندهی Server usage در UI؛ ۵ تست |
-| U7 label + follow | ⬜ | |
+| U7 label + follow | 🟢 | کامل شد 2026-09-24 — `PATCH /api/sessions/:id` + rename اینلاین؛ `GET /api/observability/stream` (reuse `followLog`) + پنل Follow log؛ ۵ تست |
 | U8 docs + regression | ⬜ | |
 
 **Baseline:** 451/451 تست (27 فایل) · **هدف انتها:** ~451 + ≥۳۶ تست جدید

@@ -66,6 +66,10 @@ const tasksListEl = $('#tasks-list');
 const tasksCountsEl = $('#tasks-counts');
 const usageLineEl = $('#usage-line');
 const serverUsageEl = $('#server-usage');
+// U7: observability follow panel
+const logFollowBtn = $('#log-follow-btn');
+const logClearBtn = $('#log-clear-btn');
+const logBodyEl = $('#log-body');
 const planFeedbackEl = $('#plan-feedback');
 const planConfirmBtn = $('#plan-confirm-btn');
 const planRejectBtn = $('#plan-reject-btn');
@@ -81,6 +85,7 @@ const state = {
   modalPreview: false,
   modalClarify: false,
   usageTimer: null,
+  logEs: null,
 };
 
 // ─── Utilities ───────────────────────────────────────────────────
@@ -161,7 +166,11 @@ async function loadSessions(selectId = state.sessionId) {
     const li = document.createElement('li');
     li.className = 'session-item' + (s.id === selectId ? ' active' : '');
     li.innerHTML = `
-      <div class="session-id">${escapeHtml(s.id)}</div>
+      <div class="session-id">
+        <span class="session-title-text">${escapeHtml(s.label || s.id)}</span>
+        <button class="session-rename-btn" title="Rename session" aria-label="Rename session">✎</button>
+      </div>
+      ${s.label ? `<div class="session-id-sub">${escapeHtml(s.id)}</div>` : ''}
       <div class="session-meta">
         <span class="outcome ${escapeHtml(s.lastOutcome || '')}">${escapeHtml(s.lastOutcome || 'no interactions')}</span>
         <span class="session-count">${s.interactionCount} interaction${s.interactionCount === 1 ? '' : 's'}</span>
@@ -169,15 +178,48 @@ async function loadSessions(selectId = state.sessionId) {
       ${s.lastSummary ? `<div class="session-summary" title="${escapeHtml(s.lastSummary)}">${escapeHtml(s.lastSummary.slice(0, 80))}</div>` : ''}
     `;
     li.addEventListener('click', () => openSession(s.id));
+    // U7: inline rename (pencil) — PATCH persists in the same store the CLI uses.
+    li.querySelector('.session-rename-btn').addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      void renameSession(s.id, s.label || '');
+    });
     sessionListEl.appendChild(li);
+  }
+}
+
+/** U7: prompt for a new label, PATCH it, refresh the sidebar. */
+async function renameSession(sessionId, currentLabel) {
+  const next = window.prompt('Session label (empty clears it):', currentLabel);
+  if (next === null) return; // cancelled
+  try {
+    await api(`/api/sessions/${encodeURIComponent(sessionId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ label: next }),
+    });
+    if (state.sessionId === sessionId) {
+      state.sessionTitle = next.trim() || sessionId;
+      sessionTitleEl.textContent = state.sessionTitle;
+    }
+    await loadSessions(state.sessionId);
+    showToast(next.trim() ? 'Session renamed.' : 'Session label cleared.', false);
+  } catch (err) {
+    showToast(`Rename failed: ${err.message}`);
   }
 }
 
 async function openSession(id) {
   stopRun(); // leave any in-flight UI run state (server-side run continues)
   state.sessionId = id;
-  state.sessionTitle = id;
-  sessionTitleEl.textContent = id;
+  let label = null;
+  try {
+    // U7: show the human label in the header when the session has one.
+    const session = await api(`/api/sessions/${encodeURIComponent(id)}`);
+    label = session.label || null;
+  } catch {
+    /* fall back to the raw id */
+  }
+  state.sessionTitle = label || id;
+  sessionTitleEl.textContent = label || id;
   await loadSessions(id);
   renderInteractions();
 }
@@ -892,6 +934,60 @@ clarifySendBtn.addEventListener('click', () => void submitClarification(false));
 clarifyDeclineBtn.addEventListener('click', () => void submitClarification(true));
 planConfirmBtn.addEventListener('click', () => void decidePlan(true));
 planRejectBtn.addEventListener('click', () => void decidePlan(false));
+logFollowBtn.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  toggleLogFollow();
+});
+logClearBtn.addEventListener('click', (ev) => {
+  ev.preventDefault();
+  clearLogPanel();
+});
+
+// ─── U7: observability follow ────────────────────────────────────
+
+/**
+ * Stream new observability lines over SSE (`/api/observability/stream`).
+ * The server sends a bounded backlog first (`tail-end` marks the boundary)
+ * and then every new entry — the same `followLog` the CLI uses.
+ */
+function toggleLogFollow() {
+  if (state.logEs) {
+    state.logEs.close();
+    state.logEs = null;
+    logFollowBtn.textContent = 'Follow';
+    return;
+  }
+  const planFilter = state.run && state.run.planId ? state.run.planId : null;
+  const url = planFilter
+    ? `/api/observability/stream?planId=${encodeURIComponent(planFilter)}`
+    : '/api/observability/stream';
+  const es = new EventSource(url);
+  state.logEs = es;
+  logFollowBtn.textContent = 'Stop';
+  logBodyEl.textContent = planFilter ? `— following ${planFilter} —\n` : '— following —\n';
+
+  es.addEventListener('entry', (e) => {
+    let line = e.data;
+    try {
+      const d = JSON.parse(e.data);
+      line = `${d.timestamp} ${String(d.level || 'info').toUpperCase()} ${d.eventType} ${d.message}`;
+    } catch {
+      /* raw line */
+    }
+    logBodyEl.textContent += `${line}\n`;
+    logBodyEl.scrollTop = logBodyEl.scrollHeight;
+  });
+  es.addEventListener('tail-end', () => {
+    logBodyEl.textContent += '— live —\n';
+  });
+  es.onerror = () => {
+    // EventSource retries; the panel simply stays as-is meanwhile.
+  };
+}
+
+function clearLogPanel() {
+  logBodyEl.textContent = '—';
+}
 
 // ─── U2: Registry panel ─────────────────────────────────────────
 // Collapsible introspection of the runtime's registries. Data comes

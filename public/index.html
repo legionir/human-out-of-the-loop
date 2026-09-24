@@ -75,6 +75,16 @@
         <ul id="tasks-list" class="tasks-list"></ul>
       </div>
 
+      <!-- ── U7: observability follow (live log) ─────────────── -->
+      <details id="log-panel" class="log-panel">
+        <summary>
+          Observability log
+          <button id="log-follow-btn" class="btn small" title="Stream new log lines (SSE)">Follow</button>
+          <button id="log-clear-btn" class="btn small" title="Clear the panel">Clear</button>
+        </summary>
+        <pre id="log-body" class="log-body">—</pre>
+      </details>
+
       <div id="chat" class="chat">
         <div class="empty-state" id="empty-state">
           <p>Describe a goal below — the runtime plans it, you confirm once, and it executes Human-Out-Of-Loop.</p>

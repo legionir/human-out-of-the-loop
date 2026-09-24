@@ -64,7 +64,11 @@ function formatEntry(entry: NonNullable<ReturnType<typeof parseLine>>): string {
 }
 
 /** Read the current file content as entries (optional plan filter). */
-function readEntries(file: string, planId?: string) {
+/**
+ * U7: exported so the server's follow-stream route shares the exact same
+ * JSONL parsing/tail semantics as the CLI (single implementation).
+ */
+export function readEntries(file: string, planId?: string) {
   let content = '';
   try {
     content = fs.readFileSync(file, 'utf-8');
