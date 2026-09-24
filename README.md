@@ -88,6 +88,71 @@ human-out-of-the-loop logs --follow --project-root ./app
 human-out-of-the-loop sessions label session_5c1d… "Login page v2"
 ```
 
+## Web UI
+
+The same runtime behind a browser front-end (Express + vanilla JS, no build step). Every UI action maps to a runtime capability — nothing is simulated:
+
+```bash
+npm run server                       # http://localhost:3000  (project root = cwd)
+HOTL_PROJECT_ROOT=./app npm run server
+HOTL_PORT=4000 HOTL_MODEL=claude-sonnet npx tsx src/server.ts
+```
+
+| Env var | Effect |
+|---|---|
+| `HOTL_PROJECT_ROOT` | Workspace root (registry/, `.ai-runtime/`) — also read from `~/.human-out-of-the-loop/config.json` (`projectRoot`) |
+| `HOTL_PORT` | HTTP port (default `3000`) |
+| `HOTL_MODEL` | Server default model, overridable per run from the UI (see U3 below) |
+| `HOTL_REDACT_KEYS` | Extra comma-separated keys to redact from the observability log |
+| `.env` (project root or cwd) + `~/.human-out-of-the-loop/config.json` | Same sources as the CLI (`defaultModel`, `projectRoot`) |
+
+### UI flows
+
+1. **Run** — type a goal → `Run`: the plan modal appears (with the selected model in the header), you confirm **once**, then execution streams live and ends with the final report.
+2. **Plan only (preview)** — plans without saving anything: no session, no plan id, no execution. Feasibility and dependency-cycle checks are shown, and the modal has no Confirm button.
+3. **Clarification** — when the planner needs more information it asks in a modal (one textarea per question); answers are fed back, the plan is regenerated, and nothing runs until you confirm it. "Don't answer" cancels the run.
+4. **Per-run options** — a model selector populated from `/api/models` (default = server model) plus a collapsed *Advanced* group: `timeoutMs`, `maxSteps` (1–100), `maxReplans` (0–10). Invalid values are rejected with `400` before the run starts.
+5. **Live tasks & usage** — the Tasks panel shows each task's status with a per-task **Cancel** (real cancellation in this process) and the run's token usage; the sidebar footer shows this server's aggregate.
+6. **Sessions** — list/rename (✎)/open/delete; labels use the same store as `sessions label`.
+7. **Observability** — the *Observability log* panel follows `.ai-runtime/observability.jsonl` live (SSE), optionally filtered to the active run's plan.
+
+### API reference
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/health` | `{ok, projectRoot, model, persistent, redactKeysCount}` |
+| `POST /api/run` | `{message, sessionId?, confirm?, model?, timeoutMs?, maxSteps?, maxReplans?}` → `202 {runId}` |
+| `GET /api/runs/:runId` | Live run state (`planning` → `awaiting-clarification` → `awaiting-confirmation` → `running` → `done`/`error`) |
+| `POST /api/runs/:runId/clarification` | `{answers:{question:answer}}` or `{decline:true}` (400 on incomplete answers, 409 when not awaiting) |
+| `GET /api/runs/:runId/tasks` | Tasks of the run's plan + counts |
+| `POST /api/runs/:runId/tasks/:taskId/cancel` | Cancel one pending/running task |
+| `POST /api/preview` | Plan without side effects → `{ok, planId:null, plan, planText, feasibility, cycles}` (400 + `questions` when unclear) |
+| `POST /api/plans/:id/confirm` | `{confirmed, feedback?}` — the single human decision |
+| `GET /api/plans`, `GET /api/plans/:id`, `POST /api/plans/:id/cancel` | Plans list/detail/cancel |
+| `PATCH /api/sessions/:id` · `DELETE /api/sessions/:id` | Rename (`{label}`; `""` clears) / delete |
+| `GET /api/usage` · `GET /api/usage?planId=` | In-memory aggregate for this server / one plan's tokens |
+| `GET /api/stream/:planId` · `GET /api/stream/:runId` | SSE: plan progress / clarification events |
+| `GET /api/observability` · `GET /api/observability/stream?planId=` | Log entries / live follow |
+| `GET /api/models` · `/api/personas` · `/api/skills` · `/api/tools` · `/api/mcp` · `POST /api/mcp/:id/test` | Registry introspection (same data as the CLI commands) |
+
+```bash
+# Run e2e without a browser (auto-confirm)
+curl -s localhost:3000/api/run -H 'Content-Type: application/json' \
+  -d '{"message":"Build a login page","confirm":true,"model":"local-llama","maxSteps":10}'
+
+# Preview: nothing is persisted
+curl -s localhost:3000/api/preview -H 'Content-Type: application/json' \
+  -d '{"message":"Build a login page"}'
+
+# Per-plan usage, live tasks, rename a session
+curl -s 'localhost:3000/api/usage?planId=plan_abc'
+curl -s localhost:3000/api/runs/<runId>/tasks
+curl -s -X PATCH localhost:3000/api/sessions/session_5c1d -H 'Content-Type: application/json' \
+  -d '{"label":"Login page v2"}'
+```
+
+> **In-memory vs persisted:** `/api/usage` and `/api/runs/:runId/tasks` reflect *this server process* (restart resets them). The durable per-plan totals live in `plan.json` (`review.usage`, exposed via `GET /api/plans/:id`), and sessions/plans/logs persist in `.ai-runtime/`.
+
 ## Architecture
 
 See [src/ai/README.md](./src/ai/README.md) for full architecture diagram, layers, data flow, Persona/Skill/Tool differences, authorization model, MCP integration, and Human-Out-Of-Loop principle.
@@ -121,8 +186,11 @@ See [src/ai/CONFIGURATION.md](./src/ai/CONFIGURATION.md) for env vars, configura
 | 15 | End-to-End Integration | 🟢 |
 | 16 | Hardening + 15 Fixes | 🟢 |
 | 17 | Documentation & Delivery | 🟢 |
+| 18–26 | Runtime hardening, CLI parity, server-side controls, registry introspection, clarification, usage/tasks | 🟢 |
+| C1–C5 | CLI completion plan (`CLI_COMPLETION_PLAN.md`) | 🟢 |
+| U1–U7 | UI completion plan (`UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**488 tests green, 0 tsc errors** (phases 18–26 complete — see `EXECUTION_PLAN_V2.md`; CLI + UI completion plans: `CLI_COMPLETION_PLAN.md`, `UI_COMPLETION_PLAN.md`)
+**527 tests green (36 files), 0 tsc errors** (phases 18–26 complete — see `EXECUTION_PLAN_V2.md`; CLI + UI completion plans: `CLI_COMPLETION_PLAN.md`, `UI_COMPLETION_PLAN.md`)
 
 ## Law Compliance
 
