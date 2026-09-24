@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { generateObject } from 'ai';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
@@ -134,7 +135,7 @@ ${userRequest}
 
     return {
       ...object,
-      id: object.id ?? `plan_${Date.now()}`,
+      id: object.id ?? `plan_${randomUUID()}`,
       status: 'draft',
       createdAt: Date.now(),
     };

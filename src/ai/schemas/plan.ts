@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 // ─── PlanStep ─────────────────────────────────────────────────────
@@ -110,7 +111,7 @@ export interface FeasibilityCheckResult {
  */
 export function createPlan(goal: string, steps: Array<Omit<PlanStep, 'status'> & { status?: PlanStepStatus }>): Plan {
   return {
-    id: `plan_${Date.now()}`,
+    id: `plan_${randomUUID()}`,
     goal,
     steps: steps.map((s) => ({
       ...s,

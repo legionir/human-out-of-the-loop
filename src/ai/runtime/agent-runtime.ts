@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { generateText, stepCountIs, type LanguageModelUsage } from 'ai';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { EventBus, type TokenUsage } from './event-bus.js';
@@ -251,7 +252,7 @@ export class AgentRuntime {
               timestamp: Date.now(),
               status: 'running',
               toolName,
-              callId: call.toolCallId ?? `call-${Date.now()}`,
+              callId: call.toolCallId ?? `call-${randomUUID()}`,
               ...planContext,
             });
           }

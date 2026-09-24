@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { generateObject } from 'ai';
 import type { PlannerConfig } from './planner.js';
 import { PlanSchema, type Plan } from '../schemas/plan.js';
@@ -63,7 +64,7 @@ ${userRequest}
 
   return {
     ...object,
-    id: object.id ?? `plan_${Date.now()}`,
+    id: object.id ?? `plan_${randomUUID()}`,
     status: 'draft',
     createdAt: Date.now(),
     steps: object.steps.map((s) => ({ ...s, status: 'pending' as const })),

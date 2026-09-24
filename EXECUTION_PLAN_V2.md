@@ -8,7 +8,7 @@
 - `messages.md` (تاریخچه بحث CLI/UI/Session)
 
 **وضعیت فعلی:** 17/17 فاز 🟢، 334 تست سبز، اما 40+ باگ/بهبود شناسایی شده
-**پیشرفت (2026-09-24):** فازهای ۱۸ تا ۲۴ این پلن کامل 🟢 — 450 تست سبز (27 فایل)، tsc سبز. باقی‌مانده: ۲۵ (مستندات و delivery).
+**پیشرفت (2026-09-24):** فازهای ۱۸ تا ۲۴ و ۲۶ این پلن کامل 🟢 — 457 تست سبز (28 فایل)، tsc سبز. باقی‌مانده: ۲۵ (مستندات و delivery) + پلن‌های تکمیلی CLI/UI.
 **سیاست Breaking:** ✅ مجاز (طبق تصمیم کاربر) — `randomUUID()`, حذف `globalEventBus` fallback, الزامی شدن `projectRoot`
 
 ---
@@ -589,6 +589,32 @@ GET  /api/observability?planId=&tail=
 
 ---
 
+### [🟢] فاز ۲۶: ID Migration به randomUUID() — کامل شد 2026-09-24
+
+**مبنا:** یافته verify (بخش ۷) — دسته D (سربرگ 🔴) در هیچ فازی فیکس نشده بود؛ `plan_${Date.now()}` بدون جزء تصادفی + filename `sha256(id)` فاز ۲۲ = overwrite احتمالی دو plan در یک میلی‌ثانیه.
+
+**نتیجه:** ۷ نقطه تولید ID به `prefix_randomUUID()` (node:crypto) تغییر کرد:
+1. `schemas/session.ts` — `session_${randomUUID()}` (ID-01)
+2. `schemas/session.ts` — `interaction_${randomUUID()}` (ID-02)
+3. `schemas/plan.ts` — `plan_${randomUUID()}` (ID-03)
+4. `planning/planner.ts` — fallback `plan_${randomUUID()}` (ID-06)
+5. `planning/plan-generator.ts` — fallback `plan_${randomUUID()}` (ID-06)
+6. `tools/implementations/delegate-task.ts` — `dynamic_${persona}_${randomUUID()}` (ID-04)
+7. `tools/implementations/task-control-tools.ts` — `pending_${agentId}_${randomUUID()}` (ID-05)
+8. (بافور، برای یکسان‌سازی) `runtime/agent-runtime.ts` — فالبک `call-${randomUUID()}`
+
+پیشوند (`plan_`/`session_`/…) برای خوانایی لاگ‌ها نگه داشته شد؛ جزء تصادفی UUIDv4 غیرقابل‌پیش‌بینی و collision-free است. 6 تست جدید (`phase26.test.ts`): collision 5000 plan + 5000 session + 2000 interaction در loop تنگ (با `Date.now()` collision تضمین‌شده بود)، فرمت UUIDv4، **source-scan** ماندگار (هیچ `_ ${Date.now()}` / `_ ${Math.random()}` در src/ai باقی نمانده)، round-trip FilePlanStore با idهای UUID. **457 تست سبز (28 فایل)** + tsc سبز.
+
+**انحراف ثبت‌شده:** (1) به‌جای `randomUUID()` خالص (متن «فیکس واحد»)، `prefix_uuid` انتخاب شد — شناسایی سریع نوع رکورد در لاگ/فایل‌ها بدون هیچ هزینه (breaking: قالب ID جدید؛ IDهای قدیمی روی disk نامتأثر چون store id را از محتوای JSON می‌خواند). (2) فالبک `call-` در agent-runtime هم به همان شکل اصلاح شد (در جدول D نبود؛ جلوگیری از بازگشت به الگوی ناپایدار).
+
+**معیار پذیرش (بررسی‌شده):**
+- [x] ۰ `_ ${Date.now()}` / `_ ${Math.random()}` در src/ai (source-scan)
+- [x] 5000 plan در loop تنگ → 5000 id یکتا
+- [x] 457/457 تست + tsc سبز
+- [x] persist/read با idهای UUID (فایل‌name hash) کار می‌کند
+
+---
+
 ## ۳. وابستگی بین فازها
 
 ```
@@ -651,4 +677,33 @@ GET  /api/observability?planId=&tail=
 - [x] وابستگی فازها مشخص است
 
 **هیچ موردی از قلم نیفتاده است.**
+
+---
+
+## ۷. نتیجه بررسی نهایی 🔴/🟠 (verify — 2026-09-24)
+
+بررسی تک‌تک ۲۸ آیتم با بج 🔴/🟠 مقابل کد فعلی (commit `bd10d4e`) — نه صرفاً اتکا به «نتیجه» فازها:
+
+| دسته | آیتم‌ها | وضعیت verify | شواهد |
+|---|---|---|---|
+| A Path | PATH-01..04 🔴, PATH-05/07/09 🟠 | ✅ ۷/۷ فیکس | factoryها با `projectRoot`؛ ۰ `process.cwd()` در implementations (یک hit = متن پیام خطا PATH-09)؛ `realpathSync` در path-security:49؛ `workspaceRoot` mandatory (throw, خط 62)؛ boundary skill-registry:117 |
+| B Config | CFG-03/04 🔴, CFG-01/05 🟠 | ✅ ۴/۴ فیکس | ۰ `localToolDefs`، `bootstrapTools` orchestrator:309؛ `new DelegationGuard` خط 228؛ `agentTimeoutMs` → TaskRuntime:28 |
+| C Singleton | SING-01 🟠 | ✅ فیکس | ۰ `?? globalEventBus`، ۰ singleton `agentRuntime` |
+| **D ID** | (سربرگ 🔴؛ آیتم‌ها 🟡 P2) | ✅ **۶/۶ فیکس (فاز ۲۶)** | همه به `prefix_randomUUID()`؛ source-scan + تست collision 5000-id در `phase26.test.ts`؛ ۷ نقطه (شامل فالبک `call-` در agent-runtime) |
+| E Persistence | PERS-01 🔴 | ✅ فیکس | `atomicWriteFileSync` (tmp+uuid+rename) در هر دو store (plan-store:61, session-store:83)؛ PERS-02/03 ✅ (structuredClone + snapshot)؛ PERS-04 🟡 باز (بدون file locking — trade-off پذیرفته‌شده atomic write) |
+| F Leaks | LEAK-01/02 🟠 | ✅ ۲/۲ فیکس | `clearTimeout` در finally: mcp-connector:275، agent-runtime:201 |
+| G Correctness | CORR-01..05 🟠 | ✅ ۵/۵ فیکس | `parsed.error.issues` base-registry:62؛ `waitForAll`(777) قبل `destroy`(784)؛ `task.planId` aggregator:81؛ hook صریح `runAcceptanceChecks` + ۰ subscription در checker؛ `event.planId` streaming:169 |
+| H Security Ext | SEC-01 🔴, SEC-03/04 🟠 | ✅ ۳/۳ فیکس | regex-guard (nested-quantifier + MAX_PATTERN_LENGTH)؛ آستانه `>4` mcp-connector:93,104؛ substring match observability:407 |
+| I Perf | PERF-01/04 🟠 | ✅ ۲/۲ فیکس | `computeTransitiveDependentCounts` (memoized) plan-runtime:387؛ fd reuse `openSync/writeSync` observability:124,162 |
+| J Quality | QUAL-05/06 🟠 | ✅ ۲/۲ فیکس | `OrchestratorConfigSchema` (zod) orchestrator:56-66؛ `abortSignal` → `generateText` agent-runtime:231 |
+| K Features | FEAT-01 🔴 | ✅ فیکس | CLI کامل (فاز ۲۳) + UI/REST (فاز ۲۴) — live verify شده |
+| فاز ۲۵ | (سربرگ 🔴) | ⏳ باز | فاز delivery — انتظار می‌رود |
+
+### یافته کلیدی: دسته D باز است → ✅ رفع شد در فاز ۲۶ (2026-09-24)
+
+با آنکه بج هر آیتم 🟡 P2 است، سربرگ دسته 🔴 است و هنگام verify **هیچ‌کدام از ۶ مورد فیکس نشده بودند**. ریسک واقعی:
+- `plan_${Date.now()}` بدون هیچ جزء تصادفی (ID-03/06) + فایل‌name فاز ۲۲ = `sha256(id)` → **دو plan در یک میلی‌ثانیه = همان فایل = overwrite/دست‌روداده داده**
+- `session_/interaction_` با 6 کاراکتر base36 تصادفی — predictable + collision در بار بالا
+
+**مقرّر شد و اجرا شد:** فاز ۲۶ — «ID migration به `randomUUID()`» (7 نقطه + تست collision). Breaking مجاز طبق سیاست؛ IDهای قدیمی روی disk نامتأثر (store id را از محتوا می‌خواند).
 

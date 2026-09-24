@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { PersonaRegistry } from '../../registries/persona-registry.js';
@@ -200,7 +201,7 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
           }
 
           agentDef = {
-            id: `dynamic_${input.persona}_${Date.now()}`,
+            id: `dynamic_${input.persona}_${randomUUID()}`,
             name: `Dynamic ${input.persona}`,
             personaId: input.persona,
             skillIds: input.skills,

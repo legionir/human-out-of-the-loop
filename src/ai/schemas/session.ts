@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 
 // ─── Session entry ────────────────────────────────────────────────
@@ -49,7 +50,7 @@ export type Session = z.infer<typeof SessionSchema>;
 export function createSession(label?: string): Session {
   const now = Date.now();
   return {
-    id: `session_${now}_${Math.random().toString(36).slice(2, 8)}`,
+    id: `session_${randomUUID()}`,
     label,
     interactions: [],
     metadata: {},
@@ -60,7 +61,7 @@ export function createSession(label?: string): Session {
 
 export function createInteraction(userRequest: string): SessionInteraction {
   return {
-    id: `interaction_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    id: `interaction_${randomUUID()}`,
     userRequest,
     planIds: [],
     outcome: 'pending',
