@@ -20,6 +20,7 @@ vi.mock('ai', async () => {
 });
 
 import { createSearchCodeTool } from '../tools/implementations/search-code.js';
+import { EventBus, type AgentEvent } from '../runtime/event-bus.js';
 import { FilePlanStore } from '../runtime/plan-store.js';
 import { FileSessionStore } from '../runtime/session-store.js';
 import { createPlan, type Plan } from '../schemas/plan.js';
@@ -261,5 +262,84 @@ describe('PERF-06: store list() only parses unseen files', () => {
 
     store.deleteSession(ids[0]);
     expect(store.listSessions().sort()).toEqual([ids[1], ids[2]].sort());
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PERF-08 — EventBus.emit must not allocate a Set per emit
+// ---------------------------------------------------------------------------
+
+describe('PERF-08: EventBus emit allocation', () => {
+  it('reuses one dedup buffer for every non-nested emit', () => {
+    const bus = new EventBus();
+    const seen: string[] = [];
+    bus.subscribe('*', (e) => seen.push(`wild:${e.type}`));
+    bus.subscribe('step-start', (e) => seen.push(`typed:${e.type}`));
+
+    for (let i = 0; i < 1000; i++) {
+      bus.emit({ type: 'step-start', stepId: `s${i}` } as AgentEvent);
+    }
+
+    expect(seen).toHaveLength(2000);
+    // 1000 emits → still exactly one buffer.
+    expect(bus.emitBufferCount).toBe(1);
+  });
+
+  it('still deduplicates a subscriber registered for both type and *', () => {
+    const bus = new EventBus();
+    const calls: string[] = [];
+    const both = () => calls.push('both');
+    bus.subscribe('step-start', both);
+    bus.subscribe('*', both);
+
+    bus.emit({ type: 'step-start', stepId: 's1' } as AgentEvent);
+    expect(calls).toEqual(['both']);
+  });
+
+  it('keeps every subscriber when only one of the two sets is populated', () => {
+    const bus = new EventBus();
+    const calls: string[] = [];
+    bus.subscribe('step-start', () => calls.push('typed-1'));
+    bus.subscribe('step-start', () => calls.push('typed-2'));
+    bus.emit({ type: 'step-start', stepId: 's1' } as AgentEvent);
+    expect(calls.sort()).toEqual(['typed-1', 'typed-2']);
+
+    const bus2 = new EventBus();
+    const wild: string[] = [];
+    bus2.subscribe('*', () => wild.push('w1'));
+    bus2.subscribe('*', () => wild.push('w2'));
+    bus2.emit({ type: 'step-complete', stepId: 's1' } as AgentEvent);
+    expect(wild.sort()).toEqual(['w1', 'w2']);
+  });
+
+  it('survives a re-entrant emit without losing subscribers', () => {
+    const bus = new EventBus();
+    const outer: string[] = [];
+    const inner: string[] = [];
+    bus.subscribe('*', (e) => {
+      if (e.type === 'step-start') {
+        outer.push('outer');
+        // A handler that emits: must use a different buffer, otherwise
+        // the outer iteration would be clobbered mid-flight.
+        bus.emit({ type: 'step-complete', stepId: 'nested' } as AgentEvent);
+      } else {
+        inner.push('inner');
+      }
+    });
+    bus.subscribe('step-start', () => outer.push('outer-typed'));
+    // The nested event hits BOTH sets → it needs its own dedup buffer.
+    bus.subscribe('step-complete', () => inner.push('inner-typed'));
+
+    bus.emit({ type: 'step-start', stepId: 's1' } as AgentEvent);
+    // The outer iteration was not clobbered by the nested emit.
+    expect(outer.sort()).toEqual(['outer', 'outer-typed']);
+    expect(inner.sort()).toEqual(['inner', 'inner-typed']);
+    // depth 0 + depth 1 buffers were retained, nothing lost.
+    expect(bus.emitBufferCount).toBe(2);
+
+    // Depth tracking unwound — a later emit reuses the depth-0 buffer.
+    bus.emit({ type: 'step-complete', stepId: 's2' } as AgentEvent);
+    expect(bus.emitBufferCount).toBe(2);
+    expect(inner.sort()).toEqual(['inner', 'inner', 'inner-typed', 'inner-typed']);
   });
 });

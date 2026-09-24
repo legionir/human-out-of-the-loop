@@ -68,6 +68,9 @@ export interface TokenUsage {
 
 export type EventSubscriber = (event: AgentEvent) => void;
 
+/** Phase 27 (PERF-08): shared empty iterable — no allocation when idle. */
+const EMPTY_HANDLERS: readonly EventSubscriber[] = [];
+
 export type UnsubscribeFn = () => void;
 
 // ─── EventBus ────────────────────────────────────────────────────
@@ -85,6 +88,12 @@ export type UnsubscribeFn = () => void;
  */
 export class EventBus {
   private readonly listeners = new Map<string, Set<EventSubscriber>>();
+  /**
+   * Phase 27 (PERF-08): reusable dedup buffers, one per re-entrancy
+   * depth — the common (non-nested) case is allocation-free.
+   */
+  private readonly emitBuffers: Array<Set<EventSubscriber>> = [];
+  private emitDepth = 0;
 
   /**
    * Phase 22: optional sink for errors thrown by subscribers.
@@ -119,25 +128,70 @@ export class EventBus {
     const targeted = this.listeners.get(event.type);
     const wildcard = this.listeners.get('*');
 
-    const allHandlers = new Set<EventSubscriber>();
-    if (targeted) {
-      for (const h of targeted) allHandlers.add(h);
-    }
-    if (wildcard) {
-      for (const h of wildcard) allHandlers.add(h);
+    // Phase 27 (PERF-08): the old code allocated a fresh `Set` for EVERY
+    // emit just to deduplicate type + wildcard subscribers.  Two fast
+    // paths removed that allocation for the common cases (only one of the
+    // two listener sets is populated); when both exist we reuse a buffer
+    // (one per nesting depth, so a handler that emits re-entrantly cannot
+    // clobber the set being iterated).
+    let handlers: Iterable<EventSubscriber>;
+    let usedBuffer = false;
+    if (targeted && wildcard) {
+      const buffer = this.getEmitBuffer();
+      usedBuffer = true;
+      for (const h of targeted) buffer.add(h);
+      for (const h of wildcard) buffer.add(h);
+      handlers = buffer;
+    } else {
+      handlers = targeted ?? wildcard ?? EMPTY_HANDLERS;
     }
 
-    for (const handler of allHandlers) {
-      try {
-        handler(event);
-      } catch (err) {
-        // Phase 22: subscriber errors are routed to an injected handler
-        // (the Orchestrator wires this to the ObservabilityLogger)
-        // instead of the console API.  If none is set, the error is
-        // swallowed — one bad subscriber must never break the bus.
-        this.onSubscriberError?.(event, err);
+    try {
+      for (const handler of handlers) {
+        try {
+          handler(event);
+        } catch (err) {
+          // Phase 22: subscriber errors are routed to an injected handler
+          // (the Orchestrator wires this to the ObservabilityLogger)
+          // instead of the console API.  If none is set, the error is
+          // swallowed — one bad subscriber must never break the bus.
+          this.onSubscriberError?.(event, err);
+        }
       }
+    } finally {
+      if (usedBuffer) this.releaseEmitBuffer();
     }
+  }
+
+  /**
+   * Acquire the dedup buffer for the current emit depth.  Buffers are
+   * keyed by depth so a re-entrant emit (a handler that emits) uses a
+   * different buffer instead of clobbering the one being iterated.
+   */
+  private getEmitBuffer(): Set<EventSubscriber> {
+    const depth = this.emitDepth;
+    this.emitDepth++;
+    let buffer = this.emitBuffers[depth];
+    if (buffer) {
+      buffer.clear();
+    } else {
+      buffer = new Set<EventSubscriber>();
+      this.emitBuffers[depth] = buffer;
+    }
+    return buffer;
+  }
+
+  /** Release the buffer after the iteration completes. */
+  private releaseEmitBuffer(): void {
+    this.emitDepth = Math.max(0, this.emitDepth - 1);
+  }
+
+  /**
+   * Number of dedup buffers retained (diagnostics/tests).  Stays at 1
+   * for non-nested emits — i.e. no per-emit allocation.
+   */
+  get emitBufferCount(): number {
+    return this.emitBuffers.length;
   }
 
   /** Remove all subscribers. Useful for cleanup in tests. */
