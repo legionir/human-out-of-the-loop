@@ -15,10 +15,24 @@ import { randomUUID } from 'node:crypto';
  *
  * If the process dies between 1 and 2, the target is untouched and
  * only an orphan temp file remains (safe to clean up).
+ *
+ * Phase 30 (P9): the target directory is created on demand.  Stores
+ * create it in their constructor, but a long-running process can outlive
+ * the directory (e.g. `rm -rf .ai-runtime` under a running web server);
+ * recreating it here keeps such a write working instead of failing with
+ * a bare ENOENT.
  */
 export function atomicWriteFileSync(filePath: string, data: string): void {
   const tmp = `${filePath}.tmp-${randomUUID()}`;
-  fs.writeFileSync(tmp, data, 'utf-8');
+  try {
+    fs.writeFileSync(tmp, data, 'utf-8');
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    // The directory disappeared after the store was constructed — recreate
+    // it once and retry (Phase 30 / P9).
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(tmp, data, 'utf-8');
+  }
   try {
     fs.renameSync(tmp, filePath);
   } catch (err) {

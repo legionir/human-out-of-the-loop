@@ -5,6 +5,47 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.8] — 2026-09-24 — the web UI/API path, end to end (Phase 30 / P9)
+
+### Fixed
+
+- **A store whose directory had been removed failed every write with a bare
+  ENOENT.** `FileSessionStore`/`FilePlanStore` created `.ai-runtime/<store>/`
+  only in their constructor, and both write primitives assumed it still
+  existed (`withFileLockSync` opened the lock with `'wx'`;
+  `atomicWriteFileSync` wrote its temp file next to the target). After
+  `rm -rf .ai-runtime` under a running server every `/api/run` answered
+  `{"state":"error","error":"ENOENT: … .json.lock"}`. Both now recreate the
+  missing parent directory once and retry.
+- **The observability log wrote into a deleted inode.** The logger keeps one
+  fd open (PERF-04); when the file was removed or replaced, later entries
+  went to the unlinked file, so `hootl logs`/`hootl usage` — which open the
+  path — saw nothing while the server's in-memory counters kept counting.
+  The fd is now reopened whenever the path no longer points at the same
+  inode (one `stat` per entry; still one `open` per file).
+- **One unhandled background rejection could kill the server.** A real server
+  log contained `TypeError: terminated` (`UND_ERR_BODY_TIMEOUT`) from an MCP
+  client's stalled stream fetch; nothing owned the rejection, so it reached
+  the top level and took the process down — a dead dashboard instead of one
+  failed probe. The server entry point now installs
+  `installCrashGuards()`: `unhandledRejection` is reported and the server
+  keeps serving (an uncaught exception still terminates).
+
+### Verified
+
+- The whole UI/API flow against the real server (`node dist/src/server.js`):
+  preview → interactive run (pauses at `awaiting-confirmation`) → confirm via
+  the API → the SSE stream from `plan:started` to `run:done` →
+  `/api/usage` + `/api/runs/:id/tasks` → cancel mid-run → a re-planning run
+  whose `plan:replanning`/`plan:replanned` events reach the browser stream.
+  15/15 checks, twice, each run preceded by `rm -rf .ai-runtime` while the
+  server was live.
+- All nine MCP probe endpoints answer HTTP 200 with a correct `ok:false`
+  (dead URL, missing env var, missing `url`/`command`, hanging stdio) — no 500s.
+- `GET /api/usage?planId=P` and `hootl usage --plan P --json` agree
+  (330 tokens / 1 task) for the same plan.
+- 9 new tests in `phase30-p9.test.ts`; suite is 636 tests in 45 files.
+
 ## [27.2.7] — 2026-09-24 — environment matrix, and stdio MCP on Windows (Phase 30 / P8)
 
 ### Fixed

@@ -113,6 +113,8 @@ export class ObservabilityLogger {
    * (a crash right after `log()` still finds the entry on disk).
    */
   private logFd: number | null = null;
+  /** Inode of the file behind `logFd` — detects a deleted/replaced log file. */
+  private logIno: number | null = null;
 
   constructor(config: ObservabilityLoggerConfig) {
     this.logFilePath = config.logFilePath;
@@ -124,9 +126,26 @@ export class ObservabilityLogger {
   }
 
   private ensureFd(): number {
-    if (this.logFd === null) {
-      this.logFd = fs.openSync(this.logFilePath, 'a');
+    if (this.logFd !== null) {
+      // Phase 30 (P9): the log file can be deleted (or replaced) under a
+      // long-running process — e.g. `rm -rf .ai-runtime` while the web
+      // server is running.  A write to the old fd would land in an
+      // unlinked inode and vanish, so reopen whenever the path no longer
+      // points at the same file.  One `stat` per entry buys durability;
+      // the file is still opened once per file (PERF-04).
+      let ino: number | undefined;
+      try {
+        ino = fs.statSync(this.logFilePath).ino;
+      } catch {
+        ino = undefined; // deleted, or the whole directory is gone
+      }
+      if (ino !== undefined && ino === this.logIno) return this.logFd;
+      this.close();
     }
+    // Recreate the directory too: the file may have gone with it.
+    fs.mkdirSync(path.dirname(this.logFilePath), { recursive: true });
+    this.logFd = fs.openSync(this.logFilePath, 'a');
+    this.logIno = fs.fstatSync(this.logFd).ino;
     return this.logFd;
   }
 
@@ -142,6 +161,7 @@ export class ObservabilityLogger {
         // best-effort close
       }
       this.logFd = null;
+      this.logIno = null;
     }
   }
 

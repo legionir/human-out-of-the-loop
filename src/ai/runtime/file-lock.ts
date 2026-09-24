@@ -129,8 +129,10 @@ function breakStaleLock(lockPath: string): void {
 /**
  * Run `fn` while holding an exclusive lock at `lockPath`.
  *
- * The lock file's directory must exist (the stores create it in their
- * constructor).  The lock is always released — also when `fn` throws.
+ * The lock file's directory is created on demand (the stores also create
+ * it in their constructor, but a long-running process can outlive the
+ * directory — e.g. `rm -rf .ai-runtime` while the web server is running).
+ * The lock is always released — also when `fn` throws.
  */
 export function withFileLockSync<T>(
   lockPath: string,
@@ -156,13 +158,25 @@ export function withFileLockSync<T>(
 
   const startedAt = Date.now();
   let fd: number | undefined;
+  let healedDir = false;
 
   for (;;) {
     try {
       fd = fs.openSync(lockPath, 'wx');
       break;
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+      const code = (err as NodeJS.ErrnoException).code;
+
+      // Phase 30 (P9): the lock directory vanished under us — recreate it
+      // once and retry.  Without this, a store whose directory was removed
+      // after construction fails every write with a bare ENOENT.
+      if (code === 'ENOENT' && !healedDir) {
+        healedDir = true;
+        fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+        continue;
+      }
+
+      if (code !== 'EEXIST') throw err;
 
       if (isStaleLock(lockPath, staleMs)) {
         breakStaleLock(lockPath);

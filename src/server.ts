@@ -208,6 +208,35 @@ export async function startServer(options: ServeOptions = {}): Promise<CreatedSe
 
 // ─── Entry point ─────────────────────────────────────────────────
 
+/**
+ * Phase 30 (P9): a web server must not die because one background promise
+ * rejected.
+ *
+ * Observed failure mode: an MCP client's stream fetch (SSE / streamable
+ * HTTP) stalled and undici aborted it with `UND_ERR_BODY_TIMEOUT` long
+ * after the request that started it had already answered.  Nothing owned
+ * that rejection, so it reached the top level and killed the process —
+ * a dead dashboard instead of one failed probe.
+ *
+ * `unhandledRejection` is caught and reported here; an *uncaught
+ * exception* still terminates (after one, the process state is not
+ * trustworthy).  The affected request keeps its own error path — this
+ * only keeps the server serving the rest.
+ */
+export function installCrashGuards(
+  target: { on: (event: string, listener: (reason: unknown) => void) => unknown } = process,
+  onError: (reason: unknown) => void = (reason) => {
+    // eslint-disable-next-line no-console
+    console.error(
+      '[hotl-ui] unhandled rejection (server stays up):',
+      reason instanceof Error ? (reason.stack ?? reason.message) : reason
+    );
+  }
+): void {
+  target.on('unhandledRejection', (reason) => onError(reason));
+}
+
+
 function isDirectlyInvoked(): boolean {
   const entry = process.argv[1];
   if (!entry) return false;
@@ -234,6 +263,7 @@ function parseArgs(argv: string[]): Partial<ServeOptions> {
 }
 
 if (isDirectlyInvoked()) {
+  installCrashGuards();
   const options = parseArgs(process.argv);
   startServer(options)
     .then(({ close }) => {
