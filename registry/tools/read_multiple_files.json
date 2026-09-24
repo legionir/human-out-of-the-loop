@@ -1,0 +1,8 @@
+{
+  "id": "read_multiple_files",
+  "name": "Read Multiple Files",
+  "description": "Reads several files in one call, reporting per-file errors",
+  "source": "local",
+  "modulePath": "./implementations/read-multiple-files",
+  "category": "filesystem"
+}

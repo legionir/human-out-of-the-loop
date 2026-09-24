@@ -7,6 +7,11 @@ export {
 } from './mcp-connector.js';
 export { loadMcpServerConfigs, bootstrapMcpServers } from './mcp-bootstrap.js';
 export { bootstrapTools } from './bootstrap.js';
+export {
+  LOCAL_TOOL_FACTORIES,
+  LOCAL_TOOL_IDS,
+  createLocalTools,
+} from './local-tools.js';
 export { bootstrapCatalogTools, type CatalogBootstrapDeps } from './catalog-bootstrap.js';
 export { bootstrapDelegateTask } from './delegate-bootstrap.js';
 export { bootstrapTaskControlTools } from './task-control-bootstrap.js';

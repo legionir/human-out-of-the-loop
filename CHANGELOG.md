@@ -5,6 +5,64 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.6.0] — 2026-09-25 — the filesystem toolset, ported from the MCP reference server
+
+The runtime could read a file, rewrite it whole, grep it and ask git about it.
+That is not enough to work on a real project: renaming a file, fixing one line
+without re-emitting the file, seeing what a directory contains, or reading five
+files to compare them each had no tool. The **filesystem** capabilities of the
+vendored MCP reference server (`servers-main/src/filesystem/`) are now native
+tools — not a registered MCP server — and the existing three filesystem tools
+were rewritten on the same core, because the point of using that code was its
+path safety.
+
+**Nine new tools** (`registry/tools/*.json`, bound to `--project-root`)
+
+- `edit_file` — line-based edits (`oldText`/`newText`), returning a git-style
+  diff. Exact match first, then a whitespace-tolerant match that shifts the
+  whole replacement by the indentation difference; a non-matching edit is an
+  error, never a silent no-op. `dryRun: true` previews without writing.
+- `read_multiple_files` — one call, per-file results: what could be read is
+  returned, what could not carries its error (a failed file no longer fails the
+  batch).
+- `list_directory` — `[DIR]`/`[FILE]` entries; a symlink is reported as
+  `symlink`, never silently followed.
+- `directory_tree` — recursive JSON tree with glob `excludePatterns` and a
+  `maxDepth` (a `node_modules`-sized tree cannot flood the context).
+- `move_file` — move/rename; both ends validated before anything moves and an
+  existing destination is refused instead of overwritten.
+- `get_file_info`, `create_directory` (idempotent), `search_files` (glob
+  counterpart of `search_code`), `list_allowed_directories`.
+- `read_file` gained `head`/`tail`; every path is now checked by the ported
+  implementation and every tool answers `{ success: false, code }` on refusal.
+
+**The path safety is the reason this port exists** (`src/ai/tools/fs/`)
+
+- Every existing component of a path is resolved through its symlinks and
+  re-checked, so `<root>/link-to-outside/new.txt` is refused *before* anything is
+  created — the previous lexical check plus a best-effort realpath let that
+  through.
+- A Windows drive path on a POSIX host is refused instead of being written as a
+  literal `C:\Users\...` file inside the workspace, and Unicode-equivalent
+  (NFC/NFD) names resolve to the file that exists (ambiguous matches refused).
+- New files are created with `O_EXCL` (a pre-existing symlink is never written
+  through); existing files are replaced through a temp file + `rename` with the
+  original permission bits restored; `move_file` uses `lstat` so an existing
+  symlink at the destination counts as occupied.
+- Allowed directories are a parameter, not module state — two Orchestrators in
+  one process still cannot share a sandbox.
+
+**Authorisation stays explicit:** `coder` gets all 13 tools, `architect` and
+`reviewer` get the read-only subset, and the `file_management`/`code_analysis`
+skills were extended to match — a write tool that a persona does not allow is
+filtered by the Factory and logged as a warning, as before.
+
+**Tests & docs:** 801 tests green (56 files), 0 tsc errors, and a new `files`
+e2e scenario (68 committed checks) that drives `edit_file`, `directory_tree` and
+`move_file` through the real CLI — the edit is asserted to leave the rest of the
+file byte-identical and the tree's JSON result is asserted to reach the next
+model request.
+
 ## [27.5.0] — 2026-09-24 — the run says it is working, and the model thinks out loud
 
 Two complaints from a real session, both about **not being able to see what is

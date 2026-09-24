@@ -1,0 +1,8 @@
+{
+  "id": "move_file",
+  "name": "Move File",
+  "description": "Moves or renames a file or directory (refuses to overwrite)",
+  "source": "local",
+  "modulePath": "./implementations/move-file",
+  "category": "filesystem"
+}

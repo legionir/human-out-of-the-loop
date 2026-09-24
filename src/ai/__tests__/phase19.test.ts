@@ -380,16 +380,33 @@ describe('Phase 19 — Law 16: no hardcoded tool defs in Orchestrator', () => {
     expect(ts).toContain('bootstrapTools(');
   });
 
-  it('tool metadata comes from registry/tools/*.json (4 definitions load)', async () => {
+  it('tool metadata comes from registry/tools/*.json (every definition loads)', async () => {
     const projectRoot = makeTempProject();
     try {
       const orch = new Orchestrator({ projectRoot });
       await orch.initialize();
       try {
-        for (const id of ['read_file', 'search_code', 'write_file', 'git_status']) {
+        const expected = [
+          'read_file',
+          'search_code',
+          'write_file',
+          'git_status',
+          // phase 33 — the reference filesystem toolset
+          'edit_file',
+          'read_multiple_files',
+          'list_directory',
+          'directory_tree',
+          'move_file',
+          'get_file_info',
+          'create_directory',
+          'search_files',
+          'list_allowed_directories',
+        ];
+        for (const id of expected) {
           expect(orch.toolRegistry.hasDefinition(id)).toBe(true);
           expect(orch.toolRegistry.getImplementation(id)).toBeDefined();
         }
+        expect(orch.toolRegistry.listDefinitions().length).toBeGreaterThanOrEqual(expected.length);
         // metadata fields come from the JSON files, not hardcoded names
         const def = orch.toolRegistry.getDefinition('read_file')!;
         expect(def.source).toBe('local');

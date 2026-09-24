@@ -323,6 +323,32 @@ human-out-of-the-loop logs --follow --project-root ./app
 human-out-of-the-loop sessions label session_5c1d… "Login page v2"
 ```
 
+### Filesystem tools
+
+The workspace tools are a native port of the MCP reference *filesystem* server
+(`servers-main/src/filesystem/`) — the same path validation, not an MCP server
+registration. Thirteen tools, all bound to `--project-root` and refusing
+anything that escapes it (symlinked parents included):
+
+| Read | Write | Inspect |
+|------|-------|---------|
+| `read_file` (full, `head`/`tail`, base64) | `write_file` (atomic, `overwrite`) | `list_directory` |
+| `read_multiple_files` | `edit_file` (line-based + diff, `dryRun`) | `directory_tree` (globs, `maxDepth`) |
+| `search_code` (regex) | `create_directory` | `get_file_info` |
+| `search_files` (glob) | `move_file` (never overwrites) | `list_allowed_directories` |
+| | | `git_status` |
+
+Safety properties the port keeps from the reference implementation: every
+component of a path is resolved through its symlinks and re-checked (a *new*
+file behind a symlinked directory is refused before it is created), a Windows
+drive path on a POSIX host is refused instead of being written as a literal
+name, Unicode-equivalent (NFC/NFD) names resolve to the file that exists, new
+files are created with `O_EXCL`, existing ones are replaced through a temp file
++ `rename` with the original permissions restored, and `edit_file` never
+silently skips a non-matching edit. Path-check failures come back as
+`{ success: false, code }` — `PATH_TRAVERSAL_BLOCKED`, `EEXIST`, `EDIT_NOT_FOUND`
+— so a refused write is visible in the log and can never be judged a success.
+
 ## Web UI
 
 The same runtime behind a browser front-end (Express + vanilla JS, no build step). Every UI action maps to a runtime capability — nothing is simulated:
@@ -457,10 +483,11 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 17 | Documentation & Delivery | 🟢 |
 | 18–26 | Runtime hardening, CLI parity, server-side controls, registry introspection, clarification, usage/tasks | 🟢 |
 | 27–32 | Env-injected endpoints, registry layers, the REPL and `/` menu, runtime models, live run feedback (status line + streamed thinking) & project context for the planner | 🟢 |
+| 33 | Native port of the MCP reference filesystem toolset (13 tools, symlink/Unicode-safe paths, atomic writes, line-based edits) | 🟢 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**758 tests green (55 files), 0 tsc errors — plus 60 committed end-to-end checks (`npm run e2e`)** (phases 18–32 complete — see `docs/history/`)
+**801 tests green (56 files), 0 tsc errors — plus 68 committed end-to-end checks (`npm run e2e`)** (phases 18–33 complete — see `docs/history/`)
 
 ## Law Compliance
 

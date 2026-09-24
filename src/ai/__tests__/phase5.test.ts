@@ -13,6 +13,7 @@ import { createReadFileTool } from '../tools/implementations/read-file.js';
 import { createSearchCodeTool } from '../tools/implementations/search-code.js';
 import { createWriteFileTool } from '../tools/implementations/write-file.js';
 import { createGitStatusTool } from '../tools/implementations/git-status.js';
+import { registerLocalToolFixtures } from './helpers/local-tools-fixture.js';
 
 // Phase 18: filesystem tools are factories bound to a workspace root.
 // Tests run from the repo root, so binding to process.cwd() keeps behavior identical.
@@ -79,6 +80,9 @@ function setupRegistries(): TestRefs {
   toolRegistry.registerImplementation('search_code', searchCodeTool);
   toolRegistry.registerImplementation('write_file', writeFileTool);
   toolRegistry.registerImplementation('git_status', gitStatusTool);
+  // Phase 33: register the reference filesystem toolset so skill cross-validation
+  // (registry/skills/*) sees the same catalog as production bootstrapTools().
+  registerLocalToolFixtures(toolRegistry, TEST_ROOT);
 
   // Skill — bootstrap catalog tools first because task_decomposition depends on them
   const skillRegistry = new SkillRegistry({ toolRegistry });
@@ -218,9 +222,10 @@ describe('createAgent', () => {
   });
 
   it('filters out tools NOT in persona.allowedTools and logs warnings', () => {
-    // reviewer persona: allowedTools = ["read_file", "search_code"]
-    // file_management skill needs: ["read_file", "write_file", "search_code"]
-    // "write_file" should be filtered out
+    // reviewer persona: read-only tools only.
+    // file_management skill also requires the four write-capable tools
+    // (write_file, edit_file, move_file, create_directory) — all must be
+    // filtered out, and the read-side tools of the same skill must survive.
     const def = {
       id: 'restricted',
       name: 'Restricted',
@@ -235,10 +240,12 @@ describe('createAgent', () => {
     expect(Object.keys(agent.tools)).toContain('search_code');
     expect(Object.keys(agent.tools)).not.toContain('write_file');
 
-    expect(agent.toolWarnings).toHaveLength(1);
-    expect(agent.toolWarnings[0].toolId).toBe('write_file');
-    expect(agent.toolWarnings[0].skillId).toBe('file_management');
-    expect(agent.toolWarnings[0].reason).toBe('not-in-allowedTools');
+    const filtered = agent.toolWarnings.map((w) => w.toolId).sort();
+    expect(filtered).toEqual(['create_directory', 'edit_file', 'move_file', 'write_file']);
+    for (const warning of agent.toolWarnings) {
+      expect(warning.skillId).toBe('file_management');
+      expect(warning.reason).toBe('not-in-allowedTools');
+    }
   });
 
   it('architect persona cannot use write_file even if skill requires it', () => {

@@ -1,0 +1,8 @@
+{
+  "id": "get_file_info",
+  "name": "Get File Info",
+  "description": "Returns size, type, permissions and timestamps of a path",
+  "source": "local",
+  "modulePath": "./implementations/get-file-info",
+  "category": "filesystem"
+}

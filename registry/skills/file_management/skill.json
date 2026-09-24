@@ -3,7 +3,20 @@
   "name": "File Management",
   "version": "1.0.0",
   "instructions": "SKILL.md",
-  "tools": ["read_file", "write_file", "search_code"],
+  "tools": [
+    "read_file",
+    "read_multiple_files",
+    "edit_file",
+    "write_file",
+    "move_file",
+    "create_directory",
+    "list_directory",
+    "directory_tree",
+    "get_file_info",
+    "search_code",
+    "search_files",
+    "list_allowed_directories"
+  ],
   "priority": 60,
-  "description": "Reads, writes, and searches files in the workspace"
+  "description": "Reads, writes, edits, moves and searches files in the workspace"
 }

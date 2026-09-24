@@ -1,27 +1,35 @@
-import fs from 'node:fs';
-import path from 'node:path';
-
 /**
  * Validates that a file path is within the allowed workspace root.
  * Prevents path traversal attacks (e.g. `../../etc/passwd`).
  *
- * Used by all filesystem tools (read_file, write_file, search_code,
- * git_status).  `workspaceRoot` is ALWAYS required (phase 18 — PATH-09):
- * the root must be injected by the factory, never inferred from
- * the process working directory, so tool behavior is independent of where the
- * process happens to be launched from.
+ * Phase 18 (PATH-09): `workspaceRoot` is ALWAYS required — it must be injected
+ * by the factory, never inferred from the process working directory, so tool
+ * behavior is independent of where the process happens to be launched from.
  *
- * Phase 20 (PATH-07): the check no longer trusts the lexical path alone.
- * When the workspace root exists, the target (or its deepest existing
- * ancestor) is resolved with `fs.realpathSync` — symlinks and `..`
- * segments are resolved to their REAL locations and re-checked against
- * the REAL workspace root.  A symlink inside the workspace pointing
- * outside (e.g. `./link -> /etc/passwd`, or a directory symlink used to
- * write outside) is now blocked.
+ * Phase 20 (PATH-07/08): the lexical check no longer stands alone — symlinks
+ * and `..` are resolved to their real locations and re-checked, and everything
+ * is compared case-insensitively on Windows.
  *
- * Phase 20 (PATH-08): all comparisons are case-insensitive on
- * `process.platform === 'win32'` (Windows paths are case-insensitive).
+ * Phase 33: the real check is the ported reference implementation
+ * (`../fs/path-validation.ts` + `../fs/lib.ts`).  The two functions below stay
+ * exactly as they were for the callers that need a **synchronous, non-throwing**
+ * answer (`validateWorkspacePath` / `isPathWithinWorkspace`), while every
+ * filesystem tool now goes through `resolvePathInWorkspace`, which adds what the
+ * reference server does on top of the lexical check:
+ *
+ *   - per-component symlink resolution (a symlinked *parent* is caught even
+ *     when the target file does not exist yet),
+ *   - Unicode-equivalent (NFC/NFD) component resolution,
+ *   - a Windows drive path on a POSIX host is refused instead of being
+ *     reinterpreted as a relative file name.
+ *
+ * The synchronous variant keeps working for a workspace root that does not
+ * exist yet (a path cannot escape a tree that has no symlinks in it).
  */
+import fs from 'node:fs';
+import path from 'node:path';
+import { isPathWithinAllowedDirectories } from '../fs/path-validation.js';
+import { PathAccessError, validatePath } from '../fs/lib.js';
 
 export interface PathCheckResult {
   safe: boolean;
@@ -69,15 +77,12 @@ export function isPathWithinWorkspace(
   const resolved = path.resolve(workspaceRoot, filePath);
   const normalizedRoot = path.resolve(workspaceRoot);
 
-  // Ensure the resolved path starts with the workspace root.
-  // Handle the filesystem root (e.g. "/") where appending path.sep
-  // would produce "//" which path.resolve never emits.
-  const isFsRoot = normalizedRoot === path.parse(normalizedRoot).root;
-  const prefix = isFsRoot ? normalizedRoot : withSep(normalizedRoot);
-
-  // Allow the root itself (e.g. directory ".") and everything beneath it.
-  // Phase 20 (PATH-08): case-insensitive on Windows.
-  if (norm(resolved) !== norm(normalizedRoot) && !norm(resolved).startsWith(norm(prefix))) {
+  // Containment is decided by the ported reference check (separator-aware,
+  // Windows-aware, null-byte safe).
+  if (
+    !isPathWithinAllowedDirectories(resolved, [normalizedRoot]) &&
+    norm(resolved) !== norm(normalizedRoot)
+  ) {
     return {
       safe: false,
       resolvedPath: resolved,
@@ -85,9 +90,7 @@ export function isPathWithinWorkspace(
     };
   }
 
-  // ── Phase 20 (PATH-07): symlink escape check ─────────────────
-  // Only meaningful when the root actually exists — a nonexistent root
-  // cannot contain symlinks, so the lexical check suffices.
+  // Symlink escape check — only meaningful when the root exists.
   let realRoot: string;
   try {
     realRoot = fs.realpathSync(normalizedRoot);
@@ -111,16 +114,54 @@ export function isPathWithinWorkspace(
 }
 
 /**
- * Wrapper that validates a path before passing it to a filesystem
- * operation.  Returns a structured error if the path is unsafe.
+ * Wrapper that validates a path before passing it to a filesystem operation.
  *
- * Phase 18 (PATH-09): `workspaceRoot` is now MANDATORY — there is no
- * silent fallback to the process working directory.  Callers must inject the
- * Orchestrator's `projectRoot`.
+ * Phase 33: this is the synchronous, non-throwing variant.  Tools use
+ * `resolvePathInWorkspace` (same result shape, stricter checks).
  */
 export function validateWorkspacePath(
   filePath: string,
   workspaceRoot: string
 ): PathCheckResult {
   return isPathWithinWorkspace(filePath, workspaceRoot);
+}
+
+/**
+ * Phase 33: the check every filesystem tool runs before touching disk.
+ *
+ * Same `{ safe, resolvedPath, reason }` contract as the synchronous variant,
+ * but implemented on the ported reference core, so a symlinked parent, a
+ * Unicode-equivalent name and a Windows-shaped path are all handled the way the
+ * MCP reference filesystem server handles them.  Never throws for a refusal —
+ * the caller turns `safe: false` into a structured tool error.
+ */
+export async function resolvePathInWorkspace(
+  requestedPath: string,
+  allowedDirectories: readonly string[]
+): Promise<PathCheckResult> {
+  const roots = allowedDirectories.filter((root) => typeof root === 'string' && root.length > 0);
+  if (roots.length === 0) {
+    throw new Error(
+      '[PathSecurity] "allowedDirectories" must contain at least one root. ' +
+        'Pass the project root explicitly — process.cwd() is forbidden (PATH-09).'
+    );
+  }
+
+  const lexical = path.isAbsolute(requestedPath)
+    ? path.resolve(requestedPath)
+    : path.resolve(roots[0]!, requestedPath);
+
+  try {
+    return { safe: true, resolvedPath: await validatePath(requestedPath, roots) };
+  } catch (error) {
+    if (error instanceof PathAccessError) {
+      // A workspace that does not exist yet contains no symlinks, so the
+      // lexical check is the best available answer (same as the sync variant).
+      if (error.code === 'PARENT_MISSING' && !roots.some((root) => fs.existsSync(root))) {
+        return isPathWithinWorkspace(requestedPath, roots[0]!);
+      }
+      return { safe: false, resolvedPath: lexical, reason: error.message };
+    }
+    throw error;
+  }
 }

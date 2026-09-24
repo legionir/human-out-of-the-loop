@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { validateWorkspacePath } from './path-security.js';
+import { resolvePathInWorkspace } from './path-security.js';
 import { isUnsafeRegex, MAX_PATTERN_LENGTH } from './regex-guard.js';
 
 const inputSchema = z.object({
@@ -119,6 +119,7 @@ async function searchFiles(dir: string, opts: SearchOptions): Promise<void> {
  *   - matched file paths are reported relative to `projectRoot`.
  */
 export function createSearchCodeTool(projectRoot: string) {
+  const allowed = [projectRoot];
   return tool({
     description:
       'Searches for a regex pattern across files in a directory. Returns matching lines with file path and line number.',
@@ -126,7 +127,8 @@ export function createSearchCodeTool(projectRoot: string) {
     execute: async ({ pattern, directory, fileExtension, maxResults }) => {
       try {
         // Security: the search directory must stay inside the workspace
-        const validation = validateWorkspacePath(directory, projectRoot);
+        // (phase 33: the ported reference check — symlink- and Unicode-aware)
+        const validation = await resolvePathInWorkspace(directory, allowed);
         if (!validation.safe) {
           return {
             success: false as const,

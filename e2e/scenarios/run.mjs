@@ -222,6 +222,62 @@ scenarios.success = async () => {
   return root;
 };
 
+/**
+ * Phase 33 — the reference filesystem toolset, through the real CLI.
+ *
+ * One run exercises `edit_file` (a line-based edit that must leave the rest of
+ * the file byte-identical), `directory_tree` (its JSON result comes back into
+ * the next model request, so the pipeline really carried it) and `move_file`
+ * (the source must be gone and the destination present).  `CHAIN` makes the
+ * stub call every marker in one agent turn.
+ */
+scenarios.files = async () => {
+  const root = makeProject('files', {
+    'notes/edit.txt': 'e2e-placeholder\nkeep this line\n',
+    'notes/moved-from.txt': 'movable\n',
+  });
+  const goal = 'edit the note, inspect the tree and move a file FILEPROBE CHAIN EDIT:notes/edit.txt TREE:. MOVE:notes/moved-from.txt|notes/moved.txt';
+  const { code, stdout } = await run(runArgs(goal, root));
+  const { plans } = planStore(root);
+  const plan = plans[0];
+  const log = readLog(root);
+
+  check('files: exit code 0', code === 0, `exit=${code}`);
+
+  const edited = fs.existsSync(path.join(root, 'notes', 'edit.txt'))
+    ? fs.readFileSync(path.join(root, 'notes', 'edit.txt'), 'utf-8')
+    : '(missing)';
+  check('files: edit_file replaced the marked line', edited === 'e2e-edited\nkeep this line\n', JSON.stringify(edited));
+  check('files: ...and left the rest of the file untouched', edited.includes('keep this line'));
+
+  check(
+    'files: move_file moved the file',
+    fs.existsSync(path.join(root, 'notes', 'moved.txt')) &&
+      !fs.existsSync(path.join(root, 'notes', 'moved-from.txt'))
+  );
+
+  const calls = log.filter((e) => e.eventType === 'task:tool-call');
+  const called = new Set(calls.map((e) => e.payload?.toolName));
+  check(
+    'files: the log records edit_file, directory_tree and move_file calls',
+    called.has('edit_file') && called.has('directory_tree') && called.has('move_file'),
+    [...called].join(',')
+  );
+
+  const probeRequests = stubRequests().filter((body) => JSON.stringify(body).includes('FILEPROBE'));
+  // The tree result travels back as an escaped JSON string inside a later
+  // function_call_output item, so assert on markers of the tool's own payload
+  // (`formatted` + a real entry name) rather than on quoted JSON.
+  const treeResultSeen = probeRequests.some((body) => {
+    const text = JSON.stringify(body);
+    return text.includes('formatted') && text.includes('edit.txt');
+  });
+  check('files: the directory_tree result reached the next model turn', treeResultSeen);
+  check('files: every step completed', Boolean(plan) && plan.steps.every((s) => s.status === 'done'));
+  check('files: no tool error was logged', !log.some((e) => e.eventType === 'task:tool-error'), log.filter((e) => e.eventType === 'task:tool-error').map((e) => e.message).join(' | '));
+  return root;
+};
+
 scenarios.resume = async () => {
   const root = makeProject('resume');
   await run(runArgs('write the project notes WRITE:notes/first.txt', root));

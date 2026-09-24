@@ -1,0 +1,8 @@
+{
+  "id": "directory_tree",
+  "name": "Directory Tree",
+  "description": "Recursive JSON tree of a directory, with glob excludes and a depth limit",
+  "source": "local",
+  "modulePath": "./implementations/directory-tree",
+  "category": "filesystem"
+}

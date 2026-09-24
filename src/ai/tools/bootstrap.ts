@@ -6,10 +6,9 @@ import { ToolDefinitionSchema } from '../schemas/tool-definition.js';
 // Import all implementations (Law 12: this is the ONLY place that
 // directly imports tool implementations — Agents never do).
 // Phase 18: filesystem tools are factories bound to projectRoot.
-import { createReadFileTool } from './implementations/read-file.js';
-import { createSearchCodeTool } from './implementations/search-code.js';
-import { createWriteFileTool } from './implementations/write-file.js';
-import { createGitStatusTool } from './implementations/git-status.js';
+// Phase 33: the (longer) local toolset lives in ./local-tools.ts so the
+// packaged definitions and the in-memory registry cannot drift apart.
+import { createLocalTools } from './local-tools.js';
 
 /**
  * Full bootstrap: loads metadata JSON from `registry/tools/`,
@@ -36,12 +35,7 @@ export function bootstrapTools(
 ): void {
   const { required = true, override = false } = options;
   // Bind implementations (created per-Orchestrator, bound to projectRoot)
-  const implementations: Record<string, Tool> = {
-    read_file: createReadFileTool(projectRoot),
-    search_code: createSearchCodeTool(projectRoot),
-    write_file: createWriteFileTool(projectRoot),
-    git_status: createGitStatusTool(projectRoot),
-  };
+  const implementations: Record<string, Tool> = createLocalTools(projectRoot);
 
   // 1. Load metadata into the underlying registry
   const metaRegistry = registry.getMetadataRegistry();

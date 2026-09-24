@@ -149,11 +149,20 @@ registry/
 │   ├── git_operations/
 │   ├── task_decomposition/
 │   └── acceptance_check/
-├── tools/
+├── tools/                   # ۱۳ ابزار محلی (فاز ۳۳: پورت سرور مرجع MCP)
 │   ├── read_file.json       # id, name, description, source: local, modulePath, category
-│   ├── search_code.json
+│   ├── search_code.json     #   (مسیرها نسبت به projectRoot؛ head/tail برای read_file)
 │   ├── write_file.json
-│   └── git_status.json
+│   ├── git_status.json
+│   ├── edit_file.json       # ویرایش خطی + diff (dryRun)
+│   ├── read_multiple_files.json
+│   ├── list_directory.json  # [DIR]/[FILE]؛ symlink هرگز دنبال نمی‌شود
+│   ├── directory_tree.json  # درخت JSON با excludePatterns و maxDepth
+│   ├── move_file.json       # مقصد موجود → خطا (بدون overwrite)
+│   ├── get_file_info.json
+│   ├── create_directory.json
+│   ├── search_files.json    # گلوب (معادل name-based برای search_code)
+│   └── list_allowed_directories.json
 ├── models/
 │   ├── gpt-4o.json          # id, provider, model, config { baseURL?, maxContextTokens? }
 │   ├── claude-sonnet.json
@@ -171,7 +180,12 @@ registry/
   "id": "coder",
   "name": "Coder",
   "system": "You are a skilled software engineer...",
-  "allowedTools": ["read_file", "write_file", "search_code", "git_status"],
+  "allowedTools": [
+    "read_file", "write_file", "edit_file", "read_multiple_files",
+    "list_directory", "directory_tree", "move_file", "get_file_info",
+    "create_directory", "search_code", "search_files",
+    "list_allowed_directories", "git_status"
+  ],
   "description": "Implements features and fixes bugs"
 }
 ```
@@ -183,9 +197,13 @@ registry/
   "name": "File Management",
   "version": "1.0.0",
   "instructions": "SKILL.md",
-  "tools": ["read_file", "write_file", "search_code"],
+  "tools": [
+    "read_file", "read_multiple_files", "edit_file", "write_file",
+    "move_file", "create_directory", "list_directory", "directory_tree",
+    "get_file_info", "search_code", "search_files", "list_allowed_directories"
+  ],
   "priority": 60,
-  "description": "Reads, writes, and searches files"
+  "description": "Reads, writes, edits, moves and searches files"
 }
 ```
 

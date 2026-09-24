@@ -23,6 +23,7 @@ const searchCodeTool = createSearchCodeTool(TEST_ROOT);
 const writeFileTool = createWriteFileTool(TEST_ROOT);
 const gitStatusTool = createGitStatusTool(TEST_ROOT);
 import { bootstrapCatalogTools } from '../tools/catalog-bootstrap';
+import { registerLocalToolFixtures } from './helpers/local-tools-fixture.js';
 
 // ─── Path Traversal Protection ───────────────────────────────────
 
@@ -188,6 +189,9 @@ describe('allowedTools — enforced in ALL paths', () => {
     toolRegistry.registerImplementation('search_code', searchCodeTool);
     toolRegistry.registerImplementation('write_file', writeFileTool);
     toolRegistry.registerImplementation('git_status', gitStatusTool);
+    // Phase 33: register the reference filesystem toolset so skill
+    // cross-validation (registry/skills/*) sees the production catalog.
+    registerLocalToolFixtures(toolRegistry, TEST_ROOT);
 
     const skillRegistry = new SkillRegistry({ toolRegistry });
     bootstrapCatalogTools({ toolRegistry, personaRegistry, skillRegistry });

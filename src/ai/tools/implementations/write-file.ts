@@ -2,7 +2,8 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { validateWorkspacePath } from './path-security.js';
+import { resolvePathInWorkspace } from './path-security.js';
+import { writeFileContent } from '../fs/lib.js';
 
 const inputSchema = z.object({
   filePath: z.string().min(1, 'filePath must not be empty'),
@@ -18,16 +19,24 @@ const inputSchema = z.object({
  * (phase 18 — PATH-02).  The root is injected, never inferred from
  * the process working directory.  Paths reported back to the model are relative to
  * the workspace root (SEC-05).
+ *
+ * Phase 33: the write itself is the ported reference implementation
+ * (`writeFileContent`): `wx` for a new file (never writing through a
+ * pre-existing symlink), temp file + `rename` for an existing one (atomic,
+ * symlink-safe, original permissions restored).
  */
 export function createWriteFileTool(projectRoot: string) {
+  const allowed = [projectRoot];
   return tool({
     description:
       'Writes content to a file. Creates parent directories if needed. Refuses to overwrite existing files unless overwrite=true.',
     inputSchema,
     execute: async ({ filePath, content, overwrite }) => {
       try {
-        // Security: validate path is within workspace
-        const validation = validateWorkspacePath(filePath, projectRoot);
+        // Schema defaults are not applied when execute() is called directly.
+        const replaceExisting = overwrite ?? false;
+        // Security: validate path is within workspace (symlink/unicode aware)
+        const validation = await resolvePathInWorkspace(filePath, allowed);
         if (!validation.safe) {
           return {
             success: false as const,
@@ -37,9 +46,9 @@ export function createWriteFileTool(projectRoot: string) {
         }
 
         const resolved = validation.resolvedPath;
-        const relative = path.relative(projectRoot, resolved);
+        const relative = path.relative(projectRoot, resolved) || '.';
 
-        if (!overwrite) {
+        if (!replaceExisting) {
           try {
             await fs.access(resolved);
             return {
@@ -53,12 +62,13 @@ export function createWriteFileTool(projectRoot: string) {
         }
 
         await fs.mkdir(path.dirname(resolved), { recursive: true });
-        await fs.writeFile(resolved, content, 'utf-8');
+        await writeFileContent(resolved, content);
 
         return {
           success: true as const,
           filePath: relative,
           bytesWritten: Buffer.byteLength(content, 'utf-8'),
+          overwritten: replaceExisting,
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

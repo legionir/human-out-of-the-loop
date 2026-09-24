@@ -1,0 +1,8 @@
+{
+  "id": "edit_file",
+  "name": "Edit File",
+  "description": "Makes line-based edits to a text file and returns a git-style diff",
+  "source": "local",
+  "modulePath": "./implementations/edit-file",
+  "category": "filesystem"
+}

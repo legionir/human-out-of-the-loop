@@ -13,6 +13,7 @@ import { createReadFileTool } from '../tools/implementations/read-file';
 import { createSearchCodeTool } from '../tools/implementations/search-code';
 import { createWriteFileTool } from '../tools/implementations/write-file';
 import { createGitStatusTool } from '../tools/implementations/git-status';
+import { registerLocalToolFixtures } from './helpers/local-tools-fixture.js';
 
 // Phase 18: filesystem tools are factories bound to a workspace root.
 const TEST_ROOT = process.cwd();
@@ -63,6 +64,9 @@ function setupFull(): FullRefs {
   toolRegistry.registerImplementation('search_code', searchCodeTool);
   toolRegistry.registerImplementation('write_file', writeFileTool);
   toolRegistry.registerImplementation('git_status', gitStatusTool);
+  // Phase 33: register the reference filesystem toolset so skill cross-validation
+  // (registry/skills/*) sees the same catalog as production bootstrapTools().
+  registerLocalToolFixtures(toolRegistry, TEST_ROOT);
 
   const skillRegistry = new SkillRegistry({ toolRegistry });
   bootstrapCatalogTools({ toolRegistry, personaRegistry, skillRegistry });

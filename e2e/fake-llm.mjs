@@ -154,6 +154,10 @@ const MARKERS = [
   { marker: 'OVERWRITE', tool: 'write_file' },
   { marker: 'SEARCH', tool: 'search_code' },
   { marker: 'GITSTATUS', tool: 'git_status' },
+  // Phase 33 — the reference filesystem toolset.
+  { marker: 'EDIT', tool: 'edit_file' },
+  { marker: 'TREE', tool: 'directory_tree' },
+  { marker: 'MOVE', tool: 'move_file' },
 ];
 
 function markersIn(text) {
@@ -173,7 +177,7 @@ function markersIn(text) {
   return found.sort((a, b) => a.at - b.at);
 }
 
-function pickToolCall(promptText, offered) {
+function pickToolCall(promptText, offered, chained = false) {
   const available = new Set(offered);
   // A marker is consumed exactly once: a reused marker would repeat the same
   // tool call (and, for WRITE, fail on "file already exists").
@@ -195,6 +199,24 @@ function pickToolCall(promptText, offered) {
   }
   if (marker.marker === 'SEARCH') return { name: 'search_code', args: { pattern: marker.arg, directory: '.' } };
   if (marker.marker === 'GITSTATUS') return { name: 'git_status', args: { directory: '.' } };
+  // Phase 33 — the reference filesystem toolset.  EDIT replaces a fixed
+  // placeholder so the scenario can assert a line-based edit, not a rewrite;
+  // MOVE carries `source|destination`.
+  if (marker.marker === 'EDIT') {
+    return {
+      name: 'edit_file',
+      args: {
+        path: marker.arg,
+        edits: [{ oldText: 'e2e-placeholder', newText: 'e2e-edited' }],
+      },
+    };
+  }
+  if (marker.marker === 'TREE') return { name: 'directory_tree', args: { path: marker.arg } };
+  if (marker.marker === 'MOVE') {
+    const [source, destination] = marker.arg.split('|');
+    if (!source || !destination) return null;
+    return { name: 'move_file', args: { source, destination } };
+  }
   return null;
 }
 
@@ -234,7 +256,7 @@ function goalFromPrompt(promptText) {
  */
 function planPayload(promptText = '') {
   const goal = goalFromPrompt(promptText);
-  const wanted = ['write_file', 'search_code', 'git_status'].filter((tool) =>
+  const wanted = [...new Set(MARKERS.map((m) => m.tool))].filter((tool) =>
     markersIn(promptText).some((m) => m.tool === tool)
   );
   const tools = [...new Set([...wanted, 'read_file'])];
@@ -319,7 +341,10 @@ async function handleChat(body, req, res) {
       : JSON.stringify(structuredPayload(schemaName ?? guessSchema(promptText), promptText));
   } else if (tools.length > 0) {
     const offered = tools.map((t) => t.function?.name ?? t.name);
-    let call = sawToolTurn ? null : pickToolCall(promptText, offered);
+    // `CHAIN` lets one agent turn call every marker in the prompt in order
+    // (used by the phase-33 files scenario to exercise three tools in one run).
+    const chained = /(^|\s)CHAIN(\s|$)/.test(promptText);
+    let call = sawToolTurn && !chained ? null : pickToolCall(promptText, offered, chained);
     if (!call && !sawToolTurn && offered.includes('read_file')) call = { name: 'read_file', args: { filePath: 'README.md' } };
     if (call) {
       message = {
@@ -645,7 +670,8 @@ const server = http.createServer((req, res) => {
       output = [messageItem(JSON.stringify(structuredPayload(format.name, promptText)))];
     } else if (tools.length > 0) {
       const offered = tools.map((t) => t.name ?? t.function?.name);
-      const call = sawToolTurn ? null : pickToolCall(promptText, offered);
+      const chained = /(^|\s)CHAIN(\s|$)/.test(promptText);
+      const call = sawToolTurn && !chained ? null : pickToolCall(promptText, offered, chained);
       if (call) {
         output = [functionCallItem(call.name, call.args)];
       } else if (!sawToolTurn && offered.includes('read_file')) {

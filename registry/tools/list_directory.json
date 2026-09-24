@@ -1,0 +1,8 @@
+{
+  "id": "list_directory",
+  "name": "List Directory",
+  "description": "Lists the files and directories in a directory",
+  "source": "local",
+  "modulePath": "./implementations/list-directory",
+  "category": "filesystem"
+}

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
-import { validateWorkspacePath } from './path-security.js';
+import { resolvePathInWorkspace } from './path-security.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -19,6 +19,7 @@ const inputSchema = z.object({
  * the reported directory is relative to the workspace root (SEC-05).
  */
 export function createGitStatusTool(projectRoot: string) {
+  const allowed = [projectRoot];
   return tool({
     description:
       'Runs `git status` in the specified directory and returns the output. Useful for understanding the current state of the working tree.',
@@ -26,7 +27,8 @@ export function createGitStatusTool(projectRoot: string) {
     execute: async ({ directory, short }) => {
       try {
         // Security: the git working directory must stay inside the workspace
-        const validation = validateWorkspacePath(directory, projectRoot);
+        // (phase 33: the ported reference check — symlink- and Unicode-aware)
+        const validation = await resolvePathInWorkspace(directory, allowed);
         if (!validation.safe) {
           return {
             success: false as const,

@@ -1,0 +1,8 @@
+{
+  "id": "search_files",
+  "name": "Search Files",
+  "description": "Finds files and directories by glob pattern",
+  "source": "local",
+  "modulePath": "./implementations/search-files",
+  "category": "filesystem"
+}

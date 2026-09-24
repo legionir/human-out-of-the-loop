@@ -225,7 +225,7 @@ describe('git_status tool', () => {
 // ─── Loader integration ─────────────────────────────────────────
 
 describe('Tool loader integration', () => {
-  it('loads all four tool definitions from registry/tools/', () => {
+  it('loads every tool definition from registry/tools/', () => {
     const reg = new ToolRegistry();
     const baseReg = createRegistry({ schema: ToolDefinitionSchema, label: 'Tool' });
     const dir = path.resolve(__dirname, '../../../registry/tools');
@@ -234,11 +234,14 @@ describe('Tool loader integration', () => {
       registry: baseReg,
       schema: ToolDefinitionSchema,
     });
-    expect(result.loaded).toBe(4);
+    // 4 original filesystem/git tools + phase 33's reference filesystem set.
+    expect(result.loaded).toBe(13);
     expect(result.errors).toHaveLength(0);
     expect(baseReg.has('read_file')).toBe(true);
     expect(baseReg.has('search_code')).toBe(true);
     expect(baseReg.has('write_file')).toBe(true);
     expect(baseReg.has('git_status')).toBe(true);
+    expect(baseReg.has('edit_file')).toBe(true);
+    expect(baseReg.has('directory_tree')).toBe(true);
   });
 });

@@ -7,6 +7,7 @@ import { createReadFileTool } from '../tools/implementations/read-file.js';
 import { createSearchCodeTool } from '../tools/implementations/search-code.js';
 import { createWriteFileTool } from '../tools/implementations/write-file.js';
 import { createGitStatusTool } from '../tools/implementations/git-status.js';
+import { registerLocalToolFixtures } from './helpers/local-tools-fixture.js';
 
 // Phase 18: filesystem tools are factories bound to a workspace root.
 // Tests run from the repo root, so binding to process.cwd() keeps behavior identical.
@@ -66,6 +67,11 @@ function createToolRegistry(withCatalog = false, personaRegistry?: any, skillReg
   reg.registerImplementation('search_code', searchCodeTool);
   reg.registerImplementation('write_file', writeFileTool);
   reg.registerImplementation('git_status', gitStatusTool);
+
+  // Phase 33: the packaged skills also reference the reference filesystem
+  // toolset, so the baseline registry must include it (same as production
+  // bootstrapTools()).
+  registerLocalToolFixtures(reg);
 
   if (withCatalog && personaRegistry && skillRegistry) {
     // Dynamically import to avoid circular deps — use require-like via import

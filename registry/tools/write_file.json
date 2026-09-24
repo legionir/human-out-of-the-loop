@@ -1,7 +1,7 @@
 {
   "id": "write_file",
   "name": "Write File",
-  "description": "Writes content to a file, creating parent directories if needed",
+  "description": "Writes a file atomically; refuses to overwrite unless overwrite=true",
   "source": "local",
   "modulePath": "./implementations/write-file",
   "category": "filesystem"
