@@ -20,6 +20,9 @@ vi.mock('ai', async () => {
 });
 
 import { createSearchCodeTool } from '../tools/implementations/search-code.js';
+import { FilePlanStore } from '../runtime/plan-store.js';
+import { FileSessionStore } from '../runtime/session-store.js';
+import { createPlan, type Plan } from '../schemas/plan.js';
 
 // ─── SEC-02: unreadable paths are reported ────────────────────────
 
@@ -137,5 +140,126 @@ describe('SEC-02: search_code reports skipped paths (no silent skip)', () => {
 
     expect(out.skippedCount).toBe(0);
     expect(out.skipped).toEqual([]);
+  });
+});
+
+
+// ─── PERF-06: store list() index ──────────────────────────────────
+
+describe('PERF-06: store list() only parses unseen files', () => {
+  let dir = '';
+  const spies: Array<ReturnType<typeof vi.spyOn>> = [];
+
+  afterEach(() => {
+    for (const s of spies.splice(0)) s.mockRestore();
+    if (dir) fsSync.rmSync(dir, { recursive: true, force: true });
+    dir = '';
+  });
+
+  /** Counts real readFileSync calls inside the store directory. */
+  function instrumentReads(): { count: () => number } {
+    const real = fsSync.readFileSync.bind(fsSync);
+    let n = 0;
+    const spy = vi.spyOn(fsSync, 'readFileSync').mockImplementation(((
+      p: unknown,
+      ...rest: unknown[]
+    ) => {
+      if (String(p).startsWith(dir)) n++;
+      return (real as unknown as (...a: unknown[]) => unknown)(p, ...rest);
+    }) as never);
+    spies.push(spy);
+    return { count: () => n };
+  }
+
+  function makePlan(i: number): Plan {
+    // Deterministic id so assertions can name the expectations.
+    const plan = createPlan(`goal ${i}`, [
+      {
+        id: `step-${i}`,
+        description: `do ${i}`,
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: [],
+        assignedTools: [],
+        claimedResources: [],
+        acceptanceCriteria: `done ${i}`,
+      },
+    ]);
+    plan.id = `plan_phase27_${i}`;
+    return plan;
+  }
+
+  it('a fresh instance reads each file once; warm lists read zero; new files read once', () => {
+    dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'phase27-perf06-'));
+    const writer = new FilePlanStore(dir);
+    for (let i = 0; i < 5; i++) writer.save(makePlan(i));
+
+    // A FRESH instance (e.g. a restarted process) has a cold index.
+    const store = new FilePlanStore(dir);
+    const reads = instrumentReads();
+
+    expect(store.list().sort()).toEqual([
+      'plan_phase27_0',
+      'plan_phase27_1',
+      'plan_phase27_2',
+      'plan_phase27_3',
+      'plan_phase27_4',
+    ]);
+    const cold = reads.count();
+    expect(cold).toBe(5);
+
+    // Warm: no file is re-read at all — 20 calls, zero reads.
+    for (let i = 0; i < 20; i++) store.list();
+    expect(reads.count()).toBe(cold);
+
+    // A plan written by ANOTHER instance costs exactly one parse.
+    writer.save(makePlan(9));
+    expect(store.list()).toContain('plan_phase27_9');
+    expect(reads.count()).toBe(cold + 1);
+
+    // …and our own writes warm the index (no read on the next list).
+    store.save(makePlan(10));
+    expect(store.list()).toContain('plan_phase27_10');
+    expect(reads.count()).toBe(cold + 1);
+  });
+
+  it('picks up files written by another store/process and forgets deleted ones', () => {
+    dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'phase27-perf06b-'));
+    const store = new FilePlanStore(dir);
+    store.save(makePlan(1));
+    expect(store.list()).toEqual(['plan_phase27_1']);
+
+    // Another process (a second store instance) writes a plan.
+    const other = new FilePlanStore(dir);
+    other.save(makePlan(2));
+    expect(store.list().sort()).toEqual(['plan_phase27_1', 'plan_phase27_2']);
+
+    // …and deletes one behind our back.
+    other.delete('plan_phase27_1');
+    expect(store.list()).toEqual(['plan_phase27_2']);
+
+    // Our own delete is reflected immediately too.
+    store.delete('plan_phase27_2');
+    expect(store.list()).toEqual([]);
+  });
+
+  it('session store behaves the same way', () => {
+    dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'phase27-perf06c-'));
+    const writer = new FileSessionStore(dir);
+    const ids = [writer.createSession(), writer.createSession(), writer.createSession()];
+
+    // Fresh instance → cold index → one parse per file, then zero.
+    const store = new FileSessionStore(dir);
+    const reads = instrumentReads();
+    expect(store.listSessions().sort()).toEqual([...ids].sort());
+    const cold = reads.count();
+    expect(cold).toBe(3);
+
+    store.listSessions();
+    store.listSessions();
+    expect(reads.count()).toBe(cold);
+
+    store.deleteSession(ids[0]);
+    expect(store.listSessions().sort()).toEqual([ids[1], ids[2]].sort());
   });
 });

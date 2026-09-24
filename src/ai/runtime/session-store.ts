@@ -49,6 +49,12 @@ export interface SessionStore {
  */
 export class FileSessionStore implements SessionStore {
   private readonly dir: string;
+  /**
+   * Phase 27 (PERF-06): filename → session id index — `listSessions()`
+   * no longer re-reads and re-parses every file on every call (the
+   * filename is `sha256(id)`, so the mapping is stable).
+   */
+  private readonly idByFile = new Map<string, string>();
 
   constructor(dir: string) {
     this.dir = dir;
@@ -98,26 +104,43 @@ export class FileSessionStore implements SessionStore {
     // a clone, and (PERS-01) write atomically.
     const snapshot: Session = structuredClone(session);
     snapshot.lastActiveAt = Date.now();
-    atomicWriteFileSync(
-      this.filePath(session.id),
-      JSON.stringify(snapshot, null, 2)
-    );
+    const filePath = this.filePath(session.id);
+    atomicWriteFileSync(filePath, JSON.stringify(snapshot, null, 2));
+    // Phase 27 (PERF-06): keep the list index warm for our own writes.
+    if (session.id) this.idByFile.set(path.basename(filePath), session.id);
   }
 
   listSessions(): string[] {
     if (!fs.existsSync(this.dir)) return [];
     // Phase 22: filenames are hashes — the real id lives inside each
     // file's JSON.  Corrupt/unreadable files are skipped, not fatal.
+    // Phase 27 (PERF-06): cached ids are reused; only NEW files are parsed.
     const ids: string[] = [];
+    const seen = new Set<string>();
     for (const f of fs.readdirSync(this.dir)) {
       if (!f.endsWith('.json')) continue;
+      seen.add(f);
+      const cachedId = this.idByFile.get(f);
+      if (cachedId !== undefined) {
+        ids.push(cachedId);
+        continue;
+      }
       try {
         const raw = JSON.parse(
           fs.readFileSync(path.join(this.dir, f), 'utf-8')
         ) as { id?: unknown };
-        if (typeof raw.id === 'string') ids.push(raw.id);
+        if (typeof raw.id === 'string') {
+          this.idByFile.set(f, raw.id);
+          ids.push(raw.id);
+        }
       } catch {
         // Skip corrupt file
+      }
+    }
+    // Drop index entries for files that disappeared (deleted elsewhere).
+    if (this.idByFile.size > seen.size) {
+      for (const f of [...this.idByFile.keys()]) {
+        if (!seen.has(f)) this.idByFile.delete(f);
       }
     }
     return ids;
@@ -126,6 +149,8 @@ export class FileSessionStore implements SessionStore {
   deleteSession(sessionId: string): void {
     const fp = this.filePath(sessionId);
     if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    // Phase 27 (PERF-06): a deleted session must leave the index at once.
+    this.idByFile.delete(path.basename(fp));
   }
 
   addInteraction(sessionId: string, userRequest: string): SessionInteraction | undefined {
