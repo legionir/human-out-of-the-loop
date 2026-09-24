@@ -5,6 +5,41 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.7] — 2026-09-24 — environment matrix, and stdio MCP on Windows (Phase 30 / P8)
+
+### Fixed
+
+- **Standard stdio MCP servers could not start on Windows.** `npx` and `npm`
+  are `.cmd` shims there, and `CreateProcess` cannot execute them directly:
+  `spawn('npx', …)` fails with ENOENT, so the most common MCP config
+  (`"command": "npx"`) never worked on Windows. The spawn options now come
+  from a pure, unit-tested `stdioSpawnOptions(platform, env)` — `shell: true`
+  on `win32` only, so POSIX behaviour (no shell, no quoting surprises) is
+  unchanged.
+- **Killing a shell-wrapped stdio server left it running.** With
+  `shell: true` the real MCP server is a grandchild, and `child.kill()` only
+  signals the shell; on Windows the whole tree is now killed with
+  `taskkill /PID <pid> /T /F` (POSIX keeps SIGTERM → SIGKILL).
+
+### Verified (no code change needed)
+
+- **Clean-room install**: `git archive HEAD` → `npm ci` → `npm run build` →
+  **627 tests / 44 files** green, and the freshly built CLI runs a plan
+  (`Outcome: SUCCESS`, exit 0) and `mcp test` succeeds.
+- **No TTY / CI**: 26 key commands with stdin closed and stdout redirected —
+  no hangs; read-only commands exit 0; `run` without `--yes` exits 1 with the
+  "requires a TTY" hint; `logs --follow` exits as soon as the consumer closes
+  the pipe and keeps `tail -f` semantics on a redirect.
+- **Static platform audit** (macOS/Windows/WSL): win32 case-insensitive path
+  comparison and symlink-escape checks already present, no `chmod`/`symlink`
+  in shipped code, no POSIX-only paths, no EOL assumptions, only `git`
+  (execFile) and MCP spawn shell out, `engines: node >=22` declared, and no
+  deprecated/removed Node APIs.
+
+**Not verified here (honest):** Node 24/26 and real Windows/macOS execution —
+this sandbox cannot reach nodejs.org (or GitHub release assets) and has only
+Node 22.  Recipe: `nvm install 24 && nvm use 24 && npm ci && npm test`.
+
 ## [27.2.6] — 2026-09-24 — large plans and honest re-planning (Phase 30 / P7 of READINESS_AUDIT.md)
 
 A 12-step chained plan with a deliberately failing middle step showed that

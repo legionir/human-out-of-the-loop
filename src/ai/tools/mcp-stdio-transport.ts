@@ -19,7 +19,7 @@
  *     credentials);
  *   - the server may exit at any time; `onclose` must fire exactly once.
  */
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import type { JSONRPCMessage, MCPTransport, MCPTransportSendOptions } from '@ai-sdk/mcp';
 
 export interface StdioTransportConfig {
@@ -34,6 +34,53 @@ export interface StdioTransportConfig {
 /** How long the child gets to exit after SIGTERM before SIGKILL. */
 const CLOSE_GRACE_MS = 1000;
 
+/** Windows needs a shell for `.cmd` shims and `taskkill` to kill a tree. */
+const IS_WINDOWS = process.platform === 'win32';
+
+/**
+ * Spawn options for the child process (a pure function of the platform, so
+ * the Windows decision is unit-testable from Linux).
+ *
+ * Phase 30 (P8): on Windows the classic stdio MCP servers are `npx …` /
+ * `npm …` — `.cmd` shims that CreateProcess cannot execute directly, so
+ * spawning them without a shell fails with ENOENT.  Command and args come
+ * from the user's own registry file, never from model output.
+ */
+export function stdioSpawnOptions(
+  platform: NodeJS.Platform,
+  env?: Record<string, string | undefined>
+): SpawnOptions {
+  return {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: env ? { ...process.env, ...env } : process.env,
+    ...(platform === 'win32' ? { shell: true } : {}),
+  };
+}
+
+/**
+ * Terminate the child (and, on Windows, the process tree).
+ *
+ * `child.kill()` only signals the process we spawned.  With `shell: true`
+ * (required on Windows for `npx`/`npm` shims) the real MCP server is a
+ * GRANDCHILD, so a plain signal leaves it running — `taskkill /T` is the
+ * documented way to take the whole tree down.
+ */
+function terminate(proc: ChildProcess, signal: NodeJS.Signals): void {
+  if (IS_WINDOWS && proc.pid !== undefined) {
+    try {
+      spawn('taskkill', ['/PID', String(proc.pid), '/T', '/F'], { stdio: 'ignore' });
+      return;
+    } catch {
+      // fall through to the plain signal below
+    }
+  }
+  try {
+    proc.kill(signal);
+  } catch {
+    // Best-effort: the child may already be gone.
+  }
+}
+
 export function createStdioTransport(config: StdioTransportConfig): MCPTransport {
   let child: ChildProcess | undefined;
   let closed = false;
@@ -42,10 +89,11 @@ export function createStdioTransport(config: StdioTransportConfig): MCPTransport
     async start(): Promise<void> {
       if (child) return;
 
-      const proc = spawn(config.command, config.args ?? [], {
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: config.env ? { ...process.env, ...config.env } : process.env,
-      });
+      const proc = spawn(
+        config.command,
+        config.args ?? [],
+        stdioSpawnOptions(process.platform, config.env)
+      );
       child = proc;
       closed = false;
 
@@ -139,11 +187,11 @@ export function createStdioTransport(config: StdioTransportConfig): MCPTransport
           resolve();
         };
         const killTimer = setTimeout(() => {
-          proc.kill('SIGKILL');
+          terminate(proc, 'SIGKILL');
           done();
         }, CLOSE_GRACE_MS);
         proc.once('exit', done);
-        proc.kill('SIGTERM');
+        terminate(proc, 'SIGTERM');
       });
 
       if (!closed) {

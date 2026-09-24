@@ -31,7 +31,7 @@ vi.mock('ai', async () => {
 });
 
 import { generateText, type LanguageModel } from 'ai';
-import { createStdioTransport } from '../tools/mcp-stdio-transport.js';
+import { createStdioTransport, stdioSpawnOptions } from '../tools/mcp-stdio-transport.js';
 import { McpConnector } from '../tools/mcp-connector.js';
 import { ToolRegistry } from '../registries/tool-registry.js';
 import { AgentRuntime } from '../runtime/agent-runtime.js';
@@ -249,6 +249,17 @@ describe('Phase 30 / P6 — stdio transport', () => {
     expect(closeCount).toBe(1);
     // The child really received SIGTERM (proved by its own marker file).
     expect(fs.existsSync(marker)).toBe(true);
+  });
+
+  it('uses a shell on Windows only (`.cmd` shims like npx need one)', () => {
+    // Phase 30 (P8): `npx`/`npm` are `.cmd` files on Windows, which
+    // CreateProcess cannot execute directly — spawning them without a shell
+    // fails with ENOENT.  On POSIX nothing changes (no shell, no quoting
+    // surprises).  The decision is a pure function so it is testable here.
+    expect(stdioSpawnOptions('win32').shell).toBe(true);
+    expect(stdioSpawnOptions('linux').shell).toBeUndefined();
+    expect(stdioSpawnOptions('darwin').shell).toBeUndefined();
+    expect(stdioSpawnOptions('linux', { P6_MARKER: 'x' }).env?.P6_MARKER).toBe('x');
   });
 
   it('refuses to send after close instead of writing to a dead pipe', async () => {
