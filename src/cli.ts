@@ -7,6 +7,7 @@
  *   human-out-of-the-loop sessions list|show|delete
  *   human-out-of-the-loop plans list|show|cancel|resume
  *   human-out-of-the-loop mcp list|test <id>
+ *   human-out-of-the-loop models|personas|skills|tools [--json]
  *   human-out-of-the-loop logs [--plan X] [--tail N] [--follow]
  *
  * The heavy lifting lives in src/ai (the Orchestrator); this layer only
@@ -30,6 +31,12 @@ import {
 } from './cli/commands/plans.js';
 import { mcpListCommand, mcpTestCommand } from './cli/commands/mcp.js';
 import { logsCommand } from './cli/commands/logs.js';
+import {
+  modelsCommand,
+  personasCommand,
+  skillsCommand,
+  toolsCommand,
+} from './cli/commands/registry.js';
 import { err } from './cli/utils/output.js';
 
 export function createProgram(): Command {
@@ -147,6 +154,52 @@ export function createProgram(): Command {
     });
 
   // ── logs ─────────────────────────────────────────────────────
+  // ── registry introspection (C1) ──────────────────────────────
+  const registryOptions = (cmd: Command): Command =>
+    cmd
+      .option('--project-root <dir>', 'project root (default: current directory)')
+      .option('--json', 'machine-readable output');
+
+  registryOptions(program
+    .command('models')
+    .description('List available models (registry/models/*.json)')
+    .action(async (opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await modelsCommand({
+        projectRoot: opts.projectRoot as string | undefined,
+        json: opts.json === true,
+      });
+    }));
+
+  registryOptions(program
+    .command('personas')
+    .description('List available personas (registry/personas/*.json)')
+    .action(async (opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await personasCommand({
+        projectRoot: opts.projectRoot as string | undefined,
+        json: opts.json === true,
+      });
+    }));
+
+  registryOptions(program
+    .command('skills')
+    .description('List available skills (registry/skills/*.json)')
+    .action(async (opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await skillsCommand({
+        projectRoot: opts.projectRoot as string | undefined,
+        json: opts.json === true,
+      });
+    }));
+
+  registryOptions(program
+    .command('tools')
+    .description('List available tools (registry/tools/*.json)')
+    .action(async (opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await toolsCommand({
+        projectRoot: opts.projectRoot as string | undefined,
+        json: opts.json === true,
+      });
+    }));
+
   program
     .command('logs')
     .description('Read the observability log (.ai-runtime/observability.jsonl)')

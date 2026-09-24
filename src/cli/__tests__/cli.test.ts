@@ -655,3 +655,83 @@ describe('Phase 23 — CLI: configuration (global config + .env)', () => {
     delete process.env.CLI_TEST_ALREADY_SET;
   });
 });
+
+// ─── C1: registry introspection ──────────────────────────────────
+
+describe('C1 — registry introspection (models/personas/skills/tools)', () => {
+  let projectRoot: string;
+
+  beforeEach(() => {
+    projectRoot = makeTempProject('phase23-registry-');
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it('models lists all registry models with provider + model columns', async () => {
+    const { code, out } = await runCli(['models', '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    expect(out).toContain('gpt-4o');
+    expect(out).toContain('claude-sonnet');
+    expect(out).toContain('local-llama');
+    expect(out).toContain('PROVIDER');
+  });
+
+  it('personas lists all 4 personas with their allowed tools', async () => {
+    const { code, out } = await runCli(['personas', '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    for (const id of ['architect', 'coder', 'planner', 'reviewer']) expect(out).toContain(id);
+    expect(out).toContain('ALLOWED TOOLS');
+  });
+
+  it('skills lists the directory-per-skill layout (skill.json)', async () => {
+    const { code, out } = await runCli(['skills', '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    for (const id of [
+      'acceptance_check',
+      'code_analysis',
+      'file_management',
+      'git_operations',
+      'task_decomposition',
+    ]) {
+      expect(out).toContain(id);
+    }
+  });
+
+  it('tools lists the 4 local tool definitions', async () => {
+    const { code, out } = await runCli(['tools', '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    for (const id of ['read_file', 'write_file', 'search_code', 'git_status']) {
+      expect(out).toContain(id);
+    }
+  });
+
+  it('models --json is machine-readable and matches the registry files', async () => {
+    const { code, out } = await runCli(['models', '--project-root', projectRoot, '--json']);
+    expect(code).toBe(0);
+    const parsed = JSON.parse(out) as Array<{ id: string; provider: string; model: string }>;
+    expect(parsed.map((m) => m.id).sort()).toEqual(['claude-sonnet', 'gpt-4o', 'local-llama']);
+    const gpt = parsed.find((m) => m.id === 'gpt-4o');
+    expect(gpt?.provider).toBe('openai');
+  });
+
+  it('exits 2 with a hint when the project has no registry/', async () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'phase23-noreg-'));
+    try {
+      const { code, errOut } = await runCli(['models', '--project-root', empty]);
+      expect(code).toBe(2);
+      expect(errOut).toContain('No "registry/" directory');
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  it('reports invalid files (exit 1) but still lists the valid ones', async () => {
+    fs.writeFileSync(path.join(projectRoot, 'registry', 'models', 'broken.json'), '{ nope');
+    const { code, out } = await runCli(['models', '--project-root', projectRoot]);
+    expect(code).toBe(1);
+    expect(out).toContain('gpt-4o'); // valid entries still shown
+    expect(out).toContain('broken.json'); // the bad file is named
+  });
+});
