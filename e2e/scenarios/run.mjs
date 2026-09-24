@@ -365,6 +365,59 @@ scenarios.cancel = async () => {
   return root;
 };
 
+/**
+ * Provider faults (`FAULT:` / `BADJSON:` markers in the stub).  Each marker
+ * carries a `#tag` of its own: the stub counts faults per marker text for
+ * its whole lifetime.
+ */
+scenarios.faults = async () => {
+  // Transient 5xx: the provider SDK's retries absorb it.
+  const transient = makeProject('faults-transient');
+  const t = await run(runArgs('write notes WRITE:notes/t.txt FAULT:500x2#e2e-transient', transient));
+  check('faults: two 500s are retried and the run succeeds', t.code === 0, `exit=${t.code}`);
+  check('faults: the step still wrote its file', fs.existsSync(path.join(transient, 'notes', 't.txt')));
+
+  // A rejected key: the step fails with a clear reason, never a false SUCCESS.
+  const auth = makeProject('faults-auth');
+  const a = await run(runArgs('write notes WRITE:notes/a.txt FAULT:401#e2e-auth', auth));
+  const authPlan = planStore(auth).plans[0];
+  check('faults: a 401 does not end as a completed plan', authPlan?.status !== 'completed', `status=${authPlan?.status}`);
+  check('faults: the report names the auth failure', /authentication failed/i.test(a.stdout), `exit=${a.code}`);
+
+  // One malformed planner answer: retried once, not "please provide more details".
+  const badjson = makeProject('faults-badjson');
+  const b = await run(runArgs('write notes WRITE:notes/b.txt BADJSON:PlannerAssessmentx1#e2e', badjson));
+  check('faults: one unparsable planner answer is retried', b.code === 0, `exit=${b.code}`);
+
+  // Persistently malformed: a planning FAILURE, not a clarification request.
+  const broken = makeProject('faults-broken');
+  const c = await run(runArgs('write notes BADJSON:PlannerAssessment#e2e-broken', broken));
+  const brokenOut = c.stdout + c.stderr;
+  check('faults: a broken planner is reported as a failure', c.code === 1 && /Planning failed/.test(brokenOut), `exit=${c.code}`);
+  check('faults: ...and not as a clarification request', !/Clarification needed/.test(brokenOut));
+
+  // An empty answer is not a finished step.
+  const empty = makeProject('faults-empty');
+  await run(runArgs('write notes WRITE:notes/e.txt FAULT:EMPTY#e2e-empty', empty));
+  const emptyLog = readLog(empty);
+  check(
+    'faults: an empty model answer fails the step',
+    emptyLog.some((e) => e.eventType === 'step:failed' || e.eventType === 'task:failed'),
+    emptyLog.filter((e) => /failed/.test(e.eventType)).map((e) => e.eventType).join(',') || '(no failure logged)'
+  );
+
+  // Usage: every model call is billed — agent turns AND structured calls.
+  const usageRun = await run(['usage', '--project-root', transient, '--json']);
+  const totals = JSON.parse(usageRun.stdout).totals;
+  const llmCalls = readLog(transient).filter((e) => e.eventType === 'llm:usage');
+  check('faults: structured calls are logged with their usage', llmCalls.length >= 3, `llm:usage=${llmCalls.length}`);
+  const agentTokens = readLog(transient)
+    .filter((e) => e.eventType === 'task:completed')
+    .reduce((sum, e) => sum + (e.payload?.usage?.totalTokens ?? 0), 0);
+  check('faults: `usage` includes the structured calls', totals.totalTokens > agentTokens, `total=${totals.totalTokens} agent=${agentTokens}`);
+  return transient;
+};
+
 scenarios.ctrlc = async () => {
   if (process.platform === 'win32') {
     check('ctrlc: skipped on Windows (no POSIX signals)', true, 'skip');

@@ -3,7 +3,8 @@ import { generateObject } from 'ai';
 import type { PlannerConfig } from './planner.js';
 import { PlanSchema, type Plan } from '../schemas/plan.js';
 import { createAgent } from '../agents/agent-factory.js';
-import { withLlmTimeout } from '../runtime/llm-timeout.js';
+import { withLlmTimeout, withStructuredRetry } from '../runtime/llm-timeout.js';
+import { reportLlmUsage } from '../runtime/llm-usage.js';
 
 /**
  * Generate a Plan using AI SDK's `generateObject` for guaranteed
@@ -52,26 +53,30 @@ ${userRequest}
     }
   }
 
-  const { object } = await withLlmTimeout(
-    'Plan generation',
-    config.timeoutMs,
-    (abortSignal) =>
-      generateObject({
-        model: agent.model,
-        system: agent.systemPrompt,
-        prompt,
-        schema: PlanSchema,
-        schemaName: 'ExecutionPlan',
-        schemaDescription:
-          'A dependency-aware execution plan with atomic steps, each assigned ' +
-          'to a persona with specific skills and tools.',
-        abortSignal,
-      })
+  const { object, usage } = await withStructuredRetry(() =>
+    withLlmTimeout(
+      'Plan generation',
+      config.timeoutMs,
+      (abortSignal) =>
+        generateObject({
+          model: agent.model,
+          system: agent.systemPrompt,
+          prompt,
+          schema: PlanSchema,
+          schemaName: 'ExecutionPlan',
+          schemaDescription:
+            'A dependency-aware execution plan with atomic steps, each assigned ' +
+            'to a persona with specific skills and tools.',
+          abortSignal,
+        })
+    )
   );
+  const id = object.id ?? `plan_${randomUUID()}`;
+  reportLlmUsage(config.onUsage, 'planning', usage, id);
 
   return {
     ...object,
-    id: object.id ?? `plan_${randomUUID()}`,
+    id,
     status: 'draft',
     createdAt: Date.now(),
     steps: object.steps.map((s) => ({ ...s, status: 'pending' as const })),

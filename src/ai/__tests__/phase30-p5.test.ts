@@ -183,7 +183,9 @@ describe('Phase 30 P5 — structured calls are bounded too', () => {
 
     expect(Date.now() - started).toBeLessThan(3000);
     expect(result.isClear).toBe(false);
-    expect(result.needsClarification.join(' ')).toContain('timed out after 60ms');
+    // A failure, not a clarification question.
+    expect(result.needsClarification).toEqual([]);
+    expect(result.errors.join(' ')).toContain('timed out after 60ms');
   });
 
   it('the acceptance check fails closed (never hangs the plan)', async () => {

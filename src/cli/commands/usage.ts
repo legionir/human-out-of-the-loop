@@ -41,7 +41,7 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
 
   const runtimeDir = path.join(root, '.ai-runtime');
   const { entries } = readLogEntries(path.join(runtimeDir, 'observability.jsonl'));
-  const completed = filterEntries(entries, { eventTypes: ['task:completed'] });
+  const completed = filterEntries(entries, { eventTypes: ['task:completed', 'llm:usage'] });
 
   // Context from the plan store (may be empty for non-persistent runs).
   let planContext: Map<string, { goal: string; status: string }> = new Map();

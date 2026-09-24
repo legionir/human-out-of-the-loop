@@ -1,5 +1,6 @@
 import { generateObject } from 'ai';
-import { withLlmTimeout } from './llm-timeout.js';
+import { withLlmTimeout, withStructuredRetry } from './llm-timeout.js';
+import { reportLlmUsage, type LlmUsageReporter } from './llm-usage.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
@@ -20,6 +21,8 @@ export interface FinalReviewerConfig {
   modelId?: string;
   /** Phase 30 (P5): deadline for the review call (default 120s). */
   timeoutMs?: number;
+  /** Token usage of the review call. */
+  onUsage?: LlmUsageReporter;
 }
 
 /**
@@ -118,23 +121,26 @@ export class FinalReviewer {
       outcome
     );
 
-    const { object } = await withLlmTimeout(
-      'Final review',
-      this.config.timeoutMs,
-      (abortSignal) =>
-        generateObject({
-          model: reviewerAgent.model,
-          system: reviewerAgent.systemPrompt,
-          prompt,
-          schema: ReviewSchema,
-          schemaName: 'FinalReview',
-          schemaDescription:
-            'Structured review of a completed plan execution, including ' +
-            'accepted findings, rejected findings, incomplete steps, and ' +
-            'a human-readable summary.',
-          abortSignal,
-        })
+    const { object, usage } = await withStructuredRetry(() =>
+      withLlmTimeout(
+        'Final review',
+        this.config.timeoutMs,
+        (abortSignal) =>
+          generateObject({
+            model: reviewerAgent.model,
+            system: reviewerAgent.systemPrompt,
+            prompt,
+            schema: ReviewSchema,
+            schemaName: 'FinalReview',
+            schemaDescription:
+              'Structured review of a completed plan execution, including ' +
+              'accepted findings, rejected findings, incomplete steps, and ' +
+              'a human-readable summary.',
+            abortSignal,
+          })
+      )
     );
+    reportLlmUsage(this.config.onUsage, 'review', usage, plan.id);
 
     // Ensure planId and goal match (the model might hallucinate)
     return {

@@ -6,7 +6,7 @@ import {
   MIN_REDACT_VALUE_LENGTH,
 } from './secret-scrub.js';
 import path from 'node:path';
-import type { AgentEvent } from './event-bus.js';
+import type { AgentEvent, TokenUsage } from './event-bus.js';
 import type { Plan, PlanStep } from '../schemas/plan.js';
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -49,6 +49,7 @@ export interface LogEntry {
     | 'task:tool-call'
     | 'task:tool-error'
     | 'task:interrupted'
+    | 'llm:usage'
     | 'session:created'
     | 'session:interaction'
     | 'system:error'
@@ -337,6 +338,20 @@ export class ObservabilityLogger {
         failureType: step.failureType,
         resultSummary: (step.resultSummary ?? '').slice(0, 300),
       },
+    });
+  }
+
+  /**
+   * Token usage of a structured model call (planning, acceptance, review).
+   * Agent turns are logged as `task:completed`; `hootl usage` sums both.
+   */
+  logLlmUsage(purpose: string, usage: TokenUsage, planId?: string): void {
+    this.log({
+      planId,
+      eventType: 'llm:usage',
+      message: `${purpose} call used ${usage.totalTokens} tokens.`,
+      level: 'info',
+      payload: { purpose, usage },
     });
   }
 

@@ -546,7 +546,7 @@ Produce a new plan that:
 3. Preserves the original goal.
 `.trim();
 
-      const result = await this.config.planner.plan(replanRequest);
+      const result = await this.config.planner.plan(replanRequest, plan.id);
 
       if (!result.isClear || !result.plan) {
         return false; // Planner couldn't produce a valid revision

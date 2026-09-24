@@ -5,6 +5,36 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.14] — 2026-09-24 — provider faults (P1 without a key)
+
+The e2e stub can now misbehave like a real provider — `FAULT:<429|500|401|CUT|HANG|EMPTY>x<n>`
+on agent turns and `BADJSON:<Schema>x<n>` on structured calls — and a new
+`faults` scenario drives the real CLI through them.  Transient 5xx/429,
+dropped connections and timeouts were already handled.  Four things were not:
+
+- **Token usage was half the bill.** Only agent turns reached the usage
+  aggregator; every planning, acceptance and final-review call
+  (`generateObject`) was billed by the provider but missing from the final
+  report and from `hootl usage` (a two-step plan: 160 reported, 320 used).
+  Structured calls now report through an `onUsage` callback, are logged as
+  `llm:usage`, count toward all totals (not toward `taskCount`), and are
+  billed to their plan — including re-planning, which bills the plan being
+  revised.
+- **The final report summed every run the orchestrator had made.** On the
+  long-lived web server the "Usage" of each new run included all previous
+  runs.  The report (and `plans resume`, which reported zero) now shows the
+  plan's own usage.
+- **One malformed structured answer ended the run.** An unparsable planner
+  answer stopped the run as "Clarification needed … please provide more
+  details"; an unparsable acceptance verdict failed a finished step and
+  forced a re-plan.  Structured calls now retry once on
+  `NoObjectGeneratedError`, and a planner that still fails is reported as
+  `Planning failed: <reason>` (exit 1) instead of as a question.
+- **An empty model answer counted as a completed step.** A turn with no text
+  and no tool call now fails the task (`EMPTY_RESPONSE`).
+
+679 tests in 50 files, `tsc` clean; `npm run e2e` → 42/42.
+
 ## [27.2.13] — 2026-09-24 — the Windows list, closed (annotations paid off)
 
 The annotations from the CI run listed exactly what the (undownloadable) job

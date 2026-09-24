@@ -26,6 +26,50 @@ function delayFor(promptText, isAgentTurn) {
   return DELAY_MS;
 }
 
+/**
+ * Fault injection — what a real provider does on a bad day:
+ *   FAULT:<kind>x<n>          the first <n> agent turns fail (no `x<n>` = every one)
+ *     kind = 429 | 500 | 401  HTTP error with an OpenAI-shaped error body
+ *            CUT              the socket is destroyed before any byte is sent
+ *            HANG             never answer (pair with --timeout-ms)
+ *            EMPTY            200 with an empty `output` array
+ *   BADJSON:<Schema>x<n>      the first <n> structured calls for <Schema>
+ *                             (PlannerAssessment, ExecutionPlan,
+ *                             AcceptanceJudgment, FinalReview) get text that
+ *                             is not JSON
+ * Counters are keyed by the marker text, and the stub lives for the whole
+ * scenario run, so every scenario should use a marker text of its own
+ * (e.g. append `#tag`: `FAULT:500x2#retry`).
+ */
+const faultCounts = new Map();
+function takeFault(re, promptText) {
+  const match = re.exec(promptText);
+  if (!match) return null;
+  const key = match[0];
+  const limit = match.groups.n === undefined ? Infinity : Number(match.groups.n);
+  const used = faultCounts.get(key) ?? 0;
+  if (used >= limit) return null;
+  faultCounts.set(key, used + 1);
+  return match.groups;
+}
+const AGENT_FAULT = /\bFAULT:(?<kind>429|500|401|CUT|HANG|EMPTY)(?:x(?<n>\d+))?(?:#[\w-]+)?/;
+function badJsonFor(name, promptText) {
+  const re = new RegExp(String.raw`\bBADJSON:${name}(?:x(?<n>\d+))?(?:#[\w-]+)?`);
+  return takeFault(re, promptText) !== null;
+}
+
+function sendHttpError(res, status) {
+  const body = {
+    401: { message: 'Incorrect API key provided (stub).', type: 'invalid_request_error', code: 'invalid_api_key' },
+    429: { message: 'Rate limit reached (stub).', type: 'requests', code: 'rate_limit_exceeded' },
+    500: { message: 'The server had an error (stub).', type: 'server_error', code: null },
+  }[status];
+  const headers = { 'content-type': 'application/json' };
+  if (status === 429) headers['retry-after'] = '0';
+  res.writeHead(status, headers);
+  res.end(JSON.stringify({ error: { ...body, param: null } }));
+}
+
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const DUMP = process.env.FAKE_DUMP;
 
@@ -250,8 +294,20 @@ const server = http.createServer((req, res) => {
     const tools = Array.isArray(body.tools) ? body.tools : [];
     const delayMs = delayFor(promptText, tools.length > 0 && !format);
     if (delayMs > 0) await sleep(delayMs);
+    const isAgentTurn = tools.length > 0 && !format;
+    const fault = isAgentTurn ? takeFault(AGENT_FAULT, promptText) : null;
+    if (fault) {
+      if (fault.kind === 'CUT') return void req.socket.destroy();
+      if (fault.kind === 'HANG') return; // never answer
+      if (fault.kind !== 'EMPTY') return void sendHttpError(res, Number(fault.kind));
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify(envelope(body.model ?? 'stub', [])));
+      return;
+    }
     let output = [];
-    if (format?.type === 'json_schema') {
+    if (format?.type === 'json_schema' && badJsonFor(format.name, promptText)) {
+      output = [messageItem('Sure! Here is the result: {not valid json')];
+    } else if (format?.type === 'json_schema') {
       output = [messageItem(JSON.stringify(structuredPayload(format.name, promptText)))];
     } else if (tools.length > 0) {
       const offered = tools.map((t) => t.name ?? t.function?.name);

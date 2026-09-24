@@ -353,7 +353,7 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**670 tests green (49 files), 0 tsc errors — plus 32 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
+**679 tests green (50 files), 0 tsc errors — plus 42 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
 
 ## Law Compliance
 

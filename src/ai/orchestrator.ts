@@ -14,6 +14,7 @@ import { StreamingManager, type ProgressEvent } from './runtime/streaming-manage
 import { CancellationManager } from './runtime/cancellation-manager.js';
 import { RateLimiter } from './runtime/rate-limiter.js';
 import { UsageAggregator } from './runtime/usage-aggregator.js';
+import type { LlmUsageReport } from './runtime/llm-usage.js';
 import { MemorySessionStore, FileSessionStore, type SessionStore } from './runtime/session-store.js';
 import { ObservabilityLogger } from './runtime/observability-logger.js';
 import { collectSecretValues } from './runtime/secret-scrub.js';
@@ -369,6 +370,7 @@ export class Orchestrator {
       // Phase 30 (P5): the same deadline `--timeout-ms` gives an agent run
       // now also covers the judgment call.
       timeoutMs: this.config.agentTimeoutMs,
+      onUsage: (report) => this.recordLlmUsage(report),
       onQualityFailure: (planId, stepId, reason) => {
         this.observabilityLogger.logQualityCheck(planId, stepId, false, reason);
         this.streamingManager.emitProgress({
@@ -388,6 +390,7 @@ export class Orchestrator {
       modelRegistry: this.modelRegistry,
       modelId: this.config.defaultModelId,
       timeoutMs: this.config.agentTimeoutMs,
+      onUsage: (report) => this.recordLlmUsage(report),
     });
 
     this.planner = new Planner({
@@ -397,7 +400,36 @@ export class Orchestrator {
       modelRegistry: this.modelRegistry,
       modelId: this.config.defaultModelId,
       timeoutMs: this.config.agentTimeoutMs,
+      onUsage: (report) => this.recordLlmUsage(report),
     });
+  }
+
+  /**
+   * Structured model calls (planning, acceptance, review) are billed like
+   * agent turns but never reach the EventBus — record them here so the final
+   * report and `hootl usage` show what the provider actually charged.
+   */
+  private recordLlmUsage(report: LlmUsageReport): void {
+    this.usageAggregator.recordDirect({
+      taskId: `llm:${report.purpose}`,
+      planId: report.planId,
+      agentId: `llm:${report.purpose}`,
+      usage: report.usage,
+      timestamp: Date.now(),
+      llmCall: true,
+    });
+    this.observabilityLogger.logLlmUsage(report.purpose, report.usage, report.planId);
+  }
+
+  /** Usage of one plan only — the aggregator lives as long as the orchestrator. */
+  private planUsage(planId: string | undefined): Review['usage'] {
+    if (!planId) return emptyReviewUsage;
+    const u = this.usageAggregator.getPlanUsage(planId);
+    return {
+      totalPromptTokens: u.promptTokens,
+      totalCompletionTokens: u.completionTokens,
+      totalTokens: u.totalTokens,
+    };
   }
 
   async initialize(): Promise<void> {
@@ -934,12 +966,9 @@ export class Orchestrator {
 
     const review = await this.finalReviewer.review(plan, executionResult);
 
-    const usageSummary = this.usageAggregator.getSummary();
-    review.usage = {
-      totalPromptTokens: usageSummary.totalPromptTokens,
-      totalCompletionTokens: usageSummary.totalCompletionTokens,
-      totalTokens: usageSummary.totalTokens,
-    };
+    // Per plan: a long-lived orchestrator (the web server) would otherwise
+    // report the sum of every run it has ever made.
+    review.usage = this.planUsage(plan.id);
 
     const report = formatFinalReview(review);
 
@@ -1105,6 +1134,7 @@ export class Orchestrator {
 
     const executionResult = await planRuntime.resume(planId);
     const review = await this.finalReviewer.review(plan, executionResult);
+    review.usage = this.planUsage(plan.id);
     const report = formatFinalReview(review);
 
     // Phase 30 (P2): the run that owned this plan was interrupted, so its
