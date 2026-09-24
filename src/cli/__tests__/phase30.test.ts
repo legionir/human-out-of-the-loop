@@ -287,3 +287,69 @@ describe('Phase 30 P2 — `plans resume` closes what the crash left open', () =>
     expect(errOut).toContain('not found (or not resumable)');
   });
 });
+
+// ─── P2 follow-up: the task the crash left "running" ────────────
+
+describe('Phase 30 P2 follow-up — the crashed task stops pretending to run', () => {
+  it('logs `task:interrupted` and stops counting it as a live task', async () => {
+    await runCli(runArgs());
+    const sessionId = sessionStore().listSessions()[0]!;
+
+    // What SIGKILL leaves behind: step-2 'running' with the task id of the
+    // process that is now dead.
+    const plan = planStore().load(PLAN_ID)!;
+    plan.status = 'running';
+    plan.completedAt = undefined;
+    plan.steps[0]!.status = 'done';
+    plan.steps[1]!.status = 'running';
+    plan.steps[1]!.taskId = 'task_deadbeef';
+    planStore().save(plan);
+
+    const session = sessionStore().getSession(sessionId)!;
+    session.interactions[0]!.outcome = 'pending';
+    session.interactions[0]!.completedAt = undefined;
+    sessionStore().saveSession(session);
+
+    // The killed process did write the `task:created` line (that is why the
+    // task shows up at all) — it just never got to write a terminal one.
+    fs.appendFileSync(
+      path.join(projectRoot, '.ai-runtime', 'observability.jsonl'),
+      JSON.stringify({
+        timestamp: new Date().toISOString(),
+        planId: PLAN_ID,
+        stepId: 'step-2',
+        taskId: 'task_deadbeef',
+        eventType: 'task:created',
+        message: 'Agent "plan-step-step-2" started for task "task_deadbeef".',
+        level: 'info',
+      }) + '\n'
+    );
+
+    const before = await runCli(['tasks', 'list', '--project-root', projectRoot]);
+    const beforeRow = before.out.split('\n').find((l) => l.includes('task_deadbeef'));
+    expect(beforeRow).toBeDefined();
+    expect(beforeRow).toContain('running');
+
+    const resumed = await runCli(['plans', 'resume', PLAN_ID, '--project-root', projectRoot]);
+    expect(resumed.code).toBe(0);
+
+    const logPath = path.join(projectRoot, '.ai-runtime', 'observability.jsonl');
+    const entries = fs
+      .readFileSync(logPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { eventType: string; taskId?: string; message: string });
+
+    const interrupted = entries.filter((e) => e.eventType === 'task:interrupted');
+    expect(interrupted).toHaveLength(1);
+    expect(interrupted[0]!.taskId).toBe('task_deadbeef');
+    expect(interrupted[0]!.message).toContain('resumed');
+
+    // …and the task list tells the truth now.
+    const after = await runCli(['tasks', 'list', '--project-root', projectRoot]);
+    const afterRow = after.out.split('\n').find((l) => l.includes('task_deadbeef'))!;
+    expect(afterRow).toContain('interrupted');
+    expect(afterRow).not.toContain('running');
+    expect(after.out).toContain('1 interrupted');
+  });
+});

@@ -41,6 +41,7 @@ export interface LogEntry {
     | 'task:failed'
     | 'task:tool-call'
     | 'task:tool-error'
+    | 'task:interrupted'
     | 'session:created'
     | 'session:interaction'
     | 'system:error'

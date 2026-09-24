@@ -25,7 +25,7 @@ interface TaskInfo {
   taskId: string;
   planId?: string;
   stepId?: string;
-  status: 'done' | 'failed' | 'running';
+  status: 'done' | 'failed' | 'running' | 'interrupted';
   toolsUsed: string[];
   promptTokens: number;
   completionTokens: number;
@@ -82,6 +82,12 @@ function buildTaskMap(entries: RawLogEntry[]): Map<string, TaskInfo> {
         t.status = 'failed';
         t.endedAt = e.timestamp;
         break;
+      // Phase 30 (P2 follow-up): the process was killed mid-step.  Without
+      // this the task stays `running` in this view forever.
+      case 'task:interrupted':
+        t.status = 'interrupted';
+        t.endedAt = e.timestamp;
+        break;
       default:
         break;
     }
@@ -136,15 +142,28 @@ export async function tasksListCommand(opts: TasksCommandOptions): Promise<numbe
         shortId(t.taskId),
         t.planId ? shortId(t.planId) : '—',
         t.stepId ?? '—',
-        t.status === 'done' ? color.done(t.status) : t.status === 'failed' ? color.failed(t.status) : color.running(t.status),
+        t.status === 'done'
+          ? color.done(t.status)
+          : t.status === 'failed'
+            ? color.failed(t.status)
+            : t.status === 'interrupted'
+              ? color.warn(t.status)
+              : color.running(t.status),
         t.toolsUsed.join(', ') || '—',
         t.toolCalls,
         t.totalTokens,
       ]),
     ),
   );
-  const done = tasks.filter((t) => t.status === 'done').length;
-  out(color.dim(`${tasks.length} task(s): ${done} done, ${tasks.length - done} other`));
+  const countBy = (status: TaskInfo['status']): number =>
+    tasks.filter((t) => t.status === status).length;
+  const parts = [
+    `${countBy('done')} done`,
+    `${countBy('failed')} failed`,
+    `${countBy('interrupted')} interrupted`,
+    `${countBy('running')} running`,
+  ];
+  out(color.dim(`${tasks.length} task(s): ${parts.join(', ')}`));
   if (parseErrors > 0) out(color.dim(`(${parseErrors} unparseable log line(s) skipped)`));
   return 0;
 }

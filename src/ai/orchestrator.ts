@@ -1056,6 +1056,15 @@ export class Orchestrator {
       acceptanceChecker: this.acceptanceChecker,
     });
 
+    // Phase 30 (P2 follow-up): a step that is still 'running' on disk belongs
+    // to the process that was killed — that task can never write its own
+    // terminal event, so `hootl tasks list` would show it as `running`
+    // forever.  Capture the orphans first: `resume()` overwrites `taskId`
+    // with the new task id for the very same step.
+    const orphanedTasks = plan.steps
+      .filter((step) => step.status === 'running' && step.taskId !== undefined)
+      .map((step) => ({ stepId: step.id, taskId: step.taskId! }));
+
     const executionResult = await planRuntime.resume(planId);
     const review = await this.finalReviewer.review(plan, executionResult);
     const report = formatFinalReview(review);
@@ -1078,6 +1087,18 @@ export class Orchestrator {
           completedAt: Date.now(),
         });
       }
+    }
+
+    for (const orphan of orphanedTasks) {
+      this.observabilityLogger.log({
+        planId,
+        stepId: orphan.stepId,
+        taskId: orphan.taskId,
+        eventType: 'task:interrupted',
+        level: 'warn',
+        message: `Task "${orphan.taskId}" was interrupted by a crash; step "${orphan.stepId}" was resumed.`,
+        payload: { taskId: orphan.taskId, stepId: orphan.stepId },
+      });
     }
 
     return {

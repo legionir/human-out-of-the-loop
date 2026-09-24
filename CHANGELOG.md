@@ -5,6 +5,37 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.3] — 2026-09-24 — the crashed task stops pretending to run (Phase 30 / P2 follow-up)
+
+Closing the last open question from P2: a process killed with `SIGKILL`
+mid-step can never write its own terminal event, so the task it was running
+stayed `running` in `hootl tasks list` forever — even after the plan was
+resumed successfully. Verified with a real crash + resume:
+
+```
+before:  task_344a1a98  step-2  running
+after :  task_344a1a98  step-2  interrupted   ← the killed run
+         task_e94d4fe6  step-2  done          ← the resumed run
+```
+
+### Fixed
+
+- `plans resume` now captures the steps that were still `running` on disk
+  before it re-runs them (the resume overwrites `taskId` on the very same
+  step) and logs a `task:interrupted` entry (level `warn`):
+  `Task "task_…" was interrupted by a crash; step "step-2" was resumed.`
+- `hootl tasks list` maps that event to a distinct `interrupted` status
+  (rendered in magenta, never as `running`) and the summary line counts each
+  status: `3 task(s): 2 done, 0 failed, 1 interrupted, 0 running`.
+
+### Tests
+
+- `src/cli/__tests__/phase30.test.ts` — new regression test that simulates the
+  crash state (including the `task:created` line the killed process managed to
+  write), resumes, and asserts both the log entry and the task view.
+  Direction-checked: disabling the emission fails the test.
+- Suite: **600 passed (41 files)**, `tsc` clean.
+
 ## [27.2.2] — 2026-09-24 — real tool side effects + sandbox (Phase 30 / P3 of READINESS_AUDIT.md)
 
 Verified by driving the real CLI against the stub provider with goals that ask

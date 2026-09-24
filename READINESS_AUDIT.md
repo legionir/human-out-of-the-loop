@@ -87,6 +87,12 @@
 
 **رفع (کمترین تغییر):** فیلد اختیاری `Plan.sessionId`؛ ثبت هر دو جهت link **قبل از شروع اجرا**؛ و در `resumePlan` بستن interaction بازِ همان سشن با outcome/summary/planIds اجرای resume شده. تست: `src/cli/__tests__/phase30.test.ts` (۵ تست، جهت‌دار — بدون رفع: `expected undefined to be 'session_…'` و `expected 'pending' to be 'success'`).
 
+### پیگیری P2 (۲۰۲۶-۰۹-۲۴، نسخه ۲۷.۲.۳) — taskِ باقی‌مانده از crash
+
+آخرین مورد تأییدنشده‌ی P2 بسته شد: پروسه‌ی `kill -9` شده هیچ‌وقت رویداد پایانیِ task خود را نمی‌نویسد، پس `hootl tasks list` آن task را **تا ابد `running`** نشان می‌داد — حتی بعد از resume موفق. حالا `plans resume` قبل از اجرا، stepهای `running` روی دیسک را ثبت می‌کند و رویداد `task:interrupted` (سطح warn) می‌نویسد؛ `tasks list` وضعیت جدید `interrupted` را جدا می‌شمارد.
+
+شاهد واقعی (crash + resume): قبل `task_344a1a98 | step-2 | running` → بعد `task_344a1a98 | step-2 | interrupted` در کنار `task_e94d4fe6 | step-2 | done`؛ خلاصه: `3 task(s): 2 done, 0 failed, 1 interrupted, 0 running`. تست: یک تست جدید در `phase30.test.ts` (جهت‌دار).
+
 ### محدودیت شناخته‌شده (پذیرفته‌شده، نه باگ)
 
 اگر پروسه **قبل از ساخته‌شدن پلن** بمیرد، interaction با outcome `pending` و بدون `planId` می‌ماند و چیزی برای resume وجود ندارد. این «حالت واقعیِ نیمه‌تمام» است؛ تشخیص خودکار آن heartbeat می‌خواهد که فعلاً وجود ندارد. `sessions show` این وضعیت را صادقانه نشان می‌دهد.
@@ -228,3 +234,4 @@
 | 2026-09-24 | — | ساخت این فایل، اولویت‌بندی، ثبت ۱۰ مورد تأییدنشده | آماده‌ی اجرا؛ شروع از P2 طبق درخواست کاربر |
 | 2026-09-24 | **P2** | crash واقعی با `kill -9` (وسط اجرا، وسط planning، پلن draft) + `plans resume` | 🟢 تأیید شد؛ باگ N (سشن `pending` ابدی + نبود link) پیدا و رفع شد؛ ۵ تست جدید `phase30.test.ts` |
 | 2026-09-24 | **P3** | اجرای واقعی `write_file`/`search_code`/`git_status` + سه تلاش فرار از sandbox (`..`، مسیر مطلق، غیر-ریپو) | 🟢 تأیید شد؛ باگ O (شکست ابزار کاملاً نامرئی → SUCCESS کاذب) پیدا و رفع شد؛ ۹ تست جدید `phase30-p3.test.ts` |
+| 2026-09-24 | **P2** (پیگیری) | علت «taskِ ابدی running» پس از crash + resume | 🟢 رفع شد؛ رویداد `task:interrupted` + وضعیت `interrupted` در `tasks list`؛ ۱ تست جدید (نسخه ۲۷.۲.۳) |
