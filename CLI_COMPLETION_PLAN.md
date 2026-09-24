@@ -5,6 +5,8 @@
 **هدف:** expose کردن امکانات runtime که فعلاً interface ندارند (بر اساس جدول gap-analysis ۲۰۲۶-۰۹-۲۴)
 **قانون اجرا:** مانند EXECUTION_PLAN_V2 — هر فاز = یک مرحله اجرا، کامل شدن معیارهای پذیرش پیش از فاز بعد، commit + push جدا برای هر فاز، علامت 🟢 در این فایل
 
+**وضعیت (2026-09-24): ✅ کامل — C1..C5 همه 🟢؛ 488/488 تست سبز (29 فایل)، tsc تمیز؛ commitها: C1 `c94f119`، C2 `4558658`، C3 `fa6d9b0`، C4 `d2c4226`، C5 (این commit)**
+
 ---
 
 ## دامنه (چه چیزی کامل می‌شود)
@@ -162,6 +164,6 @@
 | C2 usage + tasks | 🟢 | کامل شد 2026-09-24 — `usage [--plan] [--json]` + `tasks list/show` از لاگ پایدار؛ ۸ تست؛ انحراف‌ها ثبت شده (review در plan.json نبود؛ planId روی task-events لاگ گم شده بود → فیکس شد) |
 | C3 run flags | 🟢 | کامل شد 2026-09-24 — `--max-replans`/`--max-delegation-depth`/`--label` + `sessions label <id> <label>`؛ ۵ تست؛ انحراف: event `session:labeled` حذف شد (store منبع صحت است؛ افزودن logger به CLI صرفاً تزئینی) |
 | C4 clarification | 🟢 | کامل شد 2026-09-24 — حلقه `plan:clarified` در `Orchestrator.run` با `clarificationCallback` (null → cancel؛ بدون callback → رفتار legacy CI-safe)؛ `maxClarificationRounds` (default 3)؛ CLI: prompt inquirer در TTY، `--yes`/non-TTY → بدون callback؛ ۶ تست؛ انحراف: loop با fold جواب‌ها به request و re-`plan()` پیاده شد (نه `generatePlan(goal, answers)` مستقیم) تا multi-round واقعی شود |
-| C5 docs + regression | ⬜ | |
+| C5 docs + regression | 🟢 | کامل شد 2026-09-24 — بخش CLI کامل در README (جدول ۱۷ دستور + پرچم‌ها + exit codes + مثال)؛ smoke: 24/24 `--help` + دستورات read-only زنده؛ انحراف: smoke زنده `run --dry-run` ممکن نبود (بدون API key در sandbox) — پوشش تستی دارد |
 
 **Baseline:** 451/451 تست (27 فایل) · **هدف انتها:** ~451 + ≥۳۶ تست جدید
