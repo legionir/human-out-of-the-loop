@@ -154,3 +154,102 @@ describe('Phase 30 / P10 — the persisted plan never carries a secret value', (
     expect(store.load(planId)?.steps[0].resultSummary).toContain(SECRET);
   });
 });
+
+describe('Phase 30 / P10 — the log records the step lifecycle', () => {
+  it('parses only real step transitions', async () => {
+    const { parseStepEvent } = await import('../runtime/step-events.js');
+    expect(parseStepEvent('step:step-1:running')).toEqual({ stepId: 'step-1', phase: 'running' });
+    expect(parseStepEvent('step:step_2@x:done')).toEqual({ stepId: 'step_2@x', phase: 'done' });
+    expect(parseStepEvent('step:step-1:failed')).toEqual({ stepId: 'step-1', phase: 'failed' });
+    expect(parseStepEvent('plan:replanned')).toBeUndefined();
+    expect(parseStepEvent('step:step-1:something-else')).toBeUndefined();
+  });
+
+  it('writes step:started / step:completed / step:failed with the summary', async () => {
+    const { logStepEvent } = await import('../runtime/step-events.js');
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'p10-steps-')), 'observability.jsonl');
+    const logger = new ObservabilityLogger({ logFilePath: file });
+    const plan = createPlan('steps', [
+      step('step-1', { status: 'running' }),
+      step('step-2', { status: 'done', resultSummary: `did it with ${SECRET}` }),
+      step('step-3', { status: 'failed', failureType: 'technical', resultSummary: 'boom' }),
+    ]);
+
+    expect(logStepEvent(logger, plan, 'plan:started')).toBe(false);
+    expect(logStepEvent(logger, plan, 'step:step-1:running')).toBe(true);
+    expect(logStepEvent(logger, plan, 'step:step-2:done')).toBe(true);
+    expect(logStepEvent(logger, plan, 'step:step-3:failed')).toBe(true);
+    // A step that no longer exists in the plan is ignored, not invented.
+    expect(logStepEvent(logger, plan, 'step:step-gone:done')).toBe(true);
+    logger.close();
+
+    const entries = fs
+      .readFileSync(file, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as LogEntry);
+    expect(entries.map((e) => e.eventType)).toEqual([
+      'step:started',
+      'step:completed',
+      'step:failed',
+    ]);
+    expect(entries.map((e) => e.stepId)).toEqual(['step-1', 'step-2', 'step-3']);
+    expect(entries[0].message).toContain('step-1');
+    expect((entries[2].payload as { failureType: string }).failureType).toBe('technical');
+  });
+
+  it('the step summary in the log is already scrubbed (logging + scrubbing combine)', async () => {
+    const { logStepEvent } = await import('../runtime/step-events.js');
+    const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'p10-steps-')), 'observability.jsonl');
+    const logger = new ObservabilityLogger({ logFilePath: file, redactValues: [SECRET] });
+    const plan = createPlan('steps', [step('step-1', { status: 'done', resultSummary: `key ${SECRET}` })]);
+
+    logStepEvent(logger, plan, 'step:step-1:done');
+    logger.close();
+
+    const raw = fs.readFileSync(file, 'utf-8');
+    expect(raw).not.toContain(SECRET);
+    expect(raw).toContain(SECRET_REDACTION_MARKER);
+  });
+});
+
+describe('Phase 30 / P10 — a plan always has an identity', () => {
+  it('finalizePlan gives an id-less model plan everything the runtime needs', async () => {
+    const { finalizePlan } = await import('../planning/planner.js');
+    const steps = [step('step-1', { status: 'done' }), step('step-2', { status: 'running' })];
+    const raw = { goal: 'g', steps, clarifications: [], status: 'completed' } as never;
+
+    const plan = finalizePlan(raw);
+
+    expect(plan.id).toMatch(/^plan_[0-9a-f-]{36}$/);
+    expect(plan.status).toBe('draft');
+    expect(typeof plan.createdAt).toBe('number');
+    expect(plan.steps.map((s) => s.status)).toEqual(['pending', 'pending']);
+  });
+
+  it('finalizePlan keeps an id and createdAt the model already provided', async () => {
+    const { finalizePlan } = await import('../planning/planner.js');
+    const raw = {
+      id: 'plan_model_made',
+      goal: 'g',
+      steps: [step('step-1')],
+      clarifications: [],
+      status: 'running',
+      createdAt: 1234,
+    } as never;
+
+    const plan = finalizePlan(raw);
+    expect(plan.id).toBe('plan_model_made');
+    expect(plan.createdAt).toBe(1234);
+    expect(plan.status).toBe('draft');
+  });
+
+  it('the file store refuses an id-less plan instead of overwriting another one', async () => {
+    const { FilePlanStore } = await import('../runtime/plan-store.js');
+    const store = new FilePlanStore(fs.mkdtempSync(path.join(os.tmpdir(), 'p10-store-')));
+    const noId = { id: undefined, goal: 'g', steps: [step('step-1')], clarifications: [] };
+
+    expect(() => store.save(noId as never)).toThrowError(/refusing to save a plan without an id/);
+    expect(store.list()).toEqual([]);
+  });
+});

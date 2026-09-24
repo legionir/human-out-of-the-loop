@@ -5,6 +5,46 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.10] — 2026-09-24 — a plan always has an identity, and the log records its steps
+
+### Fixed
+
+- **A plan produced inside the planner's assessment had no id.** `assess()`
+  returns a plan when the model already answered `isClear: true`, and
+  `Planner.plan()` handed that object to the runtime untouched — unlike
+  `generatePlan()`, which assigns `plan_<uuid>`. Everything keyed by plan id
+  then degraded: `hootl plans show/cancel/resume` could not address the plan,
+  every log entry carried `"planId":""`, `hootl usage` listed the run as
+  `(unattributed)`, and the final report printed `Plan: unknown`. Worst of
+  all, `FilePlanStore` writes `sha256(plan.id ?? "unknown")`, so **every**
+  id-less plan was saved to the same file and silently overwrote the last
+  one. Both paths now go through one `finalizePlan()` (id, `draft` status,
+  `createdAt`, all steps `pending`), and `FilePlanStore.save` refuses an
+  id-less plan instead of colliding.
+- **The log never recorded the step lifecycle.** The runtime emits
+  `step:<id>:running|done|failed` and the logger has had
+  `logStepStarted`/`logStepCompleted`/`logStepFailed` all along, but nothing
+  called them: `hootl logs` showed tasks and quality failures, never a step.
+  The new `step-events.ts` parses those events and writes them (with the
+  already-scrubbed step summary).
+
+### Added
+
+- **`e2e/` — a local stub provider** (Responses API on `127.0.0.1:8931`) plus
+  `e2e/README.md`: plan, execute, review and inspect a run end to end without
+  a provider key. Development aid only; no product code imports it.
+
+### Verified
+
+- A real CLI run against the stub now shows `Plan: plan_<uuid>` in the report,
+  the plan in `hootl plans list`/`show`, `160 tokens` attributed to it in
+  `hootl usage`, and `step:started`/`step:completed` interleaved with
+  `task:*` in `hootl logs`.
+- The same flow through the server API: `POST /api/run` → `state=done` with a
+  real `planId`, `/api/usage?planId=P` = 160 tokens, `GET /api/plans/:id` =
+  200, UI served.
+- 6 new tests (`phase30-p10.test.ts`); suite is 651 tests in 46 files.
+
 ## [27.2.9] — 2026-09-24 — hostile content: values, not just names (Phase 30 / P10)
 
 ### Fixed

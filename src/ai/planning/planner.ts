@@ -48,6 +48,23 @@ export interface PlanningResult {
  *
  * Uses generateObject for guaranteed schema compliance.
  */
+/**
+ * Give a model-produced plan the identity and statuses the runtime relies
+ * on: an id (`plan_<uuid>` when the model omitted one), `draft` status, a
+ * creation timestamp and every step `pending`.
+ */
+export function finalizePlan(plan: Plan): Plan {
+  for (const step of plan.steps) {
+    step.status = 'pending';
+  }
+  return {
+    ...plan,
+    id: plan.id ?? `plan_${randomUUID()}`,
+    status: 'draft',
+    createdAt: plan.createdAt ?? Date.now(),
+  };
+}
+
 export class Planner {
   private readonly config: PlannerConfig;
 
@@ -94,6 +111,15 @@ If the request is clear enough, set isClear=true and provide the full plan.
             abortSignal,
           })
       );
+
+      // Phase 30 (P10 follow-up): a plan that arrives inside the assessment
+      // must be given the same shape `generatePlan` produces.  Without an id
+      // it could not be cancelled/resumed via the CLI or the API, its log
+      // entries carried no planId at all, and every id-less plan was written
+      // to the SAME store file (`sha256("unknown")`).
+      if (object.plan) {
+        object.plan = finalizePlan(object.plan);
+      }
 
       return object;
     } catch (err) {
@@ -150,16 +176,7 @@ ${userRequest}
         })
     );
 
-    for (const step of object.steps) {
-      step.status = 'pending';
-    }
-
-    return {
-      ...object,
-      id: object.id ?? `plan_${randomUUID()}`,
-      status: 'draft',
-      createdAt: Date.now(),
-    };
+    return finalizePlan(object);
   }
 
   /**

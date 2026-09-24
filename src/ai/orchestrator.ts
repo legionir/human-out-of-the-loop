@@ -18,6 +18,7 @@ import { MemorySessionStore, FileSessionStore, type SessionStore } from './runti
 import { ObservabilityLogger } from './runtime/observability-logger.js';
 import { collectSecretValues } from './runtime/secret-scrub.js';
 import { ScrubbingPlanStore } from './runtime/secret-scrub.js';
+import { logStepEvent } from './runtime/step-events.js';
 import { formatReviewForUser as formatFinalReview } from './runtime/review-formatter.js';
 import { RetryableAgentRuntime } from './runtime/agent-runtime-retry.js';
 
@@ -910,6 +911,9 @@ export class Orchestrator {
         } else if (event === 'plan:replanned') {
           this.observabilityLogger.logPlanReplanned(p);
         }
+        // Phase 30 (P10 follow-up): step:started/completed/failed were
+        // emitted by the runtime but never translated into the log.
+        logStepEvent(this.observabilityLogger, p, event);
         this.streamingManager.handlePlanStatusChange(p, event);
       },
       // Phase 20 (CORR-04): explicit acceptance hook instead of the old

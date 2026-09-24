@@ -66,10 +66,17 @@ export class FilePlanStore implements PlanStore {
   }
 
   save(plan: Plan): void {
+    // Phase 30 (P10 follow-up): an id-less plan used to be written to the
+    // SAME file as every other id-less plan (`sha256("unknown")`), so one
+    // silently overwrote the other.  The planner now always assigns an id;
+    // anything else fails loudly instead of losing data.
+    if (!plan.id) {
+      throw new Error('[plan-store] refusing to save a plan without an id.');
+    }
     // Phase 19 (PERS-01): atomic write — a crash mid-save can never
     // leave a corrupted (truncated) plan file behind.
     const data = JSON.stringify(plan, null, 2);
-    const filePath = this.filePath(plan.id ?? 'unknown');
+    const filePath = this.filePath(plan.id);
     // Phase 27 (PERS-04): serialise writers across processes sharing
     // this store directory (CLI ↔ server).
     withFileLockSync(lockPathFor(filePath), () => {

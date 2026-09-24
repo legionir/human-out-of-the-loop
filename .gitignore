@@ -7,3 +7,7 @@ coverage
 !.env.example
 .DS_Store
 .ai-runtime/
+
+# local e2e stub artifacts
+e2e/.stub.pid
+e2e/.stub.log
