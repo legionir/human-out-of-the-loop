@@ -1,134 +1,117 @@
 import { tool } from 'ai';
 import { z } from 'zod';
-import fs from 'node:fs/promises';
-import path from 'node:path';
 import { resolvePathInWorkspace } from './path-security.js';
+import { formatContentMatches, searchContentTree } from '../fs/content-search.js';
 import { isUnsafeRegex, MAX_PATTERN_LENGTH } from './regex-guard.js';
 
 const inputSchema = z.object({
   pattern: z
     .string()
     .min(1, 'Search pattern must not be empty')
-    .max(MAX_PATTERN_LENGTH, `Search pattern must be at most ${MAX_PATTERN_LENGTH} characters`),
-  directory: z.string().default('.'),
-  fileExtension: z.string().optional(),
-  maxResults: z.number().int().min(1).max(500).default(50),
+    .max(MAX_PATTERN_LENGTH, `Search pattern must be at most ${MAX_PATTERN_LENGTH} characters`)
+    .describe('Content to search for: a regular expression (or literal text with literal=true)'),
+  directory: z.string().default('.').describe('Directory to search in, relative to the workspace root'),
+  pathPattern: z
+    .string()
+    .max(MAX_PATTERN_LENGTH)
+    .optional()
+    .describe(
+      "Only search files whose workspace-relative path matches this regular expression, e.g. '\\.tsx?$' or '^src/'. Case follows caseSensitive."
+    ),
+  fileExtension: z
+    .string()
+    .optional()
+    .describe("Shorthand include filter, e.g. '.ts'. Prefer pathPattern when several extensions are involved."),
+  excludePatterns: z
+    .array(z.string())
+    .default([])
+    .describe(
+      "Glob patterns to skip, e.g. ['**/*.min.js', 'vendor']. A bare name excludes it at any depth. " +
+        'Build/vendor directories (node_modules, dist, .git, …) are skipped by default.'
+    ),
+  caseSensitive: z
+    .boolean()
+    .default(false)
+    .describe('VS Code "Match Case": when false (default) the search ignores letter case.'),
+  wholeWord: z
+    .boolean()
+    .default(false)
+    .describe('VS Code "Match Whole Word": the match must not be part of a larger word.'),
+  literal: z
+    .boolean()
+    .default(false)
+    .describe('VS Code "Use Regular Expression" turned OFF: treat pattern as plain text, not a regex.'),
+  contextLines: z
+    .number()
+    .int()
+    .min(0)
+    .max(10)
+    .default(0)
+    .describe('How many lines of surrounding context to include for each match (default 0).'),
+  maxMatchesPerFile: z
+    .number()
+    .int()
+    .min(1)
+    .max(500)
+    .default(20)
+    .describe('Ceiling per file, so one generated/large file cannot consume the whole result budget.'),
+  maxResults: z.number().int().min(1).max(500).default(50).describe('Total match ceiling'),
 });
-
-interface Match {
-  file: string;
-  line: number;
-  text: string;
-}
-
-const NOISE_DIRS = new Set(['node_modules', '.git', 'dist', '.next']);
-
-/**
- * Phase 21 (PERF-05): single-pass search with EARLY EXIT.
- *
- * The old design was two-phase: `walkDir` collected EVERY file first
- * (O(entire tree) syscalls) and only then did the matching loop stop
- * at `maxResults`.  Now walking and matching are one recursion that
- * aborts the moment `maxResults` matches are collected — a tree of
- * 10k files with a match in the first directory costs ~1 readdir +
- * 1 readFile instead of 10k+ reads.
- */
-/**
- * Phase 27 (SEC-02): a path the search could not read.  The old code
- * swallowed read errors entirely, so a permission problem looked
- * identical to "no matches" — the model (and the user) never learned
- * that part of the tree was skipped.
- */
-interface SkippedEntry {
-  path: string;
-  kind: 'file' | 'directory';
-  error: string;
-}
-
-/** Cap on reported entries — the COUNT is always exact. */
-const SKIPPED_REPORT_LIMIT = 20;
-
-interface SearchOptions {
-  ext?: string;
-  regex: RegExp;
-  maxResults: number;
-  projectRoot: string;
-  matches: Match[];
-  skipped: SkippedEntry[];
-}
-
-async function searchFiles(dir: string, opts: SearchOptions): Promise<void> {
-  // Early exit: a parent call found enough matches while we were recursing
-  if (opts.matches.length >= opts.maxResults) return;
-
-  let entries: import('node:fs').Dirent[];
-  try {
-    entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch (err) {
-    // SEC-02: report the unreadable directory instead of silently
-    // pretending it contained nothing.
-    opts.skipped.push({
-      path: path.relative(opts.projectRoot, dir) || '.',
-      kind: 'directory',
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return;
-  }
-  for (const entry of entries) {
-    if (opts.matches.length >= opts.maxResults) return; // early exit
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (NOISE_DIRS.has(entry.name)) continue;
-      await searchFiles(full, opts);
-    } else if (entry.isFile()) {
-      if (opts.ext && !entry.name.endsWith(opts.ext)) continue;
-      try {
-        const content = await fs.readFile(full, 'utf-8');
-        const lines = content.split('\n');
-        for (let i = 0; i < lines.length && opts.matches.length < opts.maxResults; i++) {
-          if (opts.regex.test(lines[i])) {
-            opts.matches.push({
-              file: path.relative(opts.projectRoot, full),
-              line: i + 1,
-              text: lines[i].trim().slice(0, 200),
-            });
-          }
-          // Reset regex lastIndex for global flag
-          opts.regex.lastIndex = 0;
-        }
-      } catch (err) {
-        // SEC-02: unreadable file (permissions, vanished, binary) —
-        // skip it but say so in the result.
-        opts.skipped.push({
-          path: path.relative(opts.projectRoot, full),
-          kind: 'file',
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
-  }
-}
 
 /**
  * Factory: creates a `search_code` tool bound to `projectRoot`
- * (phase 18 — PATH-03, SEC-01, SEC-06):
- *   - `directory` is validated against `projectRoot` (no more
- *     the process working directory),
- *   - the pattern is checked for catastrophic backtracking (ReDoS)
- *     and capped at `MAX_PATTERN_LENGTH`,
- *   - matched file paths are reported relative to `projectRoot`.
+ * (phase 18 — PATH-03, SEC-01, SEC-06).
+ *
+ * Phase 34 — VS Code-style search.  `pattern` finds content; `pathPattern` and
+ * `excludePatterns` decide which files are worth reading; `caseSensitive`,
+ * `wholeWord` and `literal` are VS Code's three toggles; every occurrence is
+ * reported with its line **and column**, optionally with context lines.
+ *
+ * The old contract is intact: the same input names (`pattern`, `directory`,
+ * `fileExtension`, `maxResults`) mean the same thing, matches carry
+ * `{file, line, text}` relative to the workspace root, and unreadable entries
+ * are reported through the exact `skippedCount` / capped `skipped` pair
+ * (SEC-02).  The walk and match engine itself now lives in
+ * `../fs/content-search.ts`, next to the other filesystem primitives.
  */
 export function createSearchCodeTool(projectRoot: string) {
   const allowed = [projectRoot];
   return tool({
     description:
-      'Searches for a regex pattern across files in a directory. Returns matching lines with file path and line number.',
+      'Searches file contents in a directory — VS Code style: a content regex plus an optional path ' +
+      'regex/glob filters, case-sensitive / whole-word / literal toggles and context lines. ' +
+      'Returns, for every match, the file path (relative to the workspace root), the 1-based line ' +
+      'and column, and the matching line, plus the list of matched files.',
     inputSchema,
-    execute: async ({ pattern, directory, fileExtension, maxResults }) => {
+    execute: async (input) => {
+      const {
+        pattern,
+        directory,
+        pathPattern,
+        fileExtension,
+        excludePatterns,
+        caseSensitive,
+        wholeWord,
+        literal,
+        contextLines,
+        maxMatchesPerFile,
+        maxResults,
+      } = input;
+
+      // Defaults are re-applied here: `execute` can also be called directly.
+      const target = directory ?? '.';
+      const excludes = excludePatterns ?? [];
+      const sensitive = caseSensitive ?? false;
+      const asText = literal ?? false;
+      const exactWord = wholeWord ?? false;
+      const context = contextLines ?? 0;
+      const perFile = maxMatchesPerFile ?? 20;
+      const limit = maxResults ?? 50;
+
       try {
         // Security: the search directory must stay inside the workspace
         // (phase 33: the ported reference check — symlink- and Unicode-aware)
-        const validation = await resolvePathInWorkspace(directory, allowed);
+        const validation = await resolvePathInWorkspace(target, allowed);
         if (!validation.safe) {
           return {
             success: false as const,
@@ -136,28 +119,46 @@ export function createSearchCodeTool(projectRoot: string) {
             code: 'PATH_TRAVERSAL_BLOCKED',
           };
         }
-        const resolvedDir = validation.resolvedPath;
 
-        // Security: ReDoS guard (defensive — the schema already caps length)
-        if (pattern.length > MAX_PATTERN_LENGTH) {
-          return {
-            success: false as const,
-            error: `Search pattern too long (${pattern.length} > ${MAX_PATTERN_LENGTH} characters).`,
-            code: 'PATTERN_TOO_LONG',
-          };
-        }
-        if (isUnsafeRegex(pattern)) {
-          return {
-            success: false as const,
-            error:
-              'Search pattern rejected: it contains nested quantifiers that can cause catastrophic backtracking. Rewrite the pattern without quantified groups containing quantifiers (e.g. use "a+b" instead of "(a+)+").',
-            code: 'UNSAFE_REGEX',
-          };
+        // Security: ReDoS guard (defensive — the schema already caps length).
+        // Both patterns are model-supplied and both are executed against
+        // untrusted file names/lines, so both are checked.
+        for (const [field, value] of [
+          ['pattern', pattern],
+          ['pathPattern', pathPattern],
+        ] as const) {
+          if (value === undefined) continue;
+          if (value.length > MAX_PATTERN_LENGTH) {
+            return {
+              success: false as const,
+              error: `${field} too long (${value.length} > ${MAX_PATTERN_LENGTH} characters).`,
+              code: 'PATTERN_TOO_LONG',
+            };
+          }
+          if (isUnsafeRegex(value)) {
+            return {
+              success: false as const,
+              error:
+                `${field} rejected: it contains nested quantifiers that can cause catastrophic ` +
+                'backtracking. Rewrite it without quantified groups containing quantifiers ' +
+                '(e.g. use "a+b" instead of "(a+)").',
+              code: 'UNSAFE_REGEX',
+            };
+          }
         }
 
-        let regex: RegExp;
+        const flags = sensitive ? '' : 'i';
+        let source = pattern;
+        if (asText) source = source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        // Whole-word via lookarounds rather than \b: a pattern that starts or
+        // ends with punctuation ("\.ts") must still match at a word boundary.
+        if (exactWord) source = `(?<![A-Za-z0-9_$])(?:${source})(?![A-Za-z0-9_$])`;
+
+        let contentRegex: RegExp;
+        let pathRegex: RegExp | undefined;
         try {
-          regex = new RegExp(pattern, 'gi');
+          contentRegex = new RegExp(source, flags);
+          if (pathPattern !== undefined) pathRegex = new RegExp(pathPattern, flags);
         } catch (err) {
           return {
             success: false as const,
@@ -166,27 +167,36 @@ export function createSearchCodeTool(projectRoot: string) {
           };
         }
 
-        // Phase 21 (PERF-05): walk + match in one pass, stopping early
-        const matches: Match[] = [];
-        const skipped: SkippedEntry[] = [];
-        await searchFiles(resolvedDir, {
-          ext: fileExtension,
-          regex,
-          maxResults,
-          projectRoot,
-          matches,
-          skipped,
+        const outcome = await searchContentTree({
+          baseDirectory: validation.resolvedPath,
+          workspaceRoot: projectRoot,
+          contentRegex,
+          pathRegex,
+          excludePatterns: excludes,
+          fileExtensions: fileExtension ? [fileExtension] : undefined,
+          contextLines: context,
+          maxResults: limit,
+          maxMatchesPerFile: perFile,
         });
 
         return {
           success: true as const,
           pattern,
-          totalMatches: matches.length,
-          truncated: matches.length >= maxResults,
-          matches,
+          ...(pathPattern !== undefined ? { pathPattern } : {}),
+          totalMatches: outcome.matches.length,
+          fileCount: outcome.files.length,
+          files: outcome.files,
+          truncated: outcome.truncated || outcome.matches.length >= limit,
+          matches: outcome.matches,
+          formatted: formatContentMatches(outcome.matches),
+          filesScanned: outcome.filesScanned,
           // SEC-02: `skippedCount` is exact; `skipped` is capped for payload size.
-          skippedCount: skipped.length,
-          skipped: skipped.slice(0, SKIPPED_REPORT_LIMIT),
+          skippedCount: outcome.skipped.length,
+          skipped: outcome.skipped.slice(0, SKIPPED_REPORT_LIMIT),
+          // Not errors — a binary or oversized file simply has no text to search.
+          skippedBinary: outcome.skippedBinary,
+          skippedTooLarge: outcome.skippedTooLarge,
+          skippedSymlinks: outcome.skippedSymlinks,
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
@@ -198,3 +208,12 @@ export function createSearchCodeTool(projectRoot: string) {
     },
   });
 }
+
+/**
+ * Phase 27 (SEC-02): a path the search could not read.  The old code
+ * swallowed read errors entirely, so a permission problem looked
+ * identical to "no matches" — the model (and the user) never learned
+ * that part of the tree was skipped.
+ */
+/** Cap on reported entries — the COUNT is always exact. */
+const SKIPPED_REPORT_LIMIT = 20;

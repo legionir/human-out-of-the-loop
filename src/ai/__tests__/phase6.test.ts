@@ -148,8 +148,8 @@ describe('Catalog Tools', () => {
     const result = await execute({ source: 'all' });
 
     expect(result.success).toBe(true);
-    // 13 filesystem/git tools + 3 catalog = 16
-    expect(result.count).toBeGreaterThanOrEqual(16);
+    // 14 filesystem/git tools + 3 catalog = 17
+    expect(result.count).toBeGreaterThanOrEqual(17);
     expect(result.tools[0]).toHaveProperty('source');
     expect(result.tools[0]).toHaveProperty('hasImplementation');
   });

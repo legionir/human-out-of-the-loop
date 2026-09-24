@@ -8,6 +8,7 @@ export { createGitStatusTool } from './git-status.js';
 // Phase 33: the rest of the reference filesystem toolset.
 export { createEditFileTool } from './edit-file.js';
 export { createReadMultipleFilesTool } from './read-multiple-files.js';
+export { createWriteMultipleFilesTool } from './write-multiple-files.js';
 export { createListDirectoryTool } from './list-directory.js';
 export { createDirectoryTreeTool } from './directory-tree.js';
 export { createMoveFileTool } from './move-file.js';

@@ -241,7 +241,13 @@ describe('createAgent', () => {
     expect(Object.keys(agent.tools)).not.toContain('write_file');
 
     const filtered = agent.toolWarnings.map((w) => w.toolId).sort();
-    expect(filtered).toEqual(['create_directory', 'edit_file', 'move_file', 'write_file']);
+    expect(filtered).toEqual([
+      'create_directory',
+      'edit_file',
+      'move_file',
+      'write_file',
+      'write_multiple_files',
+    ]);
     for (const warning of agent.toolWarnings) {
       expect(warning.skillId).toBe('file_management');
       expect(warning.reason).toBe('not-in-allowedTools');

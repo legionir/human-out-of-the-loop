@@ -5,6 +5,59 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.7.0] — 2026-09-25 — batch writing and VS Code-style search
+
+Two tools the filesystem set was still missing: writing a *set* of files in one
+call (scaffolding) and searching content the way an editor does — a pattern for
+the content, a pattern for the paths, every hit on every line.
+
+**`write_multiple_files` — one call, a whole scaffold**
+- `files: [{ path, content }]` (up to 200), parent directories created, every
+  file written through the ported atomic core.
+- **Path problems abort the batch** — if any path escapes the workspace or is
+  listed twice, *nothing* is written and each problem is reported. A
+  half-applied scaffold is worse than none.
+- **Content problems do not** — a file that exists with different content is
+  reported as a `conflict` (with its line of the summary) while the rest of the
+  batch is still written, the way `read_multiple_files` returns what it could
+  read. `overwrite: true` replaces instead.
+- **Identical content is `unchanged`, never a conflict**, so re-running a
+  scaffold is a clean no-op (mtime included). `dryRun: true` previews the same
+  statuses without touching the disk, and the result lists every directory the
+  batch created.
+
+**`search_code` — VS Code "find in files", not a single-pattern grep**
+- A **content** pattern and a **path** pattern: `pathPattern` (regex over the
+  workspace-relative path) plus glob `excludePatterns` answer VS Code's *files
+  to include / exclude*. Both patterns go through the same ReDoS guard
+  (`UNSAFE_REGEX`, `PATTERN_TOO_LONG`, `INVALID_REGEX`).
+- The three toggles: `caseSensitive` (default **false** — the search now ignores
+  case unless asked), `wholeWord` (lookarounds, so a punctuation-led pattern
+  like `\(foo\)` still works — a `\b` guard would silently fail on it) and
+  `literal` (pattern as plain text).
+- **Every occurrence, with its column.** `call(fooBar, fooBar)` is two matches
+  on one line, and the result reports both — a per-line grep reports one.
+- `contextLines` adds the surrounding lines; `maxMatchesPerFile` (default 20)
+  stops one generated file from consuming the budget; the result carries the
+  matched `files` list, a `formatted` `file:line:column: text` rendering (what
+  models read best) and `filesScanned`.
+- Safety unchanged: paths are validated by the ported core, **symlinks are never
+  followed** (counted in `skippedSymlinks`), binary files (`skippedBinary`) and
+  files over `maxFileSizeBytes` (`skippedTooLarge`) are counted instead of
+  polluting the phase-27 `skipped` contract, build/vendor directories are
+  skipped by default, and the engine lives in `src/ai/tools/fs/content-search.ts`
+  next to the other filesystem primitives. `directory_tree`'s excludes now use
+  the same `isExcludedPath` helper, so "exclude node_modules" means one thing.
+
+Authorisation: `write_multiple_files` is in `coder` and `file_management`; the
+new `search_code` surface is available to every persona that already had the
+tool, and the read-only personas still cannot write.
+
+**Tests & docs:** 828 tests green (57 files), 0 tsc errors, and a new `batch` e2e
+scenario (74 committed checks) that scaffolds two files with one call and then
+finds their marker with the path-filtered, context-carrying search — asserting
+the result really reached the next model turn.
+
 ## [27.6.0] — 2026-09-25 — the filesystem toolset, ported from the MCP reference server
 
 The runtime could read a file, rewrite it whole, grep it and ask git about it.

@@ -2,8 +2,8 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { minimatch } from 'minimatch';
 import { resolvePathInWorkspace } from './path-security.js';
+import { isExcludedPath } from '../fs/lib.js';
 
 const inputSchema = z.object({
   path: z.string().default('.').describe('Root of the tree, relative to the workspace root'),
@@ -68,13 +68,7 @@ export function createDirectoryTreeTool(projectRoot: string) {
 
           for (const entry of entries) {
             const relativePath = path.relative(rootPath, path.join(currentPath, entry.name));
-            const shouldExclude = excludes.some((pattern) =>
-              pattern.includes('*')
-                ? minimatch(relativePath, pattern, { dot: true })
-                : minimatch(relativePath, pattern, { dot: true }) ||
-                  minimatch(relativePath, `**/${pattern}`, { dot: true }) ||
-                  minimatch(relativePath, `**/${pattern}/**`, { dot: true })
-            );
+            const shouldExclude = isExcludedPath(relativePath, excludes);
             if (shouldExclude) continue;
 
             entriesVisited++;

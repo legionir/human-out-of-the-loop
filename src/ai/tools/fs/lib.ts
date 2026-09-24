@@ -572,6 +572,32 @@ export async function headFile(filePath: string, numLines: number): Promise<stri
 // ─── Search ──────────────────────────────────────────────────────
 
 /**
+ * Does a workspace-relative path match one of the exclude globs?
+ *
+ * Phase 34: one implementation shared by the content search, the directory tree
+ * and `search_files`, so "exclude node_modules" means the same thing in all of
+ * them.  Two rules:
+ *   - the path is matched as written (`dist/**`, `*.log`),
+ *   - a pattern with no glob magic is a *name* and excludes that entry at any
+ *     depth (`node_modules` also excludes `packages/app/node_modules`).
+ */
+export function isExcludedPath(
+  relativePath: string,
+  patterns: readonly string[] | undefined
+): boolean {
+  if (!patterns || patterns.length === 0) return false;
+
+  const normalized = relativePath.split(path.sep).join('/');
+  const segments = normalized.split('/');
+
+  return patterns.some((pattern) => {
+    if (minimatch(normalized, pattern, { dot: true })) return true;
+    if (pattern.includes('*')) return false;
+    return segments.includes(pattern);
+  });
+}
+
+/**
  * Recursively find entries whose path (relative to `rootPath`) matches the
  * glob `pattern`, skipping `excludePatterns` and anything that fails path
  * validation.

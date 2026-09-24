@@ -327,16 +327,25 @@ human-out-of-the-loop sessions label session_5c1d… "Login page v2"
 
 The workspace tools are a native port of the MCP reference *filesystem* server
 (`servers-main/src/filesystem/`) — the same path validation, not an MCP server
-registration. Thirteen tools, all bound to `--project-root` and refusing
+registration. Fourteen tools, all bound to `--project-root` and refusing
 anything that escapes it (symlinked parents included):
 
 | Read | Write | Inspect |
 |------|-------|---------|
 | `read_file` (full, `head`/`tail`, base64) | `write_file` (atomic, `overwrite`) | `list_directory` |
-| `read_multiple_files` | `edit_file` (line-based + diff, `dryRun`) | `directory_tree` (globs, `maxDepth`) |
-| `search_code` (regex) | `create_directory` | `get_file_info` |
-| `search_files` (glob) | `move_file` (never overwrites) | `list_allowed_directories` |
-| | | `git_status` |
+| `read_multiple_files` | `write_multiple_files` (batch/scaffold, per-file status) | `directory_tree` (globs, `maxDepth`) |
+| `search_code` (VS Code style, see below) | `edit_file` (line-based + diff, `dryRun`) | `get_file_info` |
+| `search_files` (glob) | `create_directory` | `list_allowed_directories` |
+| | `move_file` (never overwrites) | `git_status` |
+
+`search_code` follows the VS Code "search in files" model: a **content** pattern
+(regex, or literal text with `literal: true`, case-insensitive unless
+`caseSensitive`, `wholeWord` optional) plus a **path** pattern (`pathPattern`,
+regex over the workspace-relative path) and glob `excludePatterns` to decide
+which files are searched. Every occurrence is reported with its 1-based line
+**and column**, optional `contextLines`, the list of matched files, and a
+`file:line:column: text` rendering — one call answers "where is this used?"
+including *every* hit on a line, which a per-line grep cannot.
 
 Safety properties the port keeps from the reference implementation: every
 component of a path is resolved through its symlinks and re-checked (a *new*
@@ -484,10 +493,11 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 18–26 | Runtime hardening, CLI parity, server-side controls, registry introspection, clarification, usage/tasks | 🟢 |
 | 27–32 | Env-injected endpoints, registry layers, the REPL and `/` menu, runtime models, live run feedback (status line + streamed thinking) & project context for the planner | 🟢 |
 | 33 | Native port of the MCP reference filesystem toolset (13 tools, symlink/Unicode-safe paths, atomic writes, line-based edits) | 🟢 |
+| 34 | Batch writing (`write_multiple_files`) and VS Code-style `search_code` (path pattern, toggles, columns, context) | 🟢 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**801 tests green (56 files), 0 tsc errors — plus 68 committed end-to-end checks (`npm run e2e`)** (phases 18–33 complete — see `docs/history/`)
+**828 tests green (57 files), 0 tsc errors — plus 74 committed end-to-end checks (`npm run e2e`)** (phases 18–34 complete — see `docs/history/`)
 
 ## Law Compliance
 

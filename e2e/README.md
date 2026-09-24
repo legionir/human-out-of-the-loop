@@ -29,6 +29,7 @@ Exit code is 0 only when every check passed. `E2E_SCENARIO_TIMEOUT_MS`
 | --- | --- |
 | `success` | a goal reaches a persisted plan with an id, the step's tool wrote the file, step lifecycle events are logged, tokens are attributed |
 | `files` | phase 33: one run calls `edit_file` (line-based, the rest of the file byte-identical), `directory_tree` (its JSON result reaches the next model turn) and `move_file` (source gone, destination present), all recorded in the log |
+| `batch` | phase 34: one run scaffolds two files with a single `write_multiple_files` call, then finds their marker with `search_code` — asserting the path filter, the context lines and the `file:line:column` rendering all reached the next model turn |
 | `resume` | `plans resume` dispatches only the unfinished steps and a second resume is a no-op |
 | `sandbox` | `read_file`/`write_file` cannot escape the project root |
 | `credential` | a hostile note makes the model echo an API key; it never reaches any artifact, and the redaction marker proves the trap fired |

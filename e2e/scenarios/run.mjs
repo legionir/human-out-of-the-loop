@@ -278,6 +278,68 @@ scenarios.files = async () => {
   return root;
 };
 
+/**
+ * Phase 34 — batch scaffolding and VS Code-style search, through the real CLI.
+ *
+ * One run: `write_multiple_files` creates two files in one call (creating their
+ * directory), then `search_code` finds the marker those files contain — with a
+ * `pathPattern` filter and context lines — so the search result that reaches the
+ * next model turn must carry the file, the line, the column and the context.
+ */
+scenarios.batch = async () => {
+  const root = makeProject('batch');
+  const goal =
+    'scaffold a module and find its marker BATCHPROBE CHAIN SCAFFOLD:lib GREP:scaffold-marker';
+  const { code, stdout } = await run(runArgs(goal, root));
+  const { plans } = planStore(root);
+  const plan = plans[0];
+  const log = readLog(root);
+
+  check('batch: exit code 0', code === 0, `exit=${code} ${(stdout || '').split('\n')[0]}`);
+
+  const indexPath = path.join(root, 'lib', 'index.ts');
+  const helperPath = path.join(root, 'lib', 'helper.ts');
+  check(
+    'batch: both scaffolded files exist with their content',
+    fs.existsSync(indexPath) &&
+      fs.existsSync(helperPath) &&
+      fs.readFileSync(indexPath, 'utf-8') === "export * from './helper.js';\n"
+  );
+
+  const calls = log.filter((e) => e.eventType === 'task:tool-call');
+  const called = calls.map((e) => e.payload?.toolName);
+  check(
+    'batch: the log records write_multiple_files then search_code',
+    called.includes('write_multiple_files') && called.includes('search_code'),
+    called.join(',')
+  );
+
+  const probeRequests = stubRequests().filter((body) => JSON.stringify(body).includes('BATCHPROBE'));
+  const searchResultSeen = probeRequests.some((body) => {
+    const text = JSON.stringify(body);
+    // Result-only markers (none of these appear in the tool *schemas*): the
+    // context lines, the `file:line:column:` rendering, and the skip counters.
+    // Quote-sensitive checks would be defeated by the two levels of JSON
+    // escaping in this wire format, so the column is asserted through the
+    // formatted line instead.
+    return text.includes('contextBefore') && text.includes(':1:32:') && text.includes('skippedBinary');
+  });
+  check('batch: the search result (file, line, column, context) reached the model', searchResultSeen);
+
+  const pathFilterApplied = probeRequests.some((body) =>
+    JSON.stringify(body).includes('scaffold-marker')
+  );
+  check('batch: the searched pattern is in the request', pathFilterApplied);
+
+  check(
+    'batch: every step completed without a tool error',
+    Boolean(plan) && plan.steps.every((s) => s.status === 'done') &&
+      !log.some((e) => e.eventType === 'task:tool-error'),
+    log.filter((e) => e.eventType === 'task:tool-error').map((e) => e.message).join(' | ')
+  );
+  return root;
+};
+
 scenarios.resume = async () => {
   const root = makeProject('resume');
   await run(runArgs('write the project notes WRITE:notes/first.txt', root));

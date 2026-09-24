@@ -391,9 +391,10 @@ describe('Phase 19 — Law 16: no hardcoded tool defs in Orchestrator', () => {
           'search_code',
           'write_file',
           'git_status',
-          // phase 33 — the reference filesystem toolset
+          // phases 33/34 — the reference filesystem toolset + batch write
           'edit_file',
           'read_multiple_files',
+          'write_multiple_files',
           'list_directory',
           'directory_tree',
           'move_file',

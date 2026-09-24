@@ -6,6 +6,7 @@
   "tools": [
     "read_file",
     "read_multiple_files",
+    "write_multiple_files",
     "edit_file",
     "write_file",
     "move_file",

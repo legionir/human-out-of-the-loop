@@ -355,7 +355,7 @@ describe('phase 28 — registry layering', () => {
     ]);
     expect(loaded.skills.length).toBeGreaterThan(0); // from the package layer
     expect(loaded.tools.map((t) => t.id).sort()).toEqual([
-      // the original four plus phase 33's reference filesystem toolset
+      // the original four plus the phases 33/34 filesystem toolset
       'create_directory',
       'directory_tree',
       'edit_file',
@@ -369,6 +369,7 @@ describe('phase 28 — registry layering', () => {
       'search_code',
       'search_files',
       'write_file',
+      'write_multiple_files',
     ]);
     expect(loaded.errors).toEqual([]);
   });

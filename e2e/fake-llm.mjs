@@ -158,6 +158,10 @@ const MARKERS = [
   { marker: 'EDIT', tool: 'edit_file' },
   { marker: 'TREE', tool: 'directory_tree' },
   { marker: 'MOVE', tool: 'move_file' },
+  // Phase 34 — batch writing and VS Code-style search.
+  { marker: 'SCAFFOLD', tool: 'write_multiple_files' },
+  { marker: 'SCAFFOLDDRY', tool: 'write_multiple_files' },
+  { marker: 'GREP', tool: 'search_code' },
 ];
 
 function markersIn(text) {
@@ -212,6 +216,31 @@ function pickToolCall(promptText, offered, chained = false) {
     };
   }
   if (marker.marker === 'TREE') return { name: 'directory_tree', args: { path: marker.arg } };
+  // SCAFFOLD:<dir> — a two-file scaffold; the second file carries the probe the
+  // GREP marker then searches for, so one scenario can prove both directions.
+  if (marker.marker === 'SCAFFOLD' || marker.marker === 'SCAFFOLDDRY') {
+    const files = [
+      { path: `${marker.arg}/index.ts`, content: "export * from './helper.js';\n" },
+      { path: `${marker.arg}/helper.ts`, content: 'export const scaffoldMarker = "scaffold-marker";\n' },
+    ];
+    return marker.marker === 'SCAFFOLDDRY'
+      ? { name: 'write_multiple_files', args: { files, dryRun: true } }
+      : { name: 'write_multiple_files', args: { files } };
+  }
+  // GREP:<pattern> — the VS Code-style search: a path filter, context lines and
+  // a per-file ceiling, so the result must carry columns and context back.
+  if (marker.marker === 'GREP') {
+    return {
+      name: 'search_code',
+      args: {
+        pattern: marker.arg,
+        pathPattern: '\\.ts$',
+        contextLines: 1,
+        maxMatchesPerFile: 5,
+        maxResults: 10,
+      },
+    };
+  }
   if (marker.marker === 'MOVE') {
     const [source, destination] = marker.arg.split('|');
     if (!source || !destination) return null;

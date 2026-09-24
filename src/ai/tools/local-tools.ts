@@ -10,6 +10,7 @@ import { createWriteFileTool } from './implementations/write-file.js';
 import { createGitStatusTool } from './implementations/git-status.js';
 import { createEditFileTool } from './implementations/edit-file.js';
 import { createReadMultipleFilesTool } from './implementations/read-multiple-files.js';
+import { createWriteMultipleFilesTool } from './implementations/write-multiple-files.js';
 import { createListDirectoryTool } from './implementations/list-directory.js';
 import { createDirectoryTreeTool } from './implementations/directory-tree.js';
 import { createMoveFileTool } from './implementations/move-file.js';
@@ -32,6 +33,7 @@ export const LOCAL_TOOL_FACTORIES: Readonly<Record<string, (projectRoot: string)
   // Phase 33 — the reference filesystem toolset.
   edit_file: createEditFileTool,
   read_multiple_files: createReadMultipleFilesTool,
+  write_multiple_files: createWriteMultipleFilesTool,
   list_directory: createListDirectoryTool,
   directory_tree: createDirectoryTreeTool,
   move_file: createMoveFileTool,

@@ -10,7 +10,17 @@ export {
 export { isPathWithinAllowedDirectories } from './path-validation.js';
 export { parseRoot, resolveAllowedDirectories, type ResolvedRoots } from './roots.js';
 export {
+  DEFAULT_EXCLUDE_DIRS,
+  DEFAULT_MAX_FILE_SIZE_BYTES,
+  formatContentMatches,
+  searchContentTree,
+  type ContentMatch,
+  type ContentSearchOptions,
+  type ContentSearchOutcome,
+} from './content-search.js';
+export {
   PathAccessError,
+  isExcludedPath,
   applyFileEdits,
   createUnifiedDiff,
   formatSize,

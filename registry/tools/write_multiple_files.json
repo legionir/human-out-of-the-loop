@@ -1,0 +1,8 @@
+{
+  "id": "write_multiple_files",
+  "name": "Write Multiple Files",
+  "description": "Creates or updates several files at once (scaffolding), with per-file status and dryRun",
+  "source": "local",
+  "modulePath": "./implementations/write-multiple-files",
+  "category": "filesystem"
+}

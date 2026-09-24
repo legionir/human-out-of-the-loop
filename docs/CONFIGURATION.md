@@ -149,13 +149,14 @@ registry/
 │   ├── git_operations/
 │   ├── task_decomposition/
 │   └── acceptance_check/
-├── tools/                   # ۱۳ ابزار محلی (فاز ۳۳: پورت سرور مرجع MCP)
+├── tools/                   # ۱۴ ابزار محلی (فاز ۳۳/۳۴: پورت سرور مرجع MCP)
 │   ├── read_file.json       # id, name, description, source: local, modulePath, category
-│   ├── search_code.json     #   (مسیرها نسبت به projectRoot؛ head/tail برای read_file)
+│   ├── search_code.json     #   جستجوی VS Code-style: pattern محتوا + pathPattern مسیر
 │   ├── write_file.json
 │   ├── git_status.json
 │   ├── edit_file.json       # ویرایش خطی + diff (dryRun)
 │   ├── read_multiple_files.json
+│   ├── write_multiple_files.json  # scaffold دسته‌ای + وضعیت هر فایل + dryRun
 │   ├── list_directory.json  # [DIR]/[FILE]؛ symlink هرگز دنبال نمی‌شود
 │   ├── directory_tree.json  # درخت JSON با excludePatterns و maxDepth
 │   ├── move_file.json       # مقصد موجود → خطا (بدون overwrite)
@@ -183,7 +184,7 @@ registry/
   "allowedTools": [
     "read_file", "write_file", "edit_file", "read_multiple_files",
     "list_directory", "directory_tree", "move_file", "get_file_info",
-    "create_directory", "search_code", "search_files",
+    "write_multiple_files", "create_directory", "search_code", "search_files",
     "list_allowed_directories", "git_status"
   ],
   "description": "Implements features and fixes bugs"
@@ -198,9 +199,10 @@ registry/
   "version": "1.0.0",
   "instructions": "SKILL.md",
   "tools": [
-    "read_file", "read_multiple_files", "edit_file", "write_file",
-    "move_file", "create_directory", "list_directory", "directory_tree",
-    "get_file_info", "search_code", "search_files", "list_allowed_directories"
+    "read_file", "read_multiple_files", "write_multiple_files", "edit_file",
+    "write_file", "move_file", "create_directory", "list_directory",
+    "directory_tree", "get_file_info", "search_code", "search_files",
+    "list_allowed_directories"
   ],
   "priority": 60,
   "description": "Reads, writes, edits, moves and searches files"
