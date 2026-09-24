@@ -74,6 +74,8 @@ export const OrchestratorConfigSchema = z.object({
   // U1 (config parity): extra observability redaction keys (defaults
   // still apply when the list is non-empty).
   redactKeys: z.array(z.string().min(1)).default([]),
+  // C4: max question-and-answer rounds before the run fails.
+  maxClarificationRounds: z.number().int().min(0).max(10).default(3),
 });
 
 /**
@@ -92,6 +94,17 @@ export interface OrchestratorRunOptions {
    * relabel existing sessions via `SessionStore.setLabel`).
    */
   sessionLabel?: string;
+  /**
+   * C4: interactive clarification.  Called when the planner decides the
+   * request is not clear: `(questions, round) => answers` where the
+   * answers key by the exact question text.  Returning `null` (or an
+   * empty object) cancels the run.  WITHOUT a callback the legacy
+   * behavior applies: the run fails with the questions (CI-safe).
+   */
+  clarificationCallback?: (
+    questions: string[],
+    round: number,
+  ) => Promise<Record<string, string> | null>;
   /**
    * Callback to get user confirmation of the plan.
    * REQUIRED — Law 17 mandates explicit user approval before execution.
@@ -206,6 +219,7 @@ export class Orchestrator {
       contextBudgetChars: data.contextBudgetChars,
       connectTimeoutMs: data.connectTimeoutMs,
       redactKeys: data.redactKeys,
+      maxClarificationRounds: data.maxClarificationRounds,
       onProgress: config.onProgress ?? (() => {}),
     };
 
@@ -447,7 +461,72 @@ export class Orchestrator {
       level: 'info',
     });
 
-    const planningResult = await this.planner.plan(userRequest);
+    // C4: interactive clarification loop.  The planner may answer the
+    // request is unclear and ask questions; with a callback we ask the
+    // user, fold the answers back into the request, and re-plan — up to
+    // `maxClarificationRounds`.  Without a callback (CI, server, --yes)
+    // the legacy failure-with-questions path below is unchanged.
+    let planningResult = await this.planner.plan(userRequest);
+    let clarifyRound = 0;
+    let clarificationDeclined = false;
+    while (!planningResult.isClear) {
+      const callback = options?.clarificationCallback;
+      if (!callback || clarifyRound >= this.config.maxClarificationRounds) break;
+      clarifyRound++;
+      const answers = await callback(planningResult.needsClarification, clarifyRound);
+      if (!answers || Object.keys(answers).length === 0) {
+        clarificationDeclined = true;
+        break;
+      }
+      const answeredCount = Object.keys(answers).length;
+      this.observabilityLogger.log({
+        eventType: 'plan:clarified',
+        message: `User answered ${answeredCount} clarification question(s) (round ${clarifyRound}).`,
+        level: 'info',
+        payload: { attempt: clarifyRound, answeredCount },
+      });
+      const block = Object.entries(answers)
+        .map(([q, a]) => `Q: ${q}\nA: ${a}`)
+        .join('\n');
+      planningResult = await this.planner.plan(
+        `${userRequest}\n\nCLARIFICATIONS FROM USER:\n${block}`,
+      );
+    }
+
+    if (clarificationDeclined) {
+      const clarMsg = planningResult.needsClarification.join('\n');
+      if (interaction) {
+        this.sessionStore.updateInteraction(sessionId, interaction.id, {
+          outcome: 'failure',
+          reviewSummary: `Clarification declined by user (round ${clarifyRound}): ${clarMsg}`,
+          completedAt: Date.now(),
+        });
+      }
+      return {
+        review: {
+          planId: 'none',
+          goal: userRequest,
+          outcome: 'cancelled',
+          acceptedFindings: [],
+          rejectedFindings: [],
+          incompleteSteps: [],
+          finalSummary: `The planner asked for clarification, but the user chose not to answer (round ${clarifyRound}).\nQuestions:\n${clarMsg}`,
+          usage: emptyReviewUsage,
+        },
+        report: `🛑 Run cancelled — clarification questions were not answered.\nQuestions that were asked:\n${clarMsg}`,
+        planId: 'none',
+        sessionId,
+        executionResult: {
+          planId: 'none',
+          status: 'cancelled',
+          completedSteps: 0,
+          failedSteps: 0,
+          totalSteps: 0,
+          incompleteSteps: [],
+          replanningAttempts: 0,
+        },
+      };
+    }
 
     if (!planningResult.isClear) {
       const clarificationMsg = planningResult.needsClarification.join('\n');
@@ -458,7 +537,10 @@ export class Orchestrator {
           completedAt: Date.now(),
         });
       }
-
+      const roundNote =
+        clarifyRound > 0
+          ? `\n(No plan could be produced after ${clarifyRound} clarification round(s).)`
+          : '';
       return {
         review: {
           planId: 'none',
@@ -467,10 +549,10 @@ export class Orchestrator {
           acceptedFindings: [],
           rejectedFindings: [],
           incompleteSteps: [],
-          finalSummary: `The request needs clarification before a plan can be produced:\n${clarificationMsg}`,
+          finalSummary: `The request needs clarification before a plan can be produced:\n${clarificationMsg}${roundNote}`,
           usage: emptyReviewUsage,
         },
-        report: `⚠️ Clarification needed:\n${clarificationMsg}`,
+        report: `⚠️ Clarification needed:\n${clarificationMsg}${roundNote}`,
         planId: 'none',
         sessionId,
         executionResult: {

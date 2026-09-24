@@ -23,6 +23,7 @@ export interface LogEntry {
   /** Event category */
   eventType:
     | 'plan:created'
+    | 'plan:clarified'
     | 'plan:confirmed'
     | 'plan:started'
     | 'plan:completed'

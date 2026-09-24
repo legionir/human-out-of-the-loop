@@ -1018,3 +1018,41 @@ describe('C3 — run flags (--max-replans/--max-delegation-depth/--label) + sess
     expect(d.errOut).toContain('sessions label');
   });
 });
+
+// ─── C4: CLI clarification wiring (non-TTY = CI-safe) ───────────
+
+describe('C4 — run CLI clarification behavior', () => {
+  let projectRoot: string;
+
+  beforeEach(() => {
+    projectRoot = makeTempProject('phase23-c4-');
+    installModelMocks();
+    mockGenerateObject.mockClear();
+    mockGenerateText.mockClear();
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it('non-TTY + --yes: unclear request fails (exit 1) showing the questions — no hang, no prompt', async () => {
+    // first generateObject call is the planner assessment
+    mockGenerateObject.mockImplementationOnce(async () => ({
+      object: { isClear: false, needsClarification: ['Which framework should the login use?'] },
+    }) as any);
+
+    const { code, out } = await runCli([
+      'run',
+      'Build a login',
+      '--project-root',
+      projectRoot,
+      '--yes',
+    ]);
+
+    expect(code).toBe(1);
+    expect(out).toContain('Clarification needed');
+    expect(out).toContain('Which framework should the login use?');
+    // exactly one planner hit (no loop without a callback)
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+  });
+});

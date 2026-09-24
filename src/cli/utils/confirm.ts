@@ -72,3 +72,48 @@ export async function confirmPlanInteractively(planText: string): Promise<Confir
     feedback: trimmed === '' ? 'User rejected the plan.' : trimmed,
   };
 }
+
+/**
+ * C4: interactive clarification questions (inquirer).
+ *
+ * Mirrors the confirm flow: TTY required, one prompt per question,
+ * Ctrl+C/Escape (or answering ALL questions empty) → `null`, which the
+ * orchestrator treats as a clean run cancellation.
+ */
+export async function promptClarifications(
+  questions: string[],
+  round: number,
+): Promise<Record<string, string> | null> {
+  if (!process.stdout.isTTY || !process.stdin.isTTY) {
+    throw new InteractivePromptUnavailableError();
+  }
+
+  out(color.bold(`\n── Clarification needed (round ${round}) ──────────`));
+  for (const q of questions) {
+    out(color.warn(`? ${q}`));
+  }
+  out(color.bold('───────────────────────────────────────────────\n'));
+
+  const answers: Record<string, string> = {};
+  for (const question of questions) {
+    try {
+      const { value } = await inquirer.prompt<{ value: string }>([
+        {
+          type: 'input',
+          name: 'value',
+          message: question,
+          default: '',
+        },
+      ]);
+      answers[question] = value.trim();
+    } catch {
+      // Ctrl+C / Escape — treat as "I don't want to answer"
+      return null;
+    }
+  }
+  // All answers empty → decline (clean cancellation, not a silent plan)
+  if (Object.values(answers).every((a) => a === '')) {
+    return null;
+  }
+  return answers;
+}

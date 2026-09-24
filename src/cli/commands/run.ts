@@ -18,6 +18,7 @@ import { Orchestrator, type OrchestratorResult } from '../../ai/orchestrator.js'
 import type { ProgressEvent } from '../../ai/runtime/streaming-manager.js';
 import {
   confirmPlanInteractively,
+  promptClarifications,
   type ConfirmationResult,
 } from '../utils/confirm.js';
 import { prepareCliEnvironment } from '../utils/config.js';
@@ -92,6 +93,18 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     ? async () => ({ confirmed: true })
     : (planText) => confirmPlanInteractively(planText);
 
+  // C4: clarification only when interactive AND not auto-confirming.
+  //  - --yes (CI / HOTL): no callback → the planner's questions fail the
+  //    run with the questions shown (legacy CI-safe behavior).
+  //  - non-TTY without --yes: no callback → same; the questions are
+  //    printed by the failure report instead of hanging on a prompt.
+  //  - TTY without --yes: prompt per question; Ctrl+C / all-empty answers
+  //    → null → clean run cancellation.
+  const clarificationCallback =
+    opts.yes || !process.stdout.isTTY || !process.stdin.isTTY
+      ? undefined
+      : (questions: string[], round: number) => promptClarifications(questions, round);
+
   const renderer = createProgressRenderer({ verbose: opts.verbose ?? false });
 
   const orchestrator = new Orchestrator({
@@ -128,6 +141,8 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       // C3: label the NEW session (--label is rejected with --session)
       ...(opts.label !== undefined ? { sessionLabel: opts.label } : {}),
       confirmCallback,
+      // C4: interactive clarification (undefined in --yes / non-TTY)
+      ...(clarificationCallback ? { clarificationCallback } : {}),
     });
 
     out('');
