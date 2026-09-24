@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { generateObject } from 'ai';
+import { withLlmTimeout } from '../runtime/llm-timeout.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
@@ -21,6 +22,11 @@ export interface PlannerConfig {
   modelRegistry: ModelRegistry;
   /** Model id to use for planning (default: "gpt-4o") */
   modelId?: string;
+  /**
+   * Phase 30 (P5): deadline for each structured LLM call.  A provider that
+   * never answers must not leave the CLI waiting forever.
+   */
+  timeoutMs?: number;
 }
 
 export interface PlanningResult {
@@ -72,23 +78,32 @@ If the request is clear enough, set isClear=true and provide the full plan.
 `.trim();
 
     try {
-      const { object } = await generateObject({
-        model: agent.model,
-        system: agent.systemPrompt,
-        prompt: assessmentPrompt,
-        schema: PlannerAssessmentSchema,
-        schemaName: 'PlannerAssessment',
-        schemaDescription:
-          'Assessment of whether a user request is clear enough to plan, ' +
-          'with optional clarification questions or a full plan.',
-      });
+      const { object } = await withLlmTimeout(
+        'Planner assessment',
+        this.config.timeoutMs,
+        (abortSignal) =>
+          generateObject({
+            model: agent.model,
+            system: agent.systemPrompt,
+            prompt: assessmentPrompt,
+            schema: PlannerAssessmentSchema,
+            schemaName: 'PlannerAssessment',
+            schemaDescription:
+              'Assessment of whether a user request is clear enough to plan, ' +
+              'with optional clarification questions or a full plan.',
+            abortSignal,
+          })
+      );
 
       return object;
-    } catch {
+    } catch (err) {
+      // Phase 30 (P5): say WHY (a deadline, a provider error, bad output)
+      // instead of pretending the request was unclear.
+      const reason = err instanceof Error ? err.message : String(err);
       return {
         isClear: false,
         needsClarification: [
-          'The planner was unable to process the request. Please provide more details.',
+          `The planner was unable to process the request: ${reason}. Please provide more details.`,
         ],
       };
     }
@@ -120,14 +135,20 @@ ${userRequest}
       }
     }
 
-    const { object } = await generateObject({
-      model: agent.model,
-      system: agent.systemPrompt,
-      prompt,
-      schema: PlanSchema,
-      schemaName: 'ExecutionPlan',
-      schemaDescription: 'A dependency-aware execution plan with atomic steps.',
-    });
+    const { object } = await withLlmTimeout(
+      'Plan generation',
+      this.config.timeoutMs,
+      (abortSignal) =>
+        generateObject({
+          model: agent.model,
+          system: agent.systemPrompt,
+          prompt,
+          schema: PlanSchema,
+          schemaName: 'ExecutionPlan',
+          schemaDescription: 'A dependency-aware execution plan with atomic steps.',
+          abortSignal,
+        })
+    );
 
     for (const step of object.steps) {
       step.status = 'pending';

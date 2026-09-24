@@ -5,6 +5,48 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.4] — 2026-09-24 — bounded LLM calls (Phase 30 / P5 of READINESS_AUDIT.md)
+
+Driving the real CLI against a deliberately silent stub exposed two ways to
+wait forever. Both are fixed; the run now always ends.
+
+### Fixed
+
+- **A timed-out agent run left the process alive.** `--timeout-ms` marked the
+  step failed and printed the report, but the abandoned model request kept
+  the Node event loop alive: the harness had to `SIGKILL` the CLI after 90 s.
+  The run's deadline now aborts the in-flight request (and the losing side of
+  the timeout race is swallowed, so no unhandled rejection).
+- **Structured calls had no deadline at all.** Planner assessment, plan
+  generation, acceptance judgment and the final review were issued without
+  any timeout — a provider that accepts the socket and never answers hung the
+  CLI forever, with no output.
+  - New `withLlmTimeout(label, ms, fn)` (`src/ai/runtime/llm-timeout.ts`):
+    hard deadline + `abortSignal` on the SDK call, error message
+    `"<call> timed out after <ms>ms"`.
+  - `--timeout-ms` (default 120 s) is now plumbed from the orchestrator into
+    the planner, the acceptance checker and the final reviewer.
+  - The planner no longer hides the real cause behind "request unclear": it
+    reports the actual reason (e.g. a timeout).
+
+### Verified behaviour
+
+- Slow model + `--timeout-ms 5000`: `Agent run timed out after 5000ms` →
+  step failed, `Outcome: FAILURE`, exit 1, **whole run in 5 s**.
+- Infinite tool loop + `--max-steps 3`: exactly 3 tool calls, exit 0 in ~1 s.
+- Planner that never answers + `--timeout-ms 5000`: ends in 5 s with a
+  truthful message instead of hanging.
+- Real `^C` mid-run: immediate exit, no orphan process, no half-written file;
+  the plan stays `running` and `plans resume` continues it (the P2 path).
+
+### Tests
+
+- `src/ai/__tests__/phase30-p5.test.ts` — 5 tests (helper resolves/aborts,
+  agent run aborts its request, planner answers within the deadline,
+  acceptance check fails closed). Direction-checked: disabling the two aborts
+  fails exactly those two tests.
+- Suite: **605 passed (42 files)**, `tsc` clean.
+
 ## [27.2.3] — 2026-09-24 — the crashed task stops pretending to run (Phase 30 / P2 follow-up)
 
 Closing the last open question from P2: a process killed with `SIGKILL`

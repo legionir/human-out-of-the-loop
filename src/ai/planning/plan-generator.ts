@@ -3,6 +3,7 @@ import { generateObject } from 'ai';
 import type { PlannerConfig } from './planner.js';
 import { PlanSchema, type Plan } from '../schemas/plan.js';
 import { createAgent } from '../agents/agent-factory.js';
+import { withLlmTimeout } from '../runtime/llm-timeout.js';
 
 /**
  * Generate a Plan using AI SDK's `generateObject` for guaranteed
@@ -51,16 +52,22 @@ ${userRequest}
     }
   }
 
-  const { object } = await generateObject({
-    model: agent.model,
-    system: agent.systemPrompt,
-    prompt,
-    schema: PlanSchema,
-    schemaName: 'ExecutionPlan',
-    schemaDescription:
-      'A dependency-aware execution plan with atomic steps, each assigned ' +
-      'to a persona with specific skills and tools.',
-  });
+  const { object } = await withLlmTimeout(
+    'Plan generation',
+    config.timeoutMs,
+    (abortSignal) =>
+      generateObject({
+        model: agent.model,
+        system: agent.systemPrompt,
+        prompt,
+        schema: PlanSchema,
+        schemaName: 'ExecutionPlan',
+        schemaDescription:
+          'A dependency-aware execution plan with atomic steps, each assigned ' +
+          'to a persona with specific skills and tools.',
+        abortSignal,
+      })
+  );
 
   return {
     ...object,

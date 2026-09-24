@@ -210,6 +210,17 @@ export class AgentRuntime {
 
     try {
       // ── Race execution against timeout ────────────────────
+      // Phase 30 (P5): the run's own deadline.  When it fires the in-flight
+      // request must be aborted — an abandoned request keeps the Node event
+      // loop (and therefore the CLI process) alive until the provider
+      // eventually answers, which is exactly the "hang after the report"
+      // that the P5 e2e caught.
+      const runController = new AbortController();
+      const abortSignal =
+        signal && typeof AbortSignal.any === 'function'
+          ? AbortSignal.any([signal, runController.signal])
+          : runController.signal;
+
       const executionPromise = this.executeWithSdk({
         agent,
         prompt,
@@ -220,14 +231,18 @@ export class AgentRuntime {
         toolsUsed,
         toolErrors,
         planContext,
-        signal,
+        signal: abortSignal,
       });
+      // The loser of the race must not surface as an unhandled rejection
+      // when the aborted request settles.
+      executionPromise.catch(() => {});
 
       const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutTimer = setTimeout(
-          () => reject(new TimeoutError(`Agent run timed out after ${timeoutMs}ms`)),
-          timeoutMs
-        );
+        timeoutTimer = setTimeout(() => {
+          const error = new TimeoutError(`Agent run timed out after ${timeoutMs}ms`);
+          runController.abort(error);
+          reject(error);
+        }, timeoutMs);
       });
 
       const sdkResult = await Promise.race([executionPromise, timeoutPromise]);

@@ -1,4 +1,5 @@
 import { generateObject } from 'ai';
+import { withLlmTimeout } from './llm-timeout.js';
 import { z } from 'zod';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
@@ -26,6 +27,8 @@ export interface AcceptanceCheckerConfig {
    * when a step's output is rejected.
    */
   onQualityFailure?: (planId: string, stepId: string, reason: string) => void;
+  /** Phase 30 (P5): deadline for the judgment call (default 120s). */
+  timeoutMs?: number;
 }
 
 /**
@@ -90,15 +93,21 @@ a JSON object containing "accepted" (boolean) and "reason" (string).
 `.trim();
 
     try {
-      const { object } = await generateObject({
-        model: reviewerAgent.model,
-        system: reviewerAgent.systemPrompt,
-        prompt,
-        schema: AcceptanceResultSchema,
-        schemaName: 'AcceptanceJudgment',
-        schemaDescription:
-          'Whether the step output meets its acceptance criteria, with a reason.',
-      });
+      const { object } = await withLlmTimeout(
+        'Acceptance check',
+        this.config.timeoutMs,
+        (abortSignal) =>
+          generateObject({
+            model: reviewerAgent.model,
+            system: reviewerAgent.systemPrompt,
+            prompt,
+            schema: AcceptanceResultSchema,
+            schemaName: 'AcceptanceJudgment',
+            schemaDescription:
+              'Whether the step output meets its acceptance criteria, with a reason.',
+            abortSignal,
+          })
+      );
 
       return object;
     } catch (err) {

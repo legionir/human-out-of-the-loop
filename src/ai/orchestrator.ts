@@ -350,6 +350,9 @@ export class Orchestrator {
       skillRegistry: this.skillRegistry,
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
+      // Phase 30 (P5): the same deadline `--timeout-ms` gives an agent run
+      // now also covers the judgment call.
+      timeoutMs: this.config.agentTimeoutMs,
       onQualityFailure: (planId, stepId, reason) => {
         this.observabilityLogger.logQualityCheck(planId, stepId, false, reason);
         this.streamingManager.emitProgress({
@@ -368,6 +371,7 @@ export class Orchestrator {
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
       modelId: this.config.defaultModelId,
+      timeoutMs: this.config.agentTimeoutMs,
     });
 
     this.planner = new Planner({
@@ -376,6 +380,7 @@ export class Orchestrator {
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
       modelId: this.config.defaultModelId,
+      timeoutMs: this.config.agentTimeoutMs,
     });
   }
 
