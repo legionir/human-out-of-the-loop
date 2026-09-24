@@ -5,6 +5,43 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.1] — 2026-09-24 — crash recovery (Phase 30 / P2 of READINESS_AUDIT.md)
+
+Verified by really killing a run with `SIGKILL` mid-execution and resuming it
+(`READINESS_AUDIT.md` → P2). The crash itself was clean — no leftover lock, no
+orphan process, no half-written file, and `plans resume` re-ran only the step
+that had not finished. One real defect surfaced in what the crash left behind.
+
+### Fixed
+
+- **A crashed run left the session interaction open forever.** The plan had no
+  session reference and the interaction had no plan id, so after a `kill -9`:
+  `sessions show` could not tell the user which plan to resume, and even a
+  successful `plans resume` never closed the interaction (`outcome: pending`,
+  no `completedAt`).
+  - `Plan.sessionId` (optional) is now persisted, and both directions of the
+    plan ↔ session link are written **before execution starts**.
+  - `plans resume` matches the open interaction of the owning session, closes
+    it with the real outcome/summary/plan id, and returns the real session id
+    instead of the placeholder `'resumed'`.
+
+### Verified behaviour (no change needed)
+
+- `kill -9` mid-step → plan `running`, completed steps kept, no lock left
+  behind, no orphan process; `plans resume` continues from the interrupted
+  step only (usage 330 of a full 660) and finishes `completed`.
+- A never-confirmed plan (`draft`) and an unknown plan id are still refused by
+  `plans resume` (exit 1).
+- Crash before a plan exists leaves nothing to resume; `sessions show` reports
+  the interaction honestly as `pending` (documented limitation — detecting a
+  dead run would need a heartbeat).
+
+### Tests
+
+- New `src/cli/__tests__/phase30.test.ts` (5 tests, direction-checked: without
+  the fix two of them fail with `expected undefined to be 'session_…'` and
+  `expected 'pending' to be 'success'`).
+
 ## [27.2.0] — 2026-09-24 — every CLI workflow driven like a real terminal user
 
 Ten bugs were found by driving the CLI inside a real PTY — real prompts, real

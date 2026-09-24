@@ -64,6 +64,12 @@ export const PlanSchema = z.object({
   goal: z.string().min(1),
   /** Ordered list of execution steps */
   steps: z.array(PlanStepSchema).min(1),
+  /**
+   * Phase 30 (P2): the session that owns this plan.  Persisted so that
+   * `hootl plans resume` can close the interaction a crash left open, and
+   * so a plan can be traced back to the conversation that produced it.
+   */
+  sessionId: z.string().optional(),
   /** Clarification questions (populated during ambiguity resolution) */
   clarifications: z.array(z.string()).default([]),
   /** Overall plan status */

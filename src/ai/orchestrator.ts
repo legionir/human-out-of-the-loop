@@ -723,11 +723,25 @@ export class Orchestrator {
     }
 
     const plan = planningResult.plan!;
+    // Phase 30 (P2): both directions of the plan <-> session link are
+    // written BEFORE execution starts.  Without them a crash midway leaves
+    // an interaction that is 'pending' forever with no plan id, and nothing
+    // (user or `plans resume`) can tell how to finish the run.
+    plan.sessionId = sessionId;
     this.observabilityLogger.logPlanCreated(plan);
     // Phase 24 (UI): persist at creation so the plan is visible to the
     // user WHILE the confirmation is pending (UI modal / plans list).
     // Rejected plans remain in the store as 'draft'.
     this.planStore.save(plan);
+
+    if (interaction && plan.id) {
+      const known = interaction.planIds ?? [];
+      if (!known.includes(plan.id)) {
+        this.sessionStore.updateInteraction(sessionId, interaction.id, {
+          planIds: [...known, plan.id],
+        });
+      }
+    }
 
     const feasibility = runFeasibilityGate(plan, {
       personaRegistry: this.personaRegistry,
@@ -1046,11 +1060,31 @@ export class Orchestrator {
     const review = await this.finalReviewer.review(plan, executionResult);
     const report = formatFinalReview(review);
 
+    // Phase 30 (P2): the run that owned this plan was interrupted, so its
+    // interaction is still open ('pending'); the resume is what finishes it.
+    // Match the newest open interaction of the owning session (preferring the
+    // one whose request is this plan's goal).
+    if (plan.sessionId) {
+      const session = this.sessionStore.getSession(plan.sessionId);
+      const open =
+        session?.interactions.find((i) => !i.completedAt && i.userRequest === plan.goal) ??
+        [...(session?.interactions ?? [])].reverse().find((i) => !i.completedAt);
+      if (open) {
+        const known = open.planIds ?? [];
+        this.sessionStore.updateInteraction(plan.sessionId, open.id, {
+          outcome: review.outcome,
+          reviewSummary: review.finalSummary,
+          planIds: known.includes(planId) ? known : [...known, planId],
+          completedAt: Date.now(),
+        });
+      }
+    }
+
     return {
       review,
       report,
       planId,
-      sessionId: 'resumed',
+      sessionId: plan.sessionId ?? 'resumed',
       executionResult,
     };
   }
