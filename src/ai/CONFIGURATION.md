@@ -276,7 +276,7 @@ await orchestrator.shutdown();
 | A — Storage filename | PATH-06 | ۲۲ | ✅ فیکس | filename = `sha256(id).slice(0,16).json` در `plan-store`/`session-store` — تست دو id متمایز روی یک فایل |
 | A — Windows case | PATH-08 | ۲۰ | ✅ فیکس | `normaliseCase()` در `path-security.ts:32-34` (lowercase روی `process.platform === 'win32'`) و استفاده در مقایسه‌ی مسیرها (خط ۷۹) |
 | B — Config Wiring | CFG-01…07 | ۱۹ (+ فاز ۲۲ برای schema، U3 برای wire کردن `maxSteps`) | ✅ فیکس | یک `bootstrapCatalogTools` (orchestrator:380)؛ `RateLimiter` و `DelegationGuard` config می‌گیرند؛ همه‌ی فیلدهای مستندشده در `OrchestratorConfigSchema` هستند؛ `maxSteps` حالا واقعاً به `stepCountIs` می‌رسد (U3) |
-| B — Dual source | CFG-08 | ۱۹ | ✅ فیکس | catalog فقط از `registry/tools/*.json` (Law 16) |
+| B — Env injection | CFG-08 | ۱۹ | ⚠️ **باز (by design)** | providerها/`mcp-connector` هنوز `process.env` را مستقیم می‌خوانند (`openai-provider.ts:15`, `anthropic-provider.ts:14`, `mcp-connector.ts:53,63`) و per-Orchestrator env injection ندارند. مدل امنیتی پروژه همین است (credential فقط از env، هرگز inline در registry — بخش «MCP Servers» بالا) و در `dev`/`server` این envها همان env پروسه‌اند؛ تزریق per-Orchestrator یک تغییر API بزرگ‌تر است و انجام نشد. **(تصحیح audit: در نسخهٔ قبلی این ردیف اشتباهاً ✅ با شاهد مربوط به catalog ثبت شده بود.)** |
 | C — Singleton | SING-01, SING-02 | ۱۹ | ✅ فیکس | ۰ `?? globalEventBus`؛ `agentRuntime` per-Orchestrator (بدون singleton ماژولی) |
 | D — ID Generation | ID-01…06 | ۲۶ | ✅ فیکس | همه به `prefix_randomUUID()`؛ source-scan + تست collision ۵۰۰۰-id در `phase26.test.ts` |
 | E — Persistence | PERS-01…03 | ۲۰ | ✅ فیکس | `atomicWriteFileSync` (tmp+uuid+rename) در هر دو store؛ `structuredClone` + snapshot |
@@ -284,12 +284,26 @@ await orchestrator.shutdown();
 | F — Leaks | LEAK-01, 02 | ۲۰ | ✅ فیکس | `clearTimeout` در `finally` (mcp-connector، agent-runtime:201) |
 | F — MCP dynamic import | LEAK-03 | ۲۰ + **۲۵** | ✅ فیکس | فاز ۲۵: `loadMcpSdk()` memoized — دیگر در هر connect یک `import()` تازه اجرا نمی‌شود (و شکست کش نمی‌شود) |
 | G — Correctness | CORR-01…08 | ۲۰ | ✅ فیکس | `parsed.error.issues` در خطا؛ `waitForAll` قبل از `destroy`؛ `task.planId` در aggregator؛ hook صریح acceptance؛ `event.planId` در streaming:169 |
-| H — Security Ext | SEC-01…06 | ۲۰ (+۲۲ برای redact/abort) | ✅ فیکس | regex-guard (nested quantifier + MAX_PATTERN_LENGTH)؛ آستانه‌ی موفقیت MCP؛ substring redaction؛ مسیر نسبی به مدل (بدون `process.cwd()` در implementations) |
-| I — Performance | PERF-01…08 | ۲۱ | ✅ فیکس | O(1) countها؛ `computeTransitiveDependentCounts` memoized؛ fd reuse در logger |
+| H — Security Ext | SEC-01, 03…06 | ۲۰ (+۲۲ برای redact/abort) | ✅ ۵/۶ فیکس | regex-guard (nested quantifier + MAX_PATTERN_LENGTH)؛ آستانه‌ی موفقیت MCP؛ substring redaction؛ مسیر نسبی به مدل (بدون `process.cwd()` در implementations) |
+| H — Silent skip | SEC-02 | — | ⚠️ **باز** | `search-code.ts:76` فایل‌های غیرقابل‌خواندن را هنوز بی‌صدا رد می‌کند (خطای دسترسی گزارش نمی‌شود) |
+| I — Performance | PERF-01…05, 07 | ۲۱ | ✅ ۶/۸ فیکس | O(1) countها؛ `computeTransitiveDependentCounts` memoized؛ fd reuse در logger؛ cache با `stableStringify`؛ early-exit در `search_code` |
+| I — Remaining perf | PERF-06, PERF-08 | — | ⚠️ **باز (مستندشده در نتیجهٔ فاز ۲۱)** | `list()` هر بار `readdirSync` + خواندن/parse همه‌ی فایل‌ها (`plan-store.ts:79`, `session-store.ts` مشابه)؛ `EventBus.emit` هر emit یک `Set` جدید برای dedup می‌سازد (`event-bus.ts:124`) — هر دو 🟢 P2 |
 | J — Code Quality | QUAL-01…06, 07 | ۲۲ (+ فاز ۲۵ برای QUAL-07) | ✅ فیکس | `any`=۰ و `console.*`=۰ (source-scan دائمی)؛ dead code حذف؛ `abortSignal`→`generateText`؛ zod schema؛ **فاز ۲۵: `RateLimiterConfig.random` تزریق‌پذیر شد** تا تست تأخیرها deterministic باشد |
 | K — Features | FEAT-01 | ۲۳ | ✅ فیکس | CLI کامل (C1–C5) — live verify |
 | K — Features | FEAT-02, FEAT-03 | ۲۴ (+ U1–U8) | ✅ فیکس | UI وب + REST/SSE (سرور Express، `public/`) — live verify؛ قابلیت‌های تکمیلی UI در `UI_COMPLETION_PLAN.md` |
 | — | QUAL-08 (id collision) | ۲۶ | ✅ (ادغام با دسته D) | در پلن به دسته D ارجاع داده شده بود |
 | فاز ۲۵ — Docs/Delivery | — | ۲۵ | ✅ | `CHANGELOG.md`، Migration Guide در `src/ai/README.md`، همین سند، `CONTRIBUTING.md`، بخش Web UI در `README.md` |
 
-**نکته‌ی شفافیت:** شمارش «۴۲» در پلن، جمع برآوردی فازها است (۹+۱۰+۱۴+۸+۸+۳) و با تعداد ردیف‌های جدول دسته‌بندی (۶۵ ID پس از تفکیک) یکی نیست؛ این جدول هر دو را پوشش می‌دهد: هر دسته یک فاز/وضعیت دارد و هیچ دسته‌ای بدون فاز نمانده است. تنها مورد باقی‌مانده **آگاهانه** یک trade-off است: PERS-04 (بدون file locking بین‌پروسه‌ای) که در متن پلن به‌عنوان P2/پذیرفته‌شده علامت خورده است؛ ریسک آن با atomic write فاز ۲۰ کاهش یافته. (PATH-08 در فاز ۲۰ فیکس شده بود و در این audit تصحیح شد.)
+**نکته‌ی شفافیت:** شمارش «۴۲» در پلن، جمع برآوردی فازها است (۹+۱۰+۱۴+۸+۸+۳) و با تعداد ردیف‌های جدول دسته‌بندی (۶۵ ID پس از تفکیک) یکی نیست؛ این جدول هر دو را پوشش می‌دهد: هر دسته یک فاز/وضعیت دارد و هیچ دسته‌ای بدون فاز نمانده است.
+
+#### جمع‌بندی باقی‌مانده‌ها (بازبینی ۲۰۲۶-۰۹-۲۴ پس از فاز ۲۵)
+
+| مورد | شدت | وضعیت |
+|---|---|---|
+| PERS-04 — بدون file locking بین‌پروسه‌ای | 🟡 P2 | ⚠️ trade-off پذیرفته‌شده (ریسک با atomic write کاهش یافته؛ فایل‌های `.ai-runtime` تک‌نویسنده‌اند) |
+| CFG-08 — `process.env` مستقیم در providerها/MCP (بدون env injection per-Orchestrator) | 🟡 P2 | ⚠️ by design (مدل credential = env؛ تزریق per-Orchestrator تغییر API بزرگ‌تر) |
+| SEC-02 — رد بی‌صدای فایل‌های غیرقابل‌خواندن در `search_code` | 🟡 P2 | ⚠️ باز — قابل بستن با شمارنده/report فایل‌های skip‌شده |
+| PERF-06 — `list()` در storeها: `readdirSync` + خواندن همه‌ی فایل‌ها هر بار | 🟢 P2 | ⚠️ باز (در نتیجهٔ فاز ۲۱ صریحاً خارج از دامنه اعلام شد) |
+| PERF-08 — `EventBus.emit` با `new Set` در هر emit | 🟢 P2 | ⚠️ باز (همان) |
+| Open Q5 — کتابخانه‌ی ReDoS | — | ✅ بسته‌شده با راه‌حل جانشین: `safe-regex`/`re2` استفاده نشد؛ `regex-guard.ts` سفارشی (تشخیص nested quantifier) + سقف طول ۲۰۰ به‌جای timeout — بدون dependency native |
+| ارتقای UI به Next.js/React (یادداشت فاز ۲۴) | — | 🔵 اختیاری/آینده — UI vanilla عمداً ساده ماند (قابل ارتقا؛ پلن UI کامل شده) |
