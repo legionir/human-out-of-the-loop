@@ -1,4 +1,10 @@
 import fs from 'node:fs';
+import {
+  collectSecretValues as _collectSecretValues,
+  scrubSecretValues,
+  SECRET_NAME_PATTERNS,
+  MIN_REDACT_VALUE_LENGTH,
+} from './secret-scrub.js';
 import path from 'node:path';
 import type { AgentEvent } from './event-bus.js';
 import type { Plan, PlanStep } from '../schemas/plan.js';
@@ -65,22 +71,20 @@ export interface ObservabilityLoggerConfig {
    * Default: common credential field names.
    */
   redactKeys?: string[];
+  /**
+   * Phase 30 (P10): literal secret VALUES to scrub from every entry
+   * (API keys, MCP tokens).  `redactKeys` matches field NAMES; a model
+   * can echo a value it read from the project into its summary, and the
+   * summary is written to the log — so values must be scrubbed too.
+   */
+  redactValues?: string[];
 }
 
 // ─── Default redaction keys ──────────────────────────────────────
 
-const DEFAULT_REDACT_KEYS = [
-  'apiKey',
-  'api_key',
-  'token',
-  'password',
-  'secret',
-  'authorization',
-  'credential',
-  'bearer',
-  'cookie',
-  'session_key',
-];
+/** Field NAMES whose values are always redacted (P10 adds value scrubbing). */
+const DEFAULT_REDACT_KEYS = SECRET_NAME_PATTERNS;
+export { _collectSecretValues as collectSecretValues };
 
 // ─── ObservabilityLogger ─────────────────────────────────────────
 
@@ -104,6 +108,8 @@ export class ObservabilityLogger {
   private readonly logFilePath: string;
   private readonly consoleOutput: boolean;
   private readonly redactKeys: Set<string>;
+  /** Phase 30 (P10): literal secret values scrubbed from entries. */
+  private readonly redactValues: string[];
   private unsubscribeFn?: () => void;
   /**
    * Phase 21 (PERF-04): the log file descriptor, opened ONCE and
@@ -120,6 +126,10 @@ export class ObservabilityLogger {
     this.logFilePath = config.logFilePath;
     this.consoleOutput = config.consoleOutput ?? false;
     this.redactKeys = new Set(config.redactKeys ?? DEFAULT_REDACT_KEYS);
+    // Longest first: a token that contains a shorter one is scrubbed whole.
+    this.redactValues = (config.redactValues ?? [])
+      .filter((v) => typeof v === 'string' && v.length >= MIN_REDACT_VALUE_LENGTH)
+      .sort((a, b) => b.length - a.length);
 
     // Ensure the log directory exists
     fs.mkdirSync(path.dirname(this.logFilePath), { recursive: true });
@@ -176,7 +186,10 @@ export class ObservabilityLogger {
       ...entry,
       timestamp: new Date(now).toISOString(),
       epochMs: now,
-      payload: entry.payload ? this.redactPayload(entry.payload) : undefined,
+      message: this.scrubValues(entry.message),
+      payload: entry.payload
+        ? this.scrubValues(this.redactPayload(entry.payload))
+        : undefined,
     };
 
     const line = JSON.stringify(fullEntry) + '\n';
@@ -495,6 +508,23 @@ export class ObservabilityLogger {
   /**
    * Recursively redact sensitive keys from a payload object.
    */
+  /** Replace every occurrence of a known secret value with the marker. */
+  private scrubValues<T>(value: T): T {
+    if (this.redactValues.length === 0) return value;
+    if (typeof value === 'string') {
+      return scrubSecretValues(value, this.redactValues) as unknown as T;
+    }
+    if (Array.isArray(value)) {
+      return value.map((v) => this.scrubValues(v)) as unknown as T;
+    }
+    if (value && typeof value === 'object') {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value)) out[k] = this.scrubValues(v);
+      return out as T;
+    }
+    return value;
+  }
+
   private redactPayload(obj: Record<string, unknown>): Record<string, unknown> {
     const result: Record<string, unknown> = {};
 

@@ -16,6 +16,8 @@ import { RateLimiter } from './runtime/rate-limiter.js';
 import { UsageAggregator } from './runtime/usage-aggregator.js';
 import { MemorySessionStore, FileSessionStore, type SessionStore } from './runtime/session-store.js';
 import { ObservabilityLogger } from './runtime/observability-logger.js';
+import { collectSecretValues } from './runtime/secret-scrub.js';
+import { ScrubbingPlanStore } from './runtime/secret-scrub.js';
 import { formatReviewForUser as formatFinalReview } from './runtime/review-formatter.js';
 import { RetryableAgentRuntime } from './runtime/agent-runtime-retry.js';
 
@@ -222,6 +224,8 @@ export class Orchestrator {
   readonly retryableAgentRuntime: RetryableAgentRuntime;
   readonly taskRuntime: TaskRuntime;
   readonly planStore: PlanStore;
+  /** Phase 30 (P10): literal credential values scrubbed from artifacts. */
+  private readonly secretValues: string[];
   readonly sessionStore: SessionStore;
   readonly streamingManager: StreamingManager;
   readonly cancellationManager: CancellationManager;
@@ -320,9 +324,13 @@ export class Orchestrator {
     });
 
     const runtimeDir = this.config.runtimeDir;
-    this.planStore = this.config.persistent
+    // Phase 30 (P10): the persisted plan must not carry a credential the
+    // model echoed into its summary.
+    this.secretValues = collectSecretValues(this.env, this.config.redactKeys);
+    const planStore = this.config.persistent
       ? new FilePlanStore(path.join(runtimeDir, 'plans'))
       : new MemoryPlanStore();
+    this.planStore = new ScrubbingPlanStore(planStore, this.secretValues);
     this.sessionStore = this.config.persistent
       ? new FileSessionStore(path.join(runtimeDir, 'sessions'))
       : new MemorySessionStore();
@@ -334,6 +342,10 @@ export class Orchestrator {
       logFilePath: path.join(runtimeDir, 'observability.jsonl'),
       // Empty list → keep the logger's built-in defaults.
       redactKeys: this.config.redactKeys.length > 0 ? this.config.redactKeys : undefined,
+      // Phase 30 (P10): scrub the VALUES of known credentials too.  A model
+      // can echo a value it read from the project into its summary, and the
+      // summary is written to the log (`step:completed` payload).
+      redactValues: this.secretValues,
     });
 
     // Phase 22: subscriber errors go to the observability log —

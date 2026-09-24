@@ -5,6 +5,34 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.9] — 2026-09-24 — hostile content: values, not just names (Phase 30 / P10)
+
+### Fixed
+
+- **A credential the model echoed could land in runtime artifacts.**
+  Redaction matched field NAMES (`apiKey`, `token`, …); it did not touch the
+  value itself. A model that reads `.env` (or a trap file) and prints the key
+  puts it into its final text, which becomes the step summary and is written
+  into the plan record. The new `src/ai/runtime/secret-scrub.ts` collects the
+  actual secret values visible to the process (`OPENAI_API_KEY`,
+  `*_TOKEN`, …), scrubs them out of every log message and (nested) payload,
+  and a `ScrubbingPlanStore` scrubs step summaries before they are persisted.
+
+### Verified (no code change needed)
+
+- **Sandbox, end to end:** a symlink to `/etc/passwd`, a directory symlink
+  used to write outside, an absolute path, `../../../../etc/passwd` and an
+  encoded `..%2f` path are all rejected with `PATH_TRAVERSAL_BLOCKED`; nothing
+  is created outside the workspace and no `/etc/passwd` content appears in any
+  output. Unicode and 180-character file names work without a crash.
+- **Prompt injection with a fully jailbroken model:** the trap file was read
+  and the model *did* follow it (it tried to read `/etc/passwd`, write outside
+  the workspace and echo the key). The sandbox blocked every attempt, and the
+  echoed credential is recorded as `***REDACTED***` — the key appears nowhere
+  under `.ai-runtime` (log, plans, sessions) nor in `hootl logs`.
+- 8 real CLI runs; 9 new tests in `phase30-p10.test.ts`; suite is 645 tests in
+  46 files.
+
 ## [27.2.8] — 2026-09-24 — the web UI/API path, end to end (Phase 30 / P9)
 
 ### Fixed
