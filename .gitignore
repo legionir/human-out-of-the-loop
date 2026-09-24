@@ -11,3 +11,6 @@ coverage
 # local e2e stub artifacts
 e2e/.stub.pid
 e2e/.stub.log
+
+# e2e scenario artifacts
+e2e/.artifacts/

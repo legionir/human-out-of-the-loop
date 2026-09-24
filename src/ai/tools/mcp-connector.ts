@@ -4,6 +4,7 @@ import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { EnvSource } from '../env.js';
 import { resolveEnv } from '../env.js';
 import { createStdioTransport } from './mcp-stdio-transport.js';
+import { acquireMcpFetch, releaseMcpFetch } from './mcp-fetch.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -16,6 +17,13 @@ export interface McpServerState {
   toolIds: string[];
   /** Last error message (safe — never contains credentials) */
   lastError?: string;
+  /**
+   * Phase 30 (P10 follow-up): a transport-level failure reported by the SDK
+   * *after* a successful connect (a stream that died, a protocol frame that
+   * could not be parsed).  `lastError` is about connecting; this is about a
+   * connection that came apart later — it used to be dropped silently.
+   */
+  transportError?: string;
   /** Client handle for cleanup; opaque type from AI SDK */
   client?: unknown;
 }
@@ -30,6 +38,8 @@ export interface McpConnectorOptions {
   createClient?: (options: {
     transport: unknown;
     name: string;
+    /** Phase 30 (P10 follow-up): see `McpServerState.transportError`. */
+    onUncaughtError?: (error: unknown) => void;
   }) => Promise<{ tools: () => Promise<Record<string, Tool>>; close: () => Promise<void> }>;
   /**
    * Optional transport factory — used by tests.
@@ -42,6 +52,12 @@ export interface McpConnectorOptions {
    * the live `process.env`.
    */
   env?: EnvSource;
+  /**
+   * Phase 30 (P10 follow-up): called when the SDK reports a transport-level
+   * failure for an already-connected server.  Lets the CLI/server surface it
+   * (and log it) instead of losing it.
+   */
+  onTransportError?: (serverId: string, message: string) => void;
 }
 
 // ─── Credential resolution ───────────────────────────────────────
@@ -150,6 +166,11 @@ function defaultCreateTransport(config: McpServerConfig, env: EnvSource): unknow
     type: config.transport === 'sse' ? 'sse' : 'http',
     url: config.url,
     headers,
+    // Phase 30 (P10 follow-up): MCP keeps a long-lived SSE stream open, and
+    // the default (process-global) dispatcher aborts an idle body after five
+    // minutes — the abort reached the process as an unowned rejection and
+    // killed the server.  `mcp-fetch.ts` explains and bounds this.
+    fetch: acquireMcpFetch(config.id).fetch,
   };
 }
 
@@ -186,14 +207,21 @@ async function closeTransport(transport: unknown): Promise<void> {
   }
 }
 
-async function defaultCreateClient(options: {
+export async function defaultCreateClient(options: {
   transport: unknown;
   name: string;
+  /**
+   * Phase 30 (P10 follow-up): the SDK routes transport-level failures
+   * (a stream that died, a bad protocol frame) to this callback.  Without
+   * it they are dropped silently — the connection is dead and nobody knows.
+   */
+  onUncaughtError?: (error: unknown) => void;
 }): Promise<{ tools: () => Promise<Record<string, Tool>>; close: () => Promise<void> }> {
   try {
     const { createMCPClient } = await loadMcpSdk();
     const client = await createMCPClient({
       transport: options.transport as never,
+      ...(options.onUncaughtError ? { onUncaughtError: options.onUncaughtError } : {}),
     } as never);
     return {
       tools: () => client.tools() as Promise<Record<string, Tool>>,
@@ -223,6 +251,7 @@ export class McpConnector {
   private readonly toolRegistry: ToolRegistry;
   private readonly createTransport: (config: McpServerConfig) => unknown;
   private readonly createClient: NonNullable<McpConnectorOptions['createClient']>;
+  private readonly onTransportError?: McpConnectorOptions['onTransportError'];
   private readonly servers = new Map<string, McpServerState>();
   /**
    * Phase 27 (CFG-08): environment used for credential resolution.
@@ -237,6 +266,7 @@ export class McpConnector {
     this.createTransport =
       options.createTransport ?? ((config) => defaultCreateTransport(config, this.env));
     this.createClient = options.createClient ?? defaultCreateClient;
+    this.onTransportError = options.onTransportError;
   }
 
   /** The environment this connector resolves credentials from. */
@@ -286,6 +316,13 @@ export class McpConnector {
         this.createClient({
           transport,
           name: config.id,
+          onUncaughtError: (err: unknown) => {
+            const message = sanitiseError(err, credentials);
+            state.transportError = message;
+            // A dead stream does not unregister tools, but the operator must
+            // be able to see it — `hootl mcp status` and the log read this.
+            this.onTransportError?.(config.id, message);
+          },
         }),
         new Promise<never>((_, reject) => {
           timeoutTimer = setTimeout(
@@ -377,7 +414,8 @@ export class McpConnector {
    * Gracefully close all connections.  Safe to call multiple times.
    */
   async closeAll(): Promise<void> {
-    const closures = Array.from(this.servers.values())
+    const servers = Array.from(this.servers.values());
+    const closures = servers
       .filter((s) => s.client)
       .map(async (s) => {
         try {
@@ -385,7 +423,15 @@ export class McpConnector {
         } catch {
           // Swallow — closing is best-effort
         }
+        // Phase 30 (P10 follow-up): drop this server's reference to the
+        // shared MCP dispatcher; the last one out closes it.
+        if (s.config.transport !== 'stdio') await releaseMcpFetch(s.config.id);
       });
     await Promise.all(closures);
+    // A server that never produced a client (failed/timed-out connect) still
+    // took a reference when its transport was built.
+    for (const s of servers) {
+      if (!s.client && s.config.transport !== 'stdio') await releaseMcpFetch(s.config.id);
+    }
   }
 }

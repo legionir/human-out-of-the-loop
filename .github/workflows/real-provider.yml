@@ -1,0 +1,193 @@
+name: Real provider (P1)
+
+# The one test that cannot run in a sandbox: a real model behind the whole
+# runtime.  Everything here reads its endpoint and key from repository
+# secrets — no value is ever written to the workflow file, the logs, or the
+# artifacts.
+#
+# Required secrets (Settings → Secrets and variables → Actions):
+#   HOTL_API_KEY        the provider key                      (required)
+#   HOTL_BASE_URL       OpenAI-compatible base URL, e.g.
+#                       https://api.openai.com/v1            (optional;
+#                       defaults to the official OpenAI API)
+#   HOTL_MODEL          model id to run, e.g. gpt-4o-mini     (optional;
+#                       defaults to gpt-4o)
+#
+# Optional variables (Settings → Variables):
+#   HOTL_RUN_GOAL       the goal handed to `hootl run`
+#
+# Run it manually from the Actions tab, or let it run weekly so a provider
+# change is noticed without anyone pressing a button.
+
+on:
+  workflow_dispatch:
+    inputs:
+      goal:
+        description: Goal for the real run
+        required: false
+        default: ''
+      model:
+        description: Model id (overrides the HOTL_MODEL secret/variable)
+        required: false
+        default: ''
+  schedule:
+    - cron: '0 6 * * 1' # Mondays 06:00 UTC
+
+concurrency:
+  group: real-provider-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  real-provider:
+    name: hootl run against a real provider
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      # Secrets reach the shell as environment variables only.
+      OPENAI_API_KEY: ${{ secrets.HOTL_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.HOTL_ANTHROPIC_API_KEY }}
+      HOTL_BASE_URL: ${{ secrets.HOTL_BASE_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Refuse to run without a key
+        run: |
+          if [ -z "${OPENAI_API_KEY}" ]; then
+            echo "::error::Secret HOTL_API_KEY is not set — add it under Settings → Secrets and variables → Actions."
+            exit 1
+          fi
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm install -g .
+
+      # A scratch project so nothing in the repo is touched, wired to the
+      # endpoint/key from the secrets.  The key is written to .env (never
+      # echoed) only because the runtime reads .env for the project.
+      - name: Prepare scratch project
+        env:
+          # `inputs` / `vars` are resolved here, at step level, where the
+          # contexts are unambiguously available.
+          HOTL_MODEL: ${{ inputs.model || secrets.HOTL_MODEL || 'gpt-4o' }}
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/real-provider"
+          mkdir -p "$root"
+          cp -r registry "$root/"
+          {
+            printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
+            if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+              printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
+            fi
+          } > "$root/.env"
+          chmod 600 "$root/.env"
+          python3 - "$root" "$HOTL_MODEL" "${HOTL_BASE_URL:-}" <<'PY'
+          import json, sys
+          root, model_id, base_url = sys.argv[1], sys.argv[2], sys.argv[3]
+          path = f'{root}/registry/models/{model_id}.json'
+          try:
+              cfg = json.load(open(path))
+          except FileNotFoundError:
+              # Unknown id: register it on top of the default to keep the run simple.
+              cfg = json.load(open(f'{root}/registry/models/gpt-4o.json'))
+              cfg['id'] = model_id
+              cfg['model'] = model_id
+          if base_url:
+              cfg.setdefault('config', {})['baseURL'] = base_url
+          json.dump(cfg, open(path, 'w'), indent=2)
+          print(f'model config: {json.dumps(cfg)}')
+          PY
+          echo "HOTL_PROJECT_ROOT=$root" >> "$GITHUB_ENV"
+          echo "::notice::model=$HOTL_MODEL baseURL=${HOTL_BASE_URL:-<provider default>}"
+
+      - name: hootl run (real provider, auto-confirmed)
+        env:
+          HOTL_MODEL: ${{ inputs.model || secrets.HOTL_MODEL || 'gpt-4o' }}
+          HOTL_RUN_GOAL: "${{ inputs.goal || vars.HOTL_RUN_GOAL || 'Create notes/provider-check.txt containing the single line: real provider test' }}"
+        run: |
+          set -euo pipefail
+          hootl run "$HOTL_RUN_GOAL" \
+            --yes --persistent --timeout-ms 180000 \
+            --project-root "$HOTL_PROJECT_ROOT" --model "$HOTL_MODEL" \
+            --label "github-actions"
+          echo "--- plans ---"
+          hootl plans list --project-root "$HOTL_PROJECT_ROOT"
+          echo "--- usage ---"
+          hootl usage --project-root "$HOTL_PROJECT_ROOT"
+
+      - name: The run must have produced a real plan, tokens and no leak
+        env:
+          HOTL_MODEL: ${{ inputs.model || secrets.HOTL_MODEL || 'gpt-4o' }}
+          HOTL_RUN_GOAL: "${{ inputs.goal || vars.HOTL_RUN_GOAL || 'Create notes/provider-check.txt containing the single line: real provider test' }}"
+        run: |
+          set -euo pipefail
+          root="$HOTL_PROJECT_ROOT"
+          # `hootl plans list` has no --json; the store is the honest source.
+          plans=$(find "$root/.ai-runtime/plans" -name '*.json' 2>/dev/null | wc -l | tr -d ' ')
+          echo "--- plans ($plans) ---"
+          hootl plans list --project-root "$root"
+          if [ "$plans" -lt 1 ]; then
+            echo "::error::No plan was persisted — the run did not get through planning."
+            exit 1
+          fi
+
+          hootl usage --json --project-root "$root" > "$RUNNER_TEMP/usage.json"
+          python3 - "$RUNNER_TEMP/usage.json" <<'PY'
+          import json, sys
+          totals = json.load(open(sys.argv[1]))['totals']
+          print('tokens:', totals)
+          if totals['totalTokens'] <= 0:
+              raise SystemExit('::error::The provider reported zero tokens — the model call did not really happen.')
+          PY
+
+          # The key must be nowhere in the artifacts the run wrote.
+          if grep -rIl -- "$OPENAI_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
+            echo "::error::The API key leaked into .ai-runtime artifacts."
+            grep -rIl -- "$OPENAI_API_KEY" "$root/.ai-runtime" | sed 's|^|  |'
+            exit 1
+          fi
+          echo "::notice::no credential found in .ai-runtime"
+
+      - name: Verify the goal's deliverable exists (if it names a file)
+        env:
+          HOTL_RUN_GOAL: "${{ inputs.goal || vars.HOTL_RUN_GOAL || 'Create notes/provider-check.txt containing the single line: real provider test' }}"
+        run: |
+          set -euo pipefail
+          file=$(printf '%s' "$HOTL_RUN_GOAL" | grep -oE '[A-Za-z0-9_./-]+\.txt' | head -1 || true)
+          if [ -z "$file" ]; then
+            echo "::notice::goal names no .txt file — skipping the deliverable check"
+            exit 0
+          fi
+          root="$HOTL_PROJECT_ROOT"
+          if [ -f "$root/$file" ]; then
+            echo "::notice::deliverable present: $file"
+            exit 0
+          fi
+          # The model may have chosen a different directory — accept the same
+          # file name anywhere in the project, but say where it landed.
+          base=$(basename "$file")
+          found=$(find "$root" -name "$base" -not -path '*/.ai-runtime/*' 2>/dev/null | head -1)
+          if [ -n "$found" ]; then
+            echo "::notice::deliverable present at $found (the goal named $file)"
+            exit 0
+          fi
+          echo "::error::The goal asked for $file but it was not produced."
+          find "$root" -name '*.txt' -not -path '*/.ai-runtime/*' | sed 's|^|  found: |'
+          exit 1
+
+      - name: Upload the run log (no secrets — verified above)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: real-provider-run
+          path: ${{ env.HOTL_PROJECT_ROOT }}/.ai-runtime
+          if-no-files-found: warn
+          retention-days: 14

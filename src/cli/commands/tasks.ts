@@ -14,6 +14,7 @@ import path from 'node:path';
 import { prepareCliEnvironment } from '../utils/config.js';
 import { filterEntries, readLogEntries, type RawLogEntry } from '../utils/log-reader.js';
 import { color, err, out, renderTable } from '../utils/output.js';
+import { FilePlanStore } from '../../ai/runtime/plan-store.js';
 
 export interface TasksCommandOptions {
   projectRoot?: string;
@@ -99,6 +100,39 @@ function logFileFor(root: string): string {
   return path.join(root, '.ai-runtime', 'observability.jsonl');
 }
 
+/**
+ * Phase 30 (P10 follow-up): a task that still says `running` while its plan
+ * reached a terminal state was killed — the process that owned it is gone
+ * (Ctrl-C twice, SIGKILL), so no `task:*` event will ever arrive.
+ * `plans resume` used to emit `task:interrupted` for those, but a cancelled
+ * plan is not resumable, and the view has to be honest on its own.
+ */
+function reconcileWithPlans(root: string, tasks: TaskInfo[]): void {
+  // The plan FILES are the authority on where a plan stands — the log is a
+  // historical record (a plan can be resumed and run again after it was
+  // logged complete once).  A task that still says `running` while its plan
+  // reached a terminal state was killed: the process that owned it is gone
+  // (Ctrl-C twice, SIGKILL) and no `task:*` event will ever arrive.
+  const planIds = [...new Set(tasks.map((t) => t.planId).filter((id): id is string => !!id))];
+  if (planIds.length === 0) return;
+  try {
+    const store = new FilePlanStore(path.join(root, '.ai-runtime', 'plans'));
+    for (const task of tasks) {
+      if (task.status !== 'running' || !task.planId) continue;
+      const plan = store.load(task.planId);
+      if (!plan) continue;
+      const terminal =
+        plan.status === 'cancelled' || plan.status === 'completed' || plan.status === 'failed-partial';
+      if (!terminal) continue;
+      task.status = 'interrupted';
+      task.lastMessage = `Plan ${task.planId} is ${plan.status} while this task was still running — the owning process exited.`;
+    }
+  } catch {
+    // No store (non-persistent run) — the log is all there is, and there is
+    // nothing to reconcile against.
+  }
+}
+
 export async function tasksListCommand(opts: TasksCommandOptions): Promise<number> {
   const root = path.resolve(opts.projectRoot ?? process.cwd());
   prepareCliEnvironment(root);
@@ -108,7 +142,9 @@ export async function tasksListCommand(opts: TasksCommandOptions): Promise<numbe
     ? filterEntries(entries, { planId: opts.plan })
     : entries;
 
-  const tasks = [...buildTaskMap(scoped).values()].sort((a, b) =>
+  const taskMap = buildTaskMap(scoped);
+  reconcileWithPlans(root, [...taskMap.values()]);
+  const tasks = [...taskMap.values()].sort((a, b) =>
     (a.startedAt ?? '').localeCompare(b.startedAt ?? ''),
   );
 

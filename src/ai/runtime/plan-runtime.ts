@@ -224,13 +224,39 @@ export class PlanRuntime {
       throw new Error(`[PlanRuntime] Plan "${planId}" not found in store.`);
     }
 
-    if (isPlanTerminal(plan)) {
+    // Phase 30 (P10 follow-up): the documented contract of `plans resume`
+    // is "re-execute every step that is not done/failed yet".  The old
+    // `isPlanTerminal()` short-circuit also swallowed `failed-partial`
+    // plans — the one case the command exists for.  A step that is `done`
+    // is NEVER dispatched again: `getReadySteps()` only returns `pending`
+    // steps, so resuming cannot redo finished work.
+    if (plan.status === 'cancelled' || plan.status === 'cancelling') {
+      // Cancellation is final and deliberate (documented).  'cancelling'
+      // means a cancel was requested; a process that died before it could
+      // finish must not silently turn that into "run the rest".
+      plan.status = 'cancelled';
+      plan.completedAt = plan.completedAt ?? Date.now();
+      this.persist(plan);
+      return this.buildResult(plan);
+    }
+    if (plan.status === 'completed') {
+      // A plan that was declared complete is not re-opened, even if a step
+      // somehow still says `pending` (contradictory data — re-dispatching it
+      // would run work the plan already reported as finished).
+      return this.buildResult(plan);
+    }
+    const unfinished = plan.steps.filter(
+      (step) => step.status === 'pending' || step.status === 'running'
+    );
+    if (unfinished.length === 0) {
+      // Everything is done or failed — nothing to resume, and no step may
+      // be executed twice.
       return this.buildResult(plan);
     }
 
     // Reset any "running" steps back to "pending" (they were
     // interrupted by the crash and need to be re-dispatched)
-    for (const step of plan.steps) {
+    for (const step of unfinished) {
       if (step.status === 'running') {
         step.status = 'pending';
         step.taskId = undefined;

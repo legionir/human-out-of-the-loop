@@ -5,6 +5,66 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.11] — 2026-09-24 — CI: the real provider from secrets, and a real Windows/macOS matrix
+
+### Added
+
+- **`.github/workflows/real-provider.yml` — the P1 test, run by GitHub.**
+  It reads the endpoint and the key from repository secrets (`HOTL_API_KEY`,
+  `HOTL_BASE_URL`, `HOTL_MODEL`, optional `HOTL_ANTHROPIC_API_KEY`), never
+  from the workflow file, and refuses to start when `HOTL_API_KEY` is unset
+  instead of "passing" without a model. It runs `hootl run` against the real
+  provider in a scratch project and only accepts the run if (a) a plan was
+  persisted, (b) the provider reported non-zero tokens — a plan with zero
+  tokens means the model was never really called, and (c) the key appears
+  nowhere under `.ai-runtime`. Runs weekly and on demand.
+- **`.github/workflows/ci.yml` — the P8 matrix in real operating systems.**
+  Ubuntu + Windows + macOS × Node 22/24 (plus Node 26 on Linux): type check,
+  the whole vitest suite, a clean build, `npm install -g .`, a CLI smoke and
+  the committed e2e scenarios. This is what closes the two axes the sandbox
+  could not reach (Node > 22, non-Linux).
+- **`e2e/scenarios/` — the end-to-end scenarios, committed and repeatable**
+  (`npm run e2e`, ~25 s, seven scenarios, 32 checks): success path, resume,
+  sandbox escape, hostile-note credential leak, MCP discovery, `plans cancel`
+  mid-run and Ctrl-C. They drive the real CLI against `e2e/fake-llm.mjs`,
+  create a throwaway project each, and assert on the artifacts a run wrote
+  (plans, log, usage). `e2e/scenarios/fixtures/stdio-server.mjs` is a real
+  MCP stdio server for the MCP scenario. The stub now understands the goal
+  markers (`READ:`/`WRITE:`/`OVERWRITE:`/`SEARCH:`/`GITSTATUS`, `SLOW:`,
+  `SLOWALL:`), carries the goal into the step description, and echoes a
+  credential it reads, so the redaction path is exercised, not assumed.
+
+### Fixed
+
+- **`hootl plans resume` re-ran a finished plan.** A plan whose status was
+  already `completed` was re-opened (and, with a `pending` step left behind by
+  contradictory data, re-dispatched); a plan abandoned in `cancelling` (the
+  process was killed after the cancel request) was treated as resumable. Now:
+  `completed` is returned as-is, `cancelling` is finalised as `cancelled`, and
+  `plans resume` says why it refuses (`exit 1` for a cancelled plan, a notice
+  for a completed one) instead of silently running work again.
+- **Ctrl-C left the plan stuck in `cancelling`.** The first interrupt cancels
+  the plan and lets the step in flight finish; if the second interrupt leaves
+  the process immediately, the plan file was never updated and `plans list`
+  showed a state no process owned. The exit path now writes the terminal
+  state synchronously. (Found by a real PTY test, not by reasoning.)
+- **`--yes` runs could not be cancelled gracefully.** The plan id was recorded
+  in the interactive confirmation callback, which `--yes` never calls, so the
+  first Ctrl-C had no plan to address and exited immediately.
+- **`hootl tasks list` reported dead tasks as `running` forever.** A task
+  whose plan is already `completed`/`cancelled`/`failed-partial` was killed
+  with the process that owned it; the view now derives that from the plan
+  store instead of waiting for a `task:*` event that will never come.
+- **`hootl tools --mcp --json` was not parseable** — the human-readable
+  per-server notes were printed to stdout. They now go to stderr when `--json`
+  is requested.
+
+### Note
+
+- The P1 run needs a secret, so it cannot be part of the default test job:
+  `real-provider.yml` fails loudly when the secret is missing rather than
+  reporting a green run that proved nothing.
+
 ## [27.2.10] — 2026-09-24 — a plan always has an identity, and the log records its steps
 
 ### Fixed

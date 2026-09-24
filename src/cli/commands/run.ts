@@ -16,6 +16,9 @@ import path from 'node:path';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
 import { Orchestrator, type OrchestratorResult } from '../../ai/orchestrator.js';
+import type { Plan } from '../../ai/schemas/plan.js';
+import { FilePlanStore } from '../../ai/runtime/plan-store.js';
+import fs from 'node:fs';
 import type { ProgressEvent } from '../../ai/runtime/streaming-manager.js';
 import {
   confirmPlanInteractively,
@@ -101,6 +104,34 @@ export interface RunCommandResult {
   exitCode: number;
 }
 
+/**
+ * Phase 30 (P10 follow-up): the second Ctrl-C leaves immediately, but the
+ * plan must not stay stuck in `cancelling` on disk — a later reader
+ * (`plans list`, the web UI) would show a state no process owns any more.
+ * Synchronous on purpose: this runs on the way out of the process.
+ */
+function finalizeCancelledPlan(projectRoot: string, planId: string): void {
+  try {
+    const dir = path.join(projectRoot, '.ai-runtime', 'plans');
+    if (!fs.existsSync(dir)) return;
+    const store = new FilePlanStore(dir);
+    const plan = store.load(planId);
+    if (!plan) return;
+    if (
+      plan.status === 'completed' ||
+      plan.status === 'cancelled' ||
+      plan.status === 'failed-partial'
+    ) {
+      return;
+    }
+    plan.status = 'cancelled';
+    plan.completedAt = Date.now();
+    store.save(plan);
+  } catch {
+    // Leaving the process matters more than the bookkeeping.
+  }
+}
+
 export async function runCommand(goal: string, opts: RunCommandOptions): Promise<RunCommandResult> {
   const invalid = validateRunOptions(opts);
   if (invalid) {
@@ -124,9 +155,52 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
   // runtime default ('gpt-4o').  Validated against the registry below.
   const effectiveModelId = model ?? 'gpt-4o';
 
-  const confirmCallback: (planText: string) => Promise<ConfirmationResult> = opts.yes
-    ? async () => ({ confirmed: true })
-    : (planText) => confirmPlanInteractively(planText);
+  // Phase 30 (P10 follow-up): graceful Ctrl-C.
+  //
+  //   first  Ctrl-C -> cancel the running plan the same way
+  //                    `hootl plans cancel` does: no new step is dispatched,
+  //                    the step already in flight finishes, the report is
+  //                    still written;
+  //   second Ctrl-C -> leave immediately (the old behaviour).
+  //
+  // The plan id only exists once the plan is confirmed, so an interrupt
+  // before that (planning, the confirmation prompt) keeps the exit-now
+  // behaviour — nothing has been dispatched yet.
+  let currentPlanId: string | undefined;
+  let interruptRequested = false;
+  let orchestratorRef: Orchestrator | undefined;
+  const onSigint = (): void => {
+    if (!orchestratorRef) return;
+    if (interruptRequested || !currentPlanId) {
+      out(color.warn('\n⏹  Interrupted again — exiting now.'));
+      if (currentPlanId) finalizeCancelledPlan(projectRoot, currentPlanId);
+      process.exit(130);
+    }
+    interruptRequested = true;
+    out(
+      color.warn(
+        `\n⏹  Cancelling plan ${currentPlanId} — no new steps will start.` +
+          '\n   The step in flight finishes; press Ctrl-C again to leave now.',
+      ),
+    );
+    void orchestratorRef.cancelPlan(currentPlanId).catch(() => undefined);
+  };
+  process.on('SIGINT', onSigint);
+
+  const confirmCallback: (
+    planText: string,
+    plan?: Plan,
+  ) => Promise<ConfirmationResult> = opts.yes
+    ? async (_planText: string, plan?: Plan) => {
+        // --yes still sees the plan: without the id, a Ctrl-C could not
+        // address the running plan and had to exit immediately.
+        currentPlanId = plan?.id ?? currentPlanId;
+        return { confirmed: true };
+      }
+    : (planText: string, plan?: Plan) => {
+        currentPlanId = plan?.id ?? currentPlanId;
+        return confirmPlanInteractively(planText);
+      };
 
   // C4: clarification only when interactive AND not auto-confirming.
   //  - --yes (CI / HOTL): no callback → the planner's questions fail the
@@ -142,6 +216,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
 
   const renderer = createProgressRenderer({ verbose: opts.verbose ?? false });
 
+
   const orchestrator = new Orchestrator({
     projectRoot,
     persistent,
@@ -153,6 +228,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     ...(opts.maxDelegationDepth !== undefined ? { maxDelegationDepth: opts.maxDelegationDepth } : {}),
     onProgress: (event: ProgressEvent) => renderer(event),
   });
+  orchestratorRef = orchestrator;
 
   try {
     // ── Validate the model id before ANY side effect (U3 semantics) ──
@@ -236,6 +312,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     }
     return { exitCode: 1 };
   } finally {
+    process.removeListener('SIGINT', onSigint);
     await orchestrator.shutdown();
   }
 }

@@ -10,6 +10,23 @@ import http from 'node:http';
 
 const PORT = Number(process.env.FAKE_PORT ?? 8931);
 const DELAY_MS = Number(process.env.FAKE_DELAY_MS ?? 0);
+
+/**
+ * Latency, so a scenario has a window to cancel a run that is genuinely in
+ * flight:
+ *   SLOW:<ms>     delay the *agent* turns only (planning stays instant)
+ *   SLOWALL:<ms>  delay every response
+ * `FAKE_DELAY_MS` is the process-wide default.
+ */
+function delayFor(promptText, isAgentTurn) {
+  const all = /SLOWALL:(\d+)/.exec(promptText);
+  if (all) return Number(all[1]);
+  const agent = /\bSLOW:(\d+)/.exec(promptText);
+  if (agent && isAgentTurn) return Number(agent[1]);
+  return DELAY_MS;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const DUMP = process.env.FAKE_DUMP;
 
 function envelope(model, output) {
@@ -80,6 +97,63 @@ function inspectInput(input) {
   return { promptText: texts.join('\n'), sawToolTurn };
 }
 
+/**
+ * Goal markers, the same vocabulary the CLI scenarios use:
+ *   READ:<path> / WRITE:<path> / OVERWRITE:<path> / SEARCH:<pattern>
+ * The first marker in the prompt picks the tool call for that agent turn.
+ */
+const usedMarkers = new Set();
+
+const MARKERS = [
+  { marker: 'READ', tool: 'read_file' },
+  { marker: 'WRITE', tool: 'write_file' },
+  { marker: 'OVERWRITE', tool: 'write_file' },
+  { marker: 'SEARCH', tool: 'search_code' },
+  { marker: 'GITSTATUS', tool: 'git_status' },
+];
+
+function markersIn(text) {
+  const found = [];
+  for (const { marker, tool } of MARKERS) {
+    const re = new RegExp(String.raw`\b${marker}:([^\s"']+)`, "g");
+    let match;
+    while ((match = re.exec(text)) !== null) {
+      found.push({ at: match.index, marker, tool, arg: match[1] });
+    }
+  }
+  const mcp = /\bMCP:([A-Za-z0-9_-]+)/g;
+  let match;
+  while ((match = mcp.exec(text)) !== null) {
+    found.push({ at: match.index, marker: 'MCP', tool: match[1], arg: match[1] });
+  }
+  return found.sort((a, b) => a.at - b.at);
+}
+
+function pickToolCall(promptText, offered) {
+  const available = new Set(offered);
+  // A marker is consumed exactly once: a reused marker would repeat the same
+  // tool call (and, for WRITE, fail on "file already exists").
+  const marker = markersIn(promptText).find(
+    (m) => available.has(m.tool) && !usedMarkers.has(`${m.marker}:${m.arg}`)
+  );
+  if (marker) usedMarkers.add(`${marker.marker}:${marker.arg}`);
+  if (!marker) return null;
+  if (marker.marker === 'MCP') return { name: marker.tool, args: { text: 'from-mcp' } };
+  if (marker.marker === 'READ') return { name: 'read_file', args: { filePath: marker.arg } };
+  if (marker.marker === 'WRITE') {
+    return { name: 'write_file', args: { filePath: marker.arg, content: 'written by the e2e stub\n' } };
+  }
+  if (marker.marker === 'OVERWRITE') {
+    return {
+      name: 'write_file',
+      args: { filePath: marker.arg, content: 'overwritten by the e2e stub\n', overwrite: true },
+    };
+  }
+  if (marker.marker === 'SEARCH') return { name: 'search_code', args: { pattern: marker.arg, directory: '.' } };
+  if (marker.marker === 'GITSTATUS') return { name: 'git_status', args: { directory: '.' } };
+  return null;
+}
+
 function step(id, description, over = {}) {
   return {
     id,
@@ -95,15 +169,37 @@ function step(id, description, over = {}) {
   };
 }
 
-function planPayload() {
+/**
+ * The plan follows the goal's markers, the same way a real planner would
+ * follow the goal's wording: a WRITE goal produces a step that owns
+ * `write_file`.  Without this the agent turn only ever offered `read_file`
+ * and a scenario could not tell "the tool was blocked" from "the tool was
+ * never given the chance".
+ */
+function goalFromPrompt(promptText) {
+  const match = /USER REQUEST:\s*\"\"\"([\s\S]*?)\"\"\"/.exec(promptText);
+  return (match?.[1] ?? '').trim().split('\n')[0].trim();
+}
+
+/**
+ * The plan follows the goal's markers, the way a real planner follows the
+ * goal's wording: the wording reaches the steps, and a step that must write
+ * owns `write_file`.  Without this the agent turns were always offered the
+ * fixed `read_file` and a scenario could not tell "the tool was blocked" from
+ * "the tool was never offered".
+ */
+function planPayload(promptText = '') {
+  const goal = goalFromPrompt(promptText);
+  const wanted = ['write_file', 'search_code', 'git_status'].filter((tool) =>
+    markersIn(promptText).some((m) => m.tool === tool)
+  );
+  const tools = [...new Set([...wanted, 'read_file'])];
+  const description = goal || 'Read the project README';
   return {
-    goal: 'stub goal',
+    goal: goal || 'stub goal',
     steps: [
-      step('step-1', 'Read the project README'),
-      step('step-2', 'Write a short note', {
-        dependsOn: ['step-1'],
-        assignedTools: ['read_file', 'write_file'],
-      }),
+      step('step-1', description, { assignedTools: tools }),
+      step('step-2', description, { dependsOn: ['step-1'], assignedTools: tools }),
     ],
   };
 }
@@ -111,9 +207,9 @@ function planPayload() {
 function structuredPayload(name, promptText) {
   switch (name) {
     case 'PlannerAssessment':
-      return { isClear: true, needsClarification: [], plan: planPayload() };
+      return { isClear: true, needsClarification: [], plan: planPayload(promptText) };
     case 'ExecutionPlan':
-      return planPayload();
+      return planPayload(promptText);
     case 'AcceptanceJudgment':
       return { accepted: true, reason: 'stub acceptance: the step output matches its criteria' };
     case 'FinalReview':
@@ -152,15 +248,24 @@ const server = http.createServer((req, res) => {
     }
     const format = body.text?.format;
     const tools = Array.isArray(body.tools) ? body.tools : [];
+    const delayMs = delayFor(promptText, tools.length > 0 && !format);
+    if (delayMs > 0) await sleep(delayMs);
     let output = [];
     if (format?.type === 'json_schema') {
       output = [messageItem(JSON.stringify(structuredPayload(format.name, promptText)))];
     } else if (tools.length > 0) {
       const offered = tools.map((t) => t.name ?? t.function?.name);
-      if (!sawToolTurn && offered.includes('read_file')) {
+      const call = sawToolTurn ? null : pickToolCall(promptText, offered);
+      if (call) {
+        output = [functionCallItem(call.name, call.args)];
+      } else if (!sawToolTurn && offered.includes('read_file')) {
         output = [functionCallItem('read_file', { filePath: 'README.md' })];
       } else {
-        output = [messageItem('Stub agent: the step is complete and verified.')];
+        let text = 'Stub agent: the step is complete and verified.';
+        // Worst case: a compromised model echoes a credential it just read.
+        const leaked = /OPENAI_API_KEY=([A-Za-z0-9_.\-]+)/.exec(promptText);
+        if (leaked) text += ` Leaked credential: ${leaked[1]}`;
+        output = [messageItem(text)];
       }
     } else {
       output = [messageItem('Stub response.')];

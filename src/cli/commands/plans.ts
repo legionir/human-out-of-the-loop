@@ -164,6 +164,29 @@ export async function plansResumeCommand(planId: string, opts: PlansCommandOptio
 
   try {
     await orchestrator.initialize();
+    // Phase 30 (P10 follow-up): say WHY nothing happens.  A terminal plan is
+    // not resumable — resuming it silently used to re-run finished work.
+    const status = orchestrator.getPlanStatus(planId)?.status;
+    if (status === 'cancelling') {
+      // A cancel was requested but the process left before the runtime could
+      // finish it.  Finalise it here — a plan must never stay in a state no
+      // process owns.
+      await orchestrator.cancelPlan(planId);
+      err(color.failed(`Plan "${planId}" was being cancelled — it is now cancelled.`));
+      return 1;
+    }
+    if (status === 'cancelled') {
+      err(
+        color.failed(
+          `Plan "${planId}" is cancelled — cancellation is final and it will not be resumed.`,
+        ),
+      );
+      return 1;
+    }
+    if (status === 'completed') {
+      err(color.dim(`Plan "${planId}" is already completed — nothing to resume.`));
+      return 0;
+    }
     const result = await orchestrator.resumePlan(planId);
     if (!result) {
       err(color.failed(`Plan "${planId}" not found (or not resumable).`));

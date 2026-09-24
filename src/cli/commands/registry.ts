@@ -4,20 +4,36 @@
  *   human-out-of-the-loop models   [--project-root DIR] [--json]
  *   human-out-of-the-loop personas [--project-root DIR] [--json]
  *   human-out-of-the-loop skills   [--project-root DIR] [--json]
- *   human-out-of-the-loop tools    [--project-root DIR] [--json]
+ *   human-out-of-the-loop tools    [--project-root DIR] [--json] [--mcp]
  *
  * Lightweight by design: only the registry JSON files are read (validated
- * with the runtime schemas) — no MCP, no LLM, no Orchestrator.
+ * with the runtime schemas) — no MCP, no LLM, no Orchestrator.  `tools
+ * --mcp` is the opt-in exception: it connects to the configured MCP servers
+ * to show the tools a run would receive from them.
  */
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadRegistries } from '../utils/registries.js';
 import { describeRegistryLayers, registryLayersFor } from '../../ai/registries/layout.js';
 import { color, err, out, renderTable } from '../utils/output.js';
+import { loadMcpServerConfigs } from '../../ai/tools/mcp-bootstrap.js';
+import { McpConnector } from '../../ai/tools/mcp-connector.js';
+import { ToolRegistry } from '../../ai/registries/tool-registry.js';
 
 export interface RegistryCommandOptions {
   projectRoot?: string;
   json?: boolean;
+}
+
+export interface ToolsCommandOptions extends RegistryCommandOptions {
+  /**
+   * Phase 30 (P10 follow-up): connect to the MCP servers in
+   * `registry/mcp-servers/` and list the tools they actually expose.
+   * Without it only the static registry files are read (no processes, no
+   * network) — and the tools a *run* would receive from MCP are invisible,
+   * which made an MCP config impossible to verify from the CLI.
+   */
+  mcp?: boolean;
 }
 
 /** Dim one-line provenance line: which layers these entries came from. */
@@ -112,15 +128,87 @@ export async function skillsCommand(opts: RegistryCommandOptions): Promise<numbe
   });
 }
 
-export async function toolsCommand(opts: RegistryCommandOptions): Promise<number> {
+export async function toolsCommand(opts: ToolsCommandOptions): Promise<number> {
   const root = resolveProjectRoot(opts);
   if (!root) return 2;
   const loaded = loadRegistries(root);
-  return render(opts, {
+  const rows: Array<Array<string | number>> = loaded.tools.map((t) => [
+    t.id,
+    t.name,
+    t.source,
+    t.category ?? '',
+    t.description,
+  ]);
+  const items: unknown[] = [...loaded.tools];
+  let failed = 0;
+
+  if (opts.mcp) {
+    const mcp = await collectMcpTools(root);
+    failed = mcp.failed;
+    // Notes go to stderr when the caller asked for JSON, so the document on
+    // stdout stays parseable.
+    for (const note of mcp.notes) {
+      if (opts.json) err(color.dim(note));
+      else out(color.dim(note));
+    }
+    rows.push(...mcp.rows);
+    items.push(...mcp.items);
+  }
+
+  const code = render(opts, {
     kind: 'tools',
-    items: loaded.tools,
-    rows: loaded.tools.map((t) => [t.id, t.name, t.source, t.category ?? '', t.description]),
+    items,
+    rows,
     header: ['ID', 'NAME', 'SOURCE', 'CATEGORY', 'DESCRIPTION'],
     errors: loaded.errors,
   });
+  return failed > 0 ? 1 : code;
+}
+
+/**
+ * Connect to every configured MCP server, list its tools, and disconnect.
+ * A listing must never affect a running plan: it uses its own ToolRegistry
+ * and closes every connection (and child process) again.
+ */
+async function collectMcpTools(root: string): Promise<{
+  rows: Array<Array<string | number>>;
+  items: unknown[];
+  notes: string[];
+  failed: number;
+}> {
+  const dir = path.join(root, 'registry', 'mcp-servers');
+  const { configs, errors } = loadMcpServerConfigs(dir);
+  const rows: Array<Array<string | number>> = [];
+  const items: unknown[] = [];
+  const notes: string[] = errors.map((e) => `Invalid MCP config ${e.file}: ${e.error}`);
+  let failed = 0;
+
+  if (configs.length === 0) {
+    notes.push(`No MCP servers configured in ${path.relative(root, dir) || dir}.`);
+    return { rows, items, notes, failed };
+  }
+
+  const registry = new ToolRegistry();
+  const connector = new McpConnector({ toolRegistry: registry });
+  try {
+    for (const config of configs) {
+      const ok = await connector.connectServer(config);
+      const state = connector.getServerState(config.id);
+      if (!ok) {
+        failed++;
+        notes.push(`✖ ${config.id} (${config.transport}) — ${state?.lastError ?? 'connection failed'}`);
+        continue;
+      }
+      const ids = state?.toolIds ?? [];
+      notes.push(`✔ ${config.id} (${config.transport}) — ${ids.length} tool(s)`);
+      for (const id of ids) {
+        const definition = registry.getDefinition(id);
+        rows.push([id, definition?.name ?? id, `mcp:${config.id}`, 'mcp', definition?.description ?? '']);
+        items.push({ ...(definition ?? { id }), mcpServerId: config.id, transport: config.transport });
+      }
+    }
+  } finally {
+    await connector.closeAll();
+  }
+  return { rows, items, notes, failed };
 }

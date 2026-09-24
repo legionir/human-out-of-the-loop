@@ -888,7 +888,10 @@ describe('C2 — usage + tasks commands (from the observability log)', () => {
     expect(out).toContain('task_legacy'); // plan-less legacy entry still listed globally
     // Phase 30 (P2 follow-up): the summary counts every status explicitly
     // (done / failed / interrupted / running) instead of "N other".
-    expect(out).toMatch(/5 task\(s\): 2 done, 1 failed, 0 interrupted, 2 running/);
+    // P10 follow-up: `task_4` belongs to PLAN_B, whose stored status is
+    // `cancelled` — the process that owned it is gone, so it is reported
+    // `interrupted` instead of "running" forever.
+    expect(out).toMatch(/5 task\(s\): 2 done, 1 failed, 1 interrupted, 1 running/);
   });
 
   it('tasks list --plan filters (and legacy plan-less entries are excluded)', async () => {

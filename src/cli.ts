@@ -498,12 +498,35 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
   registryOptions(program
     .command('tools')
     .description('List available tools (project registry + built-in)')
+    .option(
+      '--mcp',
+      'also connect to registry/mcp-servers and list the tools they expose (slower: starts stdio servers)',
+    )
     .action(async (opts: Record<string, string | boolean | undefined>) => {
       process.exitCode = await toolsCommand({
         projectRoot: opts.projectRoot as string | undefined,
         json: opts.json === true,
+        mcp: opts.mcp === true,
       });
-    }));
+    })
+    .addHelpText(
+      'after',
+      helpBlock(
+        'WHAT IT SHOWS',
+        '  The static registry (registry/tools/*.json in the project layer and the',
+        '  built-in layer) with each tool id, its source and category.',
+        '',
+        '--mcp',
+        '  Connects to every server in registry/mcp-servers/ and lists the tool ids',
+        '  that a run would actually receive from it (the same ids personas may',
+        '  reference).  Each server reports ✔ with its tool count, or ✖ with the',
+        '  connection error — the command exits 1 when any server fails.',
+        '',
+        'NOTE',
+        '  Without --mcp nothing is started or fetched; the ids of MCP tools only',
+        '  exist at runtime, so they cannot appear in a static listing.',
+      ),
+    ));
 
   // ── usage + tasks (C2) ───────────────────────────────────────
   program
