@@ -71,6 +71,9 @@ export const OrchestratorConfigSchema = z.object({
   contextBudgetChars: z.number().int().min(1000).default(120000),
   connectTimeoutMs: z.number().int().min(1000).default(10000),
   defaultModelId: z.string().default('gpt-4o'),
+  // U1 (config parity): extra observability redaction keys (defaults
+  // still apply when the list is non-empty).
+  redactKeys: z.array(z.string().min(1)).default([]),
 });
 
 /**
@@ -139,7 +142,12 @@ export function createCliConfirmCallback(): (planText: string) => Promise<{ conf
 // ─── Orchestrator ────────────────────────────────────────────────
 
 export class Orchestrator {
-  private readonly config: Required<OrchestratorConfig>;
+  /**
+   * The validated, defaults-applied config.  Exposed read-only so
+   * consumers (CLI, server health endpoint, tests) can inspect the
+   * effective settings without duplicating resolution logic.
+   */
+  readonly config: Required<OrchestratorConfig>;
 
   readonly personaRegistry: PersonaRegistry;
   readonly skillRegistry: SkillRegistry;
@@ -192,6 +200,7 @@ export class Orchestrator {
       maxSteps: data.maxSteps,
       contextBudgetChars: data.contextBudgetChars,
       connectTimeoutMs: data.connectTimeoutMs,
+      redactKeys: data.redactKeys,
       onProgress: config.onProgress ?? (() => {}),
     };
 
@@ -243,6 +252,8 @@ export class Orchestrator {
     this.usageAggregator = new UsageAggregator();
     this.observabilityLogger = new ObservabilityLogger({
       logFilePath: path.join(runtimeDir, 'observability.jsonl'),
+      // Empty list → keep the logger's built-in defaults.
+      redactKeys: this.config.redactKeys.length > 0 ? this.config.redactKeys : undefined,
     });
 
     // Phase 22: subscriber errors go to the observability log —

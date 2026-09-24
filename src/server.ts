@@ -26,6 +26,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import express, { type Express } from 'express';
 import { Orchestrator } from './ai/orchestrator.js';
+import { loadDotEnv, loadGlobalConfig } from './cli/utils/config.js';
 import { SseHub } from './server/sse.js';
 import { sessionsRouter } from './server/routes/sessions.js';
 import { plansRouter } from './server/routes/plans.js';
@@ -38,6 +39,14 @@ export interface ServerOptions {
   projectRoot?: string;
   /** UI mode keeps its history — default true here (override for tests). */
   persistent?: boolean;
+  /**
+   * U1 (config parity): server-level default model.
+   * Precedence: this option > `HOTL_MODEL` env > global config
+   * `defaultModel` > Orchestrator default (`gpt-4o`).
+   */
+  model?: string;
+  /** Extra observability redaction keys (defaults still apply). */
+  redactKeys?: string[];
 }
 
 export interface CreatedServer {
@@ -48,13 +57,33 @@ export interface CreatedServer {
 }
 
 export function createApp(options: ServerOptions = {}): CreatedServer {
-  const projectRoot = path.resolve(options.projectRoot ?? process.env.HOTL_PROJECT_ROOT ?? process.cwd());
+  // U1 (config parity): the server reads the SAME configuration sources
+  // as the CLI — `~/.human-out-of-the-loop/config.json` + `.env` in the
+  // project (then cwd).  Precedence: explicit option/env > global config
+  // > project env > built-in default.  loadDotEnv never overwrites a
+  // variable already present in the real environment.
+  const globalCfg = loadGlobalConfig();
+  const projectRoot = path.resolve(
+    options.projectRoot ??
+      process.env.HOTL_PROJECT_ROOT ??
+      (globalCfg.projectRoot ? path.resolve(globalCfg.projectRoot) : process.cwd()),
+  );
+  loadDotEnv([projectRoot, process.cwd()]);
+  const model = options.model ?? process.env.HOTL_MODEL ?? globalCfg.defaultModel;
+  const redactKeys = [
+    ...(options.redactKeys ?? []),
+    ...(process.env.HOTL_REDACT_KEYS
+      ? process.env.HOTL_REDACT_KEYS.split(',').map((s) => s.trim()).filter(Boolean)
+      : []),
+  ];
   const runtimeDir = path.join(projectRoot, '.ai-runtime');
-  const persistent = options.persistent ?? true;
+  const persistent = options.persistent ?? globalCfg.persistent ?? true;
 
   const orchestrator = new Orchestrator({
     projectRoot,
     persistent,
+    defaultModelId: model,
+    redactKeys,
   });
 
   const hub = new SseHub();
@@ -109,8 +138,15 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
   app.use(runRouter(ctx));
   app.use(streamRouter(ctx));
 
+  // U1: surface the effective config — never any secret VALUES.
   app.get('/api/health', (req, res) => {
-    res.json({ ok: true, projectRoot });
+    res.json({
+      ok: true,
+      projectRoot,
+      model: orchestrator.config.defaultModelId,
+      persistent,
+      redactKeysCount: redactKeys.length,
+    });
   });
 
   // Static frontend — public/ lives at the package root, but this module
@@ -119,6 +155,11 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
   app.use(express.static(findPublicDir()));
 
   const close = async (): Promise<void> => {
+    // Drain the (possibly still running, possibly failed) initialization
+    // before shutting down — otherwise shutdown races initialize's
+    // filesystem reads (e.g. SIGINT during startup, or a test removing
+    // its temp project while init is in flight).
+    await ctx.ready.catch(() => {});
     await orchestrator.shutdown();
   };
 

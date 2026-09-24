@@ -52,6 +52,14 @@
 
 ---
 
+### [🟢] فاز U1 — نتیجه (2026-09-24)
+
+**نتیجه:** سرور حالا دقیقاً همان منابع پیکربندی CLI را می‌خواند: `loadDotEnv([projectRoot, cwd])` + `loadGlobalConfig()` در ابتدای `createApp` (قبل از ساخت Orchestrator → providerها). اولویت: option صریح > env (`HOTL_MODEL`) > global config > پیش‌فرض؛ `.env` هرگز env واقعی را overwrite نمی‌کند. `HOTL_REDACT_KEYS` (comma-list) → `redactKeys` در `OrchestratorConfig` (فیلد جدید schema) → `ObservabilityLogger` (اگر خالی باشد، defaultهای logger حفظ می‌شوند). `GET /api/health` حالا: `{ok, projectRoot, model, persistent, redactKeysCount}` — **بدون هیچ مقدار راز** (تست‌شده). `orchestrator.config` public readonly شد (health/تست‌ها). 5 تست جدید (بارگذاری .env قبل از provider، برتری env واقعی، زنجیره اولویت model سه‌مرحله‌ای، redact keys + health بدون مقدار، projectRoot از global config) = **462 تست سبز (28 فایل)** + tsc سبز.
+
+**انحراف ثبت‌شده:** (1) `redactKeys` در `OrchestratorConfigSchema` نبود (logger از قبل support داشت) — به schema اضافه شد (additive، default `[]`). (2) `close()` حالا قبل از shutdown، `ctx.ready` را drain می‌کند — **race واقعی** بود: SIGINT (یا حذف tmp در تست) در میانه initialize → unhandled rejection؛ با drain، init یا کامل می‌شود یا خطایش می‌افتد. (3) اسم env مدل `HOTL_MODEL` (پلن فقط «env» گفته بود). (4) `globalCfg.projectRoot` هم احترام می‌شود (parity با CLI؛ پیش از HOTL_PROJECT_ROOT نبود بلکه بین آن و cwd). (5) تست «real env wins» بدون `close()`، initialize در پس‌زمینه را leak می‌کرد — با close قبل از rm رفع شد.
+
+---
+
 ## فاز U2 — endpointها و پنل Registry
 
 **گام‌ها:**
@@ -213,7 +221,7 @@
 
 | فاز | وضعیت | نتیجه / انحراف |
 |---|---|---|
-| U1 config parity | ⬜ | |
+| U1 config parity | 🟢 | کامل شد 2026-09-24 — نتایج در زیر |
 | U2 registry | ⬜ | |
 | U3 run overrides | ⬜ | |
 | U4 preview | ⬜ | |

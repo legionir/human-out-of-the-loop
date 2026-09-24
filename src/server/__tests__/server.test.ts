@@ -492,3 +492,143 @@ describe('Phase 24 — API: plans cancel + observability + sessions', () => {
     await request(app).delete(`/api/sessions/${id}`).expect(404);
   }, 30_000);
 });
+
+// ─── U1: config parity (.env + global config) ────────────────────
+
+describe('U1 — server config parity (.env + global config)', () => {
+  const savedHome = process.env.HOME;
+  const savedOpenAi = process.env.OPENAI_API_KEY;
+  const savedHotlModel = process.env.HOTL_MODEL;
+  const savedRedact = process.env.HOTL_REDACT_KEYS;
+  const savedHotlProjectRoot = process.env.HOTL_PROJECT_ROOT;
+
+  function withIsolatedHome(config: Record<string, unknown> | null): string {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'phase24-home-'));
+    if (config !== null) {
+      fs.mkdirSync(path.join(home, '.human-out-of-the-loop'), { recursive: true });
+      fs.writeFileSync(
+        path.join(home, '.human-out-of-the-loop', 'config.json'),
+        JSON.stringify(config),
+      );
+    }
+    process.env.HOME = home;
+    return home;
+  }
+
+  function makeProject(dotEnv: string | null): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'phase24-u1-'));
+    fs.cpSync(REGISTRY_SRC, path.join(dir, 'registry'), { recursive: true });
+    if (dotEnv !== null) fs.writeFileSync(path.join(dir, '.env'), dotEnv);
+    return dir;
+  }
+
+  function restoreEnv(): void {
+    if (savedHome === undefined) delete process.env.HOME;
+    else process.env.HOME = savedHome;
+    if (savedOpenAi === undefined) delete process.env.OPENAI_API_KEY;
+    else process.env.OPENAI_API_KEY = savedOpenAi;
+    if (savedHotlModel === undefined) delete process.env.HOTL_MODEL;
+    else process.env.HOTL_MODEL = savedHotlModel;
+    if (savedRedact === undefined) delete process.env.HOTL_REDACT_KEYS;
+    else process.env.HOTL_REDACT_KEYS = savedRedact;
+    if (savedHotlProjectRoot === undefined) delete process.env.HOTL_PROJECT_ROOT;
+    else process.env.HOTL_PROJECT_ROOT = savedHotlProjectRoot;
+  }
+
+  afterEach(() => {
+    restoreEnv();
+  });
+
+  it('.env in the project is loaded before providers build (API keys work in the UI)', async () => {
+    const home = withIsolatedHome(null);
+    delete process.env.OPENAI_API_KEY;
+    const dir = makeProject('OPENAI_API_KEY=dotenv-key-u1\n# a comment\nOTHER_THING=42\n');
+    try {
+      const created = createApp({ projectRoot: dir, persistent: false });
+      // the loader ran during createApp — the provider layer can see it now
+      expect(process.env.OPENAI_API_KEY).toBe('dotenv-key-u1');
+      expect(process.env.OTHER_THING).toBe('42');
+      const res = await request(created.app).get('/api/health').expect(200);
+      expect(res.body.ok).toBe(true);
+      expect(res.body.model).toBe('gpt-4o'); // built-in default
+      expect(JSON.stringify(res.body)).not.toContain('dotenv-key-u1'); // no secret values
+      await created.close();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+      restoreEnv();
+    }
+  }, 15_000);
+
+  it('the real environment always wins over .env (no overwrite)', async () => {
+    const home = withIsolatedHome(null);
+    process.env.OPENAI_API_KEY = 'real-env-wins';
+    const dir = makeProject('OPENAI_API_KEY=dotenv-should-lose\n');
+    let created: CreatedServer | undefined;
+    try {
+      created = createApp({ projectRoot: dir, persistent: false });
+      expect(process.env.OPENAI_API_KEY).toBe('real-env-wins');
+    } finally {
+      if (created) await created.close();
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+      restoreEnv();
+    }
+  });
+
+  it('model precedence: option > HOTL_MODEL env > global config > default', async () => {
+    const home = withIsolatedHome({ defaultModel: 'local-llama' });
+    const dir = makeProject(null);
+    try {
+      let created = createApp({ projectRoot: dir, persistent: false });
+      expect(created.ctx.orchestrator.config.defaultModelId).toBe('local-llama');
+      await created.close();
+
+      process.env.HOTL_MODEL = 'gpt-4o';
+      created = createApp({ projectRoot: dir, persistent: false });
+      expect(created.ctx.orchestrator.config.defaultModelId).toBe('gpt-4o');
+      await created.close();
+
+      created = createApp({ projectRoot: dir, persistent: false, model: 'claude-sonnet' });
+      expect(created.ctx.orchestrator.config.defaultModelId).toBe('claude-sonnet');
+      await created.close();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+      restoreEnv();
+    }
+  });
+
+  it('HOTL_REDACT_KEYS (comma list) → orchestrator config + health count (no values)', async () => {
+    const home = withIsolatedHome(null);
+    process.env.HOTL_REDACT_KEYS = 'MySecretKey, AnotherToken ,';
+    const dir = makeProject(null);
+    try {
+      const created = createApp({ projectRoot: dir, persistent: false });
+      expect(created.ctx.orchestrator.config.redactKeys).toEqual(['MySecretKey', 'AnotherToken']);
+      const res = await request(created.app).get('/api/health').expect(200);
+      expect(res.body.redactKeysCount).toBe(2);
+      expect(JSON.stringify(res.body)).not.toContain('MySecretKey');
+      await created.close();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+      restoreEnv();
+    }
+  }, 15_000);
+
+  it('global config projectRoot is used when nothing is set explicitly', async () => {
+    const dir = makeProject(null);
+    const home = withIsolatedHome({ projectRoot: dir });
+    delete process.env.HOTL_PROJECT_ROOT;
+    try {
+      const created = createApp({ persistent: false });
+      expect(created.ctx.projectRoot).toBe(path.resolve(dir));
+      await created.close();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+      fs.rmSync(home, { recursive: true, force: true });
+      restoreEnv();
+    }
+  }, 15_000);
+});
