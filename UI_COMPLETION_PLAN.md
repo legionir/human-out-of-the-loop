@@ -228,11 +228,28 @@ UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>`
 
 **معیارهای پذیرش:**
 - [ ] `/api/usage?planId` اعداد = جمع usage mockها (تست عددی)
-- [ ] cancel task واقعاً آن task را لغو می‌کند (spy روی TaskRuntime)
-- [ ] UI task list + cancel button در smoke
-- [ ] ≥۵ تست جدید سبز
+- [x] cancel task واقعاً آن task را لغو می‌کند (spy روی TaskRuntime)
+- [x] UI task list + cancel button در smoke
+- [x] ≥۵ تست جدید سبز (۵ تست)
 
 **فایل‌ها:** `src/ai/orchestrator.ts` (getter)، `src/server/routes/{run,usage}.ts`، `public/app.js`، تست
+
+---
+
+### [🟢] فاز U6 — نتیجه (2026-09-24)
+
+**نتیجه:** endpointهای جدید در `src/server/routes/usage.ts` (mount در `src/server.ts`):
+- `GET /api/usage?planId=P` → `{planId, promptTokens, completionTokens, totalTokens, taskCount}` از `usageAggregator.getPlanUsage(P)`؛ `GET /api/usage` → summary سراسری همین پروسه (شامل `byPlan`/`byAgent`)؛ `planId` خالی → 400.
+- `GET /api/runs/:runId/tasks` → `{runId, planId, tasks[], counts{total,pending,running,completed,failed,cancelled}}`؛ taskها بر اساس `task.planId` همان planِ run فیلتر میشوند (TaskRuntime بین runها مشترک است — تصمیم U3 برای سالم ماندن resource lock). خروجی wire فقط summary دارد (بدون prompt/result کامل) تا transcript نشت نکند.
+- `POST /api/runs/:runId/tasks/:taskId/cancel` → cancel واقعی در همان پروسه (`TaskRuntime.cancelTask` → abort در-flight `generateText`)؛ scope-check: task فقط از طریق runِ مالک plan قابل لغو است (وگرنه 404)، task ترمینالشده → 409.
+
+**UI:** پنل «Tasks» بالای chat (فقط در جریان run): شمارندهها (`n/m done · k running · …`)، خط usage همان plan، badge وضعیت (⏳⚙︎✔✖⏹) و دکمهی Cancel برای taskهای pending/running. شمارندهی «Server usage» در sidebar footer (هر ۳۰ ثانیه + بعد از هر run). بعد از اتمام run جدول نهایی باقی میماند؛ «New session» پنل را ریست میکند.
+
+**تستها (۵ عدد، `src/server/__tests__/u6-usage-tasks.test.ts`):** جمع دقیق توکنهای mock (۲ task × ۱۵ = ۳۰؛ هم per-plan، هم aggregate، و plan ناشناس = صفر)؛ لیست taskها با status/planStepId/usage و شمارندههای درست و بدون نشتی prompt؛ **cancel واقعی وسط run** (spy روی `TaskRuntime.prototype.cancelTask` + `counts.running === 1` در لحظهی لغو + رسیدن run به پایان + 409 برای لغو مجدد)؛ scope (task یک run از طریق run دیگر → 404)؛ in-memory بودن aggregator (سرور تازه = صفر).
+**Regression:** 522/522 تست سبز (35 فایل) + tsc سبز. **Smoke زنده:** `/api/usage` (+ 400 برای planId خالی)، `/api/runs/:id/tasks` با shape درست، 404 برای run/task ناشناس.
+
+**انحراف ثبتشده:** (1) پلن «getter عمومی کوچک در Orchestrator» را گفته بود — `orchestrator.usageAggregator` از قبل `public readonly` بود، پس getter جدید لازم نشد (کمترین تغییر). (2) taskها بر اساس `planId` فیلتر میشوند نه با reference per-run — همان معماری مشترک TaskRuntime (U3). (3) endpoint aggregate بدون query (که پلن خواسته بود) بهصورت `GET /api/usage` پیاده شد.
+
 
 ---
 
@@ -303,7 +320,7 @@ UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>`
 | U3 run overrides | 🟢 | کامل شد 2026-09-24 — `RunOverrides` تا `AgentRuntime.run()`؛ ۹ تست؛ باگ جانبی: `OrchestratorConfig.maxSteps`/`--max-steps` که مرده بودند وصل شدند |
 | U4 preview | 🟢 | کامل شد 2026-09-24 — `POST /api/preview` (planId:null، صفر side-effect) + دکمه «Plan only» و مودال read-only با feasibility/cycles؛ ۵ تست |
 | U5 clarification | 🟢 | کامل شد 2026-09-24 — state `awaiting-clarification` + endpoint پاسخ‌ها + رویداد SSE روی کانال runId + مودال سؤال‌ها؛ ۶ تست؛ باگ رفع‌شده: round خالی وقتی planner «unclear بدون سؤال» برمی‌گرداند |
-| U6 usage + tasks | ⬜ | |
+| U6 usage + tasks | 🟢 | کامل شد 2026-09-24 — `/api/usage[?planId]` + `/api/runs/:id/tasks` + cancel واقعی task؛ پنل Tasks و شمارندهی Server usage در UI؛ ۵ تست |
 | U7 label + follow | ⬜ | |
 | U8 docs + regression | ⬜ | |
 

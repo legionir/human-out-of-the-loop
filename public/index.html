@@ -48,6 +48,10 @@
       <button id="new-session-btn" class="btn primary wide">+ New session</button>
       <div class="sessions-label">Sessions</div>
       <ul id="session-list" class="session-list"></ul>
+      <div class="usage-footer">
+        <span id="server-usage-label">Server usage</span>
+        <span id="server-usage" class="usage-line">—</span>
+      </div>
       <footer class="sidebar-footer" id="sidebar-footer"></footer>
     </aside>
 
@@ -60,6 +64,16 @@
           <button id="cancel-run-btn" class="btn danger small">Cancel run</button>
         </div>
       </header>
+
+      <!-- ── U6: live tasks of the active run ────────────────── -->
+      <div id="tasks-panel" class="tasks-panel hidden">
+        <div class="tasks-head">
+          <span>Tasks</span>
+          <span id="tasks-counts" class="tasks-counts"></span>
+          <span id="usage-line" class="usage-line"></span>
+        </div>
+        <ul id="tasks-list" class="tasks-list"></ul>
+      </div>
 
       <div id="chat" class="chat">
         <div class="empty-state" id="empty-state">

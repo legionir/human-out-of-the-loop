@@ -60,6 +60,12 @@ const clarifyQuestionsEl = $('#clarify-questions');
 const clarifyRoundEl = $('#clarify-round');
 const clarifySendBtn = $('#clarify-send-btn');
 const clarifyDeclineBtn = $('#clarify-decline-btn');
+// U6: live tasks + usage
+const tasksPanelEl = $('#tasks-panel');
+const tasksListEl = $('#tasks-list');
+const tasksCountsEl = $('#tasks-counts');
+const usageLineEl = $('#usage-line');
+const serverUsageEl = $('#server-usage');
 const planFeedbackEl = $('#plan-feedback');
 const planConfirmBtn = $('#plan-confirm-btn');
 const planRejectBtn = $('#plan-reject-btn');
@@ -74,6 +80,7 @@ const state = {
   defaultModel: null,
   modalPreview: false,
   modalClarify: false,
+  usageTimer: null,
 };
 
 // ─── Utilities ───────────────────────────────────────────────────
@@ -289,10 +296,17 @@ async function startRun() {
     done: false,
   };
   showRunControls('planning…');
+  // U6: task list + usage for this run (server-side truth, same process).
+  tasksPanelEl.classList.remove('hidden');
+  tasksListEl.textContent = '';
+  tasksCountsEl.textContent = '';
+  usageLineEl.textContent = '';
   // U5: clarification fires during PLANNING (no plan id yet) on the run
   // channel; polling is the fallback if the event is missed.
   connectRunStream(state.run);
   pollRun();
+  loadTasks();
+  loadServerUsage();
 }
 
 function pollRun() {
@@ -324,6 +338,7 @@ function pollRun() {
         run.done = true;
         return;
       }
+      if (s.state === 'running' || s.state === 'planning') loadTasks();
       run.pollTimer = setTimeout(pollRun, 800);
     })
     .catch((err) => {
@@ -334,6 +349,105 @@ function pollRun() {
 
 function assistantElFor(run) {
   return run.assistantEl;
+}
+
+// ─── U6: live tasks + usage ──────────────────────────────────────
+
+const TASK_BADGES = {
+  pending: '⏳',
+  running: '⚙︎',
+  completed: '✔',
+  failed: '✖',
+  cancelled: '⏹',
+};
+
+/** Refresh the task list of the active run (no-op when nothing is running). */
+async function loadTasks() {
+  const run = state.run;
+  if (!run) return;
+  try {
+    const data = await api(`/api/runs/${encodeURIComponent(run.runId)}/tasks`);
+    if (state.run !== run) return;
+    renderTasks(data);
+  } catch {
+    /* the next poll retries */
+  }
+}
+
+function renderTasks(data) {
+  const c = data.counts || {};
+  tasksCountsEl.textContent =
+    `${c.completed ?? 0}/${c.total ?? 0} done` +
+    (c.running ? ` · ${c.running} running` : '') +
+    (c.pending ? ` · ${c.pending} pending` : '') +
+    (c.failed ? ` · ${c.failed} failed` : '') +
+    (c.cancelled ? ` · ${c.cancelled} cancelled` : '');
+
+  tasksListEl.textContent = '';
+  for (const task of data.tasks || []) {
+    const li = document.createElement('li');
+    li.className = `task-item ${task.status}`;
+
+    const badge = document.createElement('span');
+    badge.className = 'task-badge';
+    badge.textContent = TASK_BADGES[task.status] || '•';
+
+    const label = document.createElement('span');
+    label.className = 'task-label';
+    label.textContent = `${task.planStepId || task.id} · ${task.status}`;
+    if (task.summary) label.title = task.summary;
+
+    const tokens = document.createElement('span');
+    tokens.className = 'task-tokens';
+    tokens.textContent = task.usage ? `${task.usage.totalTokens} tok` : '';
+
+    li.append(badge, label, tokens);
+    if (task.status === 'pending' || task.status === 'running') {
+      const btn = document.createElement('button');
+      btn.className = 'btn small task-cancel-btn';
+      btn.textContent = 'Cancel';
+      btn.addEventListener('click', () => void cancelTask(task.id, btn));
+      li.appendChild(btn);
+    }
+    tasksListEl.appendChild(li);
+  }
+
+  // Per-plan usage line (same process → authoritative for this server run).
+  if (data.planId && (data.counts?.total ?? 0) > 0) {
+    api(`/api/usage?planId=${encodeURIComponent(data.planId)}`)
+      .then((u) => {
+        usageLineEl.textContent = `${u.totalTokens} tok (${u.taskCount} task)`;
+      })
+      .catch(() => {
+        usageLineEl.textContent = '';
+      });
+  }
+}
+
+async function cancelTask(taskId, btn) {
+  const run = state.run;
+  if (!run) return;
+  btn.disabled = true;
+  try {
+    await api(`/api/runs/${encodeURIComponent(run.runId)}/tasks/${encodeURIComponent(taskId)}/cancel`, {
+      method: 'POST',
+    });
+    showToast(`Task ${taskId} cancelled.`, false);
+    await loadTasks();
+  } catch (err) {
+    showToast(`Cancel failed: ${err.message}`);
+    btn.disabled = false;
+  }
+}
+
+/** Server-wide usage (in-memory: a restart resets it). */
+async function loadServerUsage() {
+  try {
+    const u = await api('/api/usage');
+    serverUsageEl.textContent = `${u.totalTokens} tok · ${u.taskCount} task`;
+  } catch {
+    serverUsageEl.textContent = '—';
+  }
 }
 
 /** U5: run-scoped SSE channel — clarification arrives before any plan exists. */
@@ -519,6 +633,9 @@ function finishRunUi() {
   runBtn.disabled = false;
   hideRunControls();
   closeClarifyModal();
+  // U6: final task table stays on screen; the server-wide counter refreshes.
+  void loadTasks();
+  void loadServerUsage();
   if (state.run) {
     clearTimeout(state.run.pollTimer);
     if (state.run.es) state.run.es.close();
@@ -754,8 +871,16 @@ goalInput.addEventListener('keydown', (e) => {
     void startRun();
   }
 });
+function resetTasksPanel() {
+  tasksPanelEl.classList.add('hidden');
+  tasksListEl.textContent = '';
+  tasksCountsEl.textContent = '';
+  usageLineEl.textContent = '';
+}
+
 newSessionBtn.addEventListener('click', () => {
   stopRun();
+  resetTasksPanel();
   state.sessionId = null;
   sessionTitleEl.textContent = 'New session';
   chatEl.innerHTML = '';
@@ -916,6 +1041,8 @@ async function loadRegistry() {
 // Initial load
 loadSessions();
 loadRegistry();
+loadServerUsage();
+setInterval(loadServerUsage, 30_000);
 api('/api/health')
   .then((h) => {
     $('#sidebar-footer').textContent = `root: ${h.projectRoot}`;
