@@ -5,6 +5,30 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.13] — 2026-09-24 — the Windows list, closed (annotations paid off)
+
+The annotations from the CI run listed exactly what the (undownloadable) job
+log hid.  Five more platform truths, four of them in tests — and one in the
+product:
+
+- **`mkdirSync` could mask the real error.** When a store's directory is
+  replaced by a *file*, `withFileLockSync`/`atomicWriteFileSync` try to heal
+  by recreating the parent.  On Windows that `mkdir` fails with `EEXIST`
+  (POSIX says `ENOTDIR`), and the mkdir error was thrown instead of the
+  original one — the caller saw a different code per platform.  Both paths
+  now rethrow the original error when the heal fails.
+- **Absolute-path expectations are platform-specific.** Two assertions in
+  `hardening-security.test.ts` hard-coded `/home/user/project/src/main.ts`;
+  `path.resolve` legitimately answers `D:\home\user\project\src\main.ts`
+  on Windows.  They now compute the expectation with `path.resolve`.
+- **EPIPE is a POSIX signal.** A child that closes its own stdin makes the
+  next write fail with EPIPE on Linux/macOS; Windows anonymous pipes do not
+  report it, so no `'error'` event fires.  The portable guarantee — the write
+  rejects instead of becoming an unhandled event — is asserted everywhere;
+  the `onerror` assertion is POSIX-only now.
+
+The suite stays green (670 tests, 49 files, `tsc` clean).
+
 ## [27.2.12] — 2026-09-24 — the suite is honest on Windows (the new matrix found it)
 
 The first CI matrix run made four legs green (Ubuntu 22/24/26, macOS 22/24)

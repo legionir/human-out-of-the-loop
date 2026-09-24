@@ -28,11 +28,16 @@ import { bootstrapCatalogTools } from '../tools/catalog-bootstrap';
 
 describe('Path Traversal Protection', () => {
   const workspaceRoot = '/home/user/project';
+  // `path.resolve` is platform-specific (`/home/user/project/src/main.ts`
+  // on POSIX, `D:\home\user\project\src\main.ts` on Windows) — the
+  // assertion is about resolving INSIDE the given root, not about the
+  // separator, so compute it with the same function the code uses.
+  const insideRoot = path.resolve(workspaceRoot, 'src', 'main.ts');
 
   it('allows paths within the workspace', () => {
     const result = isPathWithinWorkspace('src/main.ts', workspaceRoot);
     expect(result.safe).toBe(true);
-    expect(result.resolvedPath).toBe('/home/user/project/src/main.ts');
+    expect(result.resolvedPath).toBe(insideRoot);
   });
 
   it('allows absolute paths within the workspace', () => {
@@ -69,7 +74,7 @@ describe('Path Traversal Protection', () => {
   it('validateWorkspacePath requires an explicit workspace root (phase 18 — no process.cwd() fallback)', () => {
     const result = validateWorkspacePath('src/main.ts', workspaceRoot);
     expect(result.safe).toBe(true);
-    expect(result.resolvedPath).toBe('/home/user/project/src/main.ts');
+    expect(result.resolvedPath).toBe(insideRoot);
   });
 
   it('validateWorkspacePath blocks traversal relative to the given root', () => {

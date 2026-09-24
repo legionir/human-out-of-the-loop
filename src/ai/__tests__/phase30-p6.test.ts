@@ -315,7 +315,13 @@ describe('Phase 30 / P6 — stdio transport', () => {
       transport.send({ jsonrpc: '2.0', id: 1, method: 'ping', params: {} } as never)
     ).rejects.toThrow();
     // The failure was REPORTED, not thrown as an unhandled 'error' event.
-    expect(errors.length).toBeGreaterThan(0);
+    // POSIX raises EPIPE on the next write once the child released its read
+    // end; Windows anonymous pipes do not, so the transport's 'error'
+    // channel stays silent there.  The portable guarantee is the rejection
+    // asserted above (a failed write never becomes an unhandled event).
+    if (process.platform !== 'win32') {
+      expect(errors.length).toBeGreaterThan(0);
+    }
 
     await transport.close();
   });

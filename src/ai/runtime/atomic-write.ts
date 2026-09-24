@@ -29,8 +29,14 @@ export function atomicWriteFileSync(filePath: string, data: string): void {
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
     // The directory disappeared after the store was constructed — recreate
-    // it once and retry (Phase 30 / P9).
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    // it once and retry (Phase 30 / P9).  If the parent cannot become a
+    // directory, the original ENOENT is the honest answer (Windows would
+    // otherwise surface EEXIST here, POSIX ENOTDIR).
+    try {
+      fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    } catch {
+      throw err;
+    }
     fs.writeFileSync(tmp, data, 'utf-8');
   }
   try {

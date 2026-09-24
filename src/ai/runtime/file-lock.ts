@@ -172,7 +172,16 @@ export function withFileLockSync<T>(
       // after construction fails every write with a bare ENOENT.
       if (code === 'ENOENT' && !healedDir) {
         healedDir = true;
-        fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+        try {
+          fs.mkdirSync(path.dirname(lockPath), { recursive: true });
+        } catch {
+          // The parent cannot be made a directory (it is a file, or a
+          // permission barrier).  Windows reports that as EEXIST where POSIX
+          // reports ENOTDIR — surface the ORIGINAL error either way, so the
+          // caller sees the same code on every platform instead of a
+          // misleading mkdir error.
+          throw err;
+        }
         continue;
       }
 
