@@ -889,6 +889,15 @@ export class Orchestrator {
       ...(ov?.agentTimeoutMs !== undefined ? { agentTimeoutMs: ov.agentTimeoutMs } : {}),
       ...(ov?.maxSteps !== undefined ? { maxSteps: ov.maxSteps } : {}),
       onStatusChange: (p, event) => {
+        // Phase 30 (P7): re-planning was invisible — the runtime emits
+        // `plan:replanning-attempt-N` / `plan:replanned`, and nothing
+        // translated or logged them, so the JSONL log and the terminal both
+        // stayed silent while the plan was rewritten.
+        if (event.startsWith('plan:replanning-attempt-')) {
+          this.observabilityLogger.logPlanReplanning(p, Number(event.split('-').pop()) || 1);
+        } else if (event === 'plan:replanned') {
+          this.observabilityLogger.logPlanReplanned(p);
+        }
         this.streamingManager.handlePlanStatusChange(p, event);
       },
       // Phase 20 (CORR-04): explicit acceptance hook instead of the old

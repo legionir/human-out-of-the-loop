@@ -5,6 +5,42 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.6] — 2026-09-24 — large plans and honest re-planning (Phase 30 / P7 of READINESS_AUDIT.md)
+
+A 12-step chained plan with a deliberately failing middle step showed that
+re-planning worked but was **invisible**, and that the step it threw away
+**disappeared** — the plan then reported `11/11 steps completed`, `SUCCESS`
+and exit 0 although the goal had 12 parts.
+
+### Fixed
+
+- **Re-planning was invisible.** `PlanRuntime` emits
+  `plan:replanning-attempt-N` and `plan:replanned`; the streaming manager
+  only matched the exact string `plan:replanning` and nothing logged either
+  event, so neither the terminal nor the JSONL log showed that the plan was
+  being rewritten. Both events are translated and logged now (the CLI prints
+  `↻ Re-planning attempt 1 — revising the plan...` and
+  `↻ Plan revised — N step(s) after re-planning.`).
+- **An abandoned step vanished from the plan.** The merge of a revised plan
+  kept only completed steps, so a failed step and its reason were dropped:
+  the store, `plans show` and the final report kept no record, and the plan
+  was reported as `completed` / `SUCCESS`. The new `replan-merge.ts` keeps
+  every terminal step (`done` **and** `failed`), which also makes the plan
+  status honest (`failed-partial`).
+  - A replacement that reuses the failed step's id is no longer swallowed:
+    it is recorded as `<id>~replan<n>` and dependants are rewired to it.
+  - Dependencies on a kept failed step are dropped — that edge can never be
+    satisfied, so keeping it deadlocked the plan (the case re-planning
+    exists to handle).
+- **`logPlanCompleted` no longer logs a `failed-partial` plan as
+  `plan:completed`** ("Plan completed. 11/12 steps done." told the log
+  reader the opposite of the truth): the event type and level follow the
+  real plan status now.
+
+Tests: `src/ai/__tests__/phase30-p7.test.ts` — 10 tests (merge semantics,
+replan event translation, truthful logging).  626 tests / 44 files green,
+`tsc` clean.
+
 ## [27.2.5] — 2026-09-24 — real MCP stdio transport (Phase 30 / P6 of READINESS_AUDIT.md)
 
 `transport: "stdio"` was advertised by the registry schema and the CLI help, but

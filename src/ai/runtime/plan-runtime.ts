@@ -16,6 +16,7 @@ import {
   getReadySteps,
 } from '../schemas/plan.js';
 import type { AcceptanceChecker } from './acceptance-checker.js';
+import { mergeReplannedSteps } from './replan-merge.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -538,16 +539,9 @@ Produce a new plan that:
         return false; // New plan has cycles
       }
 
-      // Merge: keep completed steps from old plan, replace the rest
-      const completedSteps = plan.steps.filter((s) => s.status === 'done');
-      const newSteps = newPlan.steps.filter(
-        (s) => !completedSteps.some((c) => c.id === s.id)
-      );
-
-      plan.steps = [
-        ...completedSteps,
-        ...newSteps.map((s) => ({ ...s, status: 'pending' as const })),
-      ];
+      // Phase 30 (P7): keep terminal steps (done AND failed) so an abandoned
+      // sub-goal never disappears from the plan; see `replan-merge.ts`.
+      plan.steps = mergeReplannedSteps(plan.steps, newPlan.steps, this.replanningCount);
 
       this.persist(plan);
       this.notify(plan, 'plan:replanned');

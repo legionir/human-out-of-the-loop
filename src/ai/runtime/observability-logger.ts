@@ -30,6 +30,7 @@ export interface LogEntry {
     | 'plan:failed'
     | 'plan:cancelled'
     | 'plan:replanning'
+    | 'plan:replanned'
     | 'step:started'
     | 'step:completed'
     | 'step:failed'
@@ -208,12 +209,22 @@ export class ObservabilityLogger {
 
   logPlanCompleted(plan: Plan): void {
     const done = plan.steps.filter((s) => s.status === 'done').length;
+    const abandoned = plan.steps.length - done;
+    // Phase 30 (P7): a plan that ends `failed-partial` (or cancelled) is NOT a
+    // completion — logging it as `plan:completed` ("Plan completed. 11/12
+    // steps done.") told the JSONL reader the opposite of the truth.
+    const eventType =
+      plan.status === 'cancelled'
+        ? 'plan:cancelled'
+        : plan.status === 'failed-partial'
+          ? 'plan:failed'
+          : 'plan:completed';
     this.log({
       planId: plan.id,
-      eventType: 'plan:completed',
-      message: `Plan completed. ${done}/${plan.steps.length} steps done.`,
-      level: 'info',
-      payload: { completedSteps: done, totalSteps: plan.steps.length },
+      eventType,
+      message: `Plan ${plan.status}. ${done}/${plan.steps.length} steps done.`,
+      level: plan.status === 'completed' ? 'info' : 'warn',
+      payload: { completedSteps: done, totalSteps: plan.steps.length, abandonedSteps: abandoned },
     });
   }
 
@@ -234,6 +245,25 @@ export class ObservabilityLogger {
       message: `Re-planning attempt ${attempt}.`,
       level: 'warn',
       payload: { attempt },
+    });
+  }
+
+  /**
+   * Phase 30 (P7): the plan was actually revised by a re-planning attempt.
+   * `logPlanReplanning` (below) records the ATTEMPT; this records the RESULT,
+   * including the steps that were abandoned and are kept in the plan.
+   */
+  logPlanReplanned(plan: Plan): void {
+    const done = plan.steps.filter((s) => s.status === 'done').length;
+    const abandoned = plan.steps.filter((s) => s.status === 'failed').length;
+    this.log({
+      planId: plan.id,
+      eventType: 'plan:replanned',
+      message:
+        `Plan revised: ${plan.steps.length} step(s) — ${done} done, ` +
+        `${abandoned} abandoned step(s) kept in the plan.`,
+      level: 'warn',
+      payload: { totalSteps: plan.steps.length, completedSteps: done, abandonedSteps: abandoned },
     });
   }
 

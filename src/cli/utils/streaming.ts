@@ -84,6 +84,10 @@ export function createProgressRenderer(options: ProgressRendererOptions = {}): P
         out(`${color.warn('↻')} ${event.message}`);
         break;
       }
+      case 'plan:replanned': {
+        out(`${color.warn('↻')} ${event.message}`);
+        break;
+      }
       case 'task:tool-call': {
         // Compact events only (Law 14) — the tool NAME is all we have,
         // and it is only shown with --verbose.

@@ -17,6 +17,7 @@ export interface ProgressEvent {
     | 'plan:step-completed'
     | 'plan:step-failed'
     | 'plan:replanning'
+    | 'plan:replanned'
     | 'plan:completed'
     | 'plan:cancelled'
     | 'plan:failed'
@@ -126,8 +127,27 @@ export class StreamingManager {
         payload: { totalSteps: plan.steps.length },
       };
     }
-    if (event === 'plan:replanning') {
-      return { ...base, type: 'plan:replanning', message: 'Re-planning in progress...' };
+    // Phase 30 (P7): the runtime emits `plan:replanning-attempt-N`, which
+    // the exact-match check below never matched — the user was never told
+    // that the plan was being revised.
+    if (event === 'plan:replanning' || event.startsWith('plan:replanning-attempt-')) {
+      const attempt = Number(event.split('-').pop());
+      return {
+        ...base,
+        type: 'plan:replanning',
+        message: Number.isFinite(attempt)
+          ? `Re-planning attempt ${attempt} — revising the plan...`
+          : 'Re-planning in progress...',
+        payload: Number.isFinite(attempt) ? { attempt } : undefined,
+      };
+    }
+    if (event === 'plan:replanned') {
+      return {
+        ...base,
+        type: 'plan:replanned',
+        message: `Plan revised — ${plan.steps.length} step(s) after re-planning.`,
+        payload: { totalSteps: plan.steps.length },
+      };
     }
     if (event === 'plan:finished') {
       const done = plan.steps.filter((s) => s.status === 'done').length;
