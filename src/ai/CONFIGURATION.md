@@ -30,7 +30,21 @@
 | *(هر env var تعریف‌شده در `tokenEnvVar`/`keyEnvVar`)* | بله | مطابق `registry/mcp-servers/*.json` |
 | `TEST_SECRET_TOKEN` | مثال تست | نمونه در hardening-security.test.ts |
 
-**نکته امنیتی:** هیچ credential نباید به صورت inline در `registry/mcp-servers/*.json` قرار گیرد. فقط نام env var (مثل `tokenEnvVar`) ذخیره می‌شود و مقدار واقعی از `process.env` خوانده می‌شود. `McpConnector.sanitiseError` هر مقدار credential را از پیام خطا حذف و با `***REDACTED***` جایگزین می‌کند.
+**نکته امنیتی:** هیچ credential نباید به صورت inline در `registry/mcp-servers/*.json` قرار گیرد. فقط نام env var (مثل `tokenEnvVar`) ذخیره می‌شود و مقدار واقعی از منبع محیط خوانده می‌شود — پیش‌فرض `process.env` و در صورت تزریق، `McpConnectorOptions.env` / `OrchestratorConfig.env` (فاز ۲۷، CFG-08). `McpConnector.sanitiseError` هر مقدار credential را از پیام خطا حذف و با `***REDACTED***` جایگزین می‌کند.
+
+### تزریق محیط — env injection (فاز ۲۷، CFG-08)
+
+هر جا مقدار محیطی لازم است، یک منبع قابل تزریق از نوع `EnvSource` (`Readonly<Record<string, string | undefined>>`، ماژول `src/ai/env.ts`) پذیرفته می‌شود؛ **حذف پارامتر = رفتار قبلی** (خواندن زنده از `process.env`، بدون snapshot):
+
+| نقطه | نحوه‌ی تزریق | پیش‌فرض |
+|---|---|---|
+| `Orchestrator` (کل زنجیره) | `new Orchestrator({ projectRoot, env })` — به `ModelRegistry` و bootstrap مربوط به MCP منتقل می‌شود | `process.env` |
+| `ModelRegistry` | `new ModelRegistry({ env })` → به `ProviderFactory.create(config, env)` می‌رسد | `process.env` |
+| Providerها | `factory.create(config, env)` — `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `LOCAL_MODEL_BASE_URL` | `process.env` (fallback صریح) |
+| `McpConnector` | `new McpConnector({ toolRegistry, env })` — `tokenEnvVar`/`keyEnvVar` از همین منبع | `process.env` |
+| `bootstrapMcpServers` | پارامتر چهارم `env` (فقط وقتی connector تزریق نشده باشد) | `process.env` |
+
+کاربرد: اجرای چند Orchestrator با credentialهای متفاوت در یک پروسه (سرور/تست) بدون دست‌کاری `process.env`؛ هر instance فقط env خودش را می‌بیند (`modelRegistry.envSource` قابل بازرسی است). متغیرهای غیر-secret مثل `HOTL_*` همچنان از env پروسه در لایه‌ی CLI/server خوانده می‌شوند.
 
 ## فیلدهای `OrchestratorConfig` (منبع حقیقت: `OrchestratorConfigSchema` در `src/ai/orchestrator.ts`)
 
@@ -53,6 +67,7 @@
 | `defaultModelId` | `string` | `'gpt-4o'` | خیر | مدل پیش‌فرض (باید در `registry/models/*.json` باشد) |
 | `redactKeys` | `string[].min(1)` | `[]` | خیر | کلیدهای اضافی redact (U1) |
 | `maxClarificationRounds` | `int 0..10` | `3` | خیر | سقف round ابهام‌زدایی (C4/U5) |
+| `env` | `EnvSource` (اختیاری، `z.custom`) | `process.env` | خیر | منبع محیط per-Orchestrator برای providerها و credentialهای MCP (فاز ۲۷، CFG-08) |
 | `onProgress` | callback (خارج از schema، ساختاری) | — | خیر | دریافت `ProgressEvent`ها (فاز ۱۹) |
 
 **اعتبارسنجی:** هر مقدار نامعتبر → `ZodError` در constructor (فاز ۲۲). `RunOverrides` (U3) می‌تواند `modelId`/`agentTimeoutMs`/`maxSteps`/`maxReplanningAttempts` را **برای یک run** جایگزین کند؛ `modelId` نامعتبر → `InvalidModelError` با لیست idهای معتبر، **قبل از هر side-effect**.
@@ -276,7 +291,7 @@ await orchestrator.shutdown();
 | A — Storage filename | PATH-06 | ۲۲ | ✅ فیکس | filename = `sha256(id).slice(0,16).json` در `plan-store`/`session-store` — تست دو id متمایز روی یک فایل |
 | A — Windows case | PATH-08 | ۲۰ | ✅ فیکس | `normaliseCase()` در `path-security.ts:32-34` (lowercase روی `process.platform === 'win32'`) و استفاده در مقایسه‌ی مسیرها (خط ۷۹) |
 | B — Config Wiring | CFG-01…07 | ۱۹ (+ فاز ۲۲ برای schema، U3 برای wire کردن `maxSteps`) | ✅ فیکس | یک `bootstrapCatalogTools` (orchestrator:380)؛ `RateLimiter` و `DelegationGuard` config می‌گیرند؛ همه‌ی فیلدهای مستندشده در `OrchestratorConfigSchema` هستند؛ `maxSteps` حالا واقعاً به `stepCountIs` می‌رسد (U3) |
-| B — Env injection | CFG-08 | ۱۹ | ⚠️ **باز (by design)** | providerها/`mcp-connector` هنوز `process.env` را مستقیم می‌خوانند (`openai-provider.ts:15`, `anthropic-provider.ts:14`, `mcp-connector.ts:53,63`) و per-Orchestrator env injection ندارند. مدل امنیتی پروژه همین است (credential فقط از env، هرگز inline در registry — بخش «MCP Servers» بالا) و در `dev`/`server` این envها همان env پروسه‌اند؛ تزریق per-Orchestrator یک تغییر API بزرگ‌تر است و انجام نشد. **(تصحیح audit: در نسخهٔ قبلی این ردیف اشتباهاً ✅ با شاهد مربوط به catalog ثبت شده بود.)** |
+| B — Env injection | CFG-08 | ۲۷ | ✅ فیکس | `EnvSource` تزریق‌پذیر در `src/ai/env.ts`؛ `OrchestratorConfig.env` → `ModelRegistry({env})` → `ProviderFactory.create(config, env)` و `McpConnector({env})`/`bootstrapMcpServers(..., env)`. پیش‌فرض همه‌جا `process.env` است (بدون تغییر رفتار برای فراخوان‌های موجود) و چهار تست CFG-08 در `phase27.test.ts` تزریق، عدم fallback هنگام تزریق، و جداسازی دو Orchestrator را پوشش می‌دهد. مدل credential بدون تغییر: مقدارها هنوز فقط از env می‌آیند (فقط منبع env قابل تعویض شد). |
 | C — Singleton | SING-01, SING-02 | ۱۹ | ✅ فیکس | ۰ `?? globalEventBus`؛ `agentRuntime` per-Orchestrator (بدون singleton ماژولی) |
 | D — ID Generation | ID-01…06 | ۲۶ | ✅ فیکس | همه به `prefix_randomUUID()`؛ source-scan + تست collision ۵۰۰۰-id در `phase26.test.ts` |
 | E — Persistence | PERS-01…03 | ۲۰ | ✅ فیکس | `atomicWriteFileSync` (tmp+uuid+rename) در هر دو store؛ `structuredClone` + snapshot |
@@ -301,9 +316,9 @@ await orchestrator.shutdown();
 | مورد | شدت | وضعیت |
 |---|---|---|
 | PERS-04 — بدون file locking بین‌پروسه‌ای | 🟡 P2 | ⚠️ trade-off پذیرفته‌شده (ریسک با atomic write کاهش یافته؛ فایل‌های `.ai-runtime` تک‌نویسنده‌اند) |
-| CFG-08 — `process.env` مستقیم در providerها/MCP (بدون env injection per-Orchestrator) | 🟡 P2 | ⚠️ by design (مدل credential = env؛ تزریق per-Orchestrator تغییر API بزرگ‌تر) |
-| SEC-02 — رد بی‌صدای فایل‌های غیرقابل‌خواندن در `search_code` | 🟡 P2 | ⚠️ باز — قابل بستن با شمارنده/report فایل‌های skip‌شده |
-| PERF-06 — `list()` در storeها: `readdirSync` + خواندن همه‌ی فایل‌ها هر بار | 🟢 P2 | ⚠️ باز (در نتیجهٔ فاز ۲۱ صریحاً خارج از دامنه اعلام شد) |
-| PERF-08 — `EventBus.emit` با `new Set` در هر emit | 🟢 P2 | ⚠️ باز (همان) |
+| CFG-08 — `process.env` مستقیم در providerها/MCP (بدون env injection per-Orchestrator) | 🟡 P2 | ✅ بسته‌شده در فاز ۲۷ (`src/ai/env.ts` + `OrchestratorConfig.env`؛ پیش‌فرض `process.env`؛ تست‌های `phase27.test.ts`) |
+| SEC-02 — رد بی‌صدای فایل‌های غیرقابل‌خواندن در `search_code` | 🟡 P2 | ✅ بسته‌شده در فاز ۲۷: خروجی `skippedCount` + `skipped[]` (سقف ۲۰) برای فایل/دایرکتوری غیرقابل‌خواندن |
+| PERF-06 — `list()` در storeها: `readdirSync` + خواندن همه‌ی فایل‌ها هر بار | 🟢 P2 | ✅ بسته‌شده در فاز ۲۷: ایندکس `idByFile` — فقط فایل‌های جدید parse می‌شوند (۵ فایل → ۵ خواندن در حالت سرد، ۰ خواندن برای listهای بعدی) |
+| PERF-08 — `EventBus.emit` با `new Set` در هر emit | 🟢 P2 | ✅ بسته‌شده در فاز ۲۷: fast path بدون allocation + بافر قابل بازاستفاده به‌ازای عمق re-entrancy |
 | Open Q5 — کتابخانه‌ی ReDoS | — | ✅ بسته‌شده با راه‌حل جانشین: `safe-regex`/`re2` استفاده نشد؛ `regex-guard.ts` سفارشی (تشخیص nested quantifier) + سقف طول ۲۰۰ به‌جای timeout — بدون dependency native |
 | ارتقای UI به Next.js/React (یادداشت فاز ۲۴) | — | 🔵 اختیاری/آینده — UI vanilla عمداً ساده ماند (قابل ارتقا؛ پلن UI کامل شده) |

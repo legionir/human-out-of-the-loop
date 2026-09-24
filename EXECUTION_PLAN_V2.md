@@ -600,13 +600,27 @@ GET  /api/observability?planId=&tail=
 
 | مورد | منبع در پلن | شدت | وضعیت |
 |---|---|---|---|
-| PERS-04 — بدون file locking بین‌پروسه‌ای | جدول E | 🟡 P2 | ⚠️ trade-off پذیرفته‌شده — ریسک با `atomicWriteFileSync` فاز ۲۰ کاهش یافته (storeها تک‌نویسنده در همان پروسه‌اند) |
-| CFG-08 — خواندن مستقیم `process.env` در providerها و mcp-connector (بدون env injection per-Orchestrator) | جدول B | 🟡 P2 | ⚠️ by design — مدل credential پروژه «فقط از env» است و در `CONFIGURATION.md` مستند شده؛ تزریق per-Orchestrator تغییر API بزرگ‌تر و خارج از دامنه نگه داشته شد |
-| SEC-02 — `search_code` فایل‌های غیرقابل‌خواندن را بی‌صدا رد می‌کند (خطای دسترسی دیده نمی‌شود) | جدول H | 🟡 P2 | ⚠️ باز — **قابل بستن در یک تغییر کوچک**: شمارش فایل‌های skip‌شده + فیلد `skipped` در خروجی ابزار |
-| PERF-06 — `list()` در `FilePlanStore`/`FileSessionStore`: هر بار `readdirSync` + خواندن و parse همه‌ی فایل‌ها | جدول I | 🟢 P2 | ⚠️ باز — در نتیجه‌ی فاز ۲۱ صریحاً خارج از دامنه اعلام شد (هزینه‌اش برای پروژه‌های کوچک ناچیز است) |
-| PERF-08 — `EventBus.emit` در هر emit یک `Set` جدید برای dedup می‌سازد | جدول I | 🟢 P2 | ⚠️ باز — همان سیاست PERF-06 (اگر emit هم‌زمان بالا برود، مقدار قابل بازاستفاده لازم است) |
+| PERS-04 — بدون file locking بین‌پروسه‌ای | جدول E | 🟡 P2 | ⏳ آخرین مورد باز — قفل `O_EXCL` + stale-check اطراف نوشتن storeها (فاز ۲۷) |
+| CFG-08 — خواندن مستقیم `process.env` در providerها و mcp-connector (بدون env injection per-Orchestrator) | جدول B | 🟡 P2 | ✅ بسته شد (`e7f1399`) — `EnvSource` در `src/ai/env.ts`؛ `OrchestratorConfig.env` → `ModelRegistry({env})` → `ProviderFactory.create(config, env)` + `McpConnector({env})`/`bootstrapMcpServers(..., env)`؛ پیش‌فرض `process.env` (بدون تغییر رفتار) |
+| SEC-02 — `search_code` فایل‌های غیرقابل‌خواندن را بی‌صدا رد می‌کند (خطای دسترسی دیده نمی‌شود) | جدول H | 🟡 P2 | ✅ بسته شد (`ba3de55`) — خروجی `skippedCount` + `skipped[]` (سقف ۲۰ رکورد) شامل فایل و دایرکتوری غیرقابل‌خواندن |
+| PERF-06 — `list()` در `FilePlanStore`/`FileSessionStore`: هر بار `readdirSync` + خواندن و parse همه‌ی فایل‌ها | جدول I | 🟢 P2 | ✅ بسته شد (`eaa8aa9`) — ایندکس `idByFile`: هر فایل فقط یک‌بار parse می‌شود؛ list گرم صفر خواندن I/O دارد |
+| PERF-08 — `EventBus.emit` در هر emit یک `Set` جدید برای dedup می‌سازد | جدول I | 🟢 P2 | ✅ بسته شد (`ca96332`) — fast path بدون allocation + بافر dedup به‌ازای عمق (re-entrancy-safe)؛ ۱۰۰۰ emit → یک بافر |
 | سوال ۵ بخش ۴ (ReDoS) | بخش ۴ | — | ✅ بسته شد با راه‌حل جانشین: `safe-regex`/`re2` اضافه نشد؛ `regex-guard.ts` سفارشی (تشخیص nested quantifier) + سقف طول الگو (۲۰۰ کاراکتر) بدون timeout اجرایی |
 | یادداشت فاز ۲۴: ارتقای UI به Next.js/React | فاز ۲۴ | — | 🔵 آینده/اختیاری — UI نسخه‌ی فعلی vanilla ماند (طبق تصمیم کاربر) و پلن UI (U1–U8) کامل است |
+
+### [🟢] فاز ۲۷: بستن باقی‌مانده‌های P2 — در جریان (۲۰۲۶-۰۹-۲۴)
+
+**مبنا:** «اینارو ببند» — بستن دقیق ۵ مورد جدول بالا با کمترین تغییر و تست مستقیم؛ هر مورد مستقل و قابل تعریف در `src/ai/__tests__/phase27.test.ts`.
+
+| گام | مورد | نتیجه |
+|---|---|---|
+| ۱ | SEC-02 | `ba3de55` — `search_code` فایل/دایرکتوری‌های غیرقابل‌خواندن را با `skippedCount` + `skipped[]` (سقف `SKIPPED_REPORT_LIMIT = 20`) گزارش می‌کند؛ مسیر دایرکتوری که قبلاً `return` بی‌صدا بود هم پوشش داده شد |
+| ۲ | PERF-06 | `eaa8aa9` — ایندکس `idByFile` در `FilePlanStore`/`FileSessionStore`؛ list فقط فایل‌های ندیده را parse می‌کند، رکوردهای حذف‌شده را کنار می‌گذارد؛ نوشتن خود store ایندکس را گرم می‌کند |
+| ۳ | PERF-08 | `ca96332` — `EventBus.emit` بدون allocation در مسیرهای رایج؛ بافر dedup به‌ازای عمق، آزادسازی در `finally` |
+| ۴ | CFG-08 | `e7f1399` — `EnvSource` تزریق‌پذیر (`src/ai/env.ts`) + `OrchestratorConfig.env` + thread به `ModelRegistry`، providerها، `McpConnector`، `bootstrapMcpServers`؛ پیش‌فرض همه‌جا `process.env` |
+| ۵ | PERS-04 | در جریان — قفل بین‌پروسه‌ای (`O_EXCL` lockfile + stale detection) اطراف نوشتن storeهای فایل‌محور |
+
+**تصمیم طراحی CFG-08 (تصحیح by-design قبلی):** مدل credential تغییر نکرد (مقدارها فقط از env)، اما «منبع env» قابل تعویض شد تا چند Orchestrator در یک پروسه credentialهای جدا داشته باشند؛ ماژول در `src/ai/` (نه `runtime/`) قرار گرفت تا گیت معماری «Registry مستقل از Runtime» نقض نشود و fallback صریح `process.env` در providerها باقی بماند تا گیت DevOps همچنان برقرار باشد (ثبت به‌عنوان انطباق با گیت‌های موجود، نه تغییر تست).
 
 > **تصحیح audit (۲۰۲۶-۰۹-۲۴):** جدول Scope Audit در `src/ai/CONFIGURATION.md` در دو نقطه دقیق نبود — ردیف CFG-08 اشتباهاً ✅ با شاهد مربوط به catalog ابزارها ثبت شده بود (در واقع باز/by-design است) و PERF-06/PERF-08 هر چند در نتیجه‌ی فاز ۲۱ به‌عنوان خارج از دامنه مستند شده بودند، در جدول audit به‌شکل ✅ تجمیعی دیده می‌شدند. جدول تصحیح شد و این فهرست صریح جای آن ابهام را می‌گیرد.
 
