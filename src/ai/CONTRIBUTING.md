@@ -2,31 +2,46 @@
 
 ## افزودن Tool جدید
 
-### ۱. پیاده‌سازی
-فایل جدید در `src/ai/tools/implementations/my-tool.ts`:
+### ۱. پیاده‌سازی (factory pattern — فاز ۱۸)
+
+ابزارهای filesystem باید **به `projectRoot` مقید** باشند (PATH-01…09): به‌جای export یک tool آماده، یک **factory** بنویسید که root را تزریق می‌کند. الگوی مرجع: `src/ai/tools/implementations/read-file.ts`.
+
+فایل جدید `src/ai/tools/implementations/my-tool.ts`:
 ```typescript
 import { tool } from 'ai';
 import { z } from 'zod';
-import { validateWorkspacePath } from './path-security';
+import { validateWorkspacePath } from './path-security.js';
 
-export const myTool = tool({
-  description: 'Description of what this tool does.',
-  inputSchema: z.object({
-    input: z.string().min(1),
-  }),
-  execute: async ({ input }) => {
-    // Security: validate paths if filesystem-related
-    const validation = validateWorkspacePath(input);
-    if (!validation.safe) {
-      return { success: false, error: validation.reason, code: 'PATH_TRAVERSAL_BLOCKED' };
-    }
-    // Return structured result: { success, ... } or { success: false, error, code }
-    return { success: true, result: '...' };
-  },
-});
+const inputSchema = z.object({ path: z.string().min(1) });
+
+/**
+ * Factory: the workspace root is INJECTED — never `process.cwd()`
+ * (PATH-01/PATH-09).  Results must not leak absolute host paths (SEC-05):
+ * return a path relative to `projectRoot`.
+ */
+export function createMyTool(projectRoot: string) {
+  return tool({
+    description: 'What this tool does.',
+    inputSchema,
+    execute: async ({ path: filePath }) => {
+      const validation = validateWorkspacePath(filePath, projectRoot);
+      if (!validation.safe) {
+        return { success: false as const, error: validation.reason, code: 'PATH_TRAVERSAL_BLOCKED' };
+      }
+      // ... do the work; always return a structured result
+      return { success: true as const, result: '...' };
+    },
+  });
+}
 ```
 
-### ۲. ثبت metadata
+نکات الزامی:
+- toolهای غیر-filesystem (بدون دسترسی به دیسک) می‌توانند بدون factory ساخته شوند — ولی هر ابزاری که مسیر می‌گیرد **باید** factory باشد.
+- هرگز مسیر مطلق میزبان را به مدل برنگردانید (SEC-05/SEC-06).
+- ورودی‌ها را با Zod اعتبارسنجی کنید (`ToolDefinitionSchema` + `inputSchema`).
+
+### ۲. ثبت metadata (data-driven — Law 16)
+
 فایل `registry/tools/my_tool.json`:
 ```json
 {
@@ -38,28 +53,31 @@ export const myTool = tool({
   "category": "custom"
 }
 ```
+هیچ تغییری در runtime لازم نیست — `bootstrapTools()` خودش `registry/tools/*.json` را می‌خواند (CFG-01).
 
-### ۳. اتصال در bootstrap
-در `src/ai/tools/bootstrap.ts` به `IMPLEMENTATIONS` map اضافه کنید:
+### ۳. اتصال implementation در bootstrap
+
+`src/ai/tools/bootstrap.ts` تنها جایی است که implementationها import می‌شوند (Law 12 — Agentها هرگز Tool را مستقیم import نمی‌کنند):
+
 ```typescript
-import { myTool } from './implementations/my-tool.js';
-const IMPLEMENTATIONS: Record<string, Tool> = {
-  // ... existing
-  my_tool: myTool,
+import { createMyTool } from './implementations/my-tool.js';
+
+const implementations: Record<string, Tool> = {
+  read_file: createReadFileTool(projectRoot),
+  // ...
+  my_tool: createMyTool(projectRoot),   // ← root تزریق می‌شود
 };
 ```
-و در `src/ai/registries/tool-registry.ts` متد `getMetadataRegistry()` برای دسترسی type-safe موجود است.
+اگر metadata داشته باشید ولی implementation نداشته باشید، bootstrap با خطای صریح fail می‌کند (`has metadata but no implementation`).
 
-همچنین در `src/ai/orchestrator.ts`، ابزارهای پایه به صورت مستقیم ثبت می‌شوند:
-```typescript
-toolRegistry.registerDefinition({ id: 'my_tool', name: 'My Tool', description: '...', source: 'local', modulePath: './my-tool', category: 'custom' });
-toolRegistry.registerImplementation('my_tool', myTool);
-```
+### ۴. مجوز دسترسی (Law 18)
 
-### ۴. مجوز دسترسی
-Tool id را به `allowedTools` Personaهای مجاز در `registry/personas/*.json` اضافه کنید.
+Tool id را به `allowedTools` Personaهای مجاز در `registry/personas/*.json` اضافه کنید؛ در غیر این صورت Factory آن را از agent حذف می‌کند (warning) و Feasibility Gate پلن را رد می‌کند.
 
----
+### ۵. تست
+
+- تست واحد در `src/ai/__tests__/` (شامل یک case path-traversal که باید `PATH_TRAVERSAL_BLOCKED` برگرداند).
+- تست‌های source-scan فاز ۲۲ (`phase22.test.ts`) بررسی می‌کنند که در runtime صفر `console.*` و `any` کم باشد — کد جدید نباید آن‌ها را نقض کند.
 
 ## افزودن Skill جدید
 
@@ -211,3 +229,64 @@ await connector.connectServer(config);
 - Credentialها را هرگز inline در JSON قرار ندهید — فقط `tokenEnvVar` / `keyEnvVar`
 - `allowedTools` را در هر دو مسیر static و dynamic تست کنید
 - `ObservabilityLogger` به صورت خودکار `apiKey`, `token`, `password`, `secret`, `authorization` را به `***REDACTED***` تبدیل می‌کند
+
+---
+
+## افزودن CLI command جدید
+
+CLI فقط یک لایه‌ی نازک روی Orchestrator است (`src/cli.ts` → `src/cli/commands/*.ts`).
+
+### ۱. ماژول command را بنویسید
+
+`src/cli/commands/my-command.ts`:
+```typescript
+import path from 'node:path';
+import { prepareCliEnvironment } from '../utils/config.js';
+import { out, color, err } from '../utils/output.js';
+
+export interface MyCommandOptions {
+  projectRoot?: string;
+  json?: boolean;
+}
+
+export async function myCommand(opts: MyCommandOptions): Promise<number> {
+  const projectRoot = path.resolve(opts.projectRoot ?? process.cwd());
+  prepareCliEnvironment(projectRoot);      // .env + global config (U1)
+  const orchestrator = new Orchestrator({ projectRoot, persistent: true });
+  await orchestrator.initialize();
+  try {
+    // از APIهای موجود Orchestrator استفاده کنید (بدون منطق تکراری)
+    out(opts.json ? JSON.stringify(result) : color.info('…'));
+    return 0;                               // exit code
+  } finally {
+    await orchestrator.shutdown();          // همیشه: unsubscribe + waitForAll
+  }
+}
+```
+
+### ۲. در `src/cli.ts` ثبت کنید
+
+```typescript
+program
+  .command('my-command')
+  .description('What it does')
+  .option('--project-root <dir>', 'workspace root')
+  .option('--json', 'machine-readable output')
+  .action(async (opts) => process.exitCode = await myCommand(opts));
+```
+
+### ۳. قواعد
+
+- **خروجی کاربر** فقط از طریق `src/cli/utils/output.ts` (`out`/`err`/`color`) — نه `console.*` (تست source-scan فاز ۲۲). لاگ observability از `ObservabilityLogger` در runtime می‌آید.
+- **خروجی ماشینی** با `--json` (مثل `models`/`usage`) برای اسکریپت‌ها.
+- **exit code**: `0` موفق، `1` خطای اجرا/کاربر — هرگز `process.exit()` مستقیم بدون بازگشت مقدار.
+- پرچم‌های per-run (`--model`, `--timeout-ms`, `--max-steps`, `--max-replans`) باید به `runOverrides` (`Orchestrator.run`) نگاشت شوند، نه به config سراسری — همان قراردادی که سرور وب U3 استفاده می‌کند.
+- تست: `src/cli/__tests__/cli.test.ts` را ببینید (الگوی `withIsolatedHome` + tmp project root).
+
+## افزودن endpoint جدید به وب سرور (UI)
+
+1. route را در `src/server/routes/*.ts` بسازید (الگو: `registry.ts`, `usage.ts`) و در `src/server.ts` mount کنید — middleware lazy-init تضمین می‌کند orchestrator آماده است.
+2. اگر endpoint داده‌ی حساس دارد: هرگز credential/مسیر مطلق/prompt کامل را برنگردانید (`server/types.ts` + یادداشت‌های Law 14).
+3. خطاها را با status درست برگردانید (`400` ورودی نامعتبر، `404` نبود منبع، `409` state نامناسب).
+4. UI در `public/app.js` (بدون build step) + استایل در `public/style.css`؛ از `textContent` برای متن مدل استفاده کنید (نه `innerHTML`).
+5. تست e2e با supertest الگوی `src/server/__tests__/u*.test.ts` (mock ماژول `ai`)، و در نهایت README (جدول endpointها) را به‌روز کنید.

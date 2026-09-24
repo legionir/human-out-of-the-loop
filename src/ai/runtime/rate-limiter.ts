@@ -9,6 +9,12 @@ export interface RateLimiterConfig {
   maxBackoffMs: number;
   /** Maximum retry attempts on rate-limit (default: 3) */
   maxRetries: number;
+  /**
+   * Phase 25 (QUAL-07): randomness source for the backoff jitter.
+   * Defaults to `Math.random` (production); tests inject a deterministic
+   * function so delay assertions are not flaky.
+   */
+  random: () => number;
 }
 
 interface ProviderState {
@@ -41,6 +47,7 @@ export class RateLimiter {
       baseBackoffMs: config?.baseBackoffMs ?? 1000,
       maxBackoffMs: config?.maxBackoffMs ?? 30_000,
       maxRetries: config?.maxRetries ?? 3,
+      random: config?.random ?? Math.random,
     };
   }
 
@@ -86,8 +93,9 @@ export class RateLimiter {
    */
   getBackoffDelay(attempt: number): number {
     const delay = this.config.baseBackoffMs * Math.pow(2, attempt);
-    // Add jitter (±25%)
-    const jitter = delay * 0.25 * (Math.random() * 2 - 1);
+    // Add jitter (±25%) — `random` is injectable (QUAL-07) so tests can
+    // assert exact delays without depending on Math.random.
+    const jitter = delay * 0.25 * (this.config.random() * 2 - 1);
     return Math.min(delay + jitter, this.config.maxBackoffMs);
   }
 

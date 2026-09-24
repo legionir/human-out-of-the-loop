@@ -11,6 +11,17 @@
 | `OPENAI_BASE_URL` | خیر | URL سفارشی برای OpenAI-compatible API |
 | `LOCAL_MODEL_BASE_URL` | خیر | URL برای local provider (default: http://localhost:11434/v1) |
 
+### سرور وب (UI)
+
+| متغیر | ضروری | توضیح |
+|-------|-------|-------|
+| `HOTL_PROJECT_ROOT` | خیر | ریشه‌ی پروژه برای سرور (registry + `.ai-runtime`). اگر نباشد: `projectRoot` از global config، وگرنه `process.cwd()` |
+| `HOTL_PORT` | خیر | پورت HTTP سرور (پیش‌فرض: ۳۰۰۰) |
+| `HOTL_MODEL` | خیر | مدل پیش‌فرض سرور — اولویت از بالا: گزینه‌ی `model` در `createApp()` > `HOTL_MODEL` > `defaultModel` در global config > `gpt-4o`. از UI هم per-run قابل تغییر است (U3) |
+| `HOTL_REDACT_KEYS` | خیر | لیست کلیدهای اضافی برای redact شدن در observability (با کاما جدا می‌شود؛ مکمل `redactKeys` در config) |
+
+> ترتیب بارگذاری: `.env` در project root، سپس `.env` در cwd (متغیرهای محیطی واقعی هرگز overwrite نمی‌شوند) + `~/.human-out-of-the-loop/config.json` (کلیدهای `projectRoot`/`defaultModel`) — همان منابع CLI (U1).
+
 ### MCP Servers
 
 | متغیر | ضروری | توضیح |
@@ -20,6 +31,31 @@
 | `TEST_SECRET_TOKEN` | مثال تست | نمونه در hardening-security.test.ts |
 
 **نکته امنیتی:** هیچ credential نباید به صورت inline در `registry/mcp-servers/*.json` قرار گیرد. فقط نام env var (مثل `tokenEnvVar`) ذخیره می‌شود و مقدار واقعی از `process.env` خوانده می‌شود. `McpConnector.sanitiseError` هر مقدار credential را از پیام خطا حذف و با `***REDACTED***` جایگزین می‌کند.
+
+## فیلدهای `OrchestratorConfig` (منبع حقیقت: `OrchestratorConfigSchema` در `src/ai/orchestrator.ts`)
+
+| فیلد | نوع/بازه Zod | پیش‌فرض | پیش‌نیاز | توضیح |
+|------|--------------|---------|----------|-------|
+| `projectRoot` | `string().min(1)` | — (**الزامی**) | بله | ریشه‌ی workspace؛ همه‌ی tool factoryها و path-security از آن استفاده می‌کنند |
+| `persistent` | `boolean` | `false` | خیر | استفاده از storeهای فایل‌محور (`.ai-runtime`) به‌جای حافظه |
+| `runtimeDir` | `string` | `<projectRoot>/.ai-runtime` | خیر | مسیر دایرکتوری runtime |
+| `maxConcurrentTasks` | `int 1..100` | `5` | خیر | سقف task هم‌زمان در TaskRuntime |
+| `maxConcurrentPerProvider` | `int 1..50` | `5` | خیر | سقف درخواست هم‌زمان به هر provider (RateLimiter) |
+| `maxReplanningAttempts` | `int 0..10` | `3` | خیر | سقف کل re-planning یک plan |
+| `agentTimeoutMs` | `int 1000..600000` | `120000` | خیر | timeout هر اجرای agent (به `AgentRuntime.run` می‌رسد) |
+| `maxDelegationDepth` | `int 0..5` | `1` | خیر | عمق مجاز delegation |
+| `maxRetries` | `int 0..10` | `3` | خیر | تعداد retry روی rate-limit |
+| `baseBackoffMs` | `int ≥100` | `1000` | خیر | تأخیر پایه backoff |
+| `maxBackoffMs` | `int ≥1000` | `30000` | خیر | سقف تأخیر backoff |
+| `maxSteps` | `int 1..100` | `20` | خیر | سقف iteration حلقه‌ی Tool (U3: واقعاً اعمال می‌شود) |
+| `contextBudgetChars` | `int ≥1000` | `120000` | خیر | سقف context برای ترکیب persona+skills |
+| `connectTimeoutMs` | `int ≥1000` | `10000` | خیر | timeout اتصال MCP |
+| `defaultModelId` | `string` | `'gpt-4o'` | خیر | مدل پیش‌فرض (باید در `registry/models/*.json` باشد) |
+| `redactKeys` | `string[].min(1)` | `[]` | خیر | کلیدهای اضافی redact (U1) |
+| `maxClarificationRounds` | `int 0..10` | `3` | خیر | سقف round ابهام‌زدایی (C4/U5) |
+| `onProgress` | callback (خارج از schema، ساختاری) | — | خیر | دریافت `ProgressEvent`ها (فاز ۱۹) |
+
+**اعتبارسنجی:** هر مقدار نامعتبر → `ZodError` در constructor (فاز ۲۲). `RunOverrides` (U3) می‌تواند `modelId`/`agentTimeoutMs`/`maxSteps`/`maxReplanningAttempts` را **برای یک run** جایگزین کند؛ `modelId` نامعتبر → `InvalidModelError` با لیست idهای معتبر، **قبل از هر side-effect**.
 
 ## سقف‌های پیکربندی‌پذیر
 
@@ -33,7 +69,10 @@
 | `baseBackoffMs` | ۱,۰۰۰ | `RateLimiterConfig` | تأخیر پایه backoff (exponential: base * 2^attempt + jitter) |
 | `maxBackoffMs` | ۳۰,۰۰۰ | `RateLimiterConfig` | سقف تأخیر backoff |
 | `maxDelegationDepth` | ۱ | `OrchestratorConfig` | عمق مجاز delegation (0 = فقط Main Agent, 1 = یک سطح) |
-| `maxSteps` (tool loop) | ۲۰ | `AgentRunOptions` | حداکثر iteration حلقه‌ی Tool در AgentRuntime |
+| `maxSteps` (tool loop) | ۲۰ | `OrchestratorConfig` → `TaskRuntimeConfig` → `AgentRunOptions` (U3 آن را واقعاً wire کرد؛ قبلاً config مرده بود) | حداکثر iteration حلقه‌ی Tool در AgentRuntime |
+| `maxClarificationRounds` | ۳ | `OrchestratorConfig` | حداکثر round پرسش‌وپاسخ ابهام‌زدایی (C4/U5)؛ پس از آن run با گزارش failure پایان می‌یابد (۰ = بدون پرسش) |
+| `redactKeys` | `[]` | `OrchestratorConfig` (+ `HOTL_REDACT_KEYS`) | کلیدهای اضافی برای redact در observability (U1) |
+| `random` (backoff jitter) | `Math.random` | `RateLimiterConfig` | منبع تصادفی jitter؛ تست‌ها تابع deterministic تزریق می‌کنند (QUAL-07، فاز ۲۵) |
 | `contextBudgetChars` | ۱۲۰,۰۰۰ (~۳۰k tokens) | `CreateAgentOptions` | سقف context برای ترکیب persona.system + skill.instructions |
 | `connectTimeoutMs` (MCP) | ۱۰,۰۰۰ | `registry/mcp-servers/*.json` | Timeout اتصال به هر MCP server |
 | `additionalTasksCeiling` | ۲ | `PlanRuntimeConfig` | سقف چرخه‌ی additionalTasks (جلوگیری از رشد بی‌رویه) |
@@ -226,3 +265,31 @@ await orchestrator.shutdown();
 | Human-Out-Of-Loop | ۹, ۱۰, ۱۶ | Planning confirmation ONLY touchpoint, PlanRuntime auto loop without human, hardening Law 17 checks |
 
 تمام ۱۸ نیازمندی به حداقل یک فاز نگاشت شده‌اند ✅
+
+### نگاشت ۴۲ باگ/بهبود (فازهای ۱۸–۲۶) — Scope Audit نهایی (فاز ۲۵)
+
+مبنای شمارش: بخش ۱ پلن `EXECUTION_PLAN_V2.md` (دسته‌های A–J + K) و برآورد بخش ۵ (۹+۱۰+۱۴+۸+۸ باگ برای فازهای ۱۸–۲۲ + ۳ فیچر در ۲۳/۲۴ = **۴۲+۳**). هر دسته دقیقاً یک فاز/گام دارد:
+
+| دسته | آیتم‌ها | فاز | وضعیت | شواهد |
+|------|---------|-----|--------|-------|
+| A — Path Security | PATH-01…05, 07, 09 | ۱۸ | ✅ فیکس | tool factoryها `projectRoot` می‌گیرند؛ `realpathSync` در `path-security.ts:49`؛ `workspaceRoot` اجباری (throw)؛ boundary-check در `skill-registry.ts` |
+| A — Storage filename | PATH-06 | ۲۲ | ✅ فیکس | filename = `sha256(id).slice(0,16).json` در `plan-store`/`session-store` — تست دو id متمایز روی یک فایل |
+| A — Windows case | PATH-08 | ۲۰ | ✅ فیکس | `normaliseCase()` در `path-security.ts:32-34` (lowercase روی `process.platform === 'win32'`) و استفاده در مقایسه‌ی مسیرها (خط ۷۹) |
+| B — Config Wiring | CFG-01…07 | ۱۹ (+ فاز ۲۲ برای schema، U3 برای wire کردن `maxSteps`) | ✅ فیکس | یک `bootstrapCatalogTools` (orchestrator:380)؛ `RateLimiter` و `DelegationGuard` config می‌گیرند؛ همه‌ی فیلدهای مستندشده در `OrchestratorConfigSchema` هستند؛ `maxSteps` حالا واقعاً به `stepCountIs` می‌رسد (U3) |
+| B — Dual source | CFG-08 | ۱۹ | ✅ فیکس | catalog فقط از `registry/tools/*.json` (Law 16) |
+| C — Singleton | SING-01, SING-02 | ۱۹ | ✅ فیکس | ۰ `?? globalEventBus`؛ `agentRuntime` per-Orchestrator (بدون singleton ماژولی) |
+| D — ID Generation | ID-01…06 | ۲۶ | ✅ فیکس | همه به `prefix_randomUUID()`؛ source-scan + تست collision ۵۰۰۰-id در `phase26.test.ts` |
+| E — Persistence | PERS-01…03 | ۲۰ | ✅ فیکس | `atomicWriteFileSync` (tmp+uuid+rename) در هر دو store؛ `structuredClone` + snapshot |
+| E — File locking | PERS-04 | ۲۰ | ⚠️ پذیرفته‌شده (trade-off) | بدون قفل بین‌پروسه‌ای؛ ریسک با atomic write کاهش یافته و مستند شده |
+| F — Leaks | LEAK-01, 02 | ۲۰ | ✅ فیکس | `clearTimeout` در `finally` (mcp-connector، agent-runtime:201) |
+| F — MCP dynamic import | LEAK-03 | ۲۰ + **۲۵** | ✅ فیکس | فاز ۲۵: `loadMcpSdk()` memoized — دیگر در هر connect یک `import()` تازه اجرا نمی‌شود (و شکست کش نمی‌شود) |
+| G — Correctness | CORR-01…08 | ۲۰ | ✅ فیکس | `parsed.error.issues` در خطا؛ `waitForAll` قبل از `destroy`؛ `task.planId` در aggregator؛ hook صریح acceptance؛ `event.planId` در streaming:169 |
+| H — Security Ext | SEC-01…06 | ۲۰ (+۲۲ برای redact/abort) | ✅ فیکس | regex-guard (nested quantifier + MAX_PATTERN_LENGTH)؛ آستانه‌ی موفقیت MCP؛ substring redaction؛ مسیر نسبی به مدل (بدون `process.cwd()` در implementations) |
+| I — Performance | PERF-01…08 | ۲۱ | ✅ فیکس | O(1) countها؛ `computeTransitiveDependentCounts` memoized؛ fd reuse در logger |
+| J — Code Quality | QUAL-01…06, 07 | ۲۲ (+ فاز ۲۵ برای QUAL-07) | ✅ فیکس | `any`=۰ و `console.*`=۰ (source-scan دائمی)؛ dead code حذف؛ `abortSignal`→`generateText`؛ zod schema؛ **فاز ۲۵: `RateLimiterConfig.random` تزریق‌پذیر شد** تا تست تأخیرها deterministic باشد |
+| K — Features | FEAT-01 | ۲۳ | ✅ فیکس | CLI کامل (C1–C5) — live verify |
+| K — Features | FEAT-02, FEAT-03 | ۲۴ (+ U1–U8) | ✅ فیکس | UI وب + REST/SSE (سرور Express، `public/`) — live verify؛ قابلیت‌های تکمیلی UI در `UI_COMPLETION_PLAN.md` |
+| — | QUAL-08 (id collision) | ۲۶ | ✅ (ادغام با دسته D) | در پلن به دسته D ارجاع داده شده بود |
+| فاز ۲۵ — Docs/Delivery | — | ۲۵ | ✅ | `CHANGELOG.md`، Migration Guide در `src/ai/README.md`، همین سند، `CONTRIBUTING.md`، بخش Web UI در `README.md` |
+
+**نکته‌ی شفافیت:** شمارش «۴۲» در پلن، جمع برآوردی فازها است (۹+۱۰+۱۴+۸+۸+۳) و با تعداد ردیف‌های جدول دسته‌بندی (۶۵ ID پس از تفکیک) یکی نیست؛ این جدول هر دو را پوشش می‌دهد: هر دسته یک فاز/وضعیت دارد و هیچ دسته‌ای بدون فاز نمانده است. تنها مورد باقی‌مانده **آگاهانه** یک trade-off است: PERS-04 (بدون file locking بین‌پروسه‌ای) که در متن پلن به‌عنوان P2/پذیرفته‌شده علامت خورده است؛ ریسک آن با atomic write فاز ۲۰ کاهش یافته. (PATH-08 در فاز ۲۰ فیکس شده بود و در این audit تصحیح شد.)

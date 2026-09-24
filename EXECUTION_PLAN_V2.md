@@ -8,7 +8,7 @@
 - `messages.md` (تاریخچه بحث CLI/UI/Session)
 
 **وضعیت فعلی:** 17/17 فاز 🟢، 334 تست سبز، اما 40+ باگ/بهبود شناسایی شده
-**پیشرفت (2026-09-24):** فازهای ۱۸ تا ۲۴ و ۲۶ این پلن کامل 🟢 — 457 تست سبز (28 فایل)، tsc سبز. باقی‌مانده: ۲۵ (مستندات و delivery) + پلن‌های تکمیلی CLI/UI.
+**پیشرفت (2026-09-24):** **تمام فازهای این پلن (۱۸–۲۶) کامل 🟢** و پلن‌های تکمیلی CLI (C1–C5) و UI (U1–U8) نیز کامل — **527 تست سبز (۳۶ فایل)**، tsc سبز، smoke زنده CLI + UI.
 **سیاست Breaking:** ✅ مجاز (طبق تصمیم کاربر) — `randomUUID()`, حذف `globalEventBus` fallback, الزامی شدن `projectRoot`
 
 ---
@@ -557,7 +557,7 @@ GET  /api/observability?planId=&tail=
 
 ---
 
-### [🔴] فاز ۲۵: Final Hardening, Docs, Delivery
+### [🟢] فاز ۲۵: Final Hardening, Docs, Delivery — کامل شد 2026-09-24
 
 **هدف:** مستندسازی تمام تغییرات breaking + scope audit نهایی.
 
@@ -581,11 +581,16 @@ GET  /api/observability?planId=&tail=
 #### گام ۵: Scope Audit نهایی
 - جدول 18 نیازمندی + 42 باگ جدید → نگاشت به فازهای 18-25
 
-**معیار پذیرش:**
-- تمام 42 مورد در یکی از فازهای 18-25 قرار گرفته‌اند
-- مستندات معماری با پیاده‌سازی نهایی منطبق
-- CLI و UI قابل اجرا بدون خواندن Runtime
-- تمام متغیرها/سقف‌ها مستند
+**معیار پذیرش (بررسی‌شده):**
+- [x] تمام 42 مورد در یکی از فازهای 18-25 قرار گرفته‌اند — جدول «Scope Audit نهایی» در `src/ai/CONFIGURATION.md` (دسته‌ی A–K → فاز + وضعیت + شواهد؛ تنها مورد باقی‌مانده PERS-04 به‌عنوان trade-off پذیرفته‌شده علامت خورده)
+- [x] مستندات معماری با پیاده‌سازی نهایی منطبق — Migration Guide در `src/ai/README.md`، جدول کامل `OrchestratorConfigSchema` در `CONFIGURATION.md` (تصحیح الگوی قدیمی Tool در `CONTRIBUTING.md` به factory pattern فاز ۱۸)
+- [x] CLI و UI قابل اجرا بدون خواندن Runtime — بخش Web UI + جدول endpointها در `README.md`؛ command reference CLI به‌روز
+- [x] تمام متغیرها/سقف‌ها مستند — envهای provider/MCP/سرور (`HOTL_*`) + جدول سقف‌ها شامل `maxSteps`, `maxClarificationRounds`, `redactKeys`, `random` (jitter)
+
+**نتیجه:** `CHANGELOG.md` جدید (نسخه ۲۵.۰.۰) شامل ۱۰ breaking change با مسیر مهاجرت + Added/Fixed/Verified؛ Migration Guide 17→25/26 در `src/ai/README.md`؛ `CONFIGURATION.md` با جدول ۱۹ فیلد config (بازه‌ی Zod + پیش‌فرض + الزام) و Scope Audit نهایی ۴۲ مورد؛ `CONTRIBUTING.md` با factory pattern ابزار، افزودن CLI command و افزودن endpoint وب؛ `README.md` با بخش Web UI/endpoint/flowها.
+**نهایی‌سازی hardening در همین فاز:** `RateLimiterConfig.random` تزریق‌پذیر شد (QUAL-07 — تست‌های backoff deterministic) و `loadMcpSdk()` در `mcp-connector` memoized شد (LEAK-03 — دیگر در هر connect یک `import()` تازه اجرا نمی‌شود).
+**تست و verify:** `npx tsc --noEmit` سبز؛ `npx vitest run` → **527/527 سبز در ۳۶ فایل**؛ smoke CLI (۱۳ command واقعی: `--help`, `models`, `personas`, `skills`, `tools`, `mcp list`, `sessions list`, `plans list`, `logs`, `usage`, `tasks list` → exit 0؛ command ناشناس → exit 1؛ `run --dry-run` بدون API key → خطای تمیز exit 1) و smoke UI روی :3000 (همه‌ی endpointها + یک run واقعی تا `awaiting-clarification` → `cancelled`).
+**انحراف ثبت‌شده:** (1) «config» در فهرست commandهای CLI پلن نبود — CHANGELOG با فهرست واقعی (`run/sessions/plans/mcp/models/personas/skills/tools/usage/tasks/logs`) تصحیح شد. (2) شمارش «۴۲» پلن با ردیف‌های ریز دسته‌بندی (۶۵ ID) یکی نیست؛ جدول audit هر دو را پوشش می‌دهد و این ناسازگاری صریحاً در `CONFIGURATION.md` مستند شده. (3) `run --dry-run`/`run` بدون API key در sandbox قابل تکمیل نیست — مسیر موفق e2e در تست‌های mock پوشش دارد.
 
 ---
 
@@ -697,7 +702,7 @@ GET  /api/observability?planId=&tail=
 | I Perf | PERF-01/04 🟠 | ✅ ۲/۲ فیکس | `computeTransitiveDependentCounts` (memoized) plan-runtime:387؛ fd reuse `openSync/writeSync` observability:124,162 |
 | J Quality | QUAL-05/06 🟠 | ✅ ۲/۲ فیکس | `OrchestratorConfigSchema` (zod) orchestrator:56-66؛ `abortSignal` → `generateText` agent-runtime:231 |
 | K Features | FEAT-01 🔴 | ✅ فیکس | CLI کامل (فاز ۲۳) + UI/REST (فاز ۲۴) — live verify شده |
-| فاز ۲۵ | (سربرگ 🔴) | ⏳ باز | فاز delivery — انتظار می‌رود |
+| فاز ۲۵ | (سربرگ 🔴؛ آیتم‌ها: QUAL-07, LEAK-03) | ✅ کامل شد | `CHANGELOG.md` + Migration Guide + Scope Audit نهایی؛ `RateLimiterConfig.random` تزریق‌پذیر (QUAL-07)؛ `loadMcpSdk()` memoized (LEAK-03)؛ 527/527 تست + tsc سبز + smoke CLI/UI |
 
 ### یافته کلیدی: دسته D باز است → ✅ رفع شد در فاز ۲۶ (2026-09-24)
 

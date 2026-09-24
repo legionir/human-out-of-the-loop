@@ -142,12 +142,31 @@ function defaultCreateTransport(config: McpServerConfig): unknown {
   };
 }
 
+/**
+ * Phase 25 (LEAK-03): the MCP SDK is resolved through a memoized loader —
+ * the dynamic `import()` used to run on EVERY connection attempt.  ESM
+ * caches the module itself, but the promise/microtask per connect is now
+ * avoided too (and a failed resolution is not cached, so a later attempt
+ * can still succeed).
+ */
+let mcpSdkPromise: Promise<typeof import('@ai-sdk/mcp')> | null = null;
+
+function loadMcpSdk(): Promise<typeof import('@ai-sdk/mcp')> {
+  if (!mcpSdkPromise) {
+    mcpSdkPromise = import('@ai-sdk/mcp').catch((err: unknown) => {
+      mcpSdkPromise = null;
+      throw err;
+    });
+  }
+  return mcpSdkPromise;
+}
+
 async function defaultCreateClient(options: {
   transport: unknown;
   name: string;
 }): Promise<{ tools: () => Promise<Record<string, Tool>>; close: () => Promise<void> }> {
   try {
-    const { createMCPClient } = await import('@ai-sdk/mcp');
+    const { createMCPClient } = await loadMcpSdk();
     const client = await createMCPClient({
       transport: options.transport as never,
     } as never);
