@@ -43,6 +43,32 @@ export interface RunCommandOptions {
   timeoutMs?: number;
   /** Max tool-call iterations per agent run */
   maxSteps?: number;
+  /** C3: automatic re-planning attempts (OrchestratorConfig.maxReplanningAttempts) */
+  maxReplans?: number;
+  /** C3: max agent → sub-agent delegation depth (OrchestratorConfig.maxDelegationDepth) */
+  maxDelegationDepth?: number;
+  /** C3: label for the NEW session (mutually exclusive with --session) */
+  label?: string;
+}
+
+/** C3: option validation → undefined when OK, error message otherwise (exit 2). */
+function validateRunOptions(opts: RunCommandOptions): string | undefined {
+  if (opts.maxReplans !== undefined && (!Number.isInteger(opts.maxReplans) || opts.maxReplans < 0 || opts.maxReplans > 10)) {
+    return '--max-replans must be an integer between 0 and 10';
+  }
+  if (
+    opts.maxDelegationDepth !== undefined &&
+    (!Number.isInteger(opts.maxDelegationDepth) || opts.maxDelegationDepth < 0 || opts.maxDelegationDepth > 5)
+  ) {
+    return '--max-delegation-depth must be an integer between 0 and 5';
+  }
+  if (opts.label !== undefined && opts.label.length > 64) {
+    return '--label must be at most 64 characters';
+  }
+  if (opts.label !== undefined && opts.session) {
+    return '--label only applies to a NEW session; use "sessions label <id> <label>" to rename an existing one';
+  }
+  return undefined;
 }
 
 export interface RunCommandResult {
@@ -50,6 +76,12 @@ export interface RunCommandResult {
 }
 
 export async function runCommand(goal: string, opts: RunCommandOptions): Promise<RunCommandResult> {
+  const invalid = validateRunOptions(opts);
+  if (invalid) {
+    err(chalk.red(invalid));
+    return { exitCode: 2 };
+  }
+
   const projectRoot = path.resolve(opts.projectRoot ?? process.cwd());
   const globalConfig = prepareCliEnvironment(projectRoot);
 
@@ -68,6 +100,9 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     ...(model ? { defaultModelId: model } : {}),
     ...(opts.timeoutMs !== undefined ? { agentTimeoutMs: opts.timeoutMs } : {}),
     ...(opts.maxSteps !== undefined ? { maxSteps: opts.maxSteps } : {}),
+    // C3: execution-control passthrough
+    ...(opts.maxReplans !== undefined ? { maxReplanningAttempts: opts.maxReplans } : {}),
+    ...(opts.maxDelegationDepth !== undefined ? { maxDelegationDepth: opts.maxDelegationDepth } : {}),
     onProgress: (event: ProgressEvent) => renderer(event),
   });
 
@@ -90,6 +125,8 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     // ── Full run (Human-Out-Of-Loop after confirmation) ───────
     const result: OrchestratorResult = await orchestrator.run(goal, {
       sessionId: opts.session,
+      // C3: label the NEW session (--label is rejected with --session)
+      ...(opts.label !== undefined ? { sessionLabel: opts.label } : {}),
       confirmCallback,
     });
 

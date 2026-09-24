@@ -88,6 +88,11 @@ export type OrchestratorConfig = z.input<typeof OrchestratorConfigSchema> & {
 export interface OrchestratorRunOptions {
   sessionId?: string;
   /**
+   * C3: label for a NEW session (ignored when `sessionId` is given —
+   * relabel existing sessions via `SessionStore.setLabel`).
+   */
+  sessionLabel?: string;
+  /**
    * Callback to get user confirmation of the plan.
    * REQUIRED — Law 17 mandates explicit user approval before execution.
    * Receives the formatted plan text, returns confirmation result.
@@ -431,7 +436,8 @@ export class Orchestrator {
       await this.initialize();
     }
 
-    const sessionId = options?.sessionId ?? this.sessionStore.createSession();
+    const sessionId =
+      options?.sessionId ?? this.sessionStore.createSession(options?.sessionLabel);
     const interaction = this.sessionStore.addInteraction(sessionId, userRequest);
     this.observabilityLogger.logSessionCreated(sessionId);
 

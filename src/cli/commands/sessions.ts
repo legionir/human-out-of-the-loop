@@ -50,6 +50,30 @@ export async function sessionsListCommand(
   return 0;
 }
 
+/** C3: `sessions label <id> <label>` — set (or clear with "") a session label. */
+export async function sessionsLabelCommand(
+  sessionId: string,
+  label: string,
+  opts: SessionsCommandOptions,
+): Promise<number> {
+  if (label.length > 64) {
+    err(color.failed('Label must be at most 64 characters.'));
+    return 2;
+  }
+  const store = storeFor(opts);
+  const updated = store.setLabel(sessionId, label);
+  if (!updated) {
+    err(color.failed(`Session "${sessionId}" not found.`));
+    return 1;
+  }
+  out(
+    label
+      ? color.done(`✔ Session ${sessionId} labeled "${updated.label}"`)
+      : color.done(`✔ Session ${sessionId} label cleared`),
+  );
+  return 0;
+}
+
 export async function sessionsShowCommand(
   sessionId: string,
   opts: SessionsCommandOptions,

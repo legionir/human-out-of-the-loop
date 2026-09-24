@@ -38,6 +38,7 @@ import { FilePlanStore } from '../../ai/runtime/plan-store.js';
 import { loadGlobalConfig, loadDotEnv } from '../../cli/utils/config.js';
 import { followLog } from '../../cli/commands/logs.js';
 import { createPlan, type Plan } from '../../ai/schemas/plan.js';
+import { Orchestrator } from '../../ai/orchestrator.js';
 import type { LogEntry } from '../../ai/runtime/observability-logger.js';
 
 const mockGenerateObject = vi.mocked(generateObject);
@@ -881,5 +882,139 @@ describe('C2 — usage + tasks commands (from the observability log)', () => {
     const { code, errOut } = await runCli(['tasks', 'show', 'task_nope', '--project-root', projectRoot]);
     expect(code).toBe(1);
     expect(errOut).toContain('No log entries');
+  });
+});
+
+// ─── C3: execution-control flags + session labels ───────────────
+
+describe('C3 — run flags (--max-replans/--max-delegation-depth/--label) + sessions label', () => {
+  let projectRoot: string;
+  let captured: {
+    maxReplanningAttempts: number;
+    maxDelegationDepth: number;
+    defaultModelId: string;
+  } | undefined;
+
+  beforeEach(() => {
+    projectRoot = makeTempProject('phase23-c3-');
+    installModelMocks();
+    mockGenerateObject.mockClear();
+    mockGenerateText.mockClear();
+    captured = undefined;
+    const origRun = Orchestrator.prototype.run;
+    vi.spyOn(Orchestrator.prototype, 'run').mockImplementation(
+      function (this: Orchestrator, ...args: Parameters<Orchestrator['run']>) {
+        captured = {
+          maxReplanningAttempts: this.config.maxReplanningAttempts,
+          maxDelegationDepth: this.config.maxDelegationDepth,
+          defaultModelId: this.config.defaultModelId,
+        };
+        return origRun.apply(this, args);
+      },
+    );
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  });
+
+  it('--max-replans and --max-delegation-depth reach the OrchestratorConfig', async () => {
+    const { code } = await runCli([
+      'run',
+      'Build a login page',
+      '--project-root',
+      projectRoot,
+      '--yes',
+      '--persistent',
+      '--max-replans',
+      '1',
+      '--max-delegation-depth',
+      '0',
+    ]);
+    expect(code).toBe(0);
+    expect(captured?.maxReplanningAttempts).toBe(1);
+    expect(captured?.maxDelegationDepth).toBe(0);
+  });
+
+  it('without the flags, the schema defaults apply (3 replans, depth 1)', async () => {
+    const { code } = await runCli([
+      'run',
+      'Build a login page',
+      '--project-root',
+      projectRoot,
+      '--yes',
+      '--persistent',
+    ]);
+    expect(code).toBe(0);
+    expect(captured?.maxReplanningAttempts).toBe(3);
+    expect(captured?.maxDelegationDepth).toBe(1);
+  });
+
+  it('--label labels the NEW session (persisted)', async () => {
+    const { code } = await runCli([
+      'run',
+      'Build a login page',
+      '--project-root',
+      projectRoot,
+      '--yes',
+      '--persistent',
+      '--label',
+      'Login work',
+    ]);
+    expect(code).toBe(0);
+    const store = new FileSessionStore(path.join(projectRoot, '.ai-runtime', 'sessions'));
+    const ids = store.listSessions();
+    expect(ids).toHaveLength(1);
+    expect(store.getSession(ids[0])?.label).toBe('Login work');
+  });
+
+  it('sessions label renames, "" clears, unknown id → exit 1', async () => {
+    // create a session first (via a real run with --label)
+    await runCli([
+      'run',
+      'Build a login page',
+      '--project-root',
+      projectRoot,
+      '--yes',
+      '--persistent',
+      '--label',
+      'original',
+    ]);
+    const store = new FileSessionStore(path.join(projectRoot, '.ai-runtime', 'sessions'));
+    const id = store.listSessions()[0];
+
+    const renamed = await runCli(['sessions', 'label', id, 'renamed', '--project-root', projectRoot]);
+    expect(renamed.code).toBe(0);
+    expect(renamed.out).toContain('renamed');
+    expect(store.getSession(id)?.label).toBe('renamed');
+
+    const cleared = await runCli(['sessions', 'label', id, '', '--project-root', projectRoot]);
+    expect(cleared.code).toBe(0);
+    expect(cleared.out).toContain('cleared');
+    expect(store.getSession(id)?.label).toBeUndefined();
+
+    const missing = await runCli(['sessions', 'label', 'session_nope', 'x', '--project-root', projectRoot]);
+    expect(missing.code).toBe(1);
+  });
+
+  it('validation: out-of-range/combined options → exit 2 with a clear message', async () => {
+    const base = ['run', 'g', '--project-root', projectRoot, '--yes'];
+
+    const a = await runCli([...base, '--max-replans', '11']);
+    expect(a.code).toBe(2);
+    expect(a.errOut).toContain('--max-replans');
+
+    const b = await runCli([...base, '--max-delegation-depth', '7']);
+    expect(b.code).toBe(2);
+    expect(b.errOut).toContain('--max-delegation-depth');
+
+    const c = await runCli([...base, '--label', 'x'.repeat(65)]);
+    expect(c.code).toBe(2);
+    expect(c.errOut).toContain('64 characters');
+
+    const d = await runCli([...base, '--label', 'L', '--session', 'session_abc']);
+    expect(d.code).toBe(2);
+    expect(d.errOut).toContain('sessions label');
   });
 });

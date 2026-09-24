@@ -14,6 +14,12 @@ import { atomicWriteFileSync } from './atomic-write.js';
 export interface SessionStore {
   /** Create a new session and return its id */
   createSession(label?: string): string;
+  /**
+   * Set (or clear with empty string) a session's label.
+   * C3: `sessions label <id> <label>` / `run --label`.
+   * Returns the updated session, or undefined when the id is unknown.
+   */
+  setLabel(sessionId: string, label: string): Session | undefined;
   /** Load a session by id */
   getSession(sessionId: string): Session | undefined;
   /** Save (overwrite) a session */
@@ -63,6 +69,18 @@ export class FileSessionStore implements SessionStore {
     const session = createSession(label);
     this.saveSession(session);
     return session.id;
+  }
+
+  setLabel(sessionId: string, label: string): Session | undefined {
+    const session = this.getSession(sessionId);
+    if (!session) return undefined;
+    if (label) {
+      session.label = label;
+    } else {
+      delete session.label;
+    }
+    this.saveSession(session);
+    return session;
   }
 
   getSession(sessionId: string): Session | undefined {
@@ -160,6 +178,18 @@ export class MemorySessionStore implements SessionStore {
     // Phase 19 (PERS-03): structuredClone instead of JSON round-trip
     this.sessions.set(session.id, structuredClone(session));
     return session.id;
+  }
+
+  setLabel(sessionId: string, label: string): Session | undefined {
+    const session = this.getSession(sessionId);
+    if (!session) return undefined;
+    if (label) {
+      session.label = label;
+    } else {
+      delete session.label;
+    }
+    this.saveSession(session);
+    return session;
   }
 
   getSession(sessionId: string): Session | undefined {

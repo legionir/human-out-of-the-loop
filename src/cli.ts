@@ -24,6 +24,7 @@ import {
   sessionsListCommand,
   sessionsShowCommand,
   sessionsDeleteCommand,
+  sessionsLabelCommand,
 } from './cli/commands/sessions.js';
 import {
   plansListCommand,
@@ -65,6 +66,9 @@ export function createProgram(): Command {
     .option('--dry-run', 'show the plan without executing anything')
     .option('--timeout-ms <ms>', 'per-agent timeout in milliseconds', (v: string) => Number(v))
     .option('--max-steps <n>', 'max tool-call iterations per agent run', (v: string) => Number(v))
+    .option('--max-replans <n>', 'automatic re-planning attempts on failure (0-10)', (v: string) => Number(v))
+    .option('--max-delegation-depth <n>', 'max agent-to-subagent delegation depth (0-5)', (v: string) => Number(v))
+    .option('--label <text>', 'label for the NEW session (max 64 chars)')
     .action(async (goal: string, opts: Record<string, string | boolean | undefined>) => {
       // `persistent` stays undefined when the flag is absent so
       // runCommand can fall back to the global config default.
@@ -78,12 +82,15 @@ export function createProgram(): Command {
         dryRun: opts.dryRun === true,
         timeoutMs: opts.timeoutMs as number | undefined,
         maxSteps: opts.maxSteps as number | undefined,
+        maxReplans: opts.maxReplans as number | undefined,
+        maxDelegationDepth: opts.maxDelegationDepth as number | undefined,
+        label: opts.label as string | undefined,
       });
       process.exitCode = result.exitCode;
     });
 
   // ── sessions ─────────────────────────────────────────────────
-  const sessions = program.command('sessions').description('List, show, and delete sessions');
+  const sessions = program.command('sessions').description('List, show, label, and delete sessions');
   sessions
     .command('list')
     .option('--project-root <dir>', 'project root (default: current directory)')
@@ -103,6 +110,14 @@ export function createProgram(): Command {
     .option('--project-root <dir>', 'project root (default: current directory)')
     .action(async (id: string, opts: Record<string, string | undefined>) => {
       process.exitCode = await sessionsDeleteCommand(id, { projectRoot: opts.projectRoot });
+    });
+  sessions
+    .command('label')
+    .argument('<sessionId>')
+    .argument('<label>', 'new label (empty string clears it)')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .action(async (id: string, label: string, opts: Record<string, string | undefined>) => {
+      process.exitCode = await sessionsLabelCommand(id, label, { projectRoot: opts.projectRoot });
     });
 
   // ── plans ────────────────────────────────────────────────────
