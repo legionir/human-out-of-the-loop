@@ -32,6 +32,11 @@ const chatEl = $('#chat');
 const goalInput = $('#goal-input');
 const runBtn = $('#run-btn');
 const autoConfirmEl = $('#auto-confirm');
+// U3: per-run model and advanced execution options
+const runModelEl = $('#run-model');
+const runTimeoutEl = $('#run-timeout');
+const runMaxStepsEl = $('#run-max-steps');
+const runMaxReplansEl = $('#run-max-replans');
 const newSessionBtn = $('#new-session-btn');
 const cancelRunBtn = $('#cancel-run-btn');
 const runControlsEl = $('#run-controls');
@@ -40,6 +45,7 @@ const sessionTitleEl = $('#session-title');
 const emptyStateEl = $('#empty-state');
 const modalEl = $('#plan-modal');
 const planSummaryEl = $('#plan-summary');
+const planModelEl = $('#plan-model');
 const planTableWrap = $('#plan-table-wrap');
 const planFeedbackEl = $('#plan-feedback');
 const planConfirmBtn = $('#plan-confirm-btn');
@@ -52,6 +58,7 @@ const state = {
   sessionId: null, // null = new session
   run: null, // { runId, planId, es, pollTimer, timelineEl, assistantEl }
   modalPlanId: null,
+  defaultModel: null,
 };
 
 // ─── Utilities ───────────────────────────────────────────────────
@@ -226,6 +233,12 @@ async function startRun() {
   const assistantEl = appendAssistantBubble('planning…');
   assistantEl.querySelector('.bubble-meta').textContent = 'planning…';
 
+  // U3: blank advanced fields mean "use the server default".
+  const model = runModelEl.value;
+  const timeoutMs = runTimeoutEl.value === '' ? undefined : Number(runTimeoutEl.value);
+  const maxSteps = runMaxStepsEl.value === '' ? undefined : Number(runMaxStepsEl.value);
+  const maxReplans = runMaxReplansEl.value === '' ? undefined : Number(runMaxReplansEl.value);
+
   let accepted;
   try {
     accepted = await api('/api/run', {
@@ -235,6 +248,10 @@ async function startRun() {
         // Omit (don't send null) when starting a fresh session
         ...(state.sessionId ? { sessionId: state.sessionId } : {}),
         confirm: autoConfirmEl.checked,
+        ...(model ? { model } : {}),
+        ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+        ...(maxSteps !== undefined ? { maxSteps } : {}),
+        ...(maxReplans !== undefined ? { maxReplans } : {}),
       }),
     });
   } catch (err) {
@@ -249,6 +266,8 @@ async function startRun() {
     es: null,
     pollTimer: null,
     assistantEl,
+    // U3: retain the selected model so the confirmation header is explicit.
+    model,
     done: false,
   };
   showRunControls('planning…');
@@ -421,6 +440,7 @@ async function cancelRun() {
 
 async function openPlanModal(run) {
   state.modalPlanId = run.planId;
+  planModelEl.textContent = run.model ? `Model: ${run.model}` : '';
   planSummaryEl.textContent = run.planText || '';
   planTableWrap.innerHTML = 'Loading plan…';
   modalEl.classList.remove('hidden');
@@ -583,6 +603,17 @@ async function loadRegistry() {
     ]);
 
     groups.models = models.map((m) => regItem(m.id, m.description, `${m.provider}:${m.model}`));
+    // U3: the run model selector is sourced from the same registry endpoint.
+    runModelEl.innerHTML = '';
+    for (const m of models) {
+      const option = document.createElement('option');
+      option.value = m.id;
+      option.textContent = `${m.id} (${m.provider}:${m.model})`;
+      runModelEl.appendChild(option);
+    }
+    if (state.defaultModel && models.some((m) => m.id === state.defaultModel)) {
+      runModelEl.value = state.defaultModel;
+    }
     groups.personas = personas.map((p) => regItem(p.id, p.description, `${p.allowedTools.length} tools`));
     groups.skills = skills.map((s) => regItem(s.id, `v${s.version}`, `${s.tools.length} tools`));
     groups.tools = tools.map((t) => regItem(t.id, t.description, t.category || t.source));
@@ -649,6 +680,13 @@ loadRegistry();
 api('/api/health')
   .then((h) => {
     $('#sidebar-footer').textContent = `root: ${h.projectRoot}`;
+    // U3: select the server-configured model rather than assuming the
+    // registry's first item is the default. Preserve a user's selection
+    // if they changed it before this request completed.
+    state.defaultModel = h.model;
+    if (h.model && runModelEl.querySelector(`option[value="${CSS.escape(h.model)}"]`)) {
+      runModelEl.value = h.model;
+    }
   })
   .catch(() => {
     $('#sidebar-footer').textContent = 'server unreachable';

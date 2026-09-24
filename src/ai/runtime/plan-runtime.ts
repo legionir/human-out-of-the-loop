@@ -34,6 +34,13 @@ export interface PlanRuntimeConfig {
   maxReplanningAttempts?: number;
   /** Default model id for dynamically composed agents (default: "gpt-4o") */
   defaultModelId?: string;
+  /**
+   * U3: per-run execution overrides (Orchestrator.run `runOverrides`).
+   * Forwarded to every TaskRuntime.createTask of this run; the task
+   * runtime falls back to its own config when these are absent.
+   */
+  agentTimeoutMs?: number;
+  maxSteps?: number;
   /** Callback invoked when plan status changes (for streaming — Phase 13) */
   onStatusChange?: (plan: Plan, event: string) => void;
   /**
@@ -240,6 +247,11 @@ export class PlanRuntime {
         // Phase 20 (CORR-03): plan id so UsageAggregator can bucket
         // token usage per plan instead of "unassigned".
         planId: plan.id,
+        // U3: per-run overrides from Orchestrator.run({ runOverrides })
+        ...(this.config.agentTimeoutMs !== undefined
+          ? { agentTimeoutMs: this.config.agentTimeoutMs }
+          : {}),
+        ...(this.config.maxSteps !== undefined ? { maxSteps: this.config.maxSteps } : {}),
       });
 
       step.taskId = taskId;

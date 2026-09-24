@@ -73,6 +73,20 @@
           rows="2"
           placeholder='e.g. "Build a REST endpoint for user registration with validation and tests"'
         ></textarea>
+        <!-- U3: model and per-run execution options -->
+        <div class="run-options-row">
+          <label class="model-picker">Model
+            <select id="run-model" aria-label="Model for this run"></select>
+          </label>
+          <details id="advanced-run-options" class="advanced-run-options">
+            <summary>Advanced</summary>
+            <div class="advanced-fields">
+              <label>Timeout (ms)<input id="run-timeout" type="number" min="1" placeholder="server default" /></label>
+              <label>Max steps<input id="run-max-steps" type="number" min="1" max="100" step="1" placeholder="server default" /></label>
+              <label>Max replans<input id="run-max-replans" type="number" min="0" max="10" step="1" placeholder="server default" /></label>
+            </div>
+          </details>
+        </div>
         <div class="composer-actions">
           <label class="auto-confirm">
             <input type="checkbox" id="auto-confirm" />
@@ -87,7 +101,10 @@
   <!-- ── Plan confirmation modal ───────────────────────────── -->
   <div id="plan-modal" class="modal-backdrop hidden">
     <div class="modal">
-      <h2>Review the plan</h2>
+      <div class="plan-modal-heading">
+        <h2>Review the plan</h2>
+        <span id="plan-model" class="plan-model"></span>
+      </div>
       <p class="modal-sub">You are asked exactly once. After confirming, the runtime executes without you.</p>
       <div id="plan-summary" class="plan-summary"></div>
       <div id="plan-table-wrap"></div>

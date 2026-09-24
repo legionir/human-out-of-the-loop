@@ -22,17 +22,24 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import type { Plan } from '../../ai/schemas/plan.js';
+import type { RunOverrides } from '../../ai/orchestrator.js';
 import type { ServerContext } from '../types.js';
 
 export function runRouter(ctx: ServerContext): Router {
   const router = Router();
 
   router.post('/api/run', async (req, res) => {
-    const { message, sessionId, confirm } = (req.body ?? {}) as {
-      message?: unknown;
-      sessionId?: unknown;
-      confirm?: unknown;
-    };
+    const { message, sessionId, confirm, model, timeoutMs, maxSteps, maxReplans } =
+      (req.body ?? {}) as {
+        message?: unknown;
+        sessionId?: unknown;
+        confirm?: unknown;
+        /** U3: per-run overrides */
+        model?: unknown;
+        timeoutMs?: unknown;
+        maxSteps?: unknown;
+        maxReplans?: unknown;
+      };
     // NOTE (UI security step): `projectRoot` intentionally does NOT come
     // from the request body — it is fixed server-side (config/env).
     if (typeof message !== 'string' || message.trim() === '') {
@@ -46,6 +53,43 @@ export function runRouter(ctx: ServerContext): Router {
       return;
     }
     const autoConfirm = confirm === true;
+
+    // U3: per-run overrides — validate now (synchronous) so the UI gets
+    // a clean 400 with the list of valid model ids, not a failed run.
+    const runOverrides: RunOverrides = {};
+    if (model != null) {
+      if (typeof model !== 'string' || model.trim() === '') {
+        res.status(400).json({ error: '"model" must be a non-empty string when present.' });
+        return;
+      }
+      const validIds = ctx.orchestrator.modelRegistry.listConfigs().map((m) => m.id);
+      if (!ctx.orchestrator.modelRegistry.hasConfig(model)) {
+        res.status(400).json({ error: `Unknown model id "${model}".`, validIds });
+        return;
+      }
+      runOverrides.modelId = model;
+    }
+    // [key, value, lo, hi, mustBeInteger]
+    for (const [key, field, lo, hi, isInt] of [
+      ['timeoutMs', timeoutMs, 1, Number.MAX_SAFE_INTEGER, false],
+      ['maxSteps', maxSteps, 1, 100, true],
+      ['maxReplans', maxReplans, 0, 10, true],
+    ] as const) {
+      if (field == null) continue;
+      if (
+        typeof field !== 'number' ||
+        !Number.isFinite(field) ||
+        (isInt && !Number.isInteger(field)) ||
+        field < lo ||
+        field > hi
+      ) {
+        res.status(400).json({ error: `"${key}" must be a number between ${lo} and ${hi}.` });
+        return;
+      }
+      if (key === 'timeoutMs') runOverrides.agentTimeoutMs = field;
+      else if (key === 'maxSteps') runOverrides.maxSteps = field;
+      else runOverrides.maxReplanningAttempts = field;
+    }
 
     const runId = randomUUID();
     ctx.runs.set(runId, {
@@ -62,6 +106,8 @@ export function runRouter(ctx: ServerContext): Router {
       try {
         const result = await ctx.orchestrator.run(message.trim(), {
           sessionId: run.sessionId,
+          // U3: per-run overrides (validated above)
+          ...(Object.keys(runOverrides).length > 0 ? { runOverrides } : {}),
           confirmCallback: async (planText: string, plan?: Plan) => {
             run.planId = plan?.id ?? run.planId;
             if (autoConfirm) {

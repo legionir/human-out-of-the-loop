@@ -87,8 +87,37 @@ export type OrchestratorConfig = z.input<typeof OrchestratorConfigSchema> & {
   onProgress?: (event: ProgressEvent) => void;
 };
 
+/**
+ * U3: per-run execution overrides.  Each field, when present, replaces
+ * the corresponding `OrchestratorConfig` value for THIS run only:
+ *   modelId                → defaultModelId (agents composed for this plan)
+ *   agentTimeoutMs         → per-agent timeout (TaskRuntime)
+ *   maxSteps               → max tool-call iterations (TaskRuntime)
+ *   maxReplanningAttempts  → replan budget (PlanRuntime)
+ * `modelId` is validated against the ModelRegistry — an unknown id
+ * throws `InvalidModelError` (carrying the list of valid ids).
+ */
+export interface RunOverrides {
+  modelId?: string;
+  agentTimeoutMs?: number;
+  maxSteps?: number;
+  maxReplanningAttempts?: number;
+}
+
+/** U3: thrown when a per-run `modelId` is not in the ModelRegistry. */
+export class InvalidModelError extends Error {
+  constructor(public readonly modelId: string, public readonly validIds: string[]) {
+    super(
+      `Unknown model id "${modelId}". Valid ids: ${validIds.join(', ') || '(none registered)'}`,
+    );
+    this.name = 'InvalidModelError';
+  }
+}
+
 export interface OrchestratorRunOptions {
   sessionId?: string;
+  /** U3: per-run overrides (model, timeout, maxSteps, replan budget). */
+  runOverrides?: RunOverrides;
   /**
    * C3: label for a NEW session (ignored when `sessionId` is given —
    * relabel existing sessions via `SessionStore.setLabel`).
@@ -250,6 +279,9 @@ export class Orchestrator {
       agentRuntime: this.agentRuntime,
       // Phase 19 (CFG-05): the configured timeout is actually applied
       agentTimeoutMs: this.config.agentTimeoutMs,
+      // U3: wire the configured max tool-call iterations (before U3 this
+      // value was set on the config but never reached the runtime).
+      maxSteps: this.config.maxSteps,
     });
     // Phase 19 (CFG-03/04): DelegationGuard instantiated from config
     // and wired into the delegate_task tool.
@@ -448,6 +480,13 @@ export class Orchestrator {
   ): Promise<OrchestratorResult> {
     if (!this.initialized) {
       await this.initialize();
+    }
+
+    // U3: validate per-run overrides BEFORE any side effect (a bad model
+    // id must fail fast, not after planning/session creation).
+    const ov = options?.runOverrides;
+    if (ov?.modelId !== undefined && !this.modelRegistry.hasConfig(ov.modelId)) {
+      throw new InvalidModelError(ov.modelId, this.modelRegistry.listConfigs().map((m) => m.id));
     }
 
     const sessionId =
@@ -701,8 +740,11 @@ export class Orchestrator {
         toolRegistry: this.toolRegistry,
         modelRegistry: this.modelRegistry,
       },
-      maxReplanningAttempts: this.config.maxReplanningAttempts,
-      defaultModelId: this.config.defaultModelId,
+      // U3: per-run overrides (runOverrides) win over the base config
+      maxReplanningAttempts: ov?.maxReplanningAttempts ?? this.config.maxReplanningAttempts,
+      defaultModelId: ov?.modelId ?? this.config.defaultModelId,
+      ...(ov?.agentTimeoutMs !== undefined ? { agentTimeoutMs: ov.agentTimeoutMs } : {}),
+      ...(ov?.maxSteps !== undefined ? { maxSteps: ov.maxSteps } : {}),
       onStatusChange: (p, event) => {
         this.streamingManager.handlePlanStatusChange(p, event);
       },

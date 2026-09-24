@@ -98,6 +98,23 @@ UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>`
 
 ---
 
+### [🟢] فاز U3 — نتیجه (2026-09-24)
+
+**نتیجه:** overrideهای per-run از فرم UI/HTTP تا `AgentRuntime.run()`:
+- **Orchestrator:** `RunOverrides {modelId?, agentTimeoutMs?, maxSteps?, maxReplanningAttempts?}` + `OrchestratorRunOptions.runOverrides`؛ validation با `modelRegistry.hasConfig` **قبل از هر side-effect** (نه ساخت session) و در صورت خطا `InvalidModelError` که لیست idهای معتبر را حمل می‌کند.
+- **PlanRuntime (همان run، از قبل per-run ساخته می‌شود):** سه فیلد جدید `agentTimeoutMs?/maxSteps?` + `defaultModelId`/`maxReplanningAttempts` با `ov?.X ?? this.config.X` merge می‌شوند و به `createTask` هر step می‌روند.
+- **TaskRuntime:** `CreateTaskOptions` دو فیلد override گرفت؛ مقادیر per-task در `taskOverrides` نگه داشته و در لحظه اجرا `overrides.X ?? this.config.X` به `runtime.run({timeoutMs, maxSteps})` پاس می‌شود (worker مشترک بین runها می‌ماند — resource-lock سالم).
+- **باگ جانبی رفع‌شده (مهم):** `OrchestratorConfig.maxSteps` و فلگ CLI `--max-steps` **مرده بودند** (هیچ‌جا مصرف نمی‌شد). حالا در constructor به TaskRuntime وصل شده و واقعاً به `stepCountIs(maxSteps)` می‌رسد (+ فلگ CLI هم بدون تغییر کد CLI زنده شد).
+- **سرور:** `POST /api/run` فیلدهای اختیاری `{model, timeoutMs, maxSteps(1..100 int), maxReplans(0..10 int)}` → validation سنکرون → 400 (با `validIds`) پیش از شروع run.
+- **UI:** select مدل از `/api/models` (پیش‌فرض = `model` همان `/api/health` — ترتیب resolve دو درخواست بی‌اثر است)، پنل تاشوی «Advanced» (timeout/max steps/max replans، خالی = پیش‌فرض سرور)، و نام مدل انتخابی در هدر مودال پلن.
+
+**تست‌ها (۹ عدد جدید):** `src/server/__tests__/u3-run-options.test.ts` (۶ عدد e2e با planner/execution mock): `model:'local-llama'` → مدل واقعیِ داده‌شده به `generateText` همان `llama3` است (و نه default سرور)؛ بدون فیلد → `gpt-4o` (رگرسیون)؛ id نامعتبر → 400 + `validIds` و **هیچ** plan/session/model-call؛ `timeoutMs/maxSteps` با spy روی `AgentRuntime.prototype.run` (اعداد دقیق)؛ `maxSteps:3` روی خود `stopWhen` SDK (`stepCountIs`) عددی تأیید می‌شود؛ فیلدهای عددی بدشکل → 400. `src/ai/__tests__/u3-run-options.test.ts` (۳ عدد unit): اولویت override بر config، fallback به config (wiring `maxSteps`)، و حذف کامل هر دو وقتی تنظیم نشده‌اند.
+**Regression:** 506/506 تست سبز (32 فایل) + tsc سبز.
+
+**انحراف/دامنه ثبت‌شده:** (1) مدل per-run روی **execution agentها** اعمال می‌شود (که مطابق گام ۱ همین پلن است: merge روی PlanRuntime). planner/reviewer/acceptance-checker مدلشان در constructor orchestrator bind می‌شود؛ تغییر آن‌ها per-run یک تغییر بزرگ‌تر (۳ کلاس) بود و خارج از دامنه U3 نگه داشته شد — کاندید فاز بعدی/اختیاری. (2) فیلد عددی `maxSteps` سقف ۱۰۰ و `maxReplans` سقف ۱۰ گرفت (پلن فقط «فیلد اختیاری» گفته بود) تا UI نتواند runtime را با عدد بی‌معنا ببندد؛ خارج از بازه → 400. (3) `InvalidModelError` به‌عنوان کلاس صادر می‌شود (به‌جای Error خام) تا مسیر CLI/کد دیگر هم بتواند type-check کند.
+
+---
+
 ## فاز U3 — model و گزینه‌های run به‌ازای هر درخواست
 
 **گام‌ها:**
@@ -109,10 +126,10 @@ UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>`
 **تست‌ها:** e2e mock — run با `model:'local-llama'` → mock model همان id را ببیند (spy)؛ model نامعتبر → 400 با لیست؛ timeout/maxSteps به runtime می‌رسند (spy)؛ بدون فیلدها → رفتار قدیمی (رگرسیون).
 
 **معیارهای پذیرش:**
-- [ ] تغییر model per-run واقعاً model متفاوت را صدا می‌زند (تست spy عددی)
-- [ ] run بدون فیلدها با رفتار امروز **بی‌تفاوت** است
-- [ ] UI: select پر می‌شود و انتخاب به body می‌رسد
-- [ ] ≥۵ تست جدید سبز
+- [x] تغییر model per-run واقعاً model متفاوت را صدا می‌زند (تست spy عددی)
+- [x] run بدون فیلدها با رفتار امروز **بی‌تفاوت** است
+- [x] UI: select پر می‌شود و انتخاب به body می‌رسد
+- [x] ≥۵ تست جدید سبز (۹ تست: ۶ e2e server + ۳ unit TaskRuntime)
 
 **فایل‌ها:** `src/ai/orchestrator.ts`، `src/server/routes/run.ts`، `public/app.js`، تست
 
@@ -242,7 +259,7 @@ UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>`
 |---|---|---|
 | U1 config parity | 🟢 | کامل شد 2026-09-24 — نتایج در زیر |
 | U2 registry | 🟢 | کامل شد 2026-09-24 — ۶ endpoint + پنل Registry در sidebar؛ ۹ تست؛ انحراف: تست success مسیر MCP با mock کنترل‌شونده connector (سرور واقعی MCP در sandbox وجود ندارد؛ منطق connector در فاز ۲ تست شده) |
-| U3 run overrides | ⬜ | |
+| U3 run overrides | 🟢 | کامل شد 2026-09-24 — `RunOverrides` تا `AgentRuntime.run()`؛ ۹ تست؛ باگ جانبی: `OrchestratorConfig.maxSteps`/`--max-steps` که مرده بودند وصل شدند |
 | U4 preview | ⬜ | |
 | U5 clarification | ⬜ | |
 | U6 usage + tasks | ⬜ | |

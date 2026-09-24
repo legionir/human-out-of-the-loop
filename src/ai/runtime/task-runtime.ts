@@ -26,6 +26,13 @@ export interface TaskRuntimeConfig {
    * `OrchestratorConfig.agentTimeoutMs`.
    */
   agentTimeoutMs?: number;
+  /**
+   * U3: max tool-call iterations per agent run.  Sourced from
+   * `OrchestratorConfig.maxSteps` — BEFORE U3 this config value was
+   * never wired to the runtime (AgentRuntime silently used its own
+   * default); now it actually applies.
+   */
+  maxSteps?: number;
 }
 
 export interface CreateTaskOptions {
@@ -39,6 +46,12 @@ export interface CreateTaskOptions {
   planStepId?: string;
   /** Phase 20 (CORR-03): owning plan id (for usage aggregation) */
   planId?: string;
+  /**
+   * U3: per-run overrides (from `Orchestrator.run({ runOverrides })`).
+   * Fall back to the runtime's own config values when absent.
+   */
+  agentTimeoutMs?: number;
+  maxSteps?: number;
 }
 
 // ─── Resource Lock Manager ───────────────────────────────────────
@@ -139,7 +152,13 @@ export class TaskRuntime {
   private readonly lockManager = new ResourceLockManager();
   private readonly maxConcurrentTasks: number;
   private readonly agentTimeoutMs?: number;
+  private readonly maxSteps?: number;
   private readonly eventBus: EventBus;
+  /** U3: per-task execution overrides (runOverrides from Orchestrator.run). */
+  private readonly taskOverrides = new Map<
+    string,
+    Pick<CreateTaskOptions, 'agentTimeoutMs' | 'maxSteps'>
+  >();
   private readonly runtime: AgentRuntime;
   private readonly runningPromises = new Map<string, Promise<AgentRunResult>>();
   // Phase 21 (PERF-03): O(1) count helpers + O(k) pending iteration.
@@ -154,6 +173,7 @@ export class TaskRuntime {
   constructor(config: Pick<TaskRuntimeConfig, 'eventBus'> & Partial<TaskRuntimeConfig>) {
     this.maxConcurrentTasks = config.maxConcurrentTasks ?? 5;
     this.agentTimeoutMs = config.agentTimeoutMs;
+    this.maxSteps = config.maxSteps;
     this.eventBus = config.eventBus;
     this.runtime = config.agentRuntime ?? new AgentRuntime();
 
@@ -183,6 +203,14 @@ export class TaskRuntime {
     this.tasks.set(taskId, task);
     this.agents.set(taskId, options.agent);
     this.pendingIds.add(taskId);
+
+    // U3: remember per-run execution overrides for this task
+    if (options.agentTimeoutMs !== undefined || options.maxSteps !== undefined) {
+      this.taskOverrides.set(taskId, {
+        agentTimeoutMs: options.agentTimeoutMs,
+        maxSteps: options.maxSteps,
+      });
+    }
 
     // Try to start immediately (respecting concurrency + locks)
     this.scheduleNext();
@@ -269,6 +297,13 @@ export class TaskRuntime {
         // cancelTask can truly abort the in-flight model call.
         const controller = new AbortController();
         this.abortControllers.set(task.id, controller);
+        // U3: per-run overrides (Orchestrator.run runOverrides) win over
+        // the runtime-level config; the maxSteps config value is wired for
+        // the first time here (previously ignored — see TaskRuntimeConfig).
+        const overrides = this.taskOverrides.get(task.id) ?? {};
+        const timeoutMs = overrides.agentTimeoutMs ?? this.agentTimeoutMs;
+        const maxSteps = overrides.maxSteps ?? this.maxSteps;
+        this.taskOverrides.delete(task.id);
         const promise = this.runtime
           .run({
             agent,
@@ -277,9 +312,9 @@ export class TaskRuntime {
             eventBus: this.eventBus,
             signal: controller.signal,
             // Phase 19 (CFG-05): the configured agent timeout actually applies
-            ...(this.agentTimeoutMs !== undefined
-              ? { timeoutMs: this.agentTimeoutMs }
-              : {}),
+            ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+            // U3: max tool-call iterations (config or per-run override)
+            ...(maxSteps !== undefined ? { maxSteps } : {}),
             // Phase 20 (CORR-03/05): carry plan context on emitted events
             ...(task.planId !== undefined ? { planId: task.planId } : {}),
             ...(task.planStepId !== undefined ? { planStepId: task.planStepId } : {}),
