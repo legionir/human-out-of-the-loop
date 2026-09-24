@@ -7,6 +7,7 @@ import type { SseHub } from './sse.js';
 
 export type RunStateKind =
   | 'planning'
+  | 'awaiting-clarification'
   | 'awaiting-confirmation'
   | 'running'
   | 'done'
@@ -24,6 +25,19 @@ export interface RunState {
   createdAt: number;
   /** Resolves the interactive confirmation for this run (UI decision). */
   confirmResolver?: (decision: { confirmed: boolean; feedback?: string }) => void;
+  /**
+   * U5: the planner's pending questions while `state === 'awaiting-clarification'`.
+   * Exposed over `GET /api/runs/:runId` so a client that missed the SSE
+   * event can still render the form.
+   */
+  clarificationQuestions?: string[];
+  /** U5: which clarification round is open (1-based). */
+  clarificationRound?: number;
+  /**
+   * U5: resolves the open clarification; `null` = the user declined to
+   * answer (the orchestrator records that as a cancelled run).
+   */
+  clarificationResolver?: (answers: Record<string, string> | null) => void;
 }
 
 export interface ServerContext {

@@ -511,6 +511,11 @@ export class Orchestrator {
     while (!planningResult.isClear) {
       const callback = options?.clarificationCallback;
       if (!callback || clarifyRound >= this.config.maxClarificationRounds) break;
+      // U5: an unclear result with NO questions (e.g. the planner failed —
+      // missing credentials) must not open an empty clarification round:
+      // there is nothing for the user to answer.  Fall through to the
+      // "clarification needed" failure report, which carries the errors.
+      if (planningResult.needsClarification.length === 0) break;
       clarifyRound++;
       const answers = await callback(planningResult.needsClarification, clarifyRound);
       if (!answers || Object.keys(answers).length === 0) {

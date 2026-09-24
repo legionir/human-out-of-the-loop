@@ -127,6 +127,25 @@
     </div>
   </div>
 
+  <!-- ── U5: clarification modal ───────────────────────────── -->
+  <div id="clarify-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="plan-modal-heading">
+        <h2>The planner needs a few answers</h2>
+        <span id="clarify-round" class="plan-model"></span>
+      </div>
+      <p class="modal-sub">
+        Your answers are fed back to the planner, which produces a new plan. Nothing runs
+        until you confirm that plan.
+      </p>
+      <div id="clarify-questions" class="clarify-questions"></div>
+      <div class="modal-actions">
+        <button id="clarify-decline-btn" class="btn danger">Don't answer (cancel run)</button>
+        <button id="clarify-send-btn" class="btn primary">Send answers</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast hidden"></div>
   <script src="/app.js"></script>
 </body>

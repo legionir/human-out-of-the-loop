@@ -189,12 +189,31 @@ UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>`
 **تست‌ها (mock planner):** e2e — run → clarification event (۲ سؤال) → POST answers → plan مودال → confirm → done (کل زنجیره در یک تست SSE)؛ بدون پاسخ → 404/409 مناسب؛ guard draft plan؛ سقف round (orchestrator) → `plan:error` با گزارش.
 
 **معیارهای پذیرش:**
-- [ ] e2e کامل ۲-round clarification → confirm → done سبز
-- [ ] state machine: `planning → awaiting-clarification → planning → awaiting-confirmation → running` در تست polling قابل مشاهده
-- [ ] guard draft-plan فاز ۲۴ رگرسیون‌شده سبز
-- [ ] ≥۴ تست جدید سبز
+- [x] e2e کامل ۲-round clarification → confirm → done سبز
+- [x] state machine: `planning → awaiting-clarification → planning → awaiting-confirmation → running` در تست polling قابل مشاهده
+- [x] guard draft-plan فاز ۲۴ رگرسیون‌شده سبز (بدون تغییر در مسیر resume؛ تست‌های فاز ۲۴ سبز ماندند)
+- [x] ≥۴ تست جدید سبز (۶ تست)
 
 **فایل‌ها:** `src/ai/orchestrator.ts` (اگر C4 نباشد)، `src/server/routes/run.ts` (+state)، `src/server/sse.ts` (event جدید)، `public/app.js`، تست
+
+---
+
+### [🟢] فاز U5 — نتیجه (2026-09-24)
+
+**نتیجه:** حلقه clarification تعاملی بدون تغییر در `sse.ts`/`stream.ts` (hub بر اساس key کار می‌کند و کلید می‌تواند runId باشد):
+- **state جدید:** `awaiting-clarification` در `RunStateKind` + سه فیلد `clarificationQuestions/clarificationRound/clarificationResolver` در `RunState`؛ resolver هرگز روی wire سریالاِیز نمی‌شود.
+- **`POST /api/run`:** `clarificationCallback` (همان امضای C4) → state = awaiting-clarification + انتشار رویداد SSE **`clarification`** روی **کانال runId** (`GET /api/stream/<runId>`) چون در این لحظه هیچ planId وجود ندارد (plan هنوز ساخته نشده)؛ payload: `{runId, questions, attempt, planId?}`.
+- **`POST /api/runs/:runId/clarification`:** `{answers:{q:a}}` (همه‌ی سؤال‌ها باید non-empty باشند وگرنه `400 {missing}`) یا `{decline:true}` (= لغو run با semantics C4). `404` برای run ناشناس، `409` وقتی run در آن state نیست.
+- **`GET /api/runs/:runId`:** در حالت انتظار، `clarificationQuestions` را هم برمی‌گرداند → کلاینتی که رویداد SSE را از دست داده (race بین POST و subscribe) با polling همان فرم را می‌سازد.
+- **UI:** مودال سؤال‌ها (هر سؤال یک textarea، متن با `textContent` — ایمن در برابر HTML تزریقی مدل)، دکمه «Send answers» و «Don't answer (cancel run)»؛ SSE کانال run بلافاصله بعد از `POST /api/run` وصل می‌شود؛ دکمه‌ی Cancel در header در این state هم همان decline را می‌فرستد؛ بعد از ارسال، خط `clarified (round n)` در timeline.
+- **رفع باگ واقعی (orchestrator):** اگر planner «unclear با صفر سؤال» برگرداند (مثلاً نبود API key)، قبلاً یک round خالی clarification باز می‌شد که کاربر هیچ راهی برای پاسخ به آن نداشت. حالا `needsClarification.length === 0` بلافاصله به گزارش failure (همان مسیر قبلی با متن خطاها) می‌رود. این رفتار CLI را هم بهتر می‌کند (prompt خالی نمایش داده نمی‌شود).
+
+**تست‌ها (۶ عدد، `src/server/__tests__/u5-clarification.test.ts`):** زنجیره کامل run → awaiting-clarification → پاسخ‌ها → reviewer planner واقعاً prompt حاوی `CLARIFICATIONS FROM USER` و متن پاسخ‌ها می‌گیرد → awaiting-confirmation → confirm → done؛ رویداد زنده SSE روی کانال runId (round 2 با `attempt:2` و `questions` و `runId`)؛ decline → outcome cancelled؛ validation کامل پاسخ‌ها (400 با `missing` + بی‌اثر بودن درخواست‌های ناقص) + 409 + 404؛ «unclear بدون سؤال» → failure مستقیم بدون round؛ سقف round (۳) → failure با `3 clarification round(s)`.
+**Regression:** 517/517 تست سبز (34 فایل) + tsc سبز. **Smoke زنده:** markup مودال + کد app.js سرو می‌شوند؛ روی سرور واقعی: run → `awaiting-clarification` → `decline` → `outcome: cancelled`.
+
+**انحراف ثبت‌شده:** (1) کانال SSE رویداد clarification = **runId** (نه planId) — در لحظه‌ی پرسش هنوز planId وجود ندارد؛ payload شامل `runId` است و `planId` فقط اگر موجود باشد. (2) race «انتشار رویداد پیش از subscribe» با polling state حل شد (فیلد `clarificationQuestions` روی GET). (3) فاز یک endpoint کاربردی تر (decline) هم گرفت تا دکمه‌ی «پاسخ ندهم» طبق پلن واقعاً run را لغو کند.
+
+---
 
 ---
 
@@ -283,7 +302,7 @@ UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>`
 | U2 registry | 🟢 | کامل شد 2026-09-24 — ۶ endpoint + پنل Registry در sidebar؛ ۹ تست؛ انحراف: تست success مسیر MCP با mock کنترل‌شونده connector (سرور واقعی MCP در sandbox وجود ندارد؛ منطق connector در فاز ۲ تست شده) |
 | U3 run overrides | 🟢 | کامل شد 2026-09-24 — `RunOverrides` تا `AgentRuntime.run()`؛ ۹ تست؛ باگ جانبی: `OrchestratorConfig.maxSteps`/`--max-steps` که مرده بودند وصل شدند |
 | U4 preview | 🟢 | کامل شد 2026-09-24 — `POST /api/preview` (planId:null، صفر side-effect) + دکمه «Plan only» و مودال read-only با feasibility/cycles؛ ۵ تست |
-| U5 clarification | ⬜ | |
+| U5 clarification | 🟢 | کامل شد 2026-09-24 — state `awaiting-clarification` + endpoint پاسخ‌ها + رویداد SSE روی کانال runId + مودال سؤال‌ها؛ ۶ تست؛ باگ رفع‌شده: round خالی وقتی planner «unclear بدون سؤال» برمی‌گرداند |
 | U6 usage + tasks | ⬜ | |
 | U7 label + follow | ⬜ | |
 | U8 docs + regression | ⬜ | |

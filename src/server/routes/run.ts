@@ -108,6 +108,29 @@ export function runRouter(ctx: ServerContext): Router {
           sessionId: run.sessionId,
           // U3: per-run overrides (validated above)
           ...(Object.keys(runOverrides).length > 0 ? { runOverrides } : {}),
+          // U5: interactive clarification.  The planner asks questions during
+          // PLANNING (before any plan id exists), so the SSE channel for this
+          // event is keyed by the runId — the run state also carries the
+          // questions for clients that missed the event.
+          clarificationCallback: async (questions: string[], round: number) => {
+            run.state = 'awaiting-clarification';
+            run.clarificationQuestions = [...questions];
+            run.clarificationRound = round;
+            ctx.hub.emit(runId, 'clarification', {
+              runId,
+              ...(run.planId ? { planId: run.planId } : {}),
+              questions,
+              attempt: round,
+            });
+            return new Promise<Record<string, string> | null>((resolve) => {
+              run.clarificationResolver = (answers) => {
+                run.state = 'planning';
+                run.clarificationQuestions = undefined;
+                run.clarificationResolver = undefined;
+                resolve(answers);
+              };
+            });
+          },
           confirmCallback: async (planText: string, plan?: Plan) => {
             run.planId = plan?.id ?? run.planId;
             if (autoConfirm) {
@@ -150,14 +173,77 @@ export function runRouter(ctx: ServerContext): Router {
     res.status(202).json({ runId, autoConfirm });
   });
 
+  /**
+   * U5: answer the planner's clarification questions (or decline).
+   *
+   *   POST /api/runs/:runId/clarification { answers: {q: a} }  → 200 { ok, answered }
+   *   POST /api/runs/:runId/clarification { decline: true }    → 200 { ok, declined }
+   *
+   * 404 unknown run · 409 when the run is not awaiting clarification ·
+   * 400 when an answer is missing/empty (every pending question must be
+   * answered — a partial answer cannot be fed back to the planner).
+   */
+  router.post('/api/runs/:runId/clarification', (req, res) => {
+    const run = ctx.runs.get(req.params.runId);
+    if (!run) {
+      res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
+      return;
+    }
+    if (run.state !== 'awaiting-clarification' || !run.clarificationResolver) {
+      res.status(409).json({
+        error: `Run "${run.runId}" is not awaiting clarification (state: ${run.state}).`,
+      });
+      return;
+    }
+    const body = (req.body ?? {}) as { answers?: unknown; decline?: unknown };
+
+    // The user may decline to answer — that cancels the run (C4 semantics).
+    if (body.decline === true) {
+      const resolver = run.clarificationResolver;
+      resolver(null);
+      res.json({ ok: true, declined: true });
+      return;
+    }
+
+    const rawAnswers = body.answers;
+    if (typeof rawAnswers !== 'object' || rawAnswers === null || Array.isArray(rawAnswers)) {
+      res.status(400).json({ error: 'Body must include an "answers" object (or "decline": true).' });
+      return;
+    }
+    const pending = run.clarificationQuestions ?? [];
+    const answers: Record<string, string> = {};
+    const missing: string[] = [];
+    for (const question of pending) {
+      const value = (rawAnswers as Record<string, unknown>)[question];
+      if (typeof value !== 'string' || value.trim() === '') {
+        missing.push(question);
+        continue;
+      }
+      answers[question] = value.trim();
+    }
+    if (missing.length > 0) {
+      res.status(400).json({
+        error: 'Every question must be answered with a non-empty string.',
+        missing,
+      });
+      return;
+    }
+
+    const resolver = run.clarificationResolver;
+    resolver(answers);
+    res.json({ ok: true, answered: Object.keys(answers).length, round: run.clarificationRound });
+  });
+
   router.get('/api/runs/:runId', (req, res) => {
     const run = ctx.runs.get(req.params.runId);
     if (!run) {
       res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
       return;
     }
-    // Never leak the resolver to the wire.
-    const { confirmResolver, ...publicState } = run;
+    // Never leak the resolvers to the wire.
+    const { confirmResolver, clarificationResolver, ...publicState } = run;
+    void confirmResolver;
+    void clarificationResolver;
     res.json(publicState);
   });
 

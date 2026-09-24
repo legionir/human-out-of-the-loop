@@ -383,3 +383,19 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; 
 }
 .plan-feasibility.ok { border-color: rgba(63, 185, 80, 0.4); }
 .plan-feasibility.bad { border-color: rgba(248, 81, 73, 0.45); color: var(--red); }
+
+/* ── U5: clarification modal ──────────────────────────────────── */
+.clarify-questions { display: flex; flex-direction: column; gap: 12px; }
+.clarify-question { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--text); }
+.clarify-question textarea {
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-family: inherit;
+  font-size: 13px;
+  resize: vertical;
+}
+.clarify-question textarea:focus { outline: none; border-color: var(--accent); }
+.tl.clarified { color: var(--accent); }

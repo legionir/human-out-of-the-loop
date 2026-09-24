@@ -54,6 +54,12 @@ const planFeasibilityEl = $('#plan-feasibility');
 const planDecisionRow = $('#plan-decision-row');
 const planPreviewRow = $('#plan-preview-row');
 const previewCloseBtn = $('#preview-close-btn');
+// U5: clarification modal (planner questions during planning)
+const clarifyModalEl = $('#clarify-modal');
+const clarifyQuestionsEl = $('#clarify-questions');
+const clarifyRoundEl = $('#clarify-round');
+const clarifySendBtn = $('#clarify-send-btn');
+const clarifyDeclineBtn = $('#clarify-decline-btn');
 const planFeedbackEl = $('#plan-feedback');
 const planConfirmBtn = $('#plan-confirm-btn');
 const planRejectBtn = $('#plan-reject-btn');
@@ -67,6 +73,7 @@ const state = {
   modalPlanId: null,
   defaultModel: null,
   modalPreview: false,
+  modalClarify: false,
 };
 
 // ─── Utilities ───────────────────────────────────────────────────
@@ -272,13 +279,19 @@ async function startRun() {
     runId: accepted.runId,
     planId: null,
     es: null,
+    runEs: null,
     pollTimer: null,
     assistantEl,
     // U3: retain the selected model so the confirmation header is explicit.
     model,
+    state: 'planning',
+    clarifyOpenFor: null,
     done: false,
   };
   showRunControls('planning…');
+  // U5: clarification fires during PLANNING (no plan id yet) on the run
+  // channel; polling is the fallback if the event is missed.
+  connectRunStream(state.run);
   pollRun();
 }
 
@@ -289,11 +302,15 @@ function pollRun() {
   api(`/api/runs/${run.runId}`)
     .then((s) => {
       if (!state.run || state.run.runId !== run.runId) return; // superseded
+      run.state = s.state;
       if (s.planId && s.planId !== run.planId) {
         run.planId = s.planId;
         connectStream(run);
       }
-      if (s.state === 'awaiting-confirmation') {
+      if (s.state === 'awaiting-clarification') {
+        showRunControls('waiting for your answers…');
+        openClarifyModal(run, s.clarificationQuestions || [], s.clarificationRound || 1);
+      } else if (s.state === 'awaiting-confirmation') {
         showRunControls('awaiting your confirmation');
         openPlanModal(run);
       } else if (s.state === 'running') {
@@ -317,6 +334,98 @@ function pollRun() {
 
 function assistantElFor(run) {
   return run.assistantEl;
+}
+
+/** U5: run-scoped SSE channel — clarification arrives before any plan exists. */
+function connectRunStream(run) {
+  if (run.runEs) return;
+  const es = new EventSource(`/api/stream/${encodeURIComponent(run.runId)}`);
+  run.runEs = es;
+  es.addEventListener('clarification', (e) => {
+    if (state.run !== run) return;
+    let d = {};
+    try {
+      d = JSON.parse(e.data);
+    } catch {
+      /* ignore malformed frame */
+    }
+    openClarifyModal(run, d.questions || [], d.attempt || 1);
+  });
+  es.onerror = () => {
+    // EventSource retries; the poller converges on the run state regardless.
+  };
+}
+
+/**
+ * U5: render the planner's questions.  Safe by construction: question text
+ * is assigned via textContent (never innerHTML) since it originates in a
+ * model response.
+ */
+function openClarifyModal(run, questions, round) {
+  if (!questions.length) return;
+  // One modal per round: ignore duplicate SSE + polling notifications.
+  if (run.clarifyOpenFor === round && !clarifyModalEl.classList.contains('hidden')) return;
+  run.clarifyOpenFor = round;
+  state.modalClarify = true;
+  clarifyRoundEl.textContent = `Round ${round}`;
+  clarifyQuestionsEl.textContent = '';
+  for (const question of questions) {
+    const label = document.createElement('label');
+    label.className = 'clarify-question';
+    const span = document.createElement('span');
+    span.textContent = question;
+    const textarea = document.createElement('textarea');
+    textarea.rows = 2;
+    textarea.placeholder = 'Your answer…';
+    textarea.dataset.question = question;
+    label.append(span, textarea);
+    clarifyQuestionsEl.appendChild(label);
+  }
+  clarifyModalEl.classList.remove('hidden');
+  const first = clarifyQuestionsEl.querySelector('textarea');
+  if (first) first.focus();
+}
+
+function closeClarifyModal() {
+  clarifyModalEl.classList.add('hidden');
+  state.modalClarify = false;
+}
+
+/** U5: send the answers (or decline → the run is cancelled). */
+async function submitClarification(decline) {
+  const run = state.run;
+  if (!run) return;
+  const boxes = [...clarifyQuestionsEl.querySelectorAll('textarea')];
+  const answers = Object.fromEntries(boxes.map((b) => [b.dataset.question, b.value.trim()]));
+  if (!decline && Object.values(answers).some((a) => a === '')) {
+    showToast('Answer every question — or choose "Don\'t answer".');
+    return;
+  }
+  clarifySendBtn.disabled = true;
+  clarifyDeclineBtn.disabled = true;
+  try {
+    const res = await api(`/api/runs/${encodeURIComponent(run.runId)}/clarification`, {
+      method: 'POST',
+      body: JSON.stringify(decline ? { decline: true } : { answers }),
+    });
+    closeClarifyModal();
+    const timeline = run.assistantEl.querySelector('.timeline');
+    if (timeline) {
+      const div = document.createElement('div');
+      div.className = 'tl clarified';
+      div.textContent = decline
+        ? '⏹ clarification declined — run cancelled'
+        : `✦ clarified (round ${res.round}): ${Object.keys(answers).length} answer(s)`;
+      timeline.appendChild(div);
+      scrollChat();
+    }
+    showRunControls(decline ? 'cancelling…' : 'planning…');
+  } catch (err) {
+    showToast(`Clarification failed: ${err.message}`);
+  } finally {
+    clarifySendBtn.disabled = false;
+    clarifyDeclineBtn.disabled = false;
+  }
 }
 
 function connectStream(run) {
@@ -409,9 +518,11 @@ async function finishRun(s, assistantEl) {
 function finishRunUi() {
   runBtn.disabled = false;
   hideRunControls();
+  closeClarifyModal();
   if (state.run) {
     clearTimeout(state.run.pollTimer);
     if (state.run.es) state.run.es.close();
+    if (state.run.runEs) state.run.runEs.close();
     state.run = null;
   }
 }
@@ -432,7 +543,17 @@ function hideRunControls() {
 
 async function cancelRun() {
   const run = state.run;
-  if (!run || !run.planId) {
+  if (!run) {
+    showToast('Nothing to cancel yet.');
+    return;
+  }
+  // U5: while the planner waits for answers there is no plan to cancel —
+  // declining the questions is the way out.
+  if (run.state === 'awaiting-clarification') {
+    await submitClarification(true);
+    return;
+  }
+  if (!run.planId) {
     showToast('Nothing to cancel yet.');
     return;
   }
@@ -642,6 +763,8 @@ newSessionBtn.addEventListener('click', () => {
   loadSessions(null);
 });
 cancelRunBtn.addEventListener('click', () => void cancelRun());
+clarifySendBtn.addEventListener('click', () => void submitClarification(false));
+clarifyDeclineBtn.addEventListener('click', () => void submitClarification(true));
 planConfirmBtn.addEventListener('click', () => void decidePlan(true));
 planRejectBtn.addEventListener('click', () => void decidePlan(false));
 
