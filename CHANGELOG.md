@@ -28,6 +28,7 @@ counts.
 | 8 | **`plans show` printed raw JSON** | Its own description promises "steps, personas, tools, dependencies". `plans show` now renders the plan for a human (per-step status, persona, skills, tools, dependencies, acceptance criteria, result) and `--json` keeps the machine-readable dump. |
 | 9 | **`sessions label` was write-only** | Labels were set but never listed; `sessions list` gained a `LABEL` column. |
 | 10 | **`--session <unknown>` was accepted silently** | The run reported the bogus id as its session and persisted no interaction; it now fails fast (exit 2) with a hint, and the hint explains that sessions require `--persistent`. |
+| 11 | **`plans cancel` did not stop a running plan** | `hootl plans cancel <id>` from a second terminal reported success and persisted `cancelled`, but the process that owned the run never re-read the store: it ran to the end and overwrote the cancellation with `completed`. The execution loop now honours the persisted `cancelled` status (before dispatching more work and before deriving the final status) and `persist()` refuses to overwrite a cancellation. The run ends with `❌ Plan cancelled. 1/2 steps completed.`, outcome `CANCELLED`, exit 1, leaving the incomplete steps listed. Running agents are not killed mid-step (the step in flight finishes) — matching the command's documented semantics. |
 
 ### Changed
 
@@ -38,8 +39,8 @@ counts.
 
 ### Tests
 
-- New `src/cli/__tests__/phase29.test.ts` (13 tests): pre-flight usage errors, the surfaced planning failure, the step counter with agent-level events, numeric-token redaction, the human `plans show` view, `--tail` validation, and a guard asserting the interactive prompt types exist in the installed inquirer.
-- Full suite: **583 tests / 39 files**, `tsc` clean.
+- New `src/cli/__tests__/phase29.test.ts` (14 tests): pre-flight usage errors, the surfaced planning failure, the step counter with agent-level events, numeric-token redaction, the human `plans show` view, `--tail` validation, a guard asserting the interactive prompt types exist in the installed inquirer, and cross-process cancellation (fails without the fix).
+- Full suite: **585 tests / 39 files**, `tsc` clean.
 
 ## [27.1.0] — 2026-09-24 — `hootl` command, layered registries, self-documenting CLI
 

@@ -121,6 +121,19 @@ export class PlanRuntime {
 
     // 2. Main execution loop
     while (!this.shouldExit(plan)) {
+      // Phase 29: cross-process cancellation.  `hootl plans cancel <id>`
+      // runs in ANOTHER process and can only persist the new status, so
+      // the loop has to re-read the store to notice it — without this the
+      // run ignored the cancellation and even overwrote it with
+      // 'completed'.  Running agents are not killed (the step in flight
+      // finishes); the loop stops before dispatching more work.
+      if (this.persistedStatus(plan) === 'cancelled') {
+        plan.status = 'cancelled';
+        this.persist(plan);
+        this.notify(plan, 'plan:cancelled');
+        break;
+      }
+
       // Check cancellation (Phase 13)
       if (this.cancelled) {
         plan.status = 'cancelled';
@@ -179,9 +192,19 @@ export class PlanRuntime {
     if (this.cancelled) {
       plan.status = 'cancelled';
     }
+    // Phase 29: a cross-process cancel that arrived while the LAST step was
+    // still running never re-enters the loop (all steps are done, so
+    // shouldExit() is already true) — honour it here too instead of
+    // reporting 'completed'.
+    if (this.persistedStatus(plan) === 'cancelled') {
+      plan.status = 'cancelled';
+    }
     if (plan.status === 'running') {
       const allDone = plan.steps.every((s) => s.status === 'done');
       plan.status = allDone ? 'completed' : 'failed-partial';
+    }
+    if (plan.status === 'cancelled') {
+      this.notify(plan, 'plan:cancelled');
     }
     plan.completedAt = Date.now();
     this.persist(plan);
@@ -571,6 +594,16 @@ Produce a new plan that:
 
   private persist(plan: Plan): void {
     try {
+      // Phase 29: a cancellation that arrives from ANOTHER process is
+      // authoritative.  Without this the loop's own (status 'running')
+      // writes raced with `hootl plans cancel` and overwrote it, so the
+      // run finished as 'completed' and the human's cancel was lost.
+      if (plan.id) {
+        const stored = this.config.planStore.load(plan.id);
+        if (stored?.status === 'cancelled' && plan.status !== 'cancelled') {
+          plan.status = 'cancelled';
+        }
+      }
       this.config.planStore.save(plan);
     } catch {
       // Persistence failure should not crash the loop
@@ -580,6 +613,19 @@ Produce a new plan that:
 
   private notify(plan: Plan, event: string): void {
     this.config.onStatusChange?.(plan, event);
+  }
+
+  /**
+   * Phase 29: the status currently on disk (a user may have cancelled the
+   * plan from another terminal while this loop is running).
+   */
+  private persistedStatus(plan: Plan): Plan['status'] | undefined {
+    if (!plan.id) return undefined;
+    try {
+      return this.config.planStore.load(plan.id)?.status;
+    } catch {
+      return undefined;
+    }
   }
 
   private buildResult(plan: Plan): PlanExecutionResult {

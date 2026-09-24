@@ -40,8 +40,19 @@ vi.mock('ai', async () => {
 import { generateObject, generateText } from 'ai';
 import { main } from '../../cli.js';
 import { FilePlanStore } from '../../ai/runtime/plan-store.js';
-import { createPlan } from '../../ai/schemas/plan.js';
+import { createPlan, type Plan } from '../../ai/schemas/plan.js';
 import { createProgressRenderer } from '../utils/streaming.js';
+import { EventBus } from '../../ai/runtime/event-bus.js';
+import { AgentRuntime } from '../../ai/runtime/agent-runtime.js';
+import { TaskRuntime } from '../../ai/runtime/task-runtime.js';
+import { MemoryPlanStore, type PlanStore } from '../../ai/runtime/plan-store.js';
+import { PlanRuntime, type PlanRuntimeConfig } from '../../ai/runtime/plan-runtime.js';
+import { PersonaRegistry } from '../../ai/registries/persona-registry.js';
+import { SkillRegistry } from '../../ai/registries/skill-registry.js';
+import { ToolRegistry } from '../../ai/registries/tool-registry.js';
+import { ModelRegistry } from '../../ai/registries/model-registry.js';
+import { bootstrapCatalogTools } from '../../ai/tools/catalog-bootstrap.js';
+import type { Planner } from '../../ai/planning/planner.js';
 import { ObservabilityLogger } from '../../ai/runtime/observability-logger.js';
 import type { ProgressEvent } from '../../ai/runtime/streaming-manager.js';
 
@@ -431,6 +442,114 @@ describe('Phase 29 — plan and session views', () => {
     const json = await runCli(['plans', 'show', id, '--json', '--project-root', projectRoot]);
     expect(json.code).toBe(0);
     expect((JSON.parse(json.out) as { id: string }).id).toBe(id);
+  });
+});
+
+// ─── Cross-process cancellation ──────────────────────────────────
+
+describe('Phase 29 — a plan cancelled from another process actually stops', () => {
+  /** Wraps a real plan store and simulates the SECOND terminal: from the
+   *  second persist onwards the stored status is 'cancelled' — exactly what
+   *  `hootl plans cancel <id>` writes while the first process keeps running. */
+  function cancellingStore(): { store: PlanStore; written: string[] } {
+    const inner = new MemoryPlanStore();
+    const written: string[] = [];
+    let saves = 0;
+    const store = {
+      save(plan: Plan) {
+        inner.save(plan);
+        written.push(plan.status);
+        saves += 1;
+        // save #1 is the initial 'running' persist of execute(); from #2 on
+        // another process owns the status.
+        if (saves >= 2) inner.save({ ...inner.load(plan.id!)!, status: 'cancelled' });
+      },
+      load: (id: string) => inner.load(id),
+      list: () => inner.list(),
+      delete: (id: string) => inner.delete(id),
+      exists: (id: string) => inner.exists(id),
+    } as unknown as PlanStore;
+    return { store, written };
+  }
+
+  it('is not overwritten by the running loop (reports CANCELLED)', async () => {
+    const eventBus = new EventBus();
+    const agentRuntime = new AgentRuntime();
+    const taskRuntime = new TaskRuntime({ maxConcurrentTasks: 2, eventBus, agentRuntime });
+
+    const personaRegistry = new PersonaRegistry();
+    const toolRegistry = new ToolRegistry();
+    const skillRegistry = new SkillRegistry({ toolRegistry });
+    const modelRegistry = new ModelRegistry();
+    // The step must SUCCEED, so the loop goes on dispatching after the
+    // external cancel (otherwise the failure path stops it anyway).
+    personaRegistry.register({
+      id: 'coder',
+      name: 'Coder',
+      system: 'You write code.',
+      allowedTools: ['*'],
+    });
+    modelRegistry.registerProvider({
+      name: 'openai',
+      supportsModel: () => true,
+      createModel: () => ({ modelId: 'gpt-4o' }) as never,
+    } as never);
+    modelRegistry.registerConfig({ id: 'gpt-4o', provider: 'openai', model: 'gpt-4o' } as never);
+    bootstrapCatalogTools({ toolRegistry, personaRegistry, skillRegistry });
+
+    const { store: planStore, written } = cancellingStore();
+    const planner = { plan: async () => ({ isClear: false, needsClarification: [], errors: [] }) } as unknown as Planner;
+
+    const runtime = new PlanRuntime({
+      taskRuntime,
+      planStore,
+      planner,
+      feasibilityDeps: { personaRegistry, skillRegistry, toolRegistry },
+      refs: { personaRegistry, skillRegistry, toolRegistry, modelRegistry },
+      maxReplanningAttempts: 0,
+      defaultModelId: 'gpt-4o',
+    } as PlanRuntimeConfig);
+
+    const plan = createPlan('cross-process cancel', [
+      {
+        id: 'step-1',
+        description: 'First step',
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: [],
+        assignedTools: ['read_file'],
+        claimedResources: [],
+        acceptanceCriteria: 'First step done',
+        status: 'pending',
+      },
+      {
+        id: 'step-2',
+        description: 'Second step',
+        dependsOn: ['step-1'],
+        assignedPersona: 'coder',
+        assignedSkills: [],
+        assignedTools: ['read_file'],
+        claimedResources: [],
+        acceptanceCriteria: 'Second step done',
+        status: 'pending',
+      },
+    ]);
+    planStore.save(plan);
+
+    const result = await runtime.execute(plan);
+
+    // Before the fix the loop re-persisted its own 'running' view over the
+    // cancellation and finished as 'completed' (the real two-terminal
+    // reproduction) or 'failed-partial' (this unit-level one).
+    expect(result.status).toBe('cancelled');
+    expect(planStore.load(plan.id!)!.status).toBe('cancelled');
+    expect(plan.steps[1]!.status).toBe('pending');
+    // Writes #1 (initial 'running') and #2 (step-1 synced) happened before
+    // the cancel; everything the loop persisted AFTERWARDS must be cancelled
+    // — this is what the persist()-time guard protects.
+    expect(written.length).toBeGreaterThan(2);
+    expect(written.slice(2).every((status) => status === 'cancelled')).toBe(true);
+    taskRuntime.destroy();
   });
 });
 
