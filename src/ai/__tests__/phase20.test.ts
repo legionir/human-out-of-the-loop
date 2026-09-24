@@ -506,6 +506,28 @@ describe('Phase 20 — log payload redaction is substring-based (SEC-04)', () =>
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
+  it('numeric *Tokens counters survive redaction (Phase 29 regression)', () => {
+    logger.log({
+      eventType: 'task:completed',
+      message: 'done',
+      level: 'info',
+      payload: {
+        toolsUsed: ['read_file'],
+        usage: { promptTokens: 240, completionTokens: 90, totalTokens: 330 },
+        accessToken: 'string-secret-must-stay-redacted',
+      },
+    });
+
+    const [entry] = logger.readAll();
+    expect(entry!.payload!.usage).toEqual({
+      promptTokens: 240,
+      completionTokens: 90,
+      totalTokens: 330,
+    });
+    // …while a real string credential is still redacted.
+    expect(entry!.payload!.accessToken).toBe('***REDACTED***');
+  });
+
   it('keys CONTAINING redact patterns are redacted (myApiKey, dbToken, accessToken)', () => {
     logger.log({
       eventType: 'system:info',

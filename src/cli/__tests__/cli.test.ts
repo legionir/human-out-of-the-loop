@@ -375,9 +375,26 @@ describe('Phase 23 — CLI: plans', () => {
     expect(out).toContain('2/2');
   });
 
-  it('plans show prints the full plan JSON', async () => {
+  it('plans show renders the plan for a human (steps, personas, tools)', async () => {
     const id = seedPlan('running', 1);
     const { code, out } = await runCli(['plans', 'show', id, '--project-root', projectRoot]);
+    expect(code).toBe(0);
+    expect(out).toContain(`Plan ${id}`);
+    expect(out).toContain('Persona:');
+    expect(out).toContain('Tools:');
+    expect(out).toContain('[step-1]');
+  });
+
+  it('plans show --json prints the full plan JSON', async () => {
+    const id = seedPlan('running', 1);
+    const { code, out } = await runCli([
+      'plans',
+      'show',
+      id,
+      '--json',
+      '--project-root',
+      projectRoot,
+    ]);
     expect(code).toBe(0);
     const parsed = JSON.parse(out) as Plan;
     expect(parsed.id).toBe(id);

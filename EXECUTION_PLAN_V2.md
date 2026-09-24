@@ -608,6 +608,34 @@ GET  /api/observability?planId=&tail=
 | سوال ۵ بخش ۴ (ReDoS) | بخش ۴ | — | ✅ بسته شد با راه‌حل جانشین: `safe-regex`/`re2` اضافه نشد؛ `regex-guard.ts` سفارشی (تشخیص nested quantifier) + سقف طول الگو (۲۰۰ کاراکتر) بدون timeout اجرایی |
 | یادداشت فاز ۲۴: ارتقای UI به Next.js/React | فاز ۲۴ | — | 🔵 آینده/اختیاری — UI نسخه‌ی فعلی vanilla ماند (طبق تصمیم کاربر) و پلن UI (U1–U8) کامل است |
 
+### [🟢] فاز ۲۹: تست ورک‌فلو‌های CLI با تعامل واقعی ترمینال — کامل شد (۲۰۲۶-۰۹-۲۴)
+
+**مبنا (درخواست کاربر):** «بصورت مجزا و کامل ورک‌فلو دستورات cli رو تست کن. درصورت امکان عینا مثل کاربری که با ترمینال تعامله» — یعنی هر دستور جداگانه، در یک PTY واقعی، با پرسش‌ها و کلیدهای واقعی.
+
+**روش (هارنس، بیرون از ریپو در `/tmp/e2e`):** (۱) استاب LLM محلی روی `http://127.0.0.1:8931/v1` که همان **Responses API** را جواب می‌دهد (Assessment/Plan/Acceptance/FinalReview/tool-call)؛ (۲) درایور PTY با `pty.fork()` تا فرزند **controlling terminal** واقعی داشته باشد (Ctrl-C = SIGINT، ISIG/ICANON مثل ترمینال)؛ (۳) پروژه‌ی نمونه با رجیستری لایه‌ای، `.env` و MCP دمو؛ (۴) ۳۰+ سناریو (happy path، خطا، تعاملی) با transcript خام.
+
+| # | باگ پیداشده در تعامل واقعی | ریشه | رفع (فایل) |
+|---|---|---|---|
+| ۱ | **`hootl run` بدون `--yes` در ترمینال crash می‌کرد**: `Prompt type "list" is not registered` | inquirer v14 نوع `list` را حذف/تغییرنام داده به `select` | `type: 'select'` + تست نگهبان که نوع‌های prompt را با رجیستری inquirer چک می‌کند (`src/cli/utils/confirm.ts`, `phase29.test.ts`) |
+| ۲ | خطای planning با لیست سؤال خالی، پیام بی‌محتوا چاپ می‌کرد: `⚠️ Clarification needed:` و سؤال‌ها هیچ | `PlanningResult.errors` نادیده گرفته می‌شد | پیام `🛑 Planning failed: <error>` + outcome `failure` (`src/ai/orchestrator.ts`) |
+| ۳ | `--max-steps 0` و `--timeout-ms 500` خروجی خام ZodError می‌دادند | اعتبارسنجی نبود؛ به `OrchestratorConfigSchema` می‌رسید | pre-flight با محدوده‌های همان اسکیما + `formatZodError` → exit 2 (`src/cli/commands/run.ts`) |
+| ۴ | `--model ghost-model` تا planner می‌رفت و مبهم شکست می‌خورد | نبودِ بررسی pre-flight | چک `modelRegistry.hasConfig` پس از `initialize()` → لیست idهای معتبر + exit 2 (`run.ts`) |
+| ۵ | **ابزارهای declared روی step هرگز به agent نمی‌رسیدند** (`Tools: read_file` نمایش داده می‌شد ولی `assignedTools` هیچ‌جا خوانده نمی‌شد) | `AgentDefinition` فیلد tool نداشت و فقط skillها ابزار می‌دادند | `toolIds` در `AgentDefinitionSchema` + گنجاندن در `requestedToolIds` با همان فیلتر persona + پاس‌دادن `assignedTools` در `buildAgentForStep` (`schemas/agent-definition.ts`, `agents/agent-factory.ts`, `runtime/plan-runtime.ts`) |
+| ۶ | `hootl usage` و ستون TOKENS در `tasks` عدد را `***REDACTED***` نشان می‌دادند | الگوی redaction «token» کلیدهای شمارنده‌ی عددی (`promptTokens/totalTokens`) را هم می‌گرفت | معافیت مقادیر **عددی** با پسوند `tokens`؛ رشته‌ها/آبجکت‌ها همچنان redact می‌شوند (`runtime/observability-logger.ts`) |
+| ۷ | شمارنده‌ی پیشرفت از حد می‌گذشت: `✔ [4/2]` روی پلن ۲ مرحله‌ای | `plan:step-completed` دو بار emit می‌شد (چرخه‌ی step + `agent:completed`) | رویدادهای سطح agent با `agentLevel: true` علامت‌گذاری و از شمارش خارج شدند (جزئیات فقط با `--verbose`) (`runtime/streaming-manager.ts`, `cli/utils/streaming.ts`) |
+| ۸ | `hootl plans show <id>` JSON خام چاپ می‌کرد، در حالی که description می‌گوید steps/personas/tools | پیاده‌سازی ناقص | نمای انسانی (status هر step، persona/tools/depends/accept/result) + `--json` برای خروجی ماشینی (`cli/commands/plans.ts`, `cli.ts`) |
+| ۹ | `sessions label` نوشتنِ بی‌مصرف بود؛ label در هیچ فهرستی دیده نمی‌شد | `sessions list` ستون label نداشت | ستون `LABEL` در `sessions list` (`cli/commands/sessions.ts`) |
+| ۱۰ | `--session <id-nameوجود>` بی‌صدا پذیرفته می‌شد: اجرا «موفق» ولی هیچ interactionی ذخیره نمی‌شد و id غلط در خلاصه چاپ می‌شد | نبودِ بررسی وجود session | pre-flight: نبود session → پیام + exit 2 (`run.ts`) |
+| ۱۱ | `hootl run ""` تا planner می‌رفت و خطای schema می‌داد | نبودِ بررسی goal خالی | `The goal must not be empty.` + exit 2 (`run.ts`) |
+| ۱۲ | `logs --tail 0` کل لاگ را چاپ می‌کرد (`slice(-0) === slice(0)`) و `--tail abc` بی‌صدا هیچ | معناشناسی `tail` در JS + نبود اعتبارسنجی | `0` = بدون خط اولیه (برای `--follow`)، مقدار غیرعددی/منفی → exit 2 (`cli/commands/logs.ts`) |
+| ۱۳ | محدوده‌ی `--max-steps`/`--timeout-ms`/`--tail` در help مستند نبود | متن help قدیمی | محدوده‌ها به متن optionها اضافه شد (`cli.ts`) |
+
+**پوشش ورک‌فلوها (همه با PTY واقعی و exit code راستی‌آزمایی‌شده):** `--version`/`--help`/`help <cmd>`؛ `run` در چهار حالت (تعاملی Enter=تأیید، ↓+Enter=رد + feedback، clarification چند دور با پاسخ‌دهی، `--yes`) به‌همراه `--dry-run` (بدون هیچ اجرا؛ فقط `observability.jsonl` از initialize)، `--persistent`, `--verbose`, `--label`, `--session <id>`, `--project-root` از cwd دیگر و فلگ‌های عددی؛ `sessions list|show|label|delete`؛ `plans list|show|cancel|resume` (شامل حالت‌های terminal/ناموجود)؛ `logs` (`--plan`, `--tail`, `--follow` + Ctrl-C)؛ `usage`/`usage --plan`؛ `tasks list|show` (+`--json`)؛ `models|personas|skills|tools` (`--json`, لایه‌ها, `HOTL_NO_PACKAGE_REGISTRY=1`, پروژه‌ی بدون رجیستری)؛ `mcp list|test`؛ و مسیرهای خطا (exit 1/2 با پیام قابل‌فهم).
+
+**تست:** فایل جدید `src/cli/__tests__/phase29.test.ts` (۱۳ تست: pre-flightها، surfaced planning error، شمارنده، redaction عددی، نمای پلن، نگهبان نوع prompt، `--tail`). کل suite: **۵۸۳ تست در ۳۹ فایل**، `tsc` پاک. نسخه → `27.2.0`؛ باینری سراسری `hootl` بازسازی و دوباره نصب شد.
+
+**انحراف ثبت‌شده:** (۱) باگ ۵ (ابزارهای step) خارج از «تست CLI» بود ولی تست تعاملی آن را آشکار کرد (خروجی «No tools used» و نبود `tools` در درخواست به مدل) → کوچک‌ترین رفع سازگار با معماری اعمال شد. (۲) باگ ۸ و ۹ تغییر رفتار قابل‌مشاهه‌ی CLI هستند (نمای انسانی plans show و ستون label) و تست قبلی `plans show prints the full plan JSON` به دو تست (نمای انسانی + `--json`) تبدیل شد. (۳) دو مورد اولیه‌ی «Ctrl-C باعث بسته‌نشدن `logs --follow`» و «^C در پرامپت‌ها» ابتدا باگ محصول به‌نظر می‌رسید؛ بررسی نشان داد هارنس PTY کنترل‌ترمینال نداشت → درایور به `pty.fork()` ارتقا یافت و رفتار درست تأیید شد (باگ محصول نبود).
+
 ### [🟢] فاز ۲۸: `hootl` + رجیستری لایه‌ای + راهنمای کامل CLI — کامل شد (۲۰۲۶-۰۹-۲۴)
 
 **مبنا (درخواست کاربر):** (۱) دستور `hootl` که در هر مسیری از ترمینال اجرا شود و همان مسیر را root پروژه بگیرد؛ (۲) برای رجیستری، **هم** رجیستری پروژه و **هم** رجیستری داخلی پکیج لود شوند (گلوبال + لوکال)؛ (۳) راهنمای CLI خیلی کامل شود، بدون نمونه‌کد.

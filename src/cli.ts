@@ -255,8 +255,8 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .option('--yes', 'auto-confirm the plan without prompting (CI mode)')
     .option('--verbose', 'show tool calls and low-level status')
     .option('--dry-run', 'show the plan without executing anything')
-    .option('--timeout-ms <ms>', 'per-agent timeout in milliseconds', (v: string) => Number(v))
-    .option('--max-steps <n>', 'max tool-call iterations per agent run', (v: string) => Number(v))
+    .option('--timeout-ms <ms>', 'per-agent timeout in milliseconds (1000-600000)', (v: string) => Number(v))
+    .option('--max-steps <n>', 'max tool-call iterations per agent run (1-100)', (v: string) => Number(v))
     .option('--max-replans <n>', 'automatic re-planning attempts on failure (0-10)', (v: string) => Number(v))
     .option('--max-delegation-depth <n>', 'max agent-to-subagent delegation depth (0-5)', (v: string) => Number(v))
     .option('--label <text>', 'label for the NEW session (max 64 chars)')
@@ -384,8 +384,12 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .addHelpText('after', PLANS_HELP)
     .argument('<planId>')
     .option('--project-root <dir>', 'project root (default: current directory)')
-    .action(async (id: string, opts: Record<string, string | undefined>) => {
-      process.exitCode = await plansShowCommand(id, { projectRoot: opts.projectRoot });
+    .option('--json', 'print the raw plan JSON instead of the formatted view')
+    .action(async (id: string, opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await plansShowCommand(id, {
+        projectRoot: opts.projectRoot as string | undefined,
+        json: opts.json === true,
+      });
     });
   plans
     .command('cancel')
@@ -567,7 +571,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .description('Read the observability log (.ai-runtime/observability.jsonl)')
     .option('--project-root <dir>', 'project root (default: current directory)')
     .option('--plan <planId>', 'only entries for this plan')
-    .option('--tail <n>', 'number of trailing lines', (v: string) => Number(v), 50)
+    .option('--tail <n>', 'number of trailing lines (0 = none, for --follow)', (v: string) => Number(v), 50)
     .option('--follow', 'keep following the log for new entries')
     .action(async (opts: Record<string, string | number | boolean | undefined>) => {
       process.exitCode = await logsCommand({

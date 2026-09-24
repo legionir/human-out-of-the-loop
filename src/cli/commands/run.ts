@@ -14,6 +14,7 @@
  */
 import path from 'node:path';
 import chalk from 'chalk';
+import { ZodError } from 'zod';
 import { Orchestrator, type OrchestratorResult } from '../../ai/orchestrator.js';
 import type { ProgressEvent } from '../../ai/runtime/streaming-manager.js';
 import {
@@ -69,7 +70,31 @@ function validateRunOptions(opts: RunCommandOptions): string | undefined {
   if (opts.label !== undefined && opts.session) {
     return '--label only applies to a NEW session; use "sessions label <id> <label>" to rename an existing one';
   }
+  // Phase 29: these two used to fall through to the OrchestratorConfigSchema
+  // and print a raw ZodError.  Bounds mirror the schema exactly.
+  if (
+    opts.maxSteps !== undefined &&
+    (!Number.isInteger(opts.maxSteps) || opts.maxSteps < 1 || opts.maxSteps > 100)
+  ) {
+    return '--max-steps must be an integer between 1 and 100';
+  }
+  if (
+    opts.timeoutMs !== undefined &&
+    (!Number.isInteger(opts.timeoutMs) || opts.timeoutMs < 1000 || opts.timeoutMs > 600000)
+  ) {
+    return '--timeout-ms must be an integer between 1000 and 600000';
+  }
   return undefined;
+}
+
+/** Render a ZodError as a short, human list instead of a JSON dump. */
+function formatZodError(err: unknown): string | undefined {
+  if (!(err instanceof ZodError)) return undefined;
+  const lines = err.issues.map((issue) => {
+    const field = issue.path.join('.') || '(config)';
+    return `${field}: ${issue.message}`;
+  });
+  return `Invalid configuration — ${lines.join('; ')}`;
 }
 
 export interface RunCommandResult {
@@ -82,12 +107,22 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     err(chalk.red(invalid));
     return { exitCode: 2 };
   }
+  // Phase 29: an empty goal reached the planner (and produced an opaque
+  // schema error); it is a usage mistake, so fail fast with exit 2.
+  if (goal.trim().length === 0) {
+    err(chalk.red('The goal must not be empty.'));
+    err(chalk.dim('Example: hootl run "summarize the README"'));
+    return { exitCode: 2 };
+  }
 
   const projectRoot = path.resolve(opts.projectRoot ?? process.cwd());
   const globalConfig = prepareCliEnvironment(projectRoot);
 
   const persistent = opts.persistent ?? globalConfig.persistent ?? false;
   const model = opts.model ?? globalConfig.defaultModel;
+  // The effective model id: the flag, the global config default, or the
+  // runtime default ('gpt-4o').  Validated against the registry below.
+  const effectiveModelId = model ?? 'gpt-4o';
 
   const confirmCallback: (planText: string) => Promise<ConfirmationResult> = opts.yes
     ? async () => ({ confirmed: true })
@@ -120,6 +155,37 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
   });
 
   try {
+    // ── Validate the model id before ANY side effect (U3 semantics) ──
+    // Previously an unknown --model fell through to the planner, whose error
+    // was swallowed into an empty "clarification needed" report.
+    await orchestrator.initialize();
+
+    // Phase 29: `--session <id>` pointing at a session that does not exist
+    // used to be accepted silently — the run reported the bogus id as its
+    // session and persisted no interaction at all.  Fail fast instead.
+    if (opts.session !== undefined && !orchestrator.sessionStore.getSession(opts.session)) {
+      err(chalk.red(`Session "${opts.session}" not found.`));
+      err(
+        chalk.dim(
+          persistent
+            ? 'List existing sessions with `hootl sessions list`.'
+            : 'Sessions are only stored with --persistent (or persistent:true in the global config).',
+        ),
+      );
+      return { exitCode: 2 };
+    }
+
+    if (!orchestrator.modelRegistry.hasConfig(effectiveModelId)) {
+      const validIds = orchestrator.modelRegistry.listConfigs().map((c) => c.id);
+      err(
+        color.failed(
+          `Unknown model id "${effectiveModelId}". Valid ids: ${validIds.join(', ') || '(none registered)'}`,
+        ),
+      );
+      err(color.dim('Pick one with --model <id>, or see `hootl models`.'));
+      return { exitCode: 2 };
+    }
+
     // ── Dry run: plan, show, stop ─────────────────────────────
     if (opts.dryRun) {
       out(color.bold('📋 Dry run — planning only, nothing will be executed.'));
@@ -163,7 +229,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
         : 1;
     return { exitCode };
   } catch (e) {
-    const message = e instanceof Error ? e.message : String(e);
+    const message = formatZodError(e) ?? (e instanceof Error ? e.message : String(e));
     err(color.failed(`Error: ${message}`));
     if (opts.verbose && e instanceof Error && e.stack) {
       err(color.dim(e.stack));

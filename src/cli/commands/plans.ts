@@ -19,6 +19,8 @@ import { color, err, out, renderTable } from '../utils/output.js';
 
 export interface PlansCommandOptions {
   projectRoot?: string;
+  /** Print the raw plan JSON instead of the formatted view */
+  json?: boolean;
   /** Pass through model/timeout for resume (model resolution needs it) */
   model?: string;
   timeoutMs?: number;
@@ -58,6 +60,12 @@ export async function plansListCommand(opts: PlansCommandOptions): Promise<numbe
   return 0;
 }
 
+/**
+ * C3/Phase 29: `plans show <planId>` renders the plan for a human — the
+ * same shape the run preview uses (steps, personas, tools, dependencies)
+ * plus the execution status of every step.  `--json` keeps the previous
+ * machine-readable dump.
+ */
 export async function plansShowCommand(planId: string, opts: PlansCommandOptions): Promise<number> {
   const store = planStoreFor(opts);
   const plan = store.load(planId);
@@ -65,7 +73,48 @@ export async function plansShowCommand(planId: string, opts: PlansCommandOptions
     err(color.failed(`Plan "${planId}" not found.`));
     return 1;
   }
-  out(JSON.stringify(plan, null, 2));
+
+  if (opts.json) {
+    out(JSON.stringify(plan, null, 2));
+    return 0;
+  }
+
+  const personasUsed = Array.from(new Set(plan.steps.map((s) => s.assignedPersona)));
+  const resources = Array.from(new Set(plan.steps.flatMap((s) => s.claimedResources)));
+
+  out(color.bold(`Plan ${plan.id ?? planId}`));
+  out(`Goal:      ${plan.goal}`);
+  out(`Status:    ${plan.status}`);
+  out(`Steps:     ${plan.steps.length}`);
+  out(`Personas:  ${personasUsed.join(', ') || 'none'}`);
+  out(`Resources: ${resources.join(', ') || 'none'}`);
+  out(color.dim(`Created:   ${plan.createdAt ? new Date(plan.createdAt).toISOString() : 'unknown'}`));
+
+  for (const step of plan.steps) {
+    const icon =
+      step.status === 'done'
+        ? color.done('✔')
+        : step.status === 'failed'
+          ? color.failed('✖')
+          : step.status === 'running'
+            ? color.running('▶')
+            : color.dim('·');
+
+    out('');
+    out(`${icon} [${step.id}] ${step.description} ${color.dim(`(${step.status})`)}`);
+    out(`    Persona:  ${step.assignedPersona}`);
+    out(`    Skills:   ${step.assignedSkills.join(', ') || 'none'}`);
+    out(`    Tools:    ${step.assignedTools.join(', ') || 'none'}`);
+    if (step.dependsOn.length > 0) out(`    Depends:  ${step.dependsOn.join(', ')}`);
+    if (step.claimedResources.length > 0) out(`    Resources: ${step.claimedResources.join(', ')}`);
+    out(`    Accept:   ${step.acceptanceCriteria}`);
+    if (step.taskId) out(color.dim(`    Task:     ${step.taskId}`));
+    if (step.failureType) out(color.failed(`    Failure:  ${step.failureType}`));
+    if (step.resultSummary) {
+      out(color.dim(`    Result:   ${step.resultSummary.replace(/\s+/g, ' ').slice(0, 160)}`));
+    }
+  }
+
   return 0;
 }
 

@@ -645,6 +645,45 @@ export class Orchestrator {
     }
 
     if (!planningResult.isClear) {
+      // Phase 29: `Planner.plan()` reports hard failures (invalid model,
+      // provider error, …) as `errors` with an EMPTY question list.  Showing
+      // "Clarification needed:" with nothing under it hid the real cause —
+      // surface the error text instead.
+      if (planningResult.needsClarification.length === 0 && planningResult.errors.length > 0) {
+        const errorMsg = planningResult.errors.join('\n');
+        if (interaction) {
+          this.sessionStore.updateInteraction(sessionId, interaction.id, {
+            outcome: 'failure',
+            reviewSummary: `Planning failed: ${errorMsg}`,
+            completedAt: Date.now(),
+          });
+        }
+        return {
+          review: {
+            planId: 'none',
+            goal: userRequest,
+            outcome: 'failure',
+            acceptedFindings: [],
+            rejectedFindings: [],
+            incompleteSteps: [],
+            finalSummary: `Planning failed: ${errorMsg}`,
+            usage: emptyReviewUsage,
+          },
+          report: `🛑 Planning failed: ${errorMsg}`,
+          planId: 'none',
+          sessionId,
+          executionResult: {
+            planId: 'none',
+            status: 'failed-partial',
+            completedSteps: 0,
+            failedSteps: 0,
+            totalSteps: 0,
+            incompleteSteps: [],
+            replanningAttempts: 0,
+          },
+        };
+      }
+
       const clarificationMsg = planningResult.needsClarification.join('\n');
       if (interaction) {
         this.sessionStore.updateInteraction(sessionId, interaction.id, {

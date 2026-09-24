@@ -5,6 +5,42 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.0] — 2026-09-24 — every CLI workflow driven like a real terminal user
+
+Ten bugs were found by driving the CLI inside a real PTY — real prompts, real
+keystrokes, real `Ctrl-C`, verified exit codes — instead of trusting the
+in-process tests alone.  Highlights: the interactive plan confirmation did not
+work at all with the installed inquirer version, plan-declared tools never
+reached the agents, and `hootl usage` printed `***REDACTED***` instead of token
+counts.
+
+### Fixed
+
+| # | Bug | Detail |
+|---|---|---|
+| 1 | **Interactive confirmation crashed** | `hootl run "<goal>"` without `--yes` died with `Prompt type "list" is not registered`: inquirer v14 renamed the arrow-key list to `select`. That made the tool's whole interactive path — clarification questions, plan confirmation, rejection feedback — unusable. |
+| 2 | **Failed planning printed an empty prompt** | When planning failed without clarification questions the CLI printed `⚠️ Clarification needed:` with nothing under it. It now reports `🛑 Planning failed: <error>` and marks the session interaction as failed. |
+| 3 | **Raw `ZodError` dumps** | `--max-steps 0` / `--timeout-ms 500` fell through to config-schema validation; both are now validated up front (`1-100`, `1000-600000`) with exit code 2 and a human sentence. |
+| 4 | **Unknown `--model` reached the planner** | `--model ghost-model` now fails before any model call with the list of valid ids and a `hootl models` hint (exit 2). |
+| 5 | **Plan-declared tools never reached the agents** | The plan showed `Tools: read_file` but `PlanStep.assignedTools` was read by nobody, so every step ran without tools (`tools` was absent from the model request and the summary said "No tools used"). `AgentDefinitionSchema` gained `toolIds`, `createAgent` merges them (still filtered by `persona.allowedTools`), and `buildAgentForStep` passes `assignedTools`. |
+| 6 | **Token counts were redacted in the log** | The `token` redaction pattern also matched the numeric counters `promptTokens` / `completionTokens` / `totalTokens`, so `hootl usage` and the TOKENS column of `hootl tasks` printed `***REDACTED***`. Numeric `*Tokens` values are now kept as metrics while string credentials (`accessToken`, `dbToken`, …) stay redacted. |
+| 7 | **Step counter overshot (`[4/2]`)** | `plan:step-completed` is emitted twice per step (plan lifecycle + `agent:completed`). Agent-level events now carry `agentLevel: true` and are shown only with `--verbose`, so the counter reads `[1/2] … [2/2]`. |
+| 8 | **`plans show` printed raw JSON** | Its own description promises "steps, personas, tools, dependencies". `plans show` now renders the plan for a human (per-step status, persona, skills, tools, dependencies, acceptance criteria, result) and `--json` keeps the machine-readable dump. |
+| 9 | **`sessions label` was write-only** | Labels were set but never listed; `sessions list` gained a `LABEL` column. |
+| 10 | **`--session <unknown>` was accepted silently** | The run reported the bogus id as its session and persisted no interaction; it now fails fast (exit 2) with a hint, and the hint explains that sessions require `--persistent`. |
+
+### Changed
+
+- `hootl run ""` is a usage error (exit 2) instead of a planner round-trip.
+- `logs --tail 0` prints no initial lines (`slice(-0)` used to dump the whole log) — handy with `--follow`; a non-numeric/negative `--tail` is a usage error.
+- Help text documents the accepted ranges for `--max-steps`, `--timeout-ms` and the meaning of `--tail 0`.
+- `logs --follow` was verified to stop cleanly on `Ctrl-C` (exit 0) in a terminal with a controlling tty.
+
+### Tests
+
+- New `src/cli/__tests__/phase29.test.ts` (13 tests): pre-flight usage errors, the surfaced planning failure, the step counter with agent-level events, numeric-token redaction, the human `plans show` view, `--tail` validation, and a guard asserting the interactive prompt types exist in the installed inquirer.
+- Full suite: **583 tests / 39 files**, `tsc` clean.
+
 ## [27.1.0] — 2026-09-24 — `hootl` command, layered registries, self-documenting CLI
 
 Makes the CLI usable from ANY directory and documents itself inside the CLI.

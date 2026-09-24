@@ -276,6 +276,7 @@ export class PlanRuntime {
         name: `Step ${step.id}`,
         personaId: step.assignedPersona,
         skillIds: step.assignedSkills,
+        toolIds: step.assignedTools,
         modelId: this.defaultModelId,
       },
       refs: this.config.refs,

@@ -140,6 +140,13 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
     }
   }
 
+  // Tools declared directly on the agent definition (plan steps pass
+  // PlanStep.assignedTools here) are requested as well; they still have
+  // to survive the persona allow-list filter below.
+  for (const toolId of def.toolIds ?? []) {
+    requestedToolIds.add(toolId);
+  }
+
   // Apply DelegationGuard if provided
   if (delegationGuard) {
     const { filtered, removed } = delegationGuard.filterTools(
@@ -156,7 +163,9 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
   const allowedToolIds = new Set<string>();
   for (const toolId of requestedToolIds) {
     // Find which skill requested this tool for warning context
-    const requestingSkill = skills.find((s) => s.resolvedTools.includes(toolId));
+    const requestingSkill =
+      skills.find((s) => s.resolvedTools.includes(toolId)) ??
+      ((def.toolIds ?? []).includes(toolId) ? { id: 'agent-definition' } : undefined);
     if (personaAllowsTool(persona, toolId)) {
       allowedToolIds.add(toolId);
     } else {

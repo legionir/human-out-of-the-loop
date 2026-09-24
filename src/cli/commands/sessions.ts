@@ -39,6 +39,7 @@ export async function sessionsListCommand(
     const last = s?.interactions[s.interactions.length - 1];
     return [
       id,
+      s?.label ?? '-',
       new Date(s?.createdAt ?? 0).toISOString().slice(0, 10),
       s?.interactions.length ?? 0,
       last?.outcome ?? '-',
@@ -46,7 +47,14 @@ export async function sessionsListCommand(
     ];
   });
 
-  out(renderTable(['SESSION ID', 'CREATED', 'INTERACTIONS', 'LAST OUTCOME', 'SUMMARY'], rows));
+  // Phase 29: `sessions label` was write-only — the label now shows up
+  // here, which is where a user actually looks for it.
+  out(
+    renderTable(
+      ['SESSION ID', 'LABEL', 'CREATED', 'INTERACTIONS', 'LAST OUTCOME', 'SUMMARY'],
+      rows,
+    ),
+  );
   return 0;
 }
 

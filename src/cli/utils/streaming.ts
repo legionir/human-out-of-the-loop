@@ -40,6 +40,10 @@ export function createProgressRenderer(options: ProgressRendererOptions = {}): P
         break;
       }
       case 'plan:step-started': {
+        if (event.payload?.agentLevel === true) {
+          if (verbose) out(`   ${color.dim('·')} ${color.running('▶')} ${event.message}`);
+          break;
+        }
         if (!started) {
           // agent events can arrive before the plan:started hook fires
           started = true;
@@ -50,6 +54,18 @@ export function createProgressRenderer(options: ProgressRendererOptions = {}): P
         break;
       }
       case 'plan:step-completed': {
+        // Phase 29: `plan:step-completed` is produced twice per step —
+        // once by the plan lifecycle (`step:<id>:done`, which carries a
+        // stepId) and once by the agent lifecycle (`agent:completed`).
+        // Counting both made the counter overshoot (`[4/2]`).  Only the
+        // step-lifecycle event drives the counter; the agent-level line
+        // is a detail and stays behind --verbose.
+        if (event.payload?.agentLevel === true) {
+          if (verbose) {
+            out(`   ${color.dim('·')} ${color.done('✔')} ${event.message}`);
+          }
+          break;
+        }
         finishedSteps += 1;
         const count =
           totalSteps > 0 ? color.dim(` [${finishedSteps}/${totalSteps}]`) : '';
@@ -57,6 +73,10 @@ export function createProgressRenderer(options: ProgressRendererOptions = {}): P
         break;
       }
       case 'plan:step-failed': {
+        if (event.payload?.agentLevel === true) {
+          if (verbose) out(`   ${color.dim('·')} ${color.failed('✖')} ${event.message}`);
+          break;
+        }
         out(`${color.failed('✖')} ${event.message}`);
         break;
       }

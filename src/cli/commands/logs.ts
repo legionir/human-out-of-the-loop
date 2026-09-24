@@ -89,13 +89,22 @@ export async function logsCommand(opts: LogsCommandOptions): Promise<number> {
   const file = logFilePath(projectRoot);
   const tail = opts.tail ?? 50;
 
+  // Phase 29: `--tail abc` used to parse to NaN and silently print nothing.
+  if (!Number.isInteger(tail) || tail < 0) {
+    err(color.failed('--tail must be a non-negative integer (0 = no initial lines).'));
+    return 2;
+  }
+
   if (!fs.existsSync(file)) {
     err(color.dim(`No observability log at ${file} (runs create it in persistent mode).`));
     return 0;
   }
 
   let { entries, size } = readEntries(file, opts.plan);
-  for (const entry of entries.slice(-tail)) out(formatEntry(entry));
+  // NOTE: `slice(-0)` is `slice(0)` in JS and would dump the WHOLE log,
+  // so 0 is special-cased: no initial lines, only what --follow adds.
+  const initial = tail > 0 ? entries.slice(-tail) : [];
+  for (const entry of initial) out(formatEntry(entry));
 
   if (!opts.follow) {
     return 0;

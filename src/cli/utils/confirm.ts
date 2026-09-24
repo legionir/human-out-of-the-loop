@@ -44,7 +44,11 @@ export async function confirmPlanInteractively(planText: string): Promise<Confir
 
   const { choice } = await inquirer.prompt<{ choice: 'yes' | 'no' }>([
     {
-      type: 'list',
+      // Phase 29: inquirer v14 renamed the arrow-key list prompt from
+      // `list` to `select`; `list` is no longer registered and made every
+      // interactive confirmation fail with
+      // 'Prompt type "list" is not registered'.
+      type: 'select',
       name: 'choice',
       message: 'Execute this plan?',
       choices: [

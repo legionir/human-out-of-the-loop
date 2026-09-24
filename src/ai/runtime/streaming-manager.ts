@@ -178,6 +178,10 @@ export class StreamingManager {
           ...base,
           type: 'plan:step-started',
           message: `Agent "${event.agentId}" started working.`,
+          // Phase 29: agent-level lines are a *detail* of the step — the
+          // plan lifecycle emits its own step events.  Without this marker
+          // the terminal counter counted every step twice ([4/2]).
+          payload: { agentLevel: true },
         };
 
       case 'agent:tool_call':
@@ -194,6 +198,7 @@ export class StreamingManager {
           type: 'plan:step-completed',
           message: `Agent "${event.agentId}" completed. ${event.toolsUsed.length} tool(s) used.`,
           payload: {
+            agentLevel: true,
             toolsUsed: event.toolsUsed,
             usage: event.usage,
           },
@@ -204,7 +209,7 @@ export class StreamingManager {
           ...base,
           type: 'plan:step-failed',
           message: `Agent "${event.agentId}" failed: ${event.error.slice(0, 100)}`,
-          payload: { code: event.code },
+          payload: { agentLevel: true, code: event.code },
         };
 
       default:

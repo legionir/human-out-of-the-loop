@@ -434,7 +434,13 @@ export class ObservabilityLogger {
     const result: Record<string, unknown> = {};
 
     for (const [key, value] of Object.entries(obj)) {
-      if (this.isRedactedKey(key)) {
+      // Phase 29: numeric counters are metrics, not credentials —
+      // `usage.totalTokens` / `promptTokens` matched the `token` pattern
+      // and were destroyed in the log, which broke `hootl usage` and the
+      // TOKENS column of `hootl tasks`.  Strings and objects are still
+      // redacted eagerly (SEC-04 keeps its substring over-redaction).
+      const isNumericMetric = typeof value === 'number' && /tokens$/i.test(key);
+      if (this.isRedactedKey(key) && !isNumericMetric) {
         result[key] = '***REDACTED***';
       } else if (value && typeof value === 'object' && !Array.isArray(value)) {
         result[key] = this.redactPayload(value as Record<string, unknown>);
