@@ -10,6 +10,8 @@
 import path from 'node:path';
 import { McpConnector } from '../../ai/tools/mcp-connector.js';
 import { loadMcpServerConfigs } from '../../ai/tools/mcp-bootstrap.js';
+import { registryLayersFor } from '../../ai/registries/layout.js';
+import type { McpServerConfig } from '../../ai/schemas/mcp-server.js';
 import { ToolRegistry } from '../../ai/registries/tool-registry.js';
 import { prepareCliEnvironment } from '../utils/config.js';
 import { color, err, out, renderTable } from '../utils/output.js';
@@ -18,14 +20,36 @@ export interface McpCommandOptions {
   projectRoot?: string;
 }
 
-function mcpDirFor(opts: McpCommandOptions): string {
+/**
+ * Phase 28: MCP servers come from every active layer (package first,
+ * project last); a project server with the same id overrides the
+ * packaged one.
+ */
+function mcpDirsFor(opts: McpCommandOptions): string[] {
   const projectRoot = path.resolve(opts.projectRoot ?? process.cwd());
   prepareCliEnvironment(projectRoot);
-  return path.join(projectRoot, 'registry', 'mcp-servers');
+  return registryLayersFor(projectRoot).map((layer) =>
+    path.join(layer.dir, 'mcp-servers')
+  );
+}
+
+/** Merge per-layer configs by id — later layers win. */
+function loadLayeredMcpConfigs(dirs: string[]): {
+  configs: McpServerConfig[];
+  errors: Array<{ file: string; error: string }>;
+} {
+  const byId = new Map<string, McpServerConfig>();
+  const errors: Array<{ file: string; error: string }> = [];
+  for (const dir of dirs) {
+    const { configs, errors: layerErrors } = loadMcpServerConfigs(dir);
+    for (const cfg of configs) byId.set(cfg.id, cfg);
+    errors.push(...layerErrors);
+  }
+  return { configs: Array.from(byId.values()), errors };
 }
 
 export async function mcpListCommand(opts: McpCommandOptions): Promise<number> {
-  const { configs, errors } = loadMcpServerConfigs(mcpDirFor(opts));
+  const { configs, errors } = loadLayeredMcpConfigs(mcpDirsFor(opts));
 
   if (configs.length === 0) {
     out(color.dim('No MCP servers configured (registry/mcp-servers/*.json).'));
@@ -47,7 +71,7 @@ export async function mcpListCommand(opts: McpCommandOptions): Promise<number> {
 }
 
 export async function mcpTestCommand(serverId: string, opts: McpCommandOptions): Promise<number> {
-  const { configs } = loadMcpServerConfigs(mcpDirFor(opts));
+  const { configs } = loadLayeredMcpConfigs(mcpDirsFor(opts));
   const config = configs.find((c) => c.id === serverId);
   if (!config) {
     err(color.failed(`MCP server "${serverId}" not found in registry/mcp-servers.`));

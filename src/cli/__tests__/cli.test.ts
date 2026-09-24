@@ -717,13 +717,31 @@ describe('C1 — registry introspection (models/personas/skills/tools)', () => {
     expect(gpt?.provider).toBe('openai');
   });
 
-  it('exits 2 with a hint when the project has no registry/', async () => {
+  // Phase 28 (registry layering): a project WITHOUT its own registry/ is
+  // no longer an error — the packaged (built-in) registry is used, so the
+  // CLI works from any directory.  The old "exit 2 + hint" behaviour now
+  // applies only when NO layer exists at all (HOTL_NO_PACKAGE_REGISTRY=1).
+  it('falls back to the built-in registry when the project has none', async () => {
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'phase23-noreg-'));
+    try {
+      const { code, out } = await runCli(['models', '--project-root', empty]);
+      expect(code).toBe(0);
+      expect(out).toContain('registry: package (built-in)');
+      expect(out).toContain('gpt-4o'); // the packaged catalog is listed
+    } finally {
+      fs.rmSync(empty, { recursive: true, force: true });
+    }
+  });
+
+  it('exits 2 with a hint when no registry layer exists at all', async () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'phase28-noreg-'));
+    process.env.HOTL_NO_PACKAGE_REGISTRY = '1';
     try {
       const { code, errOut } = await runCli(['models', '--project-root', empty]);
       expect(code).toBe(2);
-      expect(errOut).toContain('No "registry/" directory');
+      expect(errOut).toContain('No registry found');
     } finally {
+      delete process.env.HOTL_NO_PACKAGE_REGISTRY;
       fs.rmSync(empty, { recursive: true, force: true });
     }
   });

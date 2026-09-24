@@ -33,7 +33,57 @@ await orchestrator.shutdown();
 
 ## CLI
 
-A full command-line front-end (Claude Code–style): plan, confirm once, then go out of the loop. After `npm run build`, the binary is `human-out-of-the-loop`; in development use `npx tsx src/cli.ts …` (same commands).
+A full command-line front-end (Claude Code–style): plan, confirm once, then go out of the loop.
+
+### Install the `hootl` command
+
+```bash
+npm run build          # compile to dist/
+npm install -g .       # installs two binaries: `human-out-of-the-loop` and `hootl`
+```
+
+`hootl` is a short alias for the same program, so it works from ANY directory:
+
+```bash
+cd ~/work/my-project     # no registry/ needed here
+hootl models             # the built-in catalog is used
+hootl run "fix the failing tests" --persistent
+```
+
+`npm link` does the same without copying the package. Development runs stay
+unchanged: `npx tsx src/cli.ts …`.
+
+### Help
+
+The CLI documents itself — every command and subcommand carries a full
+how-to appendix (behaviour, states, configuration, exit codes):
+
+```bash
+hootl --help                 # command groups, config precedence, registry layers, exit codes
+hootl help run               # same as `hootl run --help`
+hootl plans help resume      # help for one subcommand
+hootl --version
+```
+
+### Registry layers (global + local)
+
+Registries (personas, tools, skills, models, MCP servers, `agents.json`) are
+merged from two layers, lowest precedence first:
+
+| Layer | Location | Purpose |
+|---|---|---|
+| **package** (global) | `registry/` inside the installation | the built-in catalog — makes every command work from any directory |
+| **project** (local) | `<project-root>/registry` | overrides and extensions; loaded LAST |
+
+An entry whose `id` already exists in the package layer **replaces** it; new ids
+are added. So a project can tweak `gpt-4o` or `coder` and still keep every other
+built-in entry. `HOTL_NO_PACKAGE_REGISTRY=1` disables the global layer
+(strictly local registries — handy for hermetic runs). Registry introspection
+commands print which layers were used, e.g.
+`registry: package (built-in) + project (.)`.
+
+The project root defaults to the current working directory and can be overridden
+per invocation with `--project-root <dir>`.
 
 ```bash
 # Plan + confirm + execute, persisting state in .ai-runtime
@@ -66,6 +116,11 @@ human-out-of-the-loop run "Build a login page" --dry-run
 | `tasks list` | Tasks from the observability log (derived status, tokens) | `--plan <planId>`, `--json` |
 | `tasks show <taskId>` | Every log entry for one task (incl. payloads) | `--project-root` |
 | `logs` | Read the observability log (`.ai-runtime/observability.jsonl`) | `--plan <planId>`, `--tail <n>`, `--follow` |
+
+Registry introspection commands (`models`, `personas`, `skills`, `tools`) exit
+**0** when listed (even with the built-in layer only), **1** when a registry file
+fails validation (the valid entries are still printed) and **2** when no registry
+layer exists at all.
 
 `run` exits **0** on success/partial-success, **1** on failure (plan rejected,
 clarification unanswered, agent failure), **2** on usage errors (unknown model,

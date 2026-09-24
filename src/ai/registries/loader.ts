@@ -26,6 +26,12 @@ export interface LoadDirectoryOptions<T extends { id: string }> {
    * Default: false (returns errors in LoadResult).
    */
   strict?: boolean;
+  /**
+   * Phase 28: when true, a file whose id is already registered REPLACES
+   * the existing entry instead of being reported as a duplicate error.
+   * Used by the project layer to override packaged defaults.
+   */
+  override?: boolean;
 }
 
 // ─── Loader ──────────────────────────────────────────────────────
@@ -40,7 +46,7 @@ export interface LoadDirectoryOptions<T extends { id: string }> {
 export function loadRegistryFromDirectory<T extends { id: string }>(
   options: LoadDirectoryOptions<T>
 ): LoadResult {
-  const { directory, registry, extension = '.json', strict = false } = options;
+  const { directory, registry, extension = '.json', strict = false, override = false } = options;
 
   const result: LoadResult = { loaded: 0, errors: [] };
 
@@ -80,7 +86,11 @@ export function loadRegistryFromDirectory<T extends { id: string }>(
     try {
       const raw = fs.readFileSync(filePath, 'utf-8');
       const data: unknown = JSON.parse(raw);
-      registry.register(data);
+      if (override) {
+        registry.replace(data);
+      } else {
+        registry.register(data);
+      }
       result.loaded++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

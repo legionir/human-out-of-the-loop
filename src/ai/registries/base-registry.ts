@@ -83,6 +83,29 @@ export class Registry<T extends { id: string }> {
   }
 
   /**
+   * Validate and store an entry, REPLACING an existing entry with the
+   * same id (no duplicate error).
+   *
+   * Phase 28: registry layering — a project registry must be able to
+   * override a packaged default of the same id.
+   */
+  replace(raw: unknown): T {
+    const parsed = this.schema.safeParse(raw);
+    if (!parsed.success) {
+      const issues = parsed.error.issues
+        .map((i) => `  • ${i.path.join('.')}: ${i.message}`)
+        .join('\n');
+      throw new RegistryValidationError(
+        `[${this.label}] Validation failed:\n${issues}`,
+        parsed.error
+      );
+    }
+    const entry = parsed.data;
+    this.entries.set(entry.id, entry);
+    return entry;
+  }
+
+  /**
    * Non-throwing variant — returns a discriminated-union result.
    */
   tryRegister(raw: unknown): RegisterResult<T> | RegisterError {

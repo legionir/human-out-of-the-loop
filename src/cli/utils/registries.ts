@@ -8,6 +8,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  registryLayersFor,
+  type RegistryLayer,
+} from '../../ai/registries/layout.js';
+import {
   ModelConfigSchema,
   PersonaSchema,
   SkillSchema,
@@ -30,6 +34,11 @@ export interface LoadedRegistries {
   tools: ToolDefinition[];
   /** Per-file parse/validation failures (listed, not fatal). */
   errors: RegistryFileError[];
+  /**
+   * Phase 28: the registry layers that were read, lowest precedence
+   * first (package → project).
+   */
+  layers: RegistryLayer[];
 }
 
 type ZodLike = { parse(value: unknown): unknown };
@@ -101,18 +110,48 @@ function loadSkillDir(dir: string, schema: ZodLike, errors: RegistryFileError[])
 }
 
 /**
- * Load all four registries from `<projectRoot>/registry`.
- * Missing subdirectories are fine (empty list); invalid files are
- * collected in `errors` so the caller can report them.
+ * Load all four registries from the active layers (package, then project).
+ *
+ * Phase 28: the packaged registry ships the built-in catalog, so these
+ * commands work from ANY directory; a project registry with entries of the
+ * same id overrides the packaged defaults (project wins).  Missing
+ * subdirectories are fine (empty list); invalid files are collected in
+ * `errors` so the caller can report them.
  */
 export function loadRegistries(projectRoot: string): LoadedRegistries {
-  const base = path.join(projectRoot, 'registry');
+  const layers = registryLayersFor(projectRoot);
   const errors: RegistryFileError[] = [];
+
+  const merge = <T extends { id: string }>(items: T[]): T[] => {
+    const byId = new Map<string, T>();
+    for (const item of items) byId.set(item.id, item); // later layer wins
+    return Array.from(byId.values());
+  };
+
+  const personas: Persona[] = [];
+  const skills: Skill[] = [];
+  const models: ModelConfig[] = [];
+  const tools: ToolDefinition[] = [];
+
+  for (const layer of layers) {
+    personas.push(
+      ...loadJsonDir<Persona>(path.join(layer.dir, 'personas'), PersonaSchema, errors),
+    );
+    skills.push(...loadSkillDir(path.join(layer.dir, 'skills'), SkillSchema, errors));
+    models.push(
+      ...loadJsonDir<ModelConfig>(path.join(layer.dir, 'models'), ModelConfigSchema, errors),
+    );
+    tools.push(
+      ...loadJsonDir<ToolDefinition>(path.join(layer.dir, 'tools'), ToolDefinitionSchema, errors),
+    );
+  }
+
   return {
-    personas: loadJsonDir<Persona>(path.join(base, 'personas'), PersonaSchema, errors),
-    skills: loadSkillDir(path.join(base, 'skills'), SkillSchema, errors),
-    models: loadJsonDir<ModelConfig>(path.join(base, 'models'), ModelConfigSchema, errors),
-    tools: loadJsonDir<ToolDefinition>(path.join(base, 'tools'), ToolDefinitionSchema, errors),
+    personas: merge(personas),
+    skills: merge(skills),
+    models: merge(models),
+    tools: merge(tools),
     errors,
+    layers,
   };
 }

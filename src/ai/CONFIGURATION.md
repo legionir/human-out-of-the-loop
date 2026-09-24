@@ -22,6 +22,17 @@
 
 > ترتیب بارگذاری: `.env` در project root، سپس `.env` در cwd (متغیرهای محیطی واقعی هرگز overwrite نمی‌شوند) + `~/.human-out-of-the-loop/config.json` (کلیدهای `projectRoot`/`defaultModel`) — همان منابع CLI (U1).
 
+### لایه‌های رجیستری (فاز ۲۸)
+
+رجیستری‌ها از دو لایه ادغام می‌شوند (ترتیب از کمترین به بیشترین اولویت):
+
+| لایه | مسیر | نقش |
+|---|---|---|
+| package (گلوبال) | `registry/` کنار `package.json` — یافتن با پیمایش از خود ماژول (`src/`, `dist/` یا نصب سراسری) | کاتالوگ داخلی: personas، tools، skills، models، mcp-servers، agents.json؛ دستورها را از هر مسیری کارا می‌کند |
+| project (لوکال) | `<project-root>/registry` | override و افزودن ورودی؛ **آخر** لود می‌شود |
+
+ورودی با `id` موجود در لایه‌ی پکیج، **جایگزین** می‌شود (نه خطای duplicate) و idهای جدید اضافه می‌شوند. `HOTL_NO_PACKAGE_REGISTRY=1` لایه‌ی گلوبال را غیرفعال می‌کند. لایه‌ای که فقط بعضی زیرپوشه‌ها را دارد مجاز است؛ ورودی نامعتبر (JSON خراب/اسکیمای ناقض) در هر لایه خطای واضح می‌دهد.
+
 ### MCP Servers
 
 | متغیر | ضروری | توضیح |
@@ -29,6 +40,7 @@
 | `MY_MCP_SERVER_TOKEN` | بله (اگر سرور auth دارد) | Token برای MCP server |
 | *(هر env var تعریف‌شده در `tokenEnvVar`/`keyEnvVar`)* | بله | مطابق `registry/mcp-servers/*.json` |
 | `TEST_SECRET_TOKEN` | مثال تست | نمونه در hardening-security.test.ts |
+| `HOTL_NO_PACKAGE_REGISTRY` | خیر | `1`/`true` = نادیده‌گرفتن رجیستری داخلی پکیج و استفاده‌ی صرف از `<project-root>/registry` (فاز ۲۸) |
 
 **نکته امنیتی:** هیچ credential نباید به صورت inline در `registry/mcp-servers/*.json` قرار گیرد. فقط نام env var (مثل `tokenEnvVar`) ذخیره می‌شود و مقدار واقعی از منبع محیط خوانده می‌شود — پیش‌فرض `process.env` و در صورت تزریق، `McpConnectorOptions.env` / `OrchestratorConfig.env` (فاز ۲۷، CFG-08). `McpConnector.sanitiseError` هر مقدار credential را از پیام خطا حذف و با `***REDACTED***` جایگزین می‌کند.
 

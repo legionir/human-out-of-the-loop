@@ -55,7 +55,12 @@ export function loadMcpServerConfigs(directory: string): {
  * that server as `unavailable` and the rest continue.
  */
 export async function bootstrapMcpServers(
-  mcpDir: string,
+  /**
+   * Phase 28: one directory, or an ordered list of them (package layer
+   * first, project layer last).  Servers with the same id are merged so
+   * the LAST occurrence wins.
+   */
+  mcpDir: string | string[],
   toolRegistry: ToolRegistry,
   connector?: McpConnector,
   /**
@@ -68,7 +73,15 @@ export async function bootstrapMcpServers(
   configErrors: Array<{ file: string; error: string }>;
   connectionResults: Array<{ id: string; success: boolean; toolCount: number; error?: string }>;
 }> {
-  const { configs, errors: configErrors } = loadMcpServerConfigs(mcpDir);
+  const dirs = Array.isArray(mcpDir) ? mcpDir : [mcpDir];
+  const merged = new Map<string, McpServerConfig>();
+  const configErrors: Array<{ file: string; error: string }> = [];
+  for (const dir of dirs) {
+    const { configs: layerConfigs, errors } = loadMcpServerConfigs(dir);
+    for (const cfg of layerConfigs) merged.set(cfg.id, cfg); // later layer wins
+    configErrors.push(...errors);
+  }
+  const configs = Array.from(merged.values());
 
   const conn = connector ?? new McpConnector({ toolRegistry, ...(env ? { env } : {}) });
   const connectionResults = configs.length > 0 ? await conn.connectAll(configs) : [];

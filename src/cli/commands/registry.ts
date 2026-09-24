@@ -12,6 +12,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { loadRegistries } from '../utils/registries.js';
+import { describeRegistryLayers, registryLayersFor } from '../../ai/registries/layout.js';
 import { color, err, out, renderTable } from '../utils/output.js';
 
 export interface RegistryCommandOptions {
@@ -19,13 +20,24 @@ export interface RegistryCommandOptions {
   json?: boolean;
 }
 
+/** Dim one-line provenance line: which layers these entries came from. */
+function layerNote(opts: RegistryCommandOptions): string {
+  const root = path.resolve(opts.projectRoot ?? process.cwd());
+  return describeRegistryLayers(registryLayersFor(root));
+}
+
 /** Resolve projectRoot; prints a hint and returns null when there is no registry/. */
+/**
+ * Phase 28: a project registry is no longer required — the packaged
+ * registry (global) is always available and a project registry (local)
+ * overrides it.  Returns null only when NEITHER layer exists.
+ */
 function resolveProjectRoot(opts: RegistryCommandOptions): string | null {
   const root = path.resolve(opts.projectRoot ?? process.cwd());
-  if (!fs.existsSync(path.join(root, 'registry'))) {
+  if (registryLayersFor(root).length === 0) {
     err(
       color.failed(
-        `No "registry/" directory in ${root}.` +
+        `No registry found for ${root}.` +
           ' Pass --project-root or run inside a project that has one.',
       ),
     );
@@ -44,6 +56,7 @@ interface RenderInput<T> {
 
 function render<T>(opts: RegistryCommandOptions, input: RenderInput<T>): number {
   const { kind, items, rows, header, errors } = input;
+  if (!opts.json) out(color.dim(layerNote(opts)));
   if (items.length === 0) {
     out(color.dim(`No ${kind} registered (registry/${kind}/*.json is empty or missing).`));
   } else if (opts.json) {

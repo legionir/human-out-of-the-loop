@@ -189,13 +189,16 @@ export class ModelRegistry {
 
   loadConfigsFromDirectory(
     modelsDir: string,
-    strict = true
+    strict = true,
+    /** Phase 28: replace same-id configs (project layer overrides package). */
+    override = false
   ): { loaded: number; errors: Array<{ file: string; error: string }> } {
     return loadRegistryFromDirectory({
       directory: modelsDir,
       registry: this.configs,
       schema: ModelConfigSchema,
       strict,
+      override,
     });
   }
 

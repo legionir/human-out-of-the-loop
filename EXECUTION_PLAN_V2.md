@@ -608,6 +608,24 @@ GET  /api/observability?planId=&tail=
 | سوال ۵ بخش ۴ (ReDoS) | بخش ۴ | — | ✅ بسته شد با راه‌حل جانشین: `safe-regex`/`re2` اضافه نشد؛ `regex-guard.ts` سفارشی (تشخیص nested quantifier) + سقف طول الگو (۲۰۰ کاراکتر) بدون timeout اجرایی |
 | یادداشت فاز ۲۴: ارتقای UI به Next.js/React | فاز ۲۴ | — | 🔵 آینده/اختیاری — UI نسخه‌ی فعلی vanilla ماند (طبق تصمیم کاربر) و پلن UI (U1–U8) کامل است |
 
+### [🟢] فاز ۲۸: `hootl` + رجیستری لایه‌ای + راهنمای کامل CLI — کامل شد (۲۰۲۶-۰۹-۲۴)
+
+**مبنا (درخواست کاربر):** (۱) دستور `hootl` که در هر مسیری از ترمینال اجرا شود و همان مسیر را root پروژه بگیرد؛ (۲) برای رجیستری، **هم** رجیستری پروژه و **هم** رجیستری داخلی پکیج لود شوند (گلوبال + لوکال)؛ (۳) راهنمای CLI خیلی کامل شود، بدون نمونه‌کد.
+
+| گام | موضوع | نتیجه |
+|---|---|---|
+| ۱ | `hootl` | `bin` در `package.json` دو ورودی دارد (`hootl` و `human-out-of-the-loop`, هر دو → `dist/src/cli.js`)؛ نام نمایشی help از `argv[1]` تشخیص داده می‌شود (`detectBinName`) و `--version` نسخه‌ی پکیج را چاپ می‌کند (`27.1.0`) |
+| ۲ | رجیستری لایه‌ای | ماژول `src/ai/registries/layout.ts` (`packageRoot`, `registryLayersFor`, `describeRegistryLayers`, `hasProjectRegistry`)؛ ترتیب لود: package → project با `override`؛ اعمال در `Orchestrator.initialize()` (personas/tools/skills/models/agents.json/MCP)، دستورهای `models|personas|skills|tools` و `mcp list|test` |
+| ۳ | اولویت‌دهی | `Registry.replace()` + گزینه‌ی `override` در loader و همه‌ی لودرها؛ id تکراری در لایه‌ی پروژه جایگزین لایه‌ی پکیج می‌شود، بقیه‌ی ورودی‌های پکیج باقی می‌مانند |
+| ۴ | خاموش‌کردن لایه‌ی گلوبال | `HOTL_NO_PACKAGE_REGISTRY=1` → رجیستری صرفاً لوکال (و در نبود آن، خطای راهنما با exit 2) |
+| ۵ | شفافیت لایه‌ها | هر دستور introspection خط `registry: package (built-in) + project (.)` را چاپ می‌کند (در حالت `--json` فقط JSON خالص) |
+| ۶ | راهنمای کامل CLI | هر دستور و زیردستور: description واقعی + appendix کامل (چرخه‌ی run، تعامل/غیرتعاملی، حالت‌های plan/session، قواعد MCP و credential، معنای log/tasks/usage، exit codeها، اولویت تنظیمات، لایه‌های رجیستری، project-root و محل state) |
+| ۷ | انحراف ثبت‌شده (فیکس لازم) | `--help` روی زیردستورها از قرارداد exit-code رد می‌شد: `commander` فقط روی همان commandی که `exitOverride()` صدا زده اعمال می‌کند و مستقیم `process.exit` می‌کرد → override حالا بازگشتی روی کل درخت اعمال می‌شود (تست‌پذیر و exit code درست) |
+| ۸ | انحراف ثبت‌شده (فیکس لازم) | تست قبلی «exit 2 وقتی registry/ وجود ندارد» با رفتار جدید ناسازگار بود؛ به دو تست تبدیل شد: «لایه‌ی پکیج از یک پروژه‌ی خالی لیست می‌شود (exit 0)» و «بدون هیچ لایه‌ای exit 2 با پیام No registry found» |
+| ۹ | تحمل لایه‌ی ناقص | لایه‌ای که فقط بعضی زیرپوشه‌ها را دارد (مثلاً فقط models) اکنون مجاز است؛ ورودی نامعتبر همچنان خطا می‌دهد (`assertEntriesValid` در Orchestrator + گزینه‌های `required`/`override` در `bootstrapTools`) |
+
+**تست:** ۲۱ تست جدید در `src/cli/__tests__/phase28.test.ts` (help سطح بالا/هر دستور، نام باینری، نسخه، alias پکیج، لایه‌ها، override/افزودن در چهار نوع رجیستری، MCP لایه‌ای، Orchestrator با رجیستری خالی/کامل/ناقص/خراب). کل suite: **۵۶۸ تست در ۳۸ فایل**، `tsc` پاک، و smoke واقعی با نصب سراسری (`npm install -g .`) در یک پروژه‌ی دلخواه.
+
 ### [🟢] فاز ۲۷: بستن باقی‌مانده‌های P2 — کامل شد (۲۰۲۶-۰۹-۲۴)
 
 **مبنا:** «اینارو ببند» — بستن دقیق ۵ مورد جدول بالا با کمترین تغییر و تست مستقیم؛ هر مورد مستقل و قابل تعریف در `src/ai/__tests__/phase27.test.ts`.

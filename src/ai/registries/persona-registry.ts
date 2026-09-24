@@ -57,13 +57,16 @@ export class PersonaRegistry {
    */
   loadFromDirectory(
     personasDir: string,
-    strict = true
+    strict = true,
+    /** Phase 28: replace same-id entries (project layer overrides package). */
+    override = false
   ): { loaded: number; errors: Array<{ file: string; error: string }> } {
     return loadRegistryFromDirectory({
       directory: personasDir,
       registry: this.registry,
       schema: PersonaSchema,
       strict,
+      override,
     });
   }
 }

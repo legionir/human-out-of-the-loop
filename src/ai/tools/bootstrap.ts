@@ -22,7 +22,19 @@ import { createGitStatusTool } from './implementations/git-status.js';
  * @param registry     The ToolRegistry instance to populate
  * @param projectRoot  The workspace root the tools must stay inside
  */
-export function bootstrapTools(toolsDir: string, registry: ToolRegistry, projectRoot: string): void {
+export function bootstrapTools(
+  toolsDir: string,
+  registry: ToolRegistry,
+  projectRoot: string,
+  /**
+   * Phase 28 (registry layering): the packaged layer loads first (missing
+   * directory tolerated) and the project layer second with `override`,
+   * so a project tool definition replaces the packaged default of the
+   * same id while all other packaged tools stay available.
+   */
+  options: { required?: boolean; override?: boolean } = {}
+): void {
+  const { required = true, override = false } = options;
   // Bind implementations (created per-Orchestrator, bound to projectRoot)
   const implementations: Record<string, Tool> = {
     read_file: createReadFileTool(projectRoot),
@@ -37,10 +49,26 @@ export function bootstrapTools(toolsDir: string, registry: ToolRegistry, project
     directory: toolsDir,
     registry: metaRegistry,
     schema: ToolDefinitionSchema,
-    strict: true,
+    strict: required,
+    override,
   });
 
   if (result.errors.length > 0) {
+    if (!required) {
+      // Optional layer (package): a missing directory is fine; anything
+      // else is a real error the caller must see.
+      const missingOnly = result.errors.every((e) => e.error.startsWith('Directory does not exist'));
+      if (missingOnly) {
+        // Still bind implementations for whatever is already registered.
+        for (const def of registry.listDefinitions()) {
+          const impl = implementations[def.id];
+          if (impl && !registry.getImplementation(def.id)) {
+            registry.registerImplementation(def.id, impl);
+          }
+        }
+        return;
+      }
+    }
     throw new Error(
       `[bootstrapTools] Failed to load tool definitions: ${result.errors.map((e) => `${e.file}: ${e.error}`).join('; ')}`
     );

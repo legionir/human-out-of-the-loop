@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { z } from 'zod';
+import { registryLayersFor } from './registries/layout.js';
 import { EventBus } from './runtime/event-bus.js';
 import type { EnvSource } from './env.js';
 import { resolveEnv } from './env.js';
@@ -382,21 +383,63 @@ export class Orchestrator {
     if (this.initialized) return;
 
     const root = this.config.projectRoot;
-    const registryDir = path.join(root, 'registry');
 
-    this.personaRegistry.loadFromDirectory(
-      path.join(registryDir, 'personas'),
-      true
-    );
+    // Phase 28 (registry layering): the packaged registry (global) loads
+    // first and the project registry (local) second with override, so a
+    // project entry replaces a packaged default of the same id while all
+    // other packaged entries remain available.  `HOTL_NO_PACKAGE_REGISTRY=1`
+    // disables the packaged layer entirely.
+    const layers = registryLayersFor(root, { env: this.env });
+    /** Low→high precedence; the last layer overrides the earlier ones. */
+    const forEachLayer = (baseDir: string): Array<{ dir: string; override: boolean; required: boolean }> =>
+      layers.map((layer, index) => ({
+        dir: path.join(layer.dir, baseDir),
+        override: index > 0,
+        required: layer.scope === 'project',
+      }));
+
+    /**
+     * A registry layer may legitimately ship only SOME subdirectories (a
+     * project that only overrides models, for example), so a missing
+     * directory is tolerated while malformed/invalid entries still fail.
+     */
+    const assertEntriesValid = (
+      errors: Array<{ file?: string; skill?: string; error: string }>,
+      kind: string
+    ): void => {
+      const real = errors.filter(
+        (e) => !/Directory (does not exist|not found)/i.test(e.error)
+      );
+      if (real.length > 0) {
+        throw new Error(
+          `[Orchestrator] Invalid ${kind} registry entries: ` +
+            real.map((e) => `${e.file ?? e.skill ?? '?'}: ${e.error}`).join('; ')
+        );
+      }
+    };
+
+    for (const layer of forEachLayer('personas')) {
+      assertEntriesValid(
+        this.personaRegistry.loadFromDirectory(layer.dir, false, layer.override).errors,
+        'persona'
+      );
+    }
 
     // Phase 19 (CFG-01/CFG-02, Law 16): tool metadata comes from
     // registry/tools/*.json (single source of truth) and implementations
     // are bound to projectRoot by bootstrapTools — no hardcoded defs,
     // no duplicated catalog bootstrap.
-    bootstrapTools(path.join(registryDir, 'tools'), this.toolRegistry, root);
+    for (const layer of forEachLayer('tools')) {
+      // `required: false` only tolerates a MISSING tools directory (a layer
+      // may ship just some subdirectories); invalid entries still throw.
+      bootstrapTools(layer.dir, this.toolRegistry, root, {
+        required: false,
+        override: layer.override,
+      });
+    }
 
     await bootstrapMcpServers(
-      path.join(registryDir, 'mcp-servers'),
+      forEachLayer('mcp-servers').map((l) => l.dir),
       this.toolRegistry,
       undefined,
       this.env
@@ -410,19 +453,19 @@ export class Orchestrator {
       skillRegistry: this.skillRegistry,
     });
 
-    loadSkillsFromDirectory(
-      path.join(registryDir, 'skills'),
-      this.skillRegistry,
-      true
-    );
+    for (const layer of forEachLayer('skills')) {
+      assertEntriesValid(
+        loadSkillsFromDirectory(layer.dir, this.skillRegistry, false, layer.override).errors,
+        'skill'
+      );
+    }
 
     this.modelRegistry.registerProvider(openaiProviderFactory);
     this.modelRegistry.registerProvider(anthropicProviderFactory);
     this.modelRegistry.registerProvider(localProviderFactory);
-    this.modelRegistry.loadConfigsFromDirectory(
-      path.join(registryDir, 'models'),
-      false
-    );
+    for (const layer of forEachLayer('models')) {
+      this.modelRegistry.loadConfigsFromDirectory(layer.dir, false, layer.override);
+    }
 
     try {
       this.modelRegistry.resolveAll(false);
@@ -433,7 +476,9 @@ export class Orchestrator {
       );
     }
 
-    this.agentRegistry.loadFromFile(path.join(registryDir, 'agents.json'));
+    for (const layer of forEachLayer('agents.json')) {
+      this.agentRegistry.loadFromFile(layer.dir, layer.override);
+    }
 
     const delegateDeps: DelegateTaskDeps = {
       personaRegistry: this.personaRegistry,

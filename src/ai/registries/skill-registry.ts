@@ -59,9 +59,16 @@ export class SkillRegistry {
    * @param skillDir  Absolute path to the skill's directory
    *                  (e.g. `registry/skills/code_analysis/`)
    */
-  registerFromDirectory(raw: unknown, skillDir: string): ResolvedSkill {
+  /**
+   * Register a skill from its directory.
+   *
+   * Phase 28: `override` replaces an already-registered skill with the
+   * same id — the project layer then overrides a packaged skill instead
+   * of being reported as a duplicate.
+   */
+  registerFromDirectory(raw: unknown, skillDir: string, override = false): ResolvedSkill {
     // 1. Validate metadata
-    const skill = this.metadata.register(raw);
+    const skill = override ? this.metadata.replace(raw) : this.metadata.register(raw);
 
     // 2. Resolve instructions from SKILL.md
     const resolvedInstructions = this.loadInstructions(skill, skillDir);
@@ -170,7 +177,9 @@ export class SkillRegistry {
 export function loadSkillsFromDirectory(
   skillsDir: string,
   registry: SkillRegistry,
-  strict = true
+  strict = true,
+  /** Phase 28: replace same-id skills (project layer overrides package). */
+  override = false
 ): { loaded: number; errors: Array<{ skill: string; error: string }> } {
   const result = { loaded: 0, errors: [] as Array<{ skill: string; error: string }> };
 
@@ -198,7 +207,7 @@ export function loadSkillsFromDirectory(
 
     try {
       const raw = JSON.parse(fs.readFileSync(jsonPath, 'utf-8'));
-      registry.registerFromDirectory(raw, skillDir);
+      registry.registerFromDirectory(raw, skillDir, override);
       result.loaded++;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

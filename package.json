@@ -1,10 +1,11 @@
 {
   "name": "human-out-of-the-loop",
-  "version": "0.1.0",
+  "version": "27.1.0",
   "private": true,
   "type": "module",
   "bin": {
-    "human-out-of-the-loop": "./dist/src/cli.js"
+    "human-out-of-the-loop": "./dist/src/cli.js",
+    "hootl": "./dist/src/cli.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",

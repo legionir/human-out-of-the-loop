@@ -55,6 +55,11 @@ export class AgentRegistry {
     return this.registry.register(raw);
   }
 
+  /** Phase 28: register (or replace) — used by the project registry layer. */
+  registerOverride(raw: unknown): AgentDefinition {
+    return this.registry.replace(raw);
+  }
+
   get(id: string): AgentDefinition | undefined {
     return this.registry.get(id);
   }
@@ -77,7 +82,11 @@ export class AgentRegistry {
    * Load agent definitions from a JSON file.
    * The file should contain a JSON array of AgentDefinition objects.
    */
-  loadFromFile(filePath: string): { loaded: number; errors: string[] } {
+  loadFromFile(
+    filePath: string,
+    /** Phase 28: replace same-id agents (project layer overrides package). */
+    override = false
+  ): { loaded: number; errors: string[] } {
     const result = { loaded: 0, errors: [] as string[] };
 
     if (!fs.existsSync(filePath)) {
@@ -91,7 +100,11 @@ export class AgentRegistry {
 
       for (const item of items) {
         try {
-          this.register(item);
+          if (override) {
+            this.registerOverride(item);
+          } else {
+            this.register(item);
+          }
           result.loaded++;
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
