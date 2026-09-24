@@ -114,6 +114,11 @@ export class ModelRegistry {
     return this.configs.register(raw);
   }
 
+  /** Register a config, replacing an entry with the same id. */
+  replaceConfig(raw: unknown): ModelConfig {
+    return this.configs.replace(raw);
+  }
+
   getConfig(id: string): ModelConfig | undefined {
     return this.configs.get(id);
   }

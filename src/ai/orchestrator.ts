@@ -14,6 +14,7 @@ import { StreamingManager, type ProgressEvent } from './runtime/streaming-manage
 import { CancellationManager } from './runtime/cancellation-manager.js';
 import { RateLimiter } from './runtime/rate-limiter.js';
 import { UsageAggregator } from './runtime/usage-aggregator.js';
+import { envEndpoint } from './models/env-endpoint.js';
 import type { LlmUsageReport } from './runtime/llm-usage.js';
 import { MemorySessionStore, FileSessionStore, type SessionStore } from './runtime/session-store.js';
 import { ObservabilityLogger } from './runtime/observability-logger.js';
@@ -367,6 +368,10 @@ export class Orchestrator {
       skillRegistry: this.skillRegistry,
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
+      // The judge runs on the run's model like every other call — without
+      // it every acceptance check went to the built-in default (gpt-4o),
+      // whatever `--model` / HOTL_MODEL selected.
+      modelId: this.config.defaultModelId,
       // Phase 30 (P5): the same deadline `--timeout-ms` gives an agent run
       // now also covers the judgment call.
       timeoutMs: this.config.agentTimeoutMs,
@@ -524,6 +529,10 @@ export class Orchestrator {
     for (const layer of forEachLayer('models')) {
       this.modelRegistry.loadConfigsFromDirectory(layer.dir, false, layer.override);
     }
+    // HOTL_BASE_URL / HOTL_MODEL: an endpoint from the environment, on top
+    // of every registry layer.
+    const fromEnv = envEndpoint(this.env, this.modelRegistry.listConfigs()).config;
+    if (fromEnv) this.modelRegistry.replaceConfig(fromEnv);
 
     try {
       this.modelRegistry.resolveAll(false);

@@ -12,6 +12,7 @@
  *      otherwise: run() → confirm (inquirer, or --yes) → execute → report
  *   4. exit code: 0 success/partial, 1 failure, 2 usage error
  */
+import { envDefaultModelId } from '../utils/registries.js';
 import path from 'node:path';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
@@ -152,7 +153,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
   const globalConfig = prepareCliEnvironment(projectRoot);
 
   const persistent = opts.persistent ?? globalConfig.persistent ?? false;
-  const model = opts.model ?? globalConfig.defaultModel;
+  const model = opts.model ?? envDefaultModelId(projectRoot) ?? globalConfig.defaultModel;
   // The effective model id: the flag, the global config default, or the
   // runtime default ('gpt-4o').  Validated against the registry below.
   const effectiveModelId = model ?? 'gpt-4o';

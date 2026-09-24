@@ -6,6 +6,7 @@
  * use — no MCP bootstrap, no LLM, no Orchestrator (sub-second).
  */
 import fs from 'node:fs';
+import { envEndpoint } from '../../ai/models/env-endpoint.js';
 import path from 'node:path';
 import {
   registryLayersFor,
@@ -146,6 +147,10 @@ export function loadRegistries(projectRoot: string): LoadedRegistries {
     );
   }
 
+  // HOTL_BASE_URL / HOTL_MODEL: the environment's endpoint wins over files.
+  const fromEnv = envEndpoint(process.env, merge(models)).config;
+  if (fromEnv) models.push(fromEnv);
+
   return {
     personas: merge(personas),
     skills: merge(skills),
@@ -154,4 +159,13 @@ export function loadRegistries(projectRoot: string): LoadedRegistries {
     errors,
     layers,
   };
+}
+
+/**
+ * The model the environment selects (HOTL_MODEL / HOTL_BASE_URL), or
+ * undefined.  Precedence everywhere: --model flag > this > global config.
+ */
+export function envDefaultModelId(projectRoot: string): string | undefined {
+  const { models } = loadRegistries(projectRoot);
+  return envEndpoint(process.env, models).defaultModelId;
 }

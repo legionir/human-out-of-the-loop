@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import readline from 'node:readline';
 import { CommanderError } from 'commander';
 import { runCommand } from './commands/run.js';
-import { loadRegistries } from './utils/registries.js';
+import { envDefaultModelId, loadRegistries } from './utils/registries.js';
 import {
   globalConfigPath,
   loadDotEnv,
@@ -128,7 +128,7 @@ export function displayPath(dir: string): string {
 
 /** Which provider keys are present (never their values). */
 function keyStatus(): string {
-  const keys = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY'];
+  const keys = ['OPENAI_API_KEY', 'ANTHROPIC_API_KEY', ...(process.env.HOTL_API_KEY ? ['HOTL_API_KEY'] : [])];
   return keys
     .map((k) => (process.env[k] ? color.done(`${k} ✓`) : color.dim(`${k} ✗`)))
     .join('  ');
@@ -137,9 +137,11 @@ function keyStatus(): string {
 export function initialState(cwd: string = process.cwd()): ReplState {
   const config = loadGlobalConfig();
   const root = config.projectRoot ? path.resolve(cwd, config.projectRoot) : cwd;
+  // The project's .env may carry HOTL_MODEL / HOTL_BASE_URL.
+  loadDotEnv([root]);
   return {
     cwd: root,
-    model: config.defaultModel,
+    model: envDefaultModelId(root) ?? config.defaultModel,
     persistent: config.persistent ?? false,
     autoConfirm: false,
     verbose: false,
@@ -437,7 +439,8 @@ export class Repl {
       color.bold(title) + color.dim('  — plan once, confirm once, then out of the loop'),
       '',
       `${color.dim('cwd:  ')} ${shorten(displayPath(this.state.cwd), 72)}`,
-      `${color.dim('model:')} ${this.state.model ?? DEFAULT_MODEL}   ${color.dim('persistent:')} ${this.state.persistent ? 'on' : 'off'}`,
+      `${color.dim('model:')} ${this.modelLabel()}   ${color.dim('persistent:')} ${this.state.persistent ? 'on' : 'off'}`,
+      ...(process.env.HOTL_BASE_URL ? [`${color.dim('url:  ')} ${shorten(process.env.HOTL_BASE_URL, 72)}`] : []),
       `${color.dim('keys: ')} ${keyStatus()}`,
     ];
     const width = Math.max(...lines.map((l) => stripAnsi(l).length)) + 2;
@@ -448,9 +451,17 @@ export class Repl {
     out('');
   }
 
+  /** `custom (@aur/auto)` — the id, plus the provider model when it differs. */
+  private modelLabel(): string {
+    const id = this.state.model ?? DEFAULT_MODEL;
+    const cfg = loadRegistries(this.state.cwd).models.find((m) => m.id === id);
+    return cfg && cfg.model !== id ? `${id} (${cfg.model})` : id;
+  }
+
   private printStatus(): void {
     out(`${color.dim('directory: ')} ${this.state.cwd}`);
-    out(`${color.dim('model:     ')} ${this.state.model ?? `${DEFAULT_MODEL} (default)`}`);
+    out(`${color.dim('model:     ')} ${this.modelLabel()}`);
+    if (process.env.HOTL_BASE_URL) out(`${color.dim('endpoint:  ')} ${process.env.HOTL_BASE_URL}`);
     out(`${color.dim('persistent:')} ${this.state.persistent ? 'on' : 'off'}   ${color.dim('auto-confirm:')} ${this.state.autoConfirm ? 'on' : 'off'}   ${color.dim('verbose:')} ${this.state.verbose ? 'on' : 'off'}`);
     out(`${color.dim('session:   ')} ${this.state.sessionId ?? (this.state.persistent ? '(new on the next goal)' : '(in-memory)')}`);
     out(`${color.dim('api keys:  ')} ${keyStatus()}`);

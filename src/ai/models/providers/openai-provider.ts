@@ -17,10 +17,14 @@ export const openaiProviderFactory: ProviderFactory = {
   create(config: ModelConfig, env?: EnvSource): LanguageModel {
     // Phase 27 (CFG-08): an injected env wins; process.env is the
     // default — the DevOps gate asserts this explicit fallback.
-    const apiKey = env ? env.OPENAI_API_KEY : process.env.OPENAI_API_KEY;
+    const source = env ?? process.env;
+    // A model may name its own key variable (the HOTL_* endpoint does);
+    // OPENAI_API_KEY and HOTL_API_KEY are the fallbacks.
+    const keyVar = typeof config.config?.apiKeyEnv === 'string' ? config.config.apiKeyEnv : undefined;
+    const apiKey = (keyVar ? source[keyVar] : undefined) || source.OPENAI_API_KEY || source.HOTL_API_KEY;
     if (!apiKey) {
       throw new Error(
-        `[openaiProvider] OPENAI_API_KEY environment variable is not set.`
+        `[openaiProvider] No API key: set OPENAI_API_KEY (or HOTL_API_KEY${keyVar && keyVar !== 'HOTL_API_KEY' ? ` / ${keyVar}` : ''}).`
       );
     }
 
@@ -31,6 +35,9 @@ export const openaiProviderFactory: ProviderFactory = {
       ...(config.config?.baseURL ? { baseURL: config.config.baseURL as string } : {}),
     });
 
+    // Most OpenAI-compatible gateways implement Chat Completions only;
+    // the Responses API is the SDK default for api.openai.com.
+    if (config.config?.api === 'chat') return openai.chat(config.model) as unknown as LanguageModel;
     return openai(config.model) as unknown as LanguageModel;
   },
 };

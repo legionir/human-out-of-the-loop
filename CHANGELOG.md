@@ -5,6 +5,33 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.3.1] — 2026-09-24 — an endpoint from the environment
+
+`HOTL_BASE_URL`, `HOTL_API_KEY` and `HOTL_MODEL` were only read by the CI
+workflow; the CLI ignored them and failed with "OPENAI_API_KEY environment
+variable is not set".  They now configure the CLI, the interactive mode, the
+web server and `plans resume` directly:
+
+- `HOTL_MODEL` is a registered id (`gpt-4o`) or any provider model name
+  (`@aur/auto`, `llama3:8b`); a name that is not an id is registered as
+  **`custom`** and becomes the default model.  Precedence: `--model` >
+  `HOTL_MODEL` > the global config.
+- `HOTL_BASE_URL` points that model at an OpenAI-compatible endpoint, over
+  **Chat Completions** by default (what gateways implement;
+  `HOTL_API_STYLE=responses` keeps the Responses API).
+- `HOTL_API_KEY` is the key (`OPENAI_API_KEY` still works; an empty one no
+  longer hides the other).
+- The interactive banner shows the model (`custom (@aur/auto)`), the URL and
+  which keys are present.
+
+Found on the way: **the acceptance judge ignored the selected model** — it
+always ran on the built-in `gpt-4o`, so with `--model` (or an env endpoint)
+every step failed its quality check against a provider it was never meant to
+call.  It now uses the run's model like the planner and the reviewer.
+
+The e2e stub speaks Chat Completions too; a new `envendpoint` scenario runs
+the real CLI from the three variables alone.  705 tests, e2e 46/46.
+
 ## [27.3.0] — 2026-09-24 — interactive mode
 
 `hootl` with no arguments in a terminal now opens a prompt, like Claude Code,

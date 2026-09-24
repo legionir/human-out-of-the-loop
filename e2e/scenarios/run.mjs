@@ -418,6 +418,35 @@ scenarios.faults = async () => {
   return transient;
 };
 
+/**
+ * An endpoint configured only through HOTL_BASE_URL / HOTL_API_KEY /
+ * HOTL_MODEL — no registry edits, no OPENAI_API_KEY — over Chat Completions
+ * (what OpenAI-compatible gateways implement).  Every model call, the
+ * acceptance judge included, must reach that endpoint.
+ */
+scenarios.envendpoint = async () => {
+  const root = fs.mkdtempSync(path.join(scratchRoot, 'envendpoint-'));
+  fs.writeFileSync(path.join(root, 'README.md'), '# Scratch project\n');
+  fs.mkdirSync(path.join(root, 'notes'));
+  const env = {
+    OPENAI_API_KEY: '',
+    HOTL_BASE_URL: `http://127.0.0.1:${STUB_PORT}/p/free/v1`,
+    HOTL_API_KEY: 'stub-hotl-key',
+    HOTL_MODEL: '@aur/auto',
+  };
+  const { code, stdout, stderr } = await run(
+    ['run', 'write notes WRITE:notes/env.txt', '--yes', '--persistent', '--project-root', root],
+    { env }
+  );
+  check('envendpoint: exit code 0', code === 0, `exit=${code} ${(stderr || '').split('\n')[0]}`);
+  check('envendpoint: the step wrote its file', fs.existsSync(path.join(root, 'notes', 'env.txt')));
+  check('envendpoint: every call reached the endpoint (no quality-check failure)', !/Quality check failed/.test(stdout));
+  const models = await run(['models', '--project-root', root, '--json'], { env });
+  const custom = JSON.parse(models.stdout).find((m) => m.id === 'custom');
+  check('envendpoint: `models` lists the env model as "custom"', custom?.model === '@aur/auto', JSON.stringify(custom));
+  return root;
+};
+
 scenarios.ctrlc = async () => {
   if (process.platform === 'win32') {
     check('ctrlc: skipped on Windows (no POSIX signals)', true, 'skip');

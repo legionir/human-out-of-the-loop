@@ -272,10 +272,96 @@ function structuredPayload(name, promptText) {
   }
 }
 
+/**
+ * Chat Completions (`/chat/completions`, any path prefix) — what most
+ * OpenAI-compatible gateways implement.  Same behaviour and markers as the
+ * Responses endpoint, translated to the chat wire format.
+ */
+async function handleChat(body, req, res) {
+  if (DUMP) {
+    try {
+      (await import('node:fs')).appendFileSync(DUMP, JSON.stringify(body) + '\n');
+    } catch {
+      /* ignore */
+    }
+  }
+  const messages = Array.isArray(body.messages) ? body.messages : [];
+  const texts = [];
+  let sawToolTurn = false;
+  for (const m of messages) {
+    if (m.role === 'tool' || (m.role === 'assistant' && m.tool_calls)) sawToolTurn = true;
+    if (typeof m.content === 'string') texts.push(m.content);
+    else if (Array.isArray(m.content)) for (const part of m.content) if (part?.text) texts.push(part.text);
+  }
+  const promptText = texts.join('\n');
+  const format = body.response_format;
+  const schemaName = format?.type === 'json_schema' ? format.json_schema?.name : undefined;
+  const tools = Array.isArray(body.tools) ? body.tools : [];
+  const isAgentTurn = tools.length > 0 && !format;
+  const delayMs = delayFor(promptText, isAgentTurn);
+  if (delayMs > 0) await sleep(delayMs);
+
+  const fault = isAgentTurn ? takeFault(AGENT_FAULT, promptText) : null;
+  if (fault) {
+    if (fault.kind === 'CUT') return void req.socket.destroy();
+    if (fault.kind === 'HANG') return;
+    if (fault.kind !== 'EMPTY') return void sendHttpError(res, Number(fault.kind));
+  }
+
+  let message = { role: 'assistant', content: '' };
+  let finish = 'stop';
+  if (fault?.kind === 'EMPTY') {
+    message.content = '';
+  } else if (format) {
+    // json_schema or json_object: the SDK parses the message content.
+    message.content = schemaName && badJsonFor(schemaName, promptText)
+      ? 'Sure! Here is the result: {not valid json'
+      : JSON.stringify(structuredPayload(schemaName ?? guessSchema(promptText), promptText));
+  } else if (tools.length > 0) {
+    const offered = tools.map((t) => t.function?.name ?? t.name);
+    let call = sawToolTurn ? null : pickToolCall(promptText, offered);
+    if (!call && !sawToolTurn && offered.includes('read_file')) call = { name: 'read_file', args: { filePath: 'README.md' } };
+    if (call) {
+      message = {
+        role: 'assistant',
+        content: null,
+        tool_calls: [{ id: `call_${++seq}`, type: 'function', function: { name: call.name, arguments: JSON.stringify(call.args) } }],
+      };
+      finish = 'tool_calls';
+    } else {
+      message.content = 'Stub agent: the step is complete and verified.';
+    }
+  } else {
+    message.content = 'Stub response.';
+  }
+  res.writeHead(200, { 'content-type': 'application/json' });
+  res.end(
+    JSON.stringify({
+      id: `chatcmpl_${++seq}`,
+      object: 'chat.completion',
+      created: Math.floor(Date.now() / 1000),
+      model: body.model ?? 'stub',
+      choices: [{ index: 0, message, finish_reason: finish }],
+      usage: { prompt_tokens: 30, completion_tokens: 10, total_tokens: 40 },
+    })
+  );
+}
+
+/** Without a schema name (json_object mode) guess it from the prompt. */
+function guessSchema(promptText) {
+  if (/acceptance criteria/i.test(promptText)) return 'AcceptanceJudgment';
+  if (/review/i.test(promptText) && /plan_/.test(promptText)) return 'FinalReview';
+  return 'PlannerAssessment';
+}
+
 const server = http.createServer((req, res) => {
   let raw = '';
   req.on('data', (c) => (raw += c));
   req.on('end', async () => {
+    if (req.method === 'POST' && /\/chat\/completions$/.test(req.url.split('?')[0])) {
+      await handleChat(JSON.parse(raw || '{}'), req, res);
+      return;
+    }
     if (req.method !== 'POST' || !req.url.startsWith('/v1/responses')) {
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end(JSON.stringify({ error: 'not found' }));

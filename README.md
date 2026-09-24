@@ -127,6 +127,20 @@ startup because it runs plain JavaScript from `dist/`.
 npx tsx src/cli.ts models        # same commands, from inside the repository
 ```
 
+### Use any OpenAI-compatible endpoint (no registry edits)
+
+```bash
+export HOTL_BASE_URL=http://localhost:4414/p/free/v1   # Windows: set HOTL_BASE_URL=...
+export HOTL_API_KEY=...
+export HOTL_MODEL=@aur/auto        # a provider model name, or a registered id
+hootl                               # model: custom (@aur/auto)
+```
+
+A model name that is not a registered id is registered as `custom`. The
+endpoint is called over Chat Completions; set `HOTL_API_STYLE=responses` for
+the Responses API. The three variables can also live in the project's `.env`.
+Precedence: `--model` > `HOTL_MODEL` > `defaultModel` in the global config.
+
 ### Interactive mode
 
 Run `hootl` with no arguments in a terminal and it opens a prompt, like
@@ -393,7 +407,7 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**694 tests green (51 files), 0 tsc errors — plus 42 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
+**705 tests green (52 files), 0 tsc errors — plus 46 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
 
 ## Law Compliance
 

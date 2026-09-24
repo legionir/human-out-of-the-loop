@@ -32,6 +32,7 @@ Exit code is 0 only when every check passed. `E2E_SCENARIO_TIMEOUT_MS`
 | `mcp` | `hootl tools --mcp` starts a real stdio server, lists its tool, reports a dead server, and stays valid under `--json` |
 | `cancel` | `hootl plans cancel` mid-run ends the plan as `cancelled` and the run exits on its own |
 | `faults` | provider faults: retried 5xx, a clear 401, a retried and a persistently unparsable planner answer, an empty answer, and usage that includes the structured calls |
+| `envendpoint` | `HOTL_BASE_URL`/`HOTL_API_KEY`/`HOTL_MODEL` alone (no registry edit, no `OPENAI_API_KEY`) drive a full run over Chat Completions, the acceptance judge included |
 | `ctrlc` | one Ctrl-C cancels gracefully (skipped on Windows — no POSIX signals) |
 
 ## The provider stub
@@ -40,7 +41,8 @@ Exit code is 0 only when every check passed. `E2E_SCENARIO_TIMEOUT_MS`
 node e2e/fake-llm.mjs            # or: e2e/start-stub.sh   (writes a pid file)
 ```
 
-It speaks the OpenAI **Responses API** on `http://127.0.0.1:8931/v1`:
+It speaks the OpenAI **Responses API** on `http://127.0.0.1:8931/v1`, and
+**Chat Completions** on any path ending in `/chat/completions`:
 
 - structured requests (`text.format.type === "json_schema"`) answer with a
   payload derived from `schemaName` — `PlannerAssessment`, `ExecutionPlan`,

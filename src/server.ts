@@ -21,6 +21,7 @@
  *   - Credentials live in env vars the provider reads server-side; they
  *     are never serialized to the frontend.
  */
+import { envDefaultModelId } from './cli/utils/registries.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -73,7 +74,7 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
       (globalCfg.projectRoot ? path.resolve(globalCfg.projectRoot) : process.cwd()),
   );
   loadDotEnv([projectRoot, process.cwd()]);
-  const model = options.model ?? process.env.HOTL_MODEL ?? globalCfg.defaultModel;
+  const model = options.model ?? envDefaultModelId(projectRoot) ?? globalCfg.defaultModel;
   const redactKeys = [
     ...(options.redactKeys ?? []),
     ...(process.env.HOTL_REDACT_KEYS
