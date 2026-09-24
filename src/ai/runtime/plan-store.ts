@@ -3,6 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import type { Plan } from '../schemas/plan.js';
 import { atomicWriteFileSync } from './atomic-write.js';
+import { lockPathFor, withFileLockSync } from './file-lock.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -69,7 +70,11 @@ export class FilePlanStore implements PlanStore {
     // leave a corrupted (truncated) plan file behind.
     const data = JSON.stringify(plan, null, 2);
     const filePath = this.filePath(plan.id ?? 'unknown');
-    atomicWriteFileSync(filePath, data);
+    // Phase 27 (PERS-04): serialise writers across processes sharing
+    // this store directory (CLI ↔ server).
+    withFileLockSync(lockPathFor(filePath), () => {
+      atomicWriteFileSync(filePath, data);
+    });
     // Phase 27 (PERF-06): keep the list index warm for our own writes.
     if (plan.id) this.idByFile.set(path.basename(filePath), plan.id);
   }
@@ -124,9 +129,13 @@ export class FilePlanStore implements PlanStore {
 
   delete(planId: string): void {
     const fp = this.filePath(planId);
-    if (fs.existsSync(fp)) {
-      fs.unlinkSync(fp);
-    }
+    // Phase 27 (PERS-04): delete takes the same per-file lock as save,
+    // so a concurrent writer cannot resurrect a half-deleted plan.
+    withFileLockSync(lockPathFor(fp), () => {
+      if (fs.existsSync(fp)) {
+        fs.unlinkSync(fp);
+      }
+    });
     // Phase 27 (PERF-06): a deleted plan must leave the index at once.
     this.idByFile.delete(path.basename(fp));
   }

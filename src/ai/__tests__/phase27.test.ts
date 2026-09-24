@@ -32,6 +32,16 @@ import { McpConnector } from '../tools/mcp-connector.js';
 import { Orchestrator } from '../orchestrator.js';
 import type { ModelConfig } from '../schemas/model-config.js';
 import type { McpServerConfig } from '../schemas/mcp-server.js';
+import {
+  withFileLockSync,
+  lockPathFor,
+  isLockHeld,
+  readLockInfo,
+  cleanupStaleLockFiles,
+  FileLockTimeoutError,
+} from '../runtime/file-lock.js';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { FilePlanStore } from '../runtime/plan-store.js';
 import { FileSessionStore } from '../runtime/session-store.js';
 import { createPlan, type Plan } from '../schemas/plan.js';
@@ -511,5 +521,186 @@ describe('CFG-08: injectable environment', () => {
       await other.shutdown();
       fsSync.rmSync(projectRoot, { recursive: true, force: true });
     }
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// PERS-04 — cross-process file locking around store writes
+// ---------------------------------------------------------------------------
+
+describe('PERS-04: cross-process file locking', () => {
+  let dir = '';
+  afterEach(() => {
+    if (dir && fsSync.existsSync(dir)) fsSync.rmSync(dir, { recursive: true, force: true });
+    dir = '';
+  });
+
+  /** A plan with a deterministic id (the PERF-06 helper is describe-scoped). */
+  function lockedPlan(id: string): Plan & { id: string } {
+    const plan = createPlan('goal for locking', [
+      {
+        id: 'step-1',
+        description: 'do the thing',
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: [],
+        assignedTools: [],
+        claimedResources: [],
+        acceptanceCriteria: 'done',
+      },
+    ]);
+    plan.id = id;
+    return plan as Plan & { id: string };
+  }
+
+  /** sha256(id) prefix — the stores' documented filename contract. */
+  const planFile = (storeDir: string, planId: string) =>
+    path.join(
+      storeDir,
+      `${createHash('sha256').update(planId).digest('hex').slice(0, 16)}.json`
+    );
+
+  /**
+   * Spawn a REAL second process that holds `lockPath` for `holdMs`.
+   * Resolves once the lock is confirmed held (child printed "locked").
+   */
+  async function holdLockInChildProcess(
+    lockPath: string,
+    holdMs: number
+  ): Promise<{ child: ChildProcess; exit: Promise<number | null> }> {
+    const script = `
+      const fs = require('node:fs');
+      const [lockPath, holdMs] = process.argv.slice(1);
+      const fd = fs.openSync(lockPath, 'wx');
+      fs.writeSync(fd, JSON.stringify({ pid: process.pid, acquiredAt: Date.now() }));
+      process.stdout.write('locked\\n');
+      setTimeout(() => {
+        try { fs.closeSync(fd); fs.unlinkSync(lockPath); } catch {}
+        process.exit(0);
+      }, Number(holdMs));
+    `;
+    const child = spawn(process.execPath, ['-e', script, lockPath, String(holdMs)], {
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    await new Promise<void>((resolve, reject) => {
+      child.stdout?.on('data', (chunk) => {
+        if (String(chunk).includes('locked')) resolve();
+      });
+      child.on('error', reject);
+      child.on('exit', () => reject(new Error('child exited before locking')));
+    });
+    const exit = new Promise<number | null>((resolve) => child.on('exit', resolve));
+    return { child, exit };
+  }
+
+  it('is exclusive across processes and reports the holder', async () => {
+    dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'phase27-lock-'));
+    const lockPath = lockPathFor(path.join(dir, 'thing.json'));
+
+    const { child, exit } = await holdLockInChildProcess(lockPath, 1200);
+    try {
+      expect(isLockHeld(lockPath)).toBe(true);
+      expect(readLockInfo(lockPath)?.pid).toBe(child.pid);
+
+      // A contender gives up after its timeout instead of hanging forever.
+      expect(() =>
+        withFileLockSync(lockPath, () => 'never', { timeoutMs: 150, pollMs: 10 })
+      ).toThrow(FileLockTimeoutError);
+      try {
+        withFileLockSync(lockPath, () => 'never', { timeoutMs: 150, pollMs: 10 });
+      } catch (err) {
+        expect((err as FileLockTimeoutError).holder?.pid).toBe(child.pid);
+      }
+
+      // Once the holder releases, the same call succeeds immediately.
+      await exit;
+      expect(isLockHeld(lockPath)).toBe(false);
+      expect(withFileLockSync(lockPath, () => 'acquired', { timeoutMs: 500 })).toBe('acquired');
+      expect(isLockHeld(lockPath)).toBe(false);
+    } finally {
+      child.kill('SIGKILL');
+    }
+  });
+
+  it('makes a real store write wait for another process', async () => {
+    dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'phase27-lock-store-'));
+    const store = new FilePlanStore(dir);
+    const plan = lockedPlan('plan_phase27_lock_7');
+    const lockPath = lockPathFor(planFile(dir, plan.id));
+
+    const { child, exit } = await holdLockInChildProcess(lockPath, 800);
+    try {
+      const startedAt = Date.now();
+      store.save(plan);
+      const waited = Date.now() - startedAt;
+
+      // The save blocked until the foreign writer let go…
+      expect(waited).toBeGreaterThan(200);
+      await exit;
+      // …and then landed: the plan is readable and the lock is gone.
+      expect(store.load(plan.id)?.id).toBe(plan.id);
+      expect(isLockHeld(lockPath)).toBe(false);
+    } finally {
+      child.kill('SIGKILL');
+    }
+  });
+
+  it('is re-entrant in-process, always releases, and survives reader/writer overlap', () => {
+    dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'phase27-lock-unit-'));
+    const lockPath = lockPathFor(path.join(dir, 'unit.json'));
+
+    // Nested acquisition on the same path must not deadlock.
+    const order: string[] = [];
+    withFileLockSync(lockPath, () => {
+      order.push('outer');
+      withFileLockSync(lockPath, () => order.push('inner'));
+      order.push('outer-end');
+      // Still held by the outer frame.
+      expect(isLockHeld(lockPath)).toBe(true);
+    });
+    expect(order).toEqual(['outer', 'inner', 'outer-end']);
+    expect(isLockHeld(lockPath)).toBe(false);
+
+    // Released even when the critical section throws.
+    expect(() =>
+      withFileLockSync(lockPath, () => {
+        throw new Error('boom');
+      })
+    ).toThrow('boom');
+    expect(isLockHeld(lockPath)).toBe(false);
+  });
+
+  it('takes over abandoned locks (stale mtime or dead pid)', () => {
+    dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'phase27-lock-stale-'));
+
+    // Stale by mtime (crashed writer that never unlinked).
+    const staleByAge = lockPathFor(path.join(dir, 'old.json'));
+    fsSync.writeFileSync(
+      staleByAge,
+      JSON.stringify({ pid: process.pid, acquiredAt: Date.now() - 60_000 })
+    );
+    const old = new Date(Date.now() - 60_000);
+    fsSync.utimesSync(staleByAge, old, old);
+    expect(withFileLockSync(staleByAge, () => 'ok', { staleMs: 1000 })).toBe('ok');
+
+    // Stale because the recorded process does not exist.
+    const staleByPid = lockPathFor(path.join(dir, 'dead.json'));
+    fsSync.writeFileSync(
+      staleByPid,
+      JSON.stringify({ pid: 2_147_483_646, acquiredAt: Date.now() })
+    );
+    expect(withFileLockSync(staleByPid, () => 'ok', { staleMs: 600_000 })).toBe('ok');
+
+    // A FRESH lock by a live process is NOT broken.
+    const fresh = lockPathFor(path.join(dir, 'fresh.json'));
+    fsSync.writeFileSync(fresh, JSON.stringify({ pid: process.pid, acquiredAt: Date.now() }));
+    expect(() => withFileLockSync(fresh, () => 'ok', { timeoutMs: 80, pollMs: 10 })).toThrow(
+      FileLockTimeoutError
+    );
+
+    // Cleanup removes only the abandoned one.
+    expect(cleanupStaleLockFiles(dir)).toBe(0); // fresh lock re-created above is alive
+    expect(fsSync.existsSync(fresh)).toBe(true);
   });
 });

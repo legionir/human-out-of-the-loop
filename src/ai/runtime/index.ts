@@ -88,3 +88,14 @@ export {
   type DelegationGuardConfig,
 } from './delegation-guard.js';
 export { atomicWriteFileSync, cleanupStaleTempFiles } from './atomic-write.js';
+// Phase 27 (PERS-04): cross-process advisory file locking.
+export {
+  withFileLockSync,
+  lockPathFor,
+  isLockHeld,
+  readLockInfo,
+  cleanupStaleLockFiles,
+  FileLockTimeoutError,
+  type FileLockOptions,
+  type LockInfo,
+} from './file-lock.js';

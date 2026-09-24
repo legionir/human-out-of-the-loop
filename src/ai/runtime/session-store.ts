@@ -8,6 +8,7 @@ import {
   createInteraction,
 } from '../schemas/session.js';
 import { atomicWriteFileSync } from './atomic-write.js';
+import { lockPathFor, withFileLockSync } from './file-lock.js';
 
 // ─── Interface ────────────────────────────────────────────────────
 
@@ -78,15 +79,17 @@ export class FileSessionStore implements SessionStore {
   }
 
   setLabel(sessionId: string, label: string): Session | undefined {
-    const session = this.getSession(sessionId);
-    if (!session) return undefined;
-    if (label) {
-      session.label = label;
-    } else {
-      delete session.label;
-    }
-    this.saveSession(session);
-    return session;
+    return this.withSessionLock(sessionId, () => {
+      const session = this.getSession(sessionId);
+      if (!session) return undefined;
+      if (label) {
+        session.label = label;
+      } else {
+        delete session.label;
+      }
+      this.saveSession(session);
+      return session;
+    });
   }
 
   getSession(sessionId: string): Session | undefined {
@@ -105,9 +108,21 @@ export class FileSessionStore implements SessionStore {
     const snapshot: Session = structuredClone(session);
     snapshot.lastActiveAt = Date.now();
     const filePath = this.filePath(session.id);
-    atomicWriteFileSync(filePath, JSON.stringify(snapshot, null, 2));
+    // Phase 27 (PERS-04): cross-process lock.  Re-entrant, so the
+    // read-modify-write helpers below can hold it around read + write.
+    withFileLockSync(lockPathFor(filePath), () => {
+      atomicWriteFileSync(filePath, JSON.stringify(snapshot, null, 2));
+    });
     // Phase 27 (PERF-06): keep the list index warm for our own writes.
     if (session.id) this.idByFile.set(path.basename(filePath), session.id);
+  }
+
+  /**
+   * Phase 27 (PERS-04): run a read-modify-write section under the
+   * session's lock so two processes cannot lose each other's update.
+   */
+  private withSessionLock<T>(sessionId: string, fn: () => T): T {
+    return withFileLockSync(lockPathFor(this.filePath(sessionId)), fn);
   }
 
   listSessions(): string[] {
@@ -148,19 +163,23 @@ export class FileSessionStore implements SessionStore {
 
   deleteSession(sessionId: string): void {
     const fp = this.filePath(sessionId);
-    if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    withFileLockSync(lockPathFor(fp), () => {
+      if (fs.existsSync(fp)) fs.unlinkSync(fp);
+    });
     // Phase 27 (PERF-06): a deleted session must leave the index at once.
     this.idByFile.delete(path.basename(fp));
   }
 
   addInteraction(sessionId: string, userRequest: string): SessionInteraction | undefined {
-    const session = this.getSession(sessionId);
-    if (!session) return undefined;
+    return this.withSessionLock(sessionId, () => {
+      const session = this.getSession(sessionId);
+      if (!session) return undefined;
 
-    const interaction = createInteraction(userRequest);
-    session.interactions.push(interaction);
-    this.saveSession(session);
-    return interaction;
+      const interaction = createInteraction(userRequest);
+      session.interactions.push(interaction);
+      this.saveSession(session);
+      return interaction;
+    });
   }
 
   updateInteraction(
@@ -168,14 +187,16 @@ export class FileSessionStore implements SessionStore {
     interactionId: string,
     updates: Partial<Pick<SessionInteraction, 'outcome' | 'reviewSummary' | 'planIds' | 'completedAt'>>
   ): void {
-    const session = this.getSession(sessionId);
-    if (!session) return;
+    this.withSessionLock(sessionId, () => {
+      const session = this.getSession(sessionId);
+      if (!session) return;
 
-    const interaction = session.interactions.find((i) => i.id === interactionId);
-    if (!interaction) return;
+      const interaction = session.interactions.find((i) => i.id === interactionId);
+      if (!interaction) return;
 
-    Object.assign(interaction, updates);
-    this.saveSession(session);
+      Object.assign(interaction, updates);
+      this.saveSession(session);
+    });
   }
 
   getLatestPlanSummary(sessionId: string): string | undefined {
