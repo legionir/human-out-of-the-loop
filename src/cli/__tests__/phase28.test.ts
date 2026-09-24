@@ -13,6 +13,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 vi.mock('ai', async () => {
@@ -186,6 +187,23 @@ describe('phase 28 — help surface', () => {
         expect(line.trim().split(/\s{2,}/).length, `undocumented subcommand: ${line}`).toBeGreaterThan(1);
       }
     }
+  });
+
+  it('exits quietly when the output pipe is closed early (EPIPE)', async () => {
+    // `hootl --help | head -3` must not crash with an unhandled EPIPE.
+    const child = spawn(process.execPath, ['--import', 'tsx', path.join(REPO_ROOT, 'src/cli.ts'), '--help'], {
+      cwd: REPO_ROOT,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    const errChunks: string[] = [];
+    child.stderr.on('data', (chunk) => errChunks.push(String(chunk)));
+    // Close the reading end BEFORE the process writes anything, so the very
+    // first write hits a closed pipe (deterministic EPIPE, no timing race).
+    child.stdout.destroy();
+
+    const code = await new Promise<number | null>((resolve) => child.on('exit', resolve));
+    expect(errChunks.join('')).not.toContain('EPIPE');
+    expect(code).toBe(0);
   });
 
   it('a bad option points at --help', async () => {

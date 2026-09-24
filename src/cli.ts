@@ -641,7 +641,22 @@ function isDirectlyInvoked(): boolean {
   }
 }
 
+/**
+ * Exit quietly when the consumer closes the pipe early — `hootl --help | head`
+ * or `hootl models --json | jq '.[0]'` used to crash with an unhandled EPIPE
+ * stack trace instead of a clean exit.
+ */
+function installPipeGuard(): void {
+  for (const stream of [process.stdout, process.stderr]) {
+    stream.on('error', (err: NodeJS.ErrnoException) => {
+      if (err.code === 'EPIPE') process.exit(0);
+      throw err;
+    });
+  }
+}
+
 if (isDirectlyInvoked()) {
+  installPipeGuard();
   main(process.argv).then((code) => {
     process.exitCode = code;
   });

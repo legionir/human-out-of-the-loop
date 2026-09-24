@@ -37,21 +37,95 @@ A full command-line front-end (Claude Code–style): plan, confirm once, then go
 
 ### Install the `hootl` command
 
+Three ways to get a `hootl` command, depending on how you want to work. All of
+them keep the current working directory as the project root, so in every case
+you can just `cd` into the project you are working on and run `hootl` there
+(`--project-root <dir>` overrides it for a single invocation).
+
+#### a) Global install of the binary (recommended for real use)
+
 ```bash
-npm run build          # compile to dist/
-npm install -g .       # installs two binaries: `human-out-of-the-loop` and `hootl`
+npm install                # dependencies
+npm run build              # compile to dist/
+npm install -g .           # or: npm link  (same effect, no copy)
 ```
 
-`hootl` is a short alias for the same program, so it works from ANY directory:
+`hootl` works from ANY directory — no `registry/` needed in the project, because
+the built-in (package) registry is always available and the project's own
+`registry/` is layered on top when present:
 
 ```bash
-cd ~/work/my-project     # no registry/ needed here
-hootl models             # the built-in catalog is used
+cd ~/work/my-project       # no registry/ needed here
+hootl models               # the built-in catalog is used
 hootl run "fix the failing tests" --persistent
 ```
 
-`npm link` does the same without copying the package. Development runs stay
-unchanged: `npx tsx src/cli.ts …`.
+Notes:
+
+- `package.json` publishes **two** binaries for the same entry point:
+  `human-out-of-the-loop` and `hootl`.  The one-line alias is already in place,
+  so no extra edit is required; the help text follows the name you typed
+  (`hootl --help` prints `Usage: hootl …`).
+- `"private": true` only blocks `npm publish` — it does **not** prevent a local
+  or global install (`npm install -g .`, `npm link`) or a `npx <path>` run.
+- **Re-run `npm run build` after every source change** — the installed binary is
+  the compiled `dist/src/cli.js`, not the TypeScript sources.
+- Requires Node.js >= 22.
+
+#### b) Shell alias / function — no build, live source
+
+A function (not just an alias) is the safest form: it passes arguments through
+untouched and, because it never `cd`s into the repository, the CLI still treats
+your current directory as the project root.
+
+Add to `~/.zshrc` (zsh) or `~/.bashrc` (bash) — replace the path with your
+checkout and run `npm install` in it once:
+
+```sh
+# zsh / bash — live source, no build required
+hootl() { "/path/to/human-out-of-the-loop/node_modules/.bin/tsx" \
+          "/path/to/human-out-of-the-loop/src/cli.ts" "$@"; }
+```
+
+`npx --prefix` works the same way if you prefer not to reference `node_modules`
+directly:
+
+```sh
+hootl() { npx --prefix "/path/to/human-out-of-the-loop" tsx \
+          "/path/to/human-out-of-the-loop/src/cli.ts" "$@"; }
+```
+
+Trade-offs: the code of this repository is used **live** (no rebuild after
+edits), at the cost of roughly half a second to a second of `tsx` startup and a
+dependency on the repository path staying where it is.
+
+#### c) Wrapper script in `~/bin` or `~/.local/bin`
+
+Same live-source approach without touching your shell profile — useful when the
+shell config is shared or managed. Create the file, make it executable, and make
+sure the directory is on `PATH`:
+
+```sh
+mkdir -p ~/.local/bin
+cat > ~/.local/bin/hootl <<'EOF'
+#!/bin/sh
+exec "/path/to/human-out-of-the-loop/node_modules/.bin/tsx" \
+     "/path/to/human-out-of-the-loop/src/cli.ts" "$@"
+EOF
+chmod +x ~/.local/bin/hootl
+# add once, if not already there:
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Because the script uses the repository as-is, there is nothing to rebuild; the
+same `tsx` startup cost as option (b) applies. Option (a) remains the fastest
+startup because it runs plain JavaScript from `dist/`.
+
+#### Development runs (no installation at all)
+
+```bash
+npx tsx src/cli.ts models        # same commands, from inside the repository
+```
 
 ### Help
 
