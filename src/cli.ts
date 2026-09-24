@@ -12,6 +12,8 @@
  *   human-out-of-the-loop tasks list [--plan X] | tasks show <taskId>
  *   human-out-of-the-loop logs [--plan X] [--tail N] [--follow]
  *
+ *   human-out-of-the-loop                          interactive mode (in a terminal)
+ *
  * The heavy lifting lives in src/ai (the Orchestrator); this layer only
  * parses commands, renders progress, and manages exit codes.
  */
@@ -45,6 +47,7 @@ import {
 import { usageCommand } from './cli/commands/usage.js';
 import { tasksListCommand, tasksShowCommand } from './cli/commands/tasks.js';
 import { err } from './cli/utils/output.js';
+import { startRepl } from './cli/repl.js';
 
 const DEFAULT_BIN_NAME = 'human-out-of-the-loop';
 
@@ -197,6 +200,11 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '  that plan ONCE, then executes it autonomously with a team of agents',
         '  (planner, coder, reviewer, ...) until every step is done.  Everything is',
         '  driven by the local Orchestrator in src/ai — no server is required.',
+        '',
+        'INTERACTIVE MODE',
+        `  Run \`${binName}\` with no arguments in a terminal to open a prompt: type a goal`,
+        '  to plan and run it, or /help, /config, /model, /cd, /status, /plans … .',
+        '  The prompt shows the active directory, which is the project root.',
         '',
         'COMMAND GROUPS',
         '  run          plan + confirm + execute a goal (the main entry point)',
@@ -635,7 +643,13 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
  * and stdio flushing can finish).
  */
 export async function main(argv: string[] = process.argv): Promise<number> {
-  const program = createProgram(detectBinName(argv));
+  const binName = detectBinName(argv);
+  // No arguments in a real terminal → interactive mode (like Claude Code).
+  // Pipes, CI and scripts keep the old behaviour: print the help.
+  if (argv.length <= 2 && process.stdin.isTTY && process.stdout.isTTY) {
+    return startRepl({ binName, version: packageVersion(), createProgram });
+  }
+  const program = createProgram(binName);
   applyExitOverride(program);
   try {
     await program.parseAsync(argv);

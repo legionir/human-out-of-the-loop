@@ -127,6 +127,46 @@ startup because it runs plain JavaScript from `dist/`.
 npx tsx src/cli.ts models        # same commands, from inside the repository
 ```
 
+### Interactive mode
+
+Run `hootl` with no arguments in a terminal and it opens a prompt, like
+Claude Code. The prompt shows the active directory, which is the project root.
+
+```text
+╭──────────────────────────────────────────────────────────────╮
+│ hootl v27.3.0  — plan once, confirm once, then out of the loop│
+│ cwd:   ~/work/my-project                                      │
+│ model: gpt-4o   persistent: off                               │
+│ keys:  OPENAI_API_KEY ✓  ANTHROPIC_API_KEY ✗                  │
+╰──────────────────────────────────────────────────────────────╯
+hootl my-project › fix the failing tests
+```
+
+- **A plain line is a goal**: it is planned, shown for confirmation once, then
+  executed, the same as `hootl run`. With `/persistent on`, the goals of one
+  interactive session are recorded in the same session.
+- **Slash commands** configure the session:
+
+| command | effect |
+| --- | --- |
+| `/help` | list the commands |
+| `/status` | directory, model, persistence, session, API keys (present or not, never the value) |
+| `/config` | show the session settings and the saved defaults |
+| `/config set <key> <value>` · `/config unset <key>` | save `defaultModel`, `persistent` or `projectRoot` to `~/.human-out-of-the-loop/config.json` |
+| `/model` · `/model <id>` | list models · switch for this session |
+| `/persistent on\|off` · `/yes on\|off` · `/verbose on\|off` | write `.ai-runtime` · auto-confirm plans · stream tool calls |
+| `/cd <dir>` · `/pwd` | change or print the active directory (loads that directory's `.env`) |
+| `/new` · `/clear` · `/exit` | new session · clear the screen · leave (also Ctrl-D, or Ctrl-C twice) |
+
+- **Every regular subcommand** works with a slash, in the active directory:
+  `/plans list`, `/plans resume <id>`, `/usage`, `/logs --tail 20`,
+  `/tools --mcp`, `/mcp test <id>`, and `--help` on any of them.
+- **Ctrl-C** while a goal is running cancels the plan: the step in flight
+  finishes and you return to the prompt. A second Ctrl-C leaves the program.
+
+Without a terminal (pipes, CI, scripts), `hootl` with no arguments still prints
+the help, and every command works as before.
+
 ### Help
 
 The CLI documents itself — every command and subcommand carries a full
@@ -353,7 +393,7 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**679 tests green (50 files), 0 tsc errors — plus 42 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
+**694 tests green (51 files), 0 tsc errors — plus 42 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
 
 ## Law Compliance
 

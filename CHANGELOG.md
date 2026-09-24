@@ -5,6 +5,29 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.3.0] — 2026-09-24 — interactive mode
+
+`hootl` with no arguments in a terminal now opens a prompt, like Claude Code,
+instead of printing the help:
+
+- a banner with the version, the **active directory** (the project root), the
+  model, persistence and which API keys are present; the prompt shows the
+  directory too;
+- a plain line is a goal (plan → confirm once → execute), and with
+  `/persistent on` the goals of one interactive session share a session;
+- slash commands for configuration: `/config` (show; `set`/`unset` of
+  `defaultModel`, `persistent`, `projectRoot` in the global config), `/model`,
+  `/persistent`, `/yes`, `/verbose`, `/cd`, `/pwd`, `/status`, `/new`,
+  `/clear`, `/help`, `/exit`;
+- every regular subcommand as `/<command>` in the active directory
+  (`/plans list`, `/usage`, `/logs --tail 20`, …), including `--help`;
+- history, Tab completion of commands, Ctrl-C clears the line / cancels a
+  running plan and returns to the prompt, Ctrl-C twice or Ctrl-D leaves.
+
+Pipes, CI and scripts are unchanged: without a TTY, no arguments still prints
+the help.  Verified in a real PTY (goals with and without auto-confirm, the
+inquirer confirmation, session reuse, `/cd`, Ctrl-C cancel); 15 new tests.
+
 ## [27.2.14] — 2026-09-24 — provider faults (P1 without a key)
 
 The e2e stub can now misbehave like a real provider — `FAULT:<429|500|401|CUT|HANG|EMPTY>x<n>`

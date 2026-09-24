@@ -102,6 +102,8 @@ function formatZodError(err: unknown): string | undefined {
 
 export interface RunCommandResult {
   exitCode: number;
+  /** The session the run was recorded in (full runs only). */
+  sessionId?: string;
 }
 
 /**
@@ -303,7 +305,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       result.review.outcome === 'success' || result.review.outcome === 'partial-success'
         ? 0
         : 1;
-    return { exitCode };
+    return { exitCode, sessionId: result.sessionId };
   } catch (e) {
     const message = formatZodError(e) ?? (e instanceof Error ? e.message : String(e));
     err(color.failed(`Error: ${message}`));
