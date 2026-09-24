@@ -1,0 +1,9 @@
+{
+  "id": "task_decomposition",
+  "name": "Task Decomposition",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": ["list_personas", "list_skills", "list_tools"],
+  "priority": 90,
+  "description": "Decomposes user requests into dependency-aware execution plans"
+}

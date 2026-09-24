@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Human Out of the Loop</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- ── Sidebar ─────────────────────────────────────────── -->
+    <aside id="sidebar">
+      <div class="brand">
+        <span class="brand-mark">⏻</span>
+        <div>
+          <h1>Human Out of the Loop</h1>
+          <p class="tagline">Confirm once. Walk away.</p>
+        </div>
+      </div>
+
+      <!-- ── U2: Registry panel (collapsible introspection) ── -->
+      <details id="registry-panel" class="registry-panel">
+        <summary id="registry-summary">Registry <span id="registry-counts" class="registry-counts"></span></summary>
+        <div class="registry-body">
+          <details class="registry-group">
+            <summary class="registry-group-summary" data-kind="models">Models</summary>
+            <ul id="registry-models" class="registry-list"></ul>
+          </details>
+          <details class="registry-group">
+            <summary class="registry-group-summary" data-kind="personas">Personas</summary>
+            <ul id="registry-personas" class="registry-list"></ul>
+          </details>
+          <details class="registry-group">
+            <summary class="registry-group-summary" data-kind="skills">Skills</summary>
+            <ul id="registry-skills" class="registry-list"></ul>
+          </details>
+          <details class="registry-group">
+            <summary class="registry-group-summary" data-kind="tools">Tools</summary>
+            <ul id="registry-tools" class="registry-list"></ul>
+          </details>
+          <details class="registry-group">
+            <summary class="registry-group-summary" data-kind="mcp">MCP</summary>
+            <ul id="registry-mcp" class="registry-list"></ul>
+          </details>
+        </div>
+      </details>
+
+      <button id="new-session-btn" class="btn primary wide">+ New session</button>
+      <div class="sessions-label">Sessions</div>
+      <ul id="session-list" class="session-list"></ul>
+      <div class="usage-footer">
+        <span id="server-usage-label">Server usage</span>
+        <span id="server-usage" class="usage-line">—</span>
+      </div>
+      <footer class="sidebar-footer" id="sidebar-footer"></footer>
+    </aside>
+
+    <!-- ── Main ────────────────────────────────────────────── -->
+    <main id="main">
+      <header id="main-header">
+        <div id="session-title">New session</div>
+        <div id="run-controls" class="hidden">
+          <span id="run-state" class="run-state"></span>
+          <button id="cancel-run-btn" class="btn danger small">Cancel run</button>
+        </div>
+      </header>
+
+      <!-- ── U6: live tasks of the active run ────────────────── -->
+      <div id="tasks-panel" class="tasks-panel hidden">
+        <div class="tasks-head">
+          <span>Tasks</span>
+          <span id="tasks-counts" class="tasks-counts"></span>
+          <span id="usage-line" class="usage-line"></span>
+        </div>
+        <ul id="tasks-list" class="tasks-list"></ul>
+      </div>
+
+      <!-- ── U7: observability follow (live log) ─────────────── -->
+      <details id="log-panel" class="log-panel">
+        <summary>
+          Observability log
+          <button id="log-follow-btn" class="btn small" title="Stream new log lines (SSE)">Follow</button>
+          <button id="log-clear-btn" class="btn small" title="Clear the panel">Clear</button>
+        </summary>
+        <pre id="log-body" class="log-body">—</pre>
+      </details>
+
+      <div id="chat" class="chat">
+        <div class="empty-state" id="empty-state">
+          <p>Describe a goal below — the runtime plans it, you confirm once, and it executes Human-Out-Of-Loop.</p>
+        </div>
+      </div>
+
+      <div id="composer">
+        <textarea
+          id="goal-input"
+          rows="2"
+          placeholder='e.g. "Build a REST endpoint for user registration with validation and tests"'
+        ></textarea>
+        <!-- U3: model and per-run execution options -->
+        <div class="run-options-row">
+          <label class="model-picker">Model
+            <select id="run-model" aria-label="Model for this run"></select>
+          </label>
+          <details id="advanced-run-options" class="advanced-run-options">
+            <summary>Advanced</summary>
+            <div class="advanced-fields">
+              <label>Timeout (ms)<input id="run-timeout" type="number" min="1" placeholder="server default" /></label>
+              <label>Max steps<input id="run-max-steps" type="number" min="1" max="100" step="1" placeholder="server default" /></label>
+              <label>Max replans<input id="run-max-replans" type="number" min="0" max="10" step="1" placeholder="server default" /></label>
+            </div>
+          </details>
+        </div>
+        <div class="composer-actions">
+          <label class="auto-confirm">
+            <input type="checkbox" id="auto-confirm" />
+            run without confirmation
+          </label>
+          <!-- U4: preview = plan only, nothing is saved or executed -->
+          <button id="preview-btn" class="btn" title="Plan without saving or executing anything">Plan only</button>
+          <button id="run-btn" class="btn primary">Run ▸</button>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- ── Plan confirmation modal ───────────────────────────── -->
+  <div id="plan-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="plan-modal-heading">
+        <h2>Review the plan</h2>
+        <span id="plan-model" class="plan-model"></span>
+      </div>
+      <p class="modal-sub">You are asked exactly once. After confirming, the runtime executes without you.</p>
+      <div id="preview-banner" class="preview-banner hidden">
+        Preview — nothing was saved and nothing will run. No session, no plan, no execution.
+      </div>
+      <div id="plan-feasibility" class="plan-feasibility hidden"></div>
+      <div id="plan-summary" class="plan-summary"></div>
+      <div id="plan-table-wrap"></div>
+      <div class="feedback-row" id="plan-decision-row">
+        <textarea id="plan-feedback" rows="2" placeholder="Optional feedback for the planner…"></textarea>
+        <div class="modal-actions">
+          <button id="plan-reject-btn" class="btn danger">Reject</button>
+          <button id="plan-confirm-btn" class="btn primary">Confirm &amp; run</button>
+        </div>
+      </div>
+      <div class="modal-actions hidden" id="plan-preview-row">
+        <button id="preview-close-btn" class="btn primary">Close preview</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── U5: clarification modal ───────────────────────────── -->
+  <div id="clarify-modal" class="modal-backdrop hidden">
+    <div class="modal">
+      <div class="plan-modal-heading">
+        <h2>The planner needs a few answers</h2>
+        <span id="clarify-round" class="plan-model"></span>
+      </div>
+      <p class="modal-sub">
+        Your answers are fed back to the planner, which produces a new plan. Nothing runs
+        until you confirm that plan.
+      </p>
+      <div id="clarify-questions" class="clarify-questions"></div>
+      <div class="modal-actions">
+        <button id="clarify-decline-btn" class="btn danger">Don't answer (cancel run)</button>
+        <button id="clarify-send-btn" class="btn primary">Send answers</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+  <script src="/app.js"></script>
+</body>
+</html>

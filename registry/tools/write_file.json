@@ -1,0 +1,8 @@
+{
+  "id": "write_file",
+  "name": "Write File",
+  "description": "Writes content to a file, creating parent directories if needed",
+  "source": "local",
+  "modulePath": "./implementations/write-file",
+  "category": "filesystem"
+}

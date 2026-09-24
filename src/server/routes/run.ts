@@ -1,0 +1,251 @@
+/**
+ * Phase 24 (UI): run routes.
+ *
+ *   POST /api/run          { message, sessionId?, confirm? } → 202 { runId }
+ *   GET  /api/runs/:runId  → live run state (UI polls until terminal)
+ *
+ * The interactive flow:
+ *   1. UI posts { message, sessionId?, confirm: false }
+ *   2. Server starts Orchestrator.run() in the background; when the plan
+ *      is ready the confirmCallback pauses and stores the plan text.
+ *   3. UI polls the run → sees 'awaiting-confirmation' + planId → renders
+ *      the plan modal (table from GET /api/plans/:id) and subscribes to
+ *      SSE /api/stream/:planId.
+ *   4. UI posts /api/plans/:id/confirm { confirmed, feedback? } → the
+ *      callback resolves and execution proceeds (or the run is cancelled).
+ *   5. UI watches SSE for live progress and polls until state 'done'
+ *      (report + outcome).
+ *
+ * `confirm: true` skips the modal entirely (auto-confirm — the
+ * Human-Out-Of-Loop mode from the web UI).
+ */
+import { randomUUID } from 'node:crypto';
+import { Router } from 'express';
+import type { Plan } from '../../ai/schemas/plan.js';
+import type { RunOverrides } from '../../ai/orchestrator.js';
+import type { ServerContext } from '../types.js';
+
+export function runRouter(ctx: ServerContext): Router {
+  const router = Router();
+
+  router.post('/api/run', async (req, res) => {
+    const { message, sessionId, confirm, model, timeoutMs, maxSteps, maxReplans } =
+      (req.body ?? {}) as {
+        message?: unknown;
+        sessionId?: unknown;
+        confirm?: unknown;
+        /** U3: per-run overrides */
+        model?: unknown;
+        timeoutMs?: unknown;
+        maxSteps?: unknown;
+        maxReplans?: unknown;
+      };
+    // NOTE (UI security step): `projectRoot` intentionally does NOT come
+    // from the request body — it is fixed server-side (config/env).
+    if (typeof message !== 'string' || message.trim() === '') {
+      res.status(400).json({ error: 'Body must include a non-empty "message".' });
+      return;
+    }
+    // JSON `null` is a natural way to express "no session" — treat it
+    // the same as an absent field.
+    if (sessionId != null && typeof sessionId !== 'string') {
+      res.status(400).json({ error: '"sessionId" must be a string when present.' });
+      return;
+    }
+    const autoConfirm = confirm === true;
+
+    // U3: per-run overrides — validate now (synchronous) so the UI gets
+    // a clean 400 with the list of valid model ids, not a failed run.
+    const runOverrides: RunOverrides = {};
+    if (model != null) {
+      if (typeof model !== 'string' || model.trim() === '') {
+        res.status(400).json({ error: '"model" must be a non-empty string when present.' });
+        return;
+      }
+      const validIds = ctx.orchestrator.modelRegistry.listConfigs().map((m) => m.id);
+      if (!ctx.orchestrator.modelRegistry.hasConfig(model)) {
+        res.status(400).json({ error: `Unknown model id "${model}".`, validIds });
+        return;
+      }
+      runOverrides.modelId = model;
+    }
+    // [key, value, lo, hi, mustBeInteger]
+    for (const [key, field, lo, hi, isInt] of [
+      ['timeoutMs', timeoutMs, 1, Number.MAX_SAFE_INTEGER, false],
+      ['maxSteps', maxSteps, 1, 100, true],
+      ['maxReplans', maxReplans, 0, 10, true],
+    ] as const) {
+      if (field == null) continue;
+      if (
+        typeof field !== 'number' ||
+        !Number.isFinite(field) ||
+        (isInt && !Number.isInteger(field)) ||
+        field < lo ||
+        field > hi
+      ) {
+        res.status(400).json({ error: `"${key}" must be a number between ${lo} and ${hi}.` });
+        return;
+      }
+      if (key === 'timeoutMs') runOverrides.agentTimeoutMs = field;
+      else if (key === 'maxSteps') runOverrides.maxSteps = field;
+      else runOverrides.maxReplanningAttempts = field;
+    }
+
+    const runId = randomUUID();
+    ctx.runs.set(runId, {
+      runId,
+      sessionId: sessionId as string | undefined,
+      state: 'planning',
+      createdAt: Date.now(),
+    });
+    const run = ctx.runs.get(runId)!;
+
+    // Detached: the HTTP response returns immediately (202); the run's
+    // lifecycle is observable via GET /api/runs/:runId + SSE.
+    void (async () => {
+      try {
+        const result = await ctx.orchestrator.run(message.trim(), {
+          sessionId: run.sessionId,
+          // U3: per-run overrides (validated above)
+          ...(Object.keys(runOverrides).length > 0 ? { runOverrides } : {}),
+          // U5: interactive clarification.  The planner asks questions during
+          // PLANNING (before any plan id exists), so the SSE channel for this
+          // event is keyed by the runId — the run state also carries the
+          // questions for clients that missed the event.
+          clarificationCallback: async (questions: string[], round: number) => {
+            run.state = 'awaiting-clarification';
+            run.clarificationQuestions = [...questions];
+            run.clarificationRound = round;
+            ctx.hub.emit(runId, 'clarification', {
+              runId,
+              ...(run.planId ? { planId: run.planId } : {}),
+              questions,
+              attempt: round,
+            });
+            return new Promise<Record<string, string> | null>((resolve) => {
+              run.clarificationResolver = (answers) => {
+                run.state = 'planning';
+                run.clarificationQuestions = undefined;
+                run.clarificationResolver = undefined;
+                resolve(answers);
+              };
+            });
+          },
+          confirmCallback: async (planText: string, plan?: Plan) => {
+            run.planId = plan?.id ?? run.planId;
+            if (autoConfirm) {
+              run.state = 'running';
+              return { confirmed: true };
+            }
+            run.state = 'awaiting-confirmation';
+            run.planText = planText;
+            if (run.planId) {
+              ctx.hub.emit(run.planId, 'awaiting-confirmation', {
+                planId: run.planId,
+                planText,
+              });
+            }
+            return new Promise((resolve) => {
+              run.confirmResolver = (decision) => {
+                run.state = 'running';
+                resolve(decision);
+              };
+            });
+          },
+        });
+
+        run.sessionId = result.sessionId;
+        run.state = 'done';
+        run.outcome = result.review.outcome;
+        run.report = result.report;
+        if (run.planId) {
+          ctx.hub.emit(run.planId, 'run:done', {
+            runId,
+            outcome: result.review.outcome,
+          });
+        }
+      } catch (err) {
+        run.state = 'error';
+        run.error = err instanceof Error ? err.message : String(err);
+      }
+    })();
+
+    res.status(202).json({ runId, autoConfirm });
+  });
+
+  /**
+   * U5: answer the planner's clarification questions (or decline).
+   *
+   *   POST /api/runs/:runId/clarification { answers: {q: a} }  → 200 { ok, answered }
+   *   POST /api/runs/:runId/clarification { decline: true }    → 200 { ok, declined }
+   *
+   * 404 unknown run · 409 when the run is not awaiting clarification ·
+   * 400 when an answer is missing/empty (every pending question must be
+   * answered — a partial answer cannot be fed back to the planner).
+   */
+  router.post('/api/runs/:runId/clarification', (req, res) => {
+    const run = ctx.runs.get(req.params.runId);
+    if (!run) {
+      res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
+      return;
+    }
+    if (run.state !== 'awaiting-clarification' || !run.clarificationResolver) {
+      res.status(409).json({
+        error: `Run "${run.runId}" is not awaiting clarification (state: ${run.state}).`,
+      });
+      return;
+    }
+    const body = (req.body ?? {}) as { answers?: unknown; decline?: unknown };
+
+    // The user may decline to answer — that cancels the run (C4 semantics).
+    if (body.decline === true) {
+      const resolver = run.clarificationResolver;
+      resolver(null);
+      res.json({ ok: true, declined: true });
+      return;
+    }
+
+    const rawAnswers = body.answers;
+    if (typeof rawAnswers !== 'object' || rawAnswers === null || Array.isArray(rawAnswers)) {
+      res.status(400).json({ error: 'Body must include an "answers" object (or "decline": true).' });
+      return;
+    }
+    const pending = run.clarificationQuestions ?? [];
+    const answers: Record<string, string> = {};
+    const missing: string[] = [];
+    for (const question of pending) {
+      const value = (rawAnswers as Record<string, unknown>)[question];
+      if (typeof value !== 'string' || value.trim() === '') {
+        missing.push(question);
+        continue;
+      }
+      answers[question] = value.trim();
+    }
+    if (missing.length > 0) {
+      res.status(400).json({
+        error: 'Every question must be answered with a non-empty string.',
+        missing,
+      });
+      return;
+    }
+
+    const resolver = run.clarificationResolver;
+    resolver(answers);
+    res.json({ ok: true, answered: Object.keys(answers).length, round: run.clarificationRound });
+  });
+
+  router.get('/api/runs/:runId', (req, res) => {
+    const run = ctx.runs.get(req.params.runId);
+    if (!run) {
+      res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
+      return;
+    }
+    // Never leak the resolvers to the wire.
+    const { confirmResolver, clarificationResolver, ...publicState } = run;
+    void confirmResolver;
+    void clarificationResolver;
+    res.json(publicState);
+  });
+
+  return router;
+}

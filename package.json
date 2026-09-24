@@ -1,0 +1,46 @@
+{
+  "name": "human-out-of-the-loop",
+  "version": "27.2.13",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "human-out-of-the-loop": "./dist/src/cli.js",
+    "hootl": "./dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "server": "tsx src/server.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "e2e": "node e2e/scenarios/run.mjs"
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.60",
+    "@ai-sdk/mcp": "2.0.55",
+    "@ai-sdk/openai": "4.0.72",
+    "ai": "7.0.111",
+    "chalk": "^6.0.0",
+    "commander": "^15.0.0",
+    "express": "^5.2.1",
+    "inquirer": "^14.2.2",
+    "ora": "^9.4.1",
+    "undici": "^7.29.1",
+    "uuid": "^11.0.0",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/json-schema": "7.0.15",
+    "@types/node": "^22.20.4",
+    "@types/supertest": "^7.2.1",
+    "@types/uuid": "^10.0.0",
+    "supertest": "^7.3.0",
+    "tsx": "^4.23.15",
+    "typescript": "7.0.2",
+    "vitest": "5.0.1"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

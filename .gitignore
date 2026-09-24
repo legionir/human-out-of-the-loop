@@ -1,0 +1,17 @@
+node_modules
+dist
+coverage
+*.log
+.env
+.env.*
+!.env.example
+.DS_Store
+.ai-runtime/
+
+# local e2e stub artifacts
+e2e/.stub.pid
+e2e/.stub.log
+
+# e2e scenario artifacts
+e2e/.artifacts/
+.ci/

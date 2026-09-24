@@ -1,0 +1,100 @@
+name: CI
+
+# The matrix P8 could not close in a sandbox: real Windows, real macOS, and
+# Node versions newer than the one the sandbox had.  Nothing here needs a
+# provider key — the stub in `e2e/` stands in for the model.
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: ['22', '24']
+        include:
+          # One run on the newest LTS line, on Linux only, to keep the bill sane.
+          - os: ubuntu-latest
+            node: '26'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Toolchain
+        run: |
+          node --version
+          npm --version
+
+      - run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      # Failures are re-published as check-run annotations, so a red matrix
+      # leg is readable without the (sometimes unavailable) job log.
+      - name: Unit + integration suite
+        run: node scripts/ci-test.mjs
+
+      - name: Build the CLI
+        run: npm run build
+
+      - name: Install the global binary
+        run: npm install -g .
+
+      - name: CLI smoke (no model needed)
+        run: |
+          hootl --version
+          hootl tools --project-root .
+
+  end-to-end:
+    name: e2e (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - run: npm ci
+      - run: npm run build
+      - run: npm install -g .
+
+      # The committed scenarios (e2e/scenarios) drive the whole runtime
+      # against the local stub: plan → execute → review → logs/plans/usage.
+      - name: Run the scenario suite
+        run: node e2e/scenarios/run.mjs
+
+      - name: Upload the scenario log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-${{ matrix.os }}
+          path: e2e/.artifacts
+          if-no-files-found: warn
+          retention-days: 7

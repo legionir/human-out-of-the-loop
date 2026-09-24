@@ -1,0 +1,10 @@
+{
+  "id": "gpt-4o",
+  "provider": "openai",
+  "model": "gpt-4o",
+  "config": {
+    "temperature": 0.2,
+    "maxTokens": 4096
+  },
+  "description": "OpenAI GPT-4o — primary model for complex reasoning"
+}
