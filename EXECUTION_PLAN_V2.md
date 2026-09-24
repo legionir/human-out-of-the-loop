@@ -323,7 +323,7 @@ private async afterStepSync(plan, step) {
 ### [🟢] فاز ۲۱: P2 Performance Optimization — کامل شد 2026-09-23
 
 **نتیجه:** `PERF-01`: `countDependents` (BFS جداگانه per ready-step) با یک DFS memoized روی گراف معکوس جایگزین شد — `computeTransitiveDependentCounts` در هر `getReadyStepsPrioritized` یک‌بار اجرا می‌شود؛ بنچمارک: 125 step / 50 ready → بازدیدهای `plan.steps` از 127 (فرمول پایین؛ comparator واقعی sort BFS را چند بار تکرار می‌کرد) به **4** رسید (معیار <500 با 125× حاشیه). `PERF-02`: `AgentCache` حالا sha256 روی `stableStringify(def)` (JSON canonical با مرتب‌سازی کلیدها) store می‌کند — get روی def با 10KB payload به‌طور میانگین **<0.2ms** (معیار <1ms) و hit به ترتیب کلیدها invariant است (با `JSON.stringify` قبلی miss می‌شد). `PERF-03`: `pendingIds`/`runningIds` Set در `TaskRuntime` — شمارنده‌ها O(1) و `scheduleNext` فقط روی pending iterate می‌کند؛ بنچمارک: 1000 task (997 pending، 3 running، lock conflict) → `scheduleNext` **<0.5ms** (معیار <2ms). `PERF-04`: fd reuse — `openSync` یک‌بار + `writeSync` per entry (سینک و دوام حفظ شد؛ گزینه دومِ خودِ پلن)؛ 1000 event در **<10ms** (معیار <100ms)؛ `close()` idempotent اضافه شد و از `Orchestrator.shutdown()` صدا زده می‌شود. `PERF-05`: `walkDir` دو-فازی حذف شد — `searchFiles` تک-گذر با early exit سه‌سطحی (entry، per-entry، per-line)؛ بنچمارک با readdir mock: درخت 2 دایرکتوری (1 فایل + 100 فایل) با `maxResults:1` → **دقیقاً 1 readFile** (قبلاً 101) و دایرکتوری دوم اصلاً list نمی‌شود. `PERF-07`: LRU `toolsCache` (cap 64) در `getToolsByIds` با key = `ids.join(',')` — hit همان reference را برمی‌گرداند، eviction بعد از 64 کامبو، و `registerImplementation` کل cache را clear می‌کند. 13 تست جدید (`phase21.test.ts`) = **402 تست سبز** + tsc سبز.
-**انحراف ثبت‌شده:** (1) `PERF-01` به‌جای precompute یک‌بار در ابتدای `execute()` (متن گام ۱)، memoization در هر فراخوانی `getReadyStepsPrioritized` است — set وابسته‌ها با کامل‌شدن stepها تغییر می‌کند، بنابراین بازمحاسبه per-loop-iteration صحت دارد و همچنان O(V+E) با 4 بازدید `plan.steps`. (2) `PERF-04` گزینه async `createWriteStream` نرفت؛ گزینه دومِ خودِ پلن (fd reuse + `writeSync`) انتخاب شد تا دوام سینک (crash after log → entry روی disk) حفظ شود. (3) `PERF-06` (readdirSync list) و `PERF-08` (dedup emit) در دسته I هستند ولی گام فاز ۲۱ نیستند → بدون تغییر (مستند شد).
+**انحراف ثبت‌شده:** (1) `PERF-01` به‌جای precompute یک‌بار در ابتدای `execute()` (متن گام ۱)، memoization در هر فراخوانی `getReadyStepsPrioritized` است — set وابسته‌ها با کامل‌شدن stepها تغییر می‌کند، بنابراین بازمحاسبه per-loop-iteration صحت دارد و همچنان O(V+E) با 4 بازدید `plan.steps`. (2) `PERF-04` گزینه async `createWriteStream` نرفت؛ گزینه دومِ خودِ پلن (fd reuse + `writeSync`) انتخاب شد تا دوام سینک (crash after log → entry روی disk) حفظ شود. (3) `PERF-06` (readdirSync list) و `PERF-08` (dedup emit) در دسته I هستند ولی گام فاز ۲۱ نیستند → در فاز ۲۱ بدون تغییر ماندند و در **فاز ۲۷** بسته شدند (`eaa8aa9`, `ca96332`).
 
 **هدف:** بهبود پرفورمنس بدون تغییر رفتار.
 
@@ -582,7 +582,7 @@ GET  /api/observability?planId=&tail=
 - جدول 18 نیازمندی + 42 باگ جدید → نگاشت به فازهای 18-25
 
 **معیار پذیرش (بررسی‌شده):**
-- [x] تمام 42 مورد در یکی از فازهای 18-25 قرار گرفته‌اند — جدول «Scope Audit نهایی» در `src/ai/CONFIGURATION.md` (دسته‌ی A–K → فاز + وضعیت + شواهد؛ تنها مورد باقی‌مانده PERS-04 به‌عنوان trade-off پذیرفته‌شده علامت خورده)
+- [x] تمام 42 مورد در یکی از فازهای 18-25 قرار گرفته‌اند — جدول «Scope Audit نهایی» در `src/ai/CONFIGURATION.md` (دسته‌ی A–K → فاز + وضعیت + شواهد؛ PERS-04 در فاز ۲۷ نیز فیکس شد و دیگر مورد بازی ندارد)
 - [x] مستندات معماری با پیاده‌سازی نهایی منطبق — Migration Guide در `src/ai/README.md`، جدول کامل `OrchestratorConfigSchema` در `CONFIGURATION.md` (تصحیح الگوی قدیمی Tool در `CONTRIBUTING.md` به factory pattern فاز ۱۸)
 - [x] CLI و UI قابل اجرا بدون خواندن Runtime — بخش Web UI + جدول endpointها در `README.md`؛ command reference CLI به‌روز
 - [x] تمام متغیرها/سقف‌ها مستند — envهای provider/MCP/سرور (`HOTL_*`) + جدول سقف‌ها شامل `maxSteps`, `maxClarificationRounds`, `redactKeys`, `random` (jitter)
@@ -600,7 +600,7 @@ GET  /api/observability?planId=&tail=
 
 | مورد | منبع در پلن | شدت | وضعیت |
 |---|---|---|---|
-| PERS-04 — بدون file locking بین‌پروسه‌ای | جدول E | 🟡 P2 | ⏳ آخرین مورد باز — قفل `O_EXCL` + stale-check اطراف نوشتن storeها (فاز ۲۷) |
+| PERS-04 — بدون file locking بین‌پروسه‌ای | جدول E | 🟡 P2 | ✅ بسته شد (`b415f7b`) — `withFileLockSync` (قفل `O_EXCL` + pid/timestamp + stale/pid-dead takeover + re-entrant + تایم‌اوت تایپ‌دار) روی `FilePlanStore.save/delete` و `FileSessionStore.saveSession/deleteSession` و read-modify-write ها |
 | CFG-08 — خواندن مستقیم `process.env` در providerها و mcp-connector (بدون env injection per-Orchestrator) | جدول B | 🟡 P2 | ✅ بسته شد (`e7f1399`) — `EnvSource` در `src/ai/env.ts`؛ `OrchestratorConfig.env` → `ModelRegistry({env})` → `ProviderFactory.create(config, env)` + `McpConnector({env})`/`bootstrapMcpServers(..., env)`؛ پیش‌فرض `process.env` (بدون تغییر رفتار) |
 | SEC-02 — `search_code` فایل‌های غیرقابل‌خواندن را بی‌صدا رد می‌کند (خطای دسترسی دیده نمی‌شود) | جدول H | 🟡 P2 | ✅ بسته شد (`ba3de55`) — خروجی `skippedCount` + `skipped[]` (سقف ۲۰ رکورد) شامل فایل و دایرکتوری غیرقابل‌خواندن |
 | PERF-06 — `list()` در `FilePlanStore`/`FileSessionStore`: هر بار `readdirSync` + خواندن و parse همه‌ی فایل‌ها | جدول I | 🟢 P2 | ✅ بسته شد (`eaa8aa9`) — ایندکس `idByFile`: هر فایل فقط یک‌بار parse می‌شود؛ list گرم صفر خواندن I/O دارد |
@@ -608,9 +608,11 @@ GET  /api/observability?planId=&tail=
 | سوال ۵ بخش ۴ (ReDoS) | بخش ۴ | — | ✅ بسته شد با راه‌حل جانشین: `safe-regex`/`re2` اضافه نشد؛ `regex-guard.ts` سفارشی (تشخیص nested quantifier) + سقف طول الگو (۲۰۰ کاراکتر) بدون timeout اجرایی |
 | یادداشت فاز ۲۴: ارتقای UI به Next.js/React | فاز ۲۴ | — | 🔵 آینده/اختیاری — UI نسخه‌ی فعلی vanilla ماند (طبق تصمیم کاربر) و پلن UI (U1–U8) کامل است |
 
-### [🟢] فاز ۲۷: بستن باقی‌مانده‌های P2 — در جریان (۲۰۲۶-۰۹-۲۴)
+### [🟢] فاز ۲۷: بستن باقی‌مانده‌های P2 — کامل شد (۲۰۲۶-۰۹-۲۴)
 
 **مبنا:** «اینارو ببند» — بستن دقیق ۵ مورد جدول بالا با کمترین تغییر و تست مستقیم؛ هر مورد مستقل و قابل تعریف در `src/ai/__tests__/phase27.test.ts`.
+
+**نتیجه:** هر ۵ مورد بسته شد (کامیت‌های `ba3de55`, `eaa8aa9`, `ca96332`, `e7f1399`, `b415f7b`)؛ ۱۸ تست فاز ۲۷، کل suite ۵۴۵ تست در ۳۷ فایل، `tsc` پاک. جدول بالا (موارد باقی‌مانده) هیچ مورد باز P2 باقی نمی‌گذارد — تنها موارد باقی‌مانده در کل پروژه: ReDoS بسته‌شده با راه‌حل جانشین و ارتقای اختیاری UI (هر دو آبی/آینده).
 
 | گام | مورد | نتیجه |
 |---|---|---|
@@ -618,7 +620,8 @@ GET  /api/observability?planId=&tail=
 | ۲ | PERF-06 | `eaa8aa9` — ایندکس `idByFile` در `FilePlanStore`/`FileSessionStore`؛ list فقط فایل‌های ندیده را parse می‌کند، رکوردهای حذف‌شده را کنار می‌گذارد؛ نوشتن خود store ایندکس را گرم می‌کند |
 | ۳ | PERF-08 | `ca96332` — `EventBus.emit` بدون allocation در مسیرهای رایج؛ بافر dedup به‌ازای عمق، آزادسازی در `finally` |
 | ۴ | CFG-08 | `e7f1399` — `EnvSource` تزریق‌پذیر (`src/ai/env.ts`) + `OrchestratorConfig.env` + thread به `ModelRegistry`، providerها، `McpConnector`، `bootstrapMcpServers`؛ پیش‌فرض همه‌جا `process.env` |
-| ۵ | PERS-04 | در جریان — قفل بین‌پروسه‌ای (`O_EXCL` lockfile + stale detection) اطراف نوشتن storeهای فایل‌محور |
+| ۵ | PERS-04 | `b415f7b` — `src/ai/runtime/file-lock.ts`؛ قفل `O_EXCL` با متادیتای pid، انتظار محدود (`FileLockTimeoutError` با holder)، re-entrant، و تصاحب قفل‌های رهاشده (mtime کهنه یا pid مرده) |
+| ۶ | کشف ضمن smoke (خارج از ۵ مورد) | `b415f7b`+ — providerها از `require()` برهنه در پکیج ESM استفاده می‌کردند؛ در `tsx`/CLI/server هر instantiate با «@ai-sdk/openai is not installed» شکست می‌خورد (shim ویتست آن را پنهان می‌کرد). فیکس حداقلی: `createRequire(import.meta.url)` در هر سه provider + تست رگرسیون ESM (spawn با `node --import tsx`) که بدون فیکس fail می‌شود |
 
 **تصمیم طراحی CFG-08 (تصحیح by-design قبلی):** مدل credential تغییر نکرد (مقدارها فقط از env)، اما «منبع env» قابل تعویض شد تا چند Orchestrator در یک پروسه credentialهای جدا داشته باشند؛ ماژول در `src/ai/` (نه `runtime/`) قرار گرفت تا گیت معماری «Registry مستقل از Runtime» نقض نشود و fallback صریح `process.env` در providerها باقی بماند تا گیت DevOps همچنان برقرار باشد (ثبت به‌عنوان انطباق با گیت‌های موجود، نه تغییر تست).
 
@@ -725,7 +728,7 @@ GET  /api/observability?planId=&tail=
 | B Config | CFG-03/04 🔴, CFG-01/05 🟠 | ✅ ۴/۴ فیکس | ۰ `localToolDefs`، `bootstrapTools` orchestrator:309؛ `new DelegationGuard` خط 228؛ `agentTimeoutMs` → TaskRuntime:28 |
 | C Singleton | SING-01 🟠 | ✅ فیکس | ۰ `?? globalEventBus`، ۰ singleton `agentRuntime` |
 | **D ID** | (سربرگ 🔴؛ آیتم‌ها 🟡 P2) | ✅ **۶/۶ فیکس (فاز ۲۶)** | همه به `prefix_randomUUID()`؛ source-scan + تست collision 5000-id در `phase26.test.ts`؛ ۷ نقطه (شامل فالبک `call-` در agent-runtime) |
-| E Persistence | PERS-01 🔴 | ✅ فیکس | `atomicWriteFileSync` (tmp+uuid+rename) در هر دو store (plan-store:61, session-store:83)؛ PERS-02/03 ✅ (structuredClone + snapshot)؛ PERS-04 🟡 باز (بدون file locking — trade-off پذیرفته‌شده atomic write) |
+| E Persistence | PERS-01 🔴 | ✅ فیکس | `atomicWriteFileSync` (tmp+uuid+rename) در هر دو store (plan-store:61, session-store:83)؛ PERS-02/03 ✅ (structuredClone + snapshot)؛ PERS-04 ✅ در فاز ۲۷ (`src/ai/runtime/file-lock.ts` — قفل `O_EXCL` بین‌پروسه‌ای روی نوشتن storeها) |
 | F Leaks | LEAK-01/02 🟠 | ✅ ۲/۲ فیکس | `clearTimeout` در finally: mcp-connector:275، agent-runtime:201 |
 | G Correctness | CORR-01..05 🟠 | ✅ ۵/۵ فیکس | `parsed.error.issues` base-registry:62؛ `waitForAll`(777) قبل `destroy`(784)؛ `task.planId` aggregator:81؛ hook صریح `runAcceptanceChecks` + ۰ subscription در checker؛ `event.planId` streaming:169 |
 | H Security Ext | SEC-01 🔴, SEC-03/04 🟠 | ✅ ۳/۳ فیکس | regex-guard (nested-quantifier + MAX_PATTERN_LENGTH)؛ آستانه `>4` mcp-connector:93,104؛ substring match observability:407 |

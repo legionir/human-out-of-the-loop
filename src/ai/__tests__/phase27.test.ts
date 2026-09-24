@@ -40,7 +40,8 @@ import {
   cleanupStaleLockFiles,
   FileLockTimeoutError,
 } from '../runtime/file-lock.js';
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { FilePlanStore } from '../runtime/plan-store.js';
 import { FileSessionStore } from '../runtime/session-store.js';
@@ -438,6 +439,50 @@ describe('CFG-08: injectable environment', () => {
 
     // …while omitting the param keeps the previous behaviour exactly.
     expect(openaiProviderFactory.create(modelConfig('openai'))).toBeTruthy();
+  });
+
+  it('provider SDK loaders work in the real ESM runtime (no bare require)', () => {
+    // Regression guard: the factories used a bare `require(...)`, which
+    // is undefined in this package's real ESM runtime — Vitest's require
+    // shim masked it, so the bug only appeared in tsx/CLI/server runs.
+    const providerUrl = (file: string) =>
+      pathToFileURL(path.join(process.cwd(), 'src/ai/models/providers', file)).href;
+
+    const tmpScript = path.join(os.tmpdir(), `phase27-esm-${process.pid}-${Date.now()}.mjs`);
+    fsSync.writeFileSync(
+      tmpScript,
+      `
+      const providers = await Promise.all([
+        import(${JSON.stringify(providerUrl('openai-provider.ts'))}),
+        import(${JSON.stringify(providerUrl('anthropic-provider.ts'))}),
+        import(${JSON.stringify(providerUrl('local-provider.ts'))}),
+      ]);
+      const env = {
+        OPENAI_API_KEY: 'esm-key',
+        ANTHROPIC_API_KEY: 'esm-key',
+        LOCAL_MODEL_BASE_URL: 'http://127.0.0.1:1/v1',
+      };
+      const cfg = (provider) => ({ id: provider, provider, model: 'esm-test-model' });
+      const built =
+        Boolean(providers[0].openaiProviderFactory.create(cfg('openai'), env)) &&
+        Boolean(providers[1].anthropicProviderFactory.create(cfg('anthropic'), env)) &&
+        Boolean(providers[2].localProviderFactory.create(cfg('local'), env));
+      console.log(built ? 'PROVIDERS_OK' : 'PROVIDERS_FAIL');
+      `,
+      'utf-8'
+    );
+
+    try {
+      const result = spawnSync(process.execPath, ['--import', 'tsx', tmpScript], {
+        cwd: process.cwd(),
+        encoding: 'utf-8',
+        timeout: 60_000,
+      });
+      expect(result.stderr ?? '').not.toMatch(/require is not defined/);
+      expect(result.stdout).toContain('PROVIDERS_OK');
+    } finally {
+      fsSync.rmSync(tmpScript, { force: true });
+    }
   });
 
   it('ModelRegistry threads its env into provider factories (default: process.env)', () => {

@@ -2,6 +2,7 @@ import type { ProviderFactory } from '../../registries/model-registry.js';
 import type { ModelConfig } from '../../schemas/model-config.js';
 import type { EnvSource } from '../../env.js';
 import type { LanguageModel } from 'ai';
+import { createRequire } from 'node:module';
 
 /**
  * Local / OpenAI-compatible provider factory (e.g. Ollama, LM Studio).
@@ -33,11 +34,18 @@ export const localProviderFactory: ProviderFactory = {
 // Phase 22: typed (was `any`) — the package is installed.
 type LocalOpenAiSdk = typeof import('@ai-sdk/openai');
 let _localOpenAISdk: LocalOpenAiSdk | null = null;
+// Phase 27: `require` is not a global in ESM (this package sets
+// "type": "module"), so the lazy SDK load goes through a
+// createRequire instance — the previous bare `require(...)` threw
+// ReferenceError under the real runtime and was only masked by
+// Vitest's require shim.
+const requireSdk = createRequire(import.meta.url);
+
 function getOpenAISdkLocal(): LocalOpenAiSdk {
   if (!_localOpenAISdk) {
     try {
       // eslint-disable-next-line @typescript-eslint/no-var-requires
-      _localOpenAISdk = require('@ai-sdk/openai') as LocalOpenAiSdk;
+      _localOpenAISdk = requireSdk('@ai-sdk/openai') as LocalOpenAiSdk;
     } catch {
       throw new Error(
         '[localProvider] @ai-sdk/openai is not installed. Run: npm install @ai-sdk/openai'

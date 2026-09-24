@@ -44,6 +44,8 @@
 | `McpConnector` | `new McpConnector({ toolRegistry, env })` — `tokenEnvVar`/`keyEnvVar` از همین منبع | `process.env` |
 | `bootstrapMcpServers` | پارامتر چهارم `env` (فقط وقتی connector تزریق نشده باشد) | `process.env` |
 
+**نکته‌ی runtime (فاز ۲۷):** این پکیج ESM است (`"type": "module"`) و `require` در آن تعریف نشده؛ lazy-loaderهای provider با `createRequire(import.meta.url)` بارگذاری می‌شوند (قبلاً `require()` برهنه بود و در `tsx`/CLI/server همه‌ی instantiationها شکست می‌خورد).
+
 کاربرد: اجرای چند Orchestrator با credentialهای متفاوت در یک پروسه (سرور/تست) بدون دست‌کاری `process.env`؛ هر instance فقط env خودش را می‌بیند (`modelRegistry.envSource` قابل بازرسی است). متغیرهای غیر-secret مثل `HOTL_*` همچنان از env پروسه در لایه‌ی CLI/server خوانده می‌شوند.
 
 ## فیلدهای `OrchestratorConfig` (منبع حقیقت: `OrchestratorConfigSchema` در `src/ai/orchestrator.ts`)
@@ -295,7 +297,7 @@ await orchestrator.shutdown();
 | C — Singleton | SING-01, SING-02 | ۱۹ | ✅ فیکس | ۰ `?? globalEventBus`؛ `agentRuntime` per-Orchestrator (بدون singleton ماژولی) |
 | D — ID Generation | ID-01…06 | ۲۶ | ✅ فیکس | همه به `prefix_randomUUID()`؛ source-scan + تست collision ۵۰۰۰-id در `phase26.test.ts` |
 | E — Persistence | PERS-01…03 | ۲۰ | ✅ فیکس | `atomicWriteFileSync` (tmp+uuid+rename) در هر دو store؛ `structuredClone` + snapshot |
-| E — File locking | PERS-04 | ۲۰ | ⚠️ پذیرفته‌شده (trade-off) | بدون قفل بین‌پروسه‌ای؛ ریسک با atomic write کاهش یافته و مستند شده |
+| E — File locking | PERS-04 | ۲۷ | ✅ فیکس | `withFileLockSync` در `src/ai/runtime/file-lock.ts` — قفل `O_EXCL` با متادیتای pid/زمان، انتظار محدود (پیش‌فرض ۵s → `FileLockTimeoutError` با holder)، re-entrant، و تصاحب قفل رهاشده (mtime کهنه > ۱۰s یا pid مرده)؛ اعمال روی `FilePlanStore.save/delete` و `FileSessionStore` (نوشتن‌ها + read-modify-write). atomic write فاز ۲۰ همچنان لایه‌ی دوم است |
 | F — Leaks | LEAK-01, 02 | ۲۰ | ✅ فیکس | `clearTimeout` در `finally` (mcp-connector، agent-runtime:201) |
 | F — MCP dynamic import | LEAK-03 | ۲۰ + **۲۵** | ✅ فیکس | فاز ۲۵: `loadMcpSdk()` memoized — دیگر در هر connect یک `import()` تازه اجرا نمی‌شود (و شکست کش نمی‌شود) |
 | G — Correctness | CORR-01…08 | ۲۰ | ✅ فیکس | `parsed.error.issues` در خطا؛ `waitForAll` قبل از `destroy`؛ `task.planId` در aggregator؛ hook صریح acceptance؛ `event.planId` در streaming:169 |
@@ -315,7 +317,7 @@ await orchestrator.shutdown();
 
 | مورد | شدت | وضعیت |
 |---|---|---|
-| PERS-04 — بدون file locking بین‌پروسه‌ای | 🟡 P2 | ⚠️ trade-off پذیرفته‌شده (ریسک با atomic write کاهش یافته؛ فایل‌های `.ai-runtime` تک‌نویسنده‌اند) |
+| PERS-04 — بدون file locking بین‌پروسه‌ای | 🟡 P2 | ✅ بسته‌شده در فاز ۲۷: `withFileLockSync` (قفل `O_EXCL` + stale/pid-dead takeover + تایم‌اوت تایپ‌دار) روی نوشتن storeها؛ تست child-process واقعی در `phase27.test.ts` |
 | CFG-08 — `process.env` مستقیم در providerها/MCP (بدون env injection per-Orchestrator) | 🟡 P2 | ✅ بسته‌شده در فاز ۲۷ (`src/ai/env.ts` + `OrchestratorConfig.env`؛ پیش‌فرض `process.env`؛ تست‌های `phase27.test.ts`) |
 | SEC-02 — رد بی‌صدای فایل‌های غیرقابل‌خواندن در `search_code` | 🟡 P2 | ✅ بسته‌شده در فاز ۲۷: خروجی `skippedCount` + `skipped[]` (سقف ۲۰) برای فایل/دایرکتوری غیرقابل‌خواندن |
 | PERF-06 — `list()` در storeها: `readdirSync` + خواندن همه‌ی فایل‌ها هر بار | 🟢 P2 | ✅ بسته‌شده در فاز ۲۷: ایندکس `idByFile` — فقط فایل‌های جدید parse می‌شوند (۵ فایل → ۵ خواندن در حالت سرد، ۰ خواندن برای listهای بعدی) |
