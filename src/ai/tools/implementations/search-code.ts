@@ -33,12 +33,28 @@ const NOISE_DIRS = new Set(['node_modules', '.git', 'dist', '.next']);
  * 10k files with a match in the first directory costs ~1 readdir +
  * 1 readFile instead of 10k+ reads.
  */
+/**
+ * Phase 27 (SEC-02): a path the search could not read.  The old code
+ * swallowed read errors entirely, so a permission problem looked
+ * identical to "no matches" — the model (and the user) never learned
+ * that part of the tree was skipped.
+ */
+interface SkippedEntry {
+  path: string;
+  kind: 'file' | 'directory';
+  error: string;
+}
+
+/** Cap on reported entries — the COUNT is always exact. */
+const SKIPPED_REPORT_LIMIT = 20;
+
 interface SearchOptions {
   ext?: string;
   regex: RegExp;
   maxResults: number;
   projectRoot: string;
   matches: Match[];
+  skipped: SkippedEntry[];
 }
 
 async function searchFiles(dir: string, opts: SearchOptions): Promise<void> {
@@ -48,7 +64,14 @@ async function searchFiles(dir: string, opts: SearchOptions): Promise<void> {
   let entries: import('node:fs').Dirent[];
   try {
     entries = await fs.readdir(dir, { withFileTypes: true });
-  } catch {
+  } catch (err) {
+    // SEC-02: report the unreadable directory instead of silently
+    // pretending it contained nothing.
+    opts.skipped.push({
+      path: path.relative(opts.projectRoot, dir) || '.',
+      kind: 'directory',
+      error: err instanceof Error ? err.message : String(err),
+    });
     return;
   }
   for (const entry of entries) {
@@ -73,8 +96,14 @@ async function searchFiles(dir: string, opts: SearchOptions): Promise<void> {
           // Reset regex lastIndex for global flag
           opts.regex.lastIndex = 0;
         }
-      } catch {
-        // Skip unreadable files silently
+      } catch (err) {
+        // SEC-02: unreadable file (permissions, vanished, binary) —
+        // skip it but say so in the result.
+        opts.skipped.push({
+          path: path.relative(opts.projectRoot, full),
+          kind: 'file',
+          error: err instanceof Error ? err.message : String(err),
+        });
       }
     }
   }
@@ -137,12 +166,14 @@ export function createSearchCodeTool(projectRoot: string) {
 
         // Phase 21 (PERF-05): walk + match in one pass, stopping early
         const matches: Match[] = [];
+        const skipped: SkippedEntry[] = [];
         await searchFiles(resolvedDir, {
           ext: fileExtension,
           regex,
           maxResults,
           projectRoot,
           matches,
+          skipped,
         });
 
         return {
@@ -151,6 +182,9 @@ export function createSearchCodeTool(projectRoot: string) {
           totalMatches: matches.length,
           truncated: matches.length >= maxResults,
           matches,
+          // SEC-02: `skippedCount` is exact; `skipped` is capped for payload size.
+          skippedCount: skipped.length,
+          skipped: skipped.slice(0, SKIPPED_REPORT_LIMIT),
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
