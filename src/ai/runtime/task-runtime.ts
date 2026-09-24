@@ -367,6 +367,11 @@ export class TaskRuntime {
         task.summary = result.summary;
         task.result = result.result;
         task.usage = result.usage;
+        // Phase 30 (P3): a successful agent run can still contain failed
+        // tool calls (e.g. a write refused by the workspace sandbox).
+        // They are kept on the task so the acceptance check and
+        // `hootl tasks show` see them.
+        task.errors = result.errors;
       } else {
         task.status = 'failed';
         task.summary = result.summary;

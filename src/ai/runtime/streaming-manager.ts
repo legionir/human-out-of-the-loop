@@ -21,6 +21,7 @@ export interface ProgressEvent {
     | 'plan:cancelled'
     | 'plan:failed'
     | 'task:tool-call'
+    | 'task:tool-error'
     | 'task:status';
   planId: string;
   /** Phase 20 (CORR-05): the task id behind this event (planId is the real plan) */
@@ -190,6 +191,17 @@ export class StreamingManager {
           type: 'task:tool-call',
           message: `Tool "${event.toolName}" invoked.`,
           payload: { toolName: event.toolName },
+        };
+
+      case 'agent:tool_error':
+        // Phase 30 (P3): surfaced to the user immediately — a refused
+        // tool call is not a detail, it is the reason a step failed.
+        // `agentLevel` keeps it out of the step counter (Phase 29 fix).
+        return {
+          ...base,
+          type: 'task:tool-error',
+          message: `Tool "${event.toolName}" failed: ${event.error}`,
+          payload: { agentLevel: true, toolName: event.toolName, callId: event.callId },
         };
 
       case 'agent:completed':

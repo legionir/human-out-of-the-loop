@@ -5,6 +5,58 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.2] — 2026-09-24 — real tool side effects + sandbox (Phase 30 / P3 of READINESS_AUDIT.md)
+
+Verified by driving the real CLI against the stub provider with goals that ask
+for real tools (`write_file`, `search_code`, `git_status`) and for writes
+*outside* the workspace (`../escape.txt`, `/tmp/abs-escape.txt`). The sandbox
+held in every case — and that is what exposed the defect: the refusal was
+invisible everywhere.
+
+### Fixed
+
+- **A tool that refused to act was reported as success.** Every tool in
+  `src/ai/tools/implementations/*` reports failure as a normal result
+  (`{ success: false, error, code }`), so the AI SDK sees a successful tool
+  call. Nothing recorded it: the observability log said `Tool "write_file"
+  called` … `Task "…" completed. 1 tools used.`, the acceptance judge was
+  handed `## Task Errors (if any)\nNone`, and the plan printed
+  `Outcome: SUCCESS` for a step that wrote nothing.
+  - `AgentRuntime` now inspects every raw SDK step content part and reports
+    all three failure shapes: a thrown tool (`tool-error` part), the project's
+    own `{ success: false, … }` contract, and `execution-denied`.
+  - New `agent:tool_error` event → `task:tool-error` (level `warn`) in the
+    observability log, and a `task:tool-error` progress event that is printed
+    **always** (not only with `--verbose`):
+    `✖ tool failed: write_file — Path … is outside workspace … [PATH_TRAVERSAL_BLOCKED]`.
+  - Tool errors are appended to the agent summary (`Tool errors: write_file — …`)
+    and stored on the task even when the run itself succeeded, so the
+    acceptance checker (which reads `task.errors`) can reject the step.
+  - Tool arguments and results still never enter events or summaries
+    (Law 14: compact events); only the tool's own error message, truncated to
+    200 characters, is carried.
+
+### Verified behaviour (no change needed)
+
+- `write_file` inside the workspace really writes: `notes/p3-demo.txt` on disk
+  with the expected content, parent directory created, `Outcome: SUCCESS`.
+- `search_code` runs on the real tree (hit and miss), `git_status` runs real
+  git — in a non-repo it surfaces git's own `fatal: not a git repository …`
+  and the plan fails honestly (exit 1).
+- Path escapes are refused by `validateWorkspacePath` and **no file** is
+  created outside the project root, for both `..` and absolute paths; the
+  failure now propagates to the acceptance check, the final report and the
+  exit code instead of being swallowed.
+
+### Tests
+
+- `src/ai/__tests__/phase30-p3.test.ts` — 9 tests: refusal result, thrown tool,
+  denied execution, no false positives, compact-event check, error truncation,
+  tool errors kept on a completed task, `task:tool-error` in the log, and the
+  always-visible progress event. Direction-checked: disabling the detection
+  fails 5 of them (`expected [] to have a length of 1`).
+- Suite: **599 passed (41 files)**, `tsc` clean.
+
 ## [27.2.1] — 2026-09-24 — crash recovery (Phase 30 / P2 of READINESS_AUDIT.md)
 
 Verified by really killing a run with `SIGKILL` mid-execution and resuming it

@@ -40,6 +40,7 @@ export interface LogEntry {
     | 'task:completed'
     | 'task:failed'
     | 'task:tool-call'
+    | 'task:tool-error'
     | 'session:created'
     | 'session:interaction'
     | 'system:error'
@@ -356,6 +357,19 @@ export class ObservabilityLogger {
             toolsUsed: event.toolsUsed,
             usage: event.usage,
           },
+        });
+        break;
+      case 'agent:tool_error':
+        // Phase 30 (P3): a refused/failed tool call is a first-class
+        // event — previously it left no trace anywhere in the log.
+        this.log({
+          taskId: event.taskId,
+          planId: event.planId,
+          stepId: event.planStepId,
+          eventType: 'task:tool-error',
+          message: `Tool "${event.toolName}" failed in "${event.agentId}": ${event.error}`,
+          level: 'warn',
+          payload: { toolName: event.toolName, callId: event.callId },
         });
         break;
       case 'agent:error':

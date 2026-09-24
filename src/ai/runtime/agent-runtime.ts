@@ -57,6 +57,90 @@ export interface AgentRunOptions {
 const DEFAULT_MAX_STEPS = 20;
 const DEFAULT_TIMEOUT_MS = 120_000; // 2 minutes
 
+/** Phase 30 (P3): compact error budget so events/summaries stay small. */
+const TOOL_ERROR_MAX_CHARS = 200;
+const TOOL_ERROR_MAX_ENTRIES = 5;
+
+/** One tool-level failure observed during an agent run. */
+export interface ToolFailure {
+  toolName: string;
+  callId: string;
+  /** Compact one-line message (truncated to TOOL_ERROR_MAX_CHARS) */
+  error: string;
+}
+
+/**
+ * Phase 30 (P3): recognise a failed tool call from a raw AI SDK step
+ * content part.  Returns `null` for anything that is not a failure.
+ *
+ * AI SDK v7 emits `tool-result` parts for tools that returned (including
+ * the project's `{ success: false, … }` refusals) and `tool-error` parts
+ * for tools that threw.  `execution-denied` covers approval refusals.
+ */
+function describeToolFailure(part: unknown): ToolFailure | null {
+  if (!part || typeof part !== 'object') return null;
+  const raw = part as {
+    type?: unknown;
+    toolName?: unknown;
+    toolCallId?: unknown;
+    output?: unknown;
+    error?: unknown;
+  };
+
+  const toolName = typeof raw.toolName === 'string' ? raw.toolName : 'unknown';
+  const callId = typeof raw.toolCallId === 'string' ? raw.toolCallId : `call-${randomUUID()}`;
+
+  // (1) The tool threw.
+  if (raw.type === 'tool-error') {
+    return { toolName, callId, error: compactToolError(errorMessage(raw.error)) };
+  }
+
+  if (raw.type !== 'tool-result') return null;
+  const output = raw.output;
+
+  // (2) SDK-level error outputs.
+  if (output && typeof output === 'object') {
+    const out = output as { type?: unknown; value?: unknown; reason?: unknown };
+    if (out.type === 'error-text' || out.type === 'error-json') {
+      return { toolName, callId, error: compactToolError(errorMessage(out.value)) };
+    }
+    if (out.type === 'execution-denied') {
+      const reason = typeof out.reason === 'string' ? out.reason : 'execution denied';
+      return { toolName, callId, error: compactToolError(reason) };
+    }
+  }
+
+  // (3) The project's own failure contract: `{ success: false, error, code }`.
+  if (output && typeof output === 'object') {
+    const out = output as { success?: unknown; error?: unknown; code?: unknown };
+    if (out.success === false) {
+      const message = typeof out.error === 'string' ? out.error : 'tool reported failure';
+      const code = typeof out.code === 'string' ? ` [${out.code}]` : '';
+      return { toolName, callId, error: compactToolError(`${message}${code}`) };
+    }
+  }
+
+  return null;
+}
+
+function errorMessage(value: unknown): string {
+  if (value instanceof Error) return value.message;
+  if (typeof value === 'string') return value;
+  if (value === undefined || value === null) return 'unknown error';
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function compactToolError(message: string): string {
+  const oneLine = message.replace(/\s+/g, ' ').trim();
+  return oneLine.length > TOOL_ERROR_MAX_CHARS
+    ? oneLine.slice(0, TOOL_ERROR_MAX_CHARS) + '…'
+    : oneLine;
+}
+
 // ─── AgentRuntime ────────────────────────────────────────────────
 
 /**
@@ -98,6 +182,10 @@ export class AgentRuntime {
     const agentId = agent.agentId;
     const toolsUsed: string[] = [];
     const errors: string[] = [];
+    // Phase 30 (P3): tool-level failures (see `executeWithSdk`) — these do
+    // NOT make the run itself fail (a model may recover by calling another
+    // tool), but they must never be silently dropped either.
+    const toolErrors: ToolFailure[] = [];
 
     // Phase 20 (CORR-03/05): plan context attached to every event
     const planContext = {
@@ -130,6 +218,7 @@ export class AgentRuntime {
         taskId,
         agentId,
         toolsUsed,
+        toolErrors,
         planContext,
         signal,
       });
@@ -144,7 +233,10 @@ export class AgentRuntime {
       const sdkResult = await Promise.race([executionPromise, timeoutPromise]);
 
       // ── Build compact summary ─────────────────────────────
-      const summary = this.buildSummary(sdkResult.text, toolsUsed);
+      const summary = this.buildSummary(sdkResult.text, toolsUsed, toolErrors);
+      const toolErrorMessages = toolErrors.map(
+        (failure) => `${failure.toolName}: ${failure.error}`
+      );
 
       // ── Emit completed event ──────────────────────────────
       eventBus.emit({
@@ -166,7 +258,10 @@ export class AgentRuntime {
         summary,
         result: sdkResult.text,
         toolsUsed: [...new Set(toolsUsed)],
-        errors: [],
+        // Phase 30 (P3): failures the tools reported are carried on the
+        // result (and therefore into the acceptance check) even though
+        // the agent run as a whole completed.
+        errors: toolErrorMessages,
         usage: sdkResult.usage,
         failureType: null,
       };
@@ -213,12 +308,24 @@ export class AgentRuntime {
     taskId: string;
     agentId: string;
     toolsUsed: string[];
+    /** Phase 30 (P3): filled with every tool-level failure observed */
+    toolErrors: ToolFailure[];
     planContext: { planId?: string; planStepId?: string };
     /** Phase 22: cancellation signal, forwarded to generateText */
     signal?: AbortSignal;
   }): Promise<{ text: string; usage?: TokenUsage }> {
-    const { agent, prompt, maxSteps, eventBus, taskId, agentId, toolsUsed, planContext, signal } =
-      params;
+    const {
+      agent,
+      prompt,
+      maxSteps,
+      eventBus,
+      taskId,
+      agentId,
+      toolsUsed,
+      toolErrors,
+      planContext,
+      signal,
+    } = params;
 
     const hasTools = Object.keys(agent.tools).length > 0;
 
@@ -257,6 +364,32 @@ export class AgentRuntime {
             });
           }
         }
+
+        // ── Phase 30 (P3): collect tool-level failures ────────
+        // Every tool in `src/ai/tools/implementations/*` that refuses to
+        // act returns `{ success: false, error, code }` as a NORMAL tool
+        // result — the AI SDK has no idea anything went wrong, so the
+        // refusal used to vanish.  A throwing tool is reported by the SDK
+        // as a `tool-error` content part instead.  Both end up here.
+        const content = (step as { content?: unknown }).content;
+        if (!Array.isArray(content)) continue;
+        for (const part of content) {
+          const failure = describeToolFailure(part);
+          if (!failure) continue;
+
+          toolErrors.push(failure);
+          eventBus.emit({
+            type: 'agent:tool_error',
+            taskId,
+            agentId,
+            timestamp: Date.now(),
+            status: 'error',
+            toolName: failure.toolName,
+            callId: failure.callId,
+            error: failure.error,
+            ...planContext,
+          });
+        }
       }
     }
 
@@ -286,19 +419,35 @@ export class AgentRuntime {
    * Build a compact summary from the agent's output.
    * Truncates to ~500 chars to keep events lightweight.
    */
-  private buildSummary(fullText: string, toolsUsed: string[]): string {
+  private buildSummary(
+    fullText: string,
+    toolsUsed: string[],
+    toolErrors: ToolFailure[] = []
+  ): string {
     const uniqueTools = [...new Set(toolsUsed)];
     const toolInfo =
       uniqueTools.length > 0
         ? ` Used tools: ${uniqueTools.join(', ')}.`
         : ' No tools used.';
 
+    // Phase 30 (P3): a refused/failed tool call is part of what the
+    // human — and the acceptance judge, which reads this summary — must
+    // see.  Without it, "the step is complete" was reported for steps
+    // whose only tool call had been rejected.
+    const errorInfo =
+      toolErrors.length === 0
+        ? ''
+        : ` Tool errors: ${toolErrors
+            .slice(0, TOOL_ERROR_MAX_ENTRIES)
+            .map((failure) => `${failure.toolName} — ${failure.error}`)
+            .join('; ')}${toolErrors.length > TOOL_ERROR_MAX_ENTRIES ? ' (…)' : ''}`;
+
     const textPreview =
       fullText.length > 400
         ? fullText.slice(0, 400) + '…'
         : fullText;
 
-    return `${textPreview}${toolInfo}`;
+    return `${textPreview}${toolInfo}${errorInfo}`;
   }
 
   /**

@@ -3,6 +3,7 @@
 **Date:** 2026-09-24
 **Baseline:** commit `71b5047` (Phase 29) — `tsc` clean، **۵۸۵ تست در ۳۹ فایل** سبز، باینری سراسری `hootl` 27.2.0
 **E2E موجود:** ۴۳ سناریوی PTY واقعی در `/tmp/e2e` (استاب LLM محلی Responses API — هیچ provider واقعی)
+**پیشرفت:** P2 🟢 (v27.2.1، commit `be9f14d`) · **P3 🟢 (v27.2.2)** — ۵۹۹ تست در ۴۱ فایل، `tsc` clean
 **سؤال مبنا (کاربر):** «باگ‌ها از runtime بود؟ الان می‌تونی بگی که سیستم ۱۰۰٪ آماده استفاده هست؟»
 
 ---
@@ -31,6 +32,8 @@
 | **P8** | ماتریس محیط (macOS/Windows/WSL، Node>22، CI بدون TTY) | قابل استفاده بودن در محیط کاربر |
 | **P9** | UI/سرور پس از تغییرات فاز ۲۹ | مسیر غیر-CLI محصول |
 | **P10** | محتوای خصمانه (prompt-injection، فرار از sandbox، نشت credential) | امنیت در شرایط واقعی |
+
+**وضعیت فعلی:** P1 ⛔ · P2 🟢 · P3 🟢 · P4–P10 ⬜
 
 **چرا این ترتیب:** P1 مسدود است (کلید واقعی). بقیه بر اساس «احتمال شکست × هزینه‌ی شکست» چیده شده‌اند: P2/P3/P4 می‌توانند به از دست رفتن کار یا داده منجر شوند؛ P5 در حد fidelity است (مسیر abort واحد-تست دارد)؛ P6–P10 وابستگی محیطی/مقیاسی دارند.
 
@@ -98,7 +101,39 @@
 
 **معیار پذیرش:** فایل درست داخل پروژه نوشته شود؛ همه‌ی تلاش‌های خروج از sandbox با خطای روشن رد شوند و **هیچ** فایلی بیرون از root ساخته/تغییر نکند؛ `search_code` نتایج درست بدهد؛ `git_status` روی غیر-ریپو کرش نکند.
 
-**وضعیت:** ⬜
+**وضعیت:** 🟢 **تأیید شد (۲۰۲۶-۰۹-۲۴)** — با یک باگ پیدا‌شده و رفع‌شده (باگ O).
+
+### نتیجه‌ی اجرا (CLI واقعی + استاب، پروژه‌ی `/tmp/e2e/proj`)
+
+| سناریو | نتیجه |
+|---|---|
+| `WRITE:notes/p3-demo.txt` (هدف واقعی نوشتن) | فایل واقعاً روی دیسک ساخته شد (`notes/p3-demo.txt`، ۱۲ بایت، محتوای `stub content`؛ پوشه‌ی والد هم ساخته شد) — `Outcome: SUCCESS`، exit 0 |
+| `SEARCH:demo` (الگوی موجود) | ابزار واقعی `search_code` اجرا شد (`task:tool-call`)، پلن SUCCESS |
+| `SEARCH:zzz-…` (الگوی ناموجود) | ابزار واقعی اجرا شد، «بدون نتیجه» یک موفقیت است (طراحی) |
+| `GITSTATUS:here` در ریپوی واقعی | `git_status` واقعی، SUCCESS |
+| `GITSTATUS:here` در **غیر**-ریپو | پیام واقعی git (`fatal: not a git repository …`) → step `failed`، `Outcome: FAILURE`، exit 1 → یعنی ابزار واقعاً git را صدا می‌زند |
+| `WRITE:../p3-escape.txt` (خروج با `..`) | رد شد: `PATH_TRAVERSAL_BLOCKED`؛ **هیچ فایلی** در `/tmp/e2e/p3-escape.txt` ساخته نشد؛ step `failed`، پلن `FAILURE`، exit 1 |
+| `WRITE:/tmp/p3-abs-escape.txt` (مسیر مطلق) | رد شد، صفر فایل بیرون از `projectRoot` |
+
+### باگ O (پیدا و رفع شد) — شکست ابزار کاملاً نامرئی بود
+
+**علامت:** قبل از رفع، اجرای «نوشتن بیرون از sandbox» را **SUCCESS** اعلام می‌کرد: `Tools used: write_file`، لاگ `Task "…" completed. 1 tools used.`، پرامپت acceptance عیناً `## Task Errors (if any)\nNone`، و هر step `done` — در حالی که ابزار صفر کار انجام داده بود. sandbox جلوی نوشتن را گرفته بود، اما هیچ‌کس (نه انسان، نه judge) خبر نداشت.
+
+**ریشه:** `AgentRuntime.executeWithSdk` فقط `step.toolCalls` را می‌خواند؛ سه شکل شکست ابزار هیچ‌کدام ثبت نمی‌شد:
+1. ابزاری که `execute` آن **throw** کند → SDK یک content part از نوع `tool-error` می‌سازد (نه `toolResult`)؛
+2. قرارداد خودِ ابزارهای پروژه: `{ success: false, error, code }` که از دید SDK یک نتیجه‌ی **موفق** است (همین حالت `write_file`/`git_status`/`search_code`)؛
+3. `execution-denied` (رد اجرا).
+
+**رفع (کمترین تغییر):**
+- event جدید `agent:tool_error` + تابع `describeToolFailure` در `src/ai/runtime/agent-runtime.ts` (پیام ≤۲۰۰ کاراکتر، آرگومان‌های ابزار هرگز وارد event نمی‌شوند — Law 14 رعایت شد)؛
+- پیام خطا در `summary` نتیجه‌ی agent هم می‌آید (`Tool errors: write_file — …`) — یعنی همان رشته‌ای که judge می‌بیند؛
+- `task.errors` روی مسیر **موفق** هم ذخیره می‌شود (`src/ai/runtime/task-runtime.ts`) تا `AcceptanceChecker` شکست ابزار را ببیند؛
+- خط `task:tool-error` (سطح `warn`) در observability log؛
+- progress event `task:tool-error` که **همیشه** چاپ می‌شود (بدون نیاز به `--verbose`): `✖ tool failed: write_file — Path … outside workspace … [PATH_TRAVERSAL_BLOCKED]`.
+
+**تست:** `src/ai/__tests__/phase30-p3.test.ts` — ۹ تست؛ جهت‌دار: با غیرفعال‌کردن تشخیص، ۵ تست fail می‌شوند (`expected [] to have a length of 1`, `expected 'Step finished. Used tools: write_file.' to contain 'outside workspace'`).
+
+**تغییر harness (خارج از ریپو، `/tmp/e2e`):** استاب حالا از نشانه‌های هدف مسئله پلن می‌سازد و همان ابزار را واقعاً صدا می‌زند (`WRITE:path`، `OVERWRITE:path`، `SEARCH:pattern`، `READ:path`، `GITSTATUS:here`), و judge استاب صادق شده: اگر بخش `## Task Errors` خالی نباشد، `accepted: false` می‌دهد. سناریوها: `p3a`–`p3f`.
 
 ---
 
@@ -192,3 +227,4 @@
 |---|---|---|---|
 | 2026-09-24 | — | ساخت این فایل، اولویت‌بندی، ثبت ۱۰ مورد تأییدنشده | آماده‌ی اجرا؛ شروع از P2 طبق درخواست کاربر |
 | 2026-09-24 | **P2** | crash واقعی با `kill -9` (وسط اجرا، وسط planning، پلن draft) + `plans resume` | 🟢 تأیید شد؛ باگ N (سشن `pending` ابدی + نبود link) پیدا و رفع شد؛ ۵ تست جدید `phase30.test.ts` |
+| 2026-09-24 | **P3** | اجرای واقعی `write_file`/`search_code`/`git_status` + سه تلاش فرار از sandbox (`..`، مسیر مطلق، غیر-ریپو) | 🟢 تأیید شد؛ باگ O (شکست ابزار کاملاً نامرئی → SUCCESS کاذب) پیدا و رفع شد؛ ۹ تست جدید `phase30-p3.test.ts` |

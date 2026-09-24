@@ -3,6 +3,7 @@
 export type AgentEventType =
   | 'agent:running'
   | 'agent:tool_call'
+  | 'agent:tool_error'
   | 'agent:completed'
   | 'agent:error';
 
@@ -35,6 +36,30 @@ export interface AgentToolCallEvent extends AgentEventBase {
   callId: string;
 }
 
+/**
+ * Phase 30 (P3): a tool call that did NOT do what it was asked to do.
+ *
+ * A tool can fail in three different ways, and all three end up here:
+ *   1. `execute` threw                     → the AI SDK emits a `tool-error` part
+ *   2. the tool returned a failure result  → `{ success: false, error, code }`
+ *      (the contract every `src/ai/tools/implementations/*` tool follows)
+ *   3. execution was denied                → `{ type: 'execution-denied' }`
+ *
+ * Before this event existed, (2) was completely invisible: the run reported
+ * `Tools used: write_file` and the acceptance judge was told "Task Errors:
+ * None" even when the tool had refused to do anything.
+ */
+export interface AgentToolErrorEvent extends AgentEventBase {
+  type: 'agent:tool_error';
+  status: 'error';
+  /** Tool name only — NOT full arguments (Law 14: compact events) */
+  toolName: string;
+  /** Opaque call id for correlating with the originating tool call */
+  callId: string;
+  /** Compact one-line error message (already truncated by the emitter) */
+  error: string;
+}
+
 export interface AgentCompletedEvent extends AgentEventBase {
   type: 'agent:completed';
   status: 'completed';
@@ -55,6 +80,7 @@ export interface AgentErrorEvent extends AgentEventBase {
 export type AgentEvent =
   | AgentRunningEvent
   | AgentToolCallEvent
+  | AgentToolErrorEvent
   | AgentCompletedEvent
   | AgentErrorEvent;
 

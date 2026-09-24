@@ -193,7 +193,7 @@ Agentهای نمونه با ترکیب صحیح و فیلترشده (طبق allo
 
 ### [🟢] گام ۱: EventBus
 
-pub/sub برای `agent:running`, `agent:tool_call`, `agent:completed`, `agent:error`.
+pub/sub برای `agent:running`, `agent:tool_call`, `agent:completed`, `agent:error`. *(فاز ۳۰/P3: رویداد `agent:tool_error` هم اضافه شد — شکست ابزار که پیش از آن هیچ‌جا ثبت نمی‌شد.)*
 
 ### [🟢] گام ۲: AgentRuntime.run(agentDefinitionOrId, prompt)
 

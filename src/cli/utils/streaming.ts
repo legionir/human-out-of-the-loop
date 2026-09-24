@@ -96,6 +96,16 @@ export function createProgressRenderer(options: ProgressRendererOptions = {}): P
         }
         break;
       }
+      case 'task:tool-error': {
+        // Phase 30 (P3): ALWAYS shown (unlike tool calls, which need
+        // --verbose).  A tool that refused to act is why the step the
+        // user just watched may be reported as failed.
+        const tool = event.payload?.toolName;
+        out(
+          `   ${color.failed('✖')} ${color.failed('tool failed')}: ${String(tool ?? 'unknown')} — ${event.message.replace(/^Tool "[^"]+" failed: /, '')}`,
+        );
+        break;
+      }
       case 'task:status': {
         if (verbose) out(`   ${color.dim('·')} ${event.message}`);
         break;
