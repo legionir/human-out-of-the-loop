@@ -1,5 +1,5 @@
 /**
- * Phase 30 — readiness verification (READINESS_AUDIT.md).
+ * Phase 30 — readiness verification (docs/READINESS_AUDIT.md).
  *
  * P2 (crash recovery): a run killed with SIGKILL leaves a plan with status
  * 'running' and a session interaction with outcome 'pending'.  Before this

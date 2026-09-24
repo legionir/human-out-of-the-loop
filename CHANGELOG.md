@@ -2,7 +2,7 @@
 
 All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions are aligned with the
-delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
+delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
 ## [27.2.13] — 2026-09-24 — the Windows list, closed (annotations paid off)

@@ -322,11 +322,11 @@ See [src/ai/README.md](./src/ai/README.md) for full architecture diagram, layers
 
 ## Adding New Components
 
-See [src/ai/CONTRIBUTING.md](./src/ai/CONTRIBUTING.md) for step-by-step guides to add Tool / Skill / Persona / Agent / MCP Server.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for step-by-step guides to add Tool / Skill / Persona / Agent / MCP Server.
 
 ## Configuration
 
-See [src/ai/CONFIGURATION.md](./src/ai/CONFIGURATION.md) for env vars, configurable ceilings, file structures, runtime directory, and scope audit.
+See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable ceilings, file structures, runtime directory, and scope audit.
 
 ## Project Status
 
@@ -350,10 +350,10 @@ See [src/ai/CONFIGURATION.md](./src/ai/CONFIGURATION.md) for env vars, configura
 | 16 | Hardening + 15 Fixes | 🟢 |
 | 17 | Documentation & Delivery | 🟢 |
 | 18–26 | Runtime hardening, CLI parity, server-side controls, registry introspection, clarification, usage/tasks | 🟢 |
-| C1–C5 | CLI completion plan (`CLI_COMPLETION_PLAN.md`) | 🟢 |
-| U1–U7 | UI completion plan (`UI_COMPLETION_PLAN.md`) | 🟢 |
+| C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
+| U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**670 tests green (49 files), 0 tsc errors — plus 32 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `EXECUTION_PLAN_V2.md`; CLI + UI completion plans: `CLI_COMPLETION_PLAN.md`, `UI_COMPLETION_PLAN.md`)
+**670 tests green (49 files), 0 tsc errors — plus 32 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
 
 ## Law Compliance
 

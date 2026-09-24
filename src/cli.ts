@@ -155,7 +155,7 @@ const MCP_HELP = helpBlock(
       '  auth block.  Credentials are NEVER stored inline: auth names an ENVIRONMENT',
       '  VARIABLE (tokenEnvVar / keyEnvVar) whose value is read at connect time and',
       '  stripped from every error message.  Required env values are documented in',
-      '  src/ai/CONFIGURATION.md.',
+      '  docs/CONFIGURATION.md.',
       '',
       'NOTE',
       '  MCP servers are also loaded during `run`, so tools exposed here become',
