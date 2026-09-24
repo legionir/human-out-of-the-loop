@@ -92,6 +92,8 @@
             <input type="checkbox" id="auto-confirm" />
             run without confirmation
           </label>
+          <!-- U4: preview = plan only, nothing is saved or executed -->
+          <button id="preview-btn" class="btn" title="Plan without saving or executing anything">Plan only</button>
           <button id="run-btn" class="btn primary">Run ▸</button>
         </div>
       </div>
@@ -106,14 +108,21 @@
         <span id="plan-model" class="plan-model"></span>
       </div>
       <p class="modal-sub">You are asked exactly once. After confirming, the runtime executes without you.</p>
+      <div id="preview-banner" class="preview-banner hidden">
+        Preview — nothing was saved and nothing will run. No session, no plan, no execution.
+      </div>
+      <div id="plan-feasibility" class="plan-feasibility hidden"></div>
       <div id="plan-summary" class="plan-summary"></div>
       <div id="plan-table-wrap"></div>
-      <div class="feedback-row">
+      <div class="feedback-row" id="plan-decision-row">
         <textarea id="plan-feedback" rows="2" placeholder="Optional feedback for the planner…"></textarea>
         <div class="modal-actions">
           <button id="plan-reject-btn" class="btn danger">Reject</button>
           <button id="plan-confirm-btn" class="btn primary">Confirm &amp; run</button>
         </div>
+      </div>
+      <div class="modal-actions hidden" id="plan-preview-row">
+        <button id="preview-close-btn" class="btn primary">Close preview</button>
       </div>
     </div>
   </div>

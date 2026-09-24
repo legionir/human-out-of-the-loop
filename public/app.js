@@ -37,6 +37,7 @@ const runModelEl = $('#run-model');
 const runTimeoutEl = $('#run-timeout');
 const runMaxStepsEl = $('#run-max-steps');
 const runMaxReplansEl = $('#run-max-replans');
+const previewBtn = $('#preview-btn');
 const newSessionBtn = $('#new-session-btn');
 const cancelRunBtn = $('#cancel-run-btn');
 const runControlsEl = $('#run-controls');
@@ -47,6 +48,12 @@ const modalEl = $('#plan-modal');
 const planSummaryEl = $('#plan-summary');
 const planModelEl = $('#plan-model');
 const planTableWrap = $('#plan-table-wrap');
+// U4: preview mode (read-only plan modal — no confirm, no execution)
+const previewBannerEl = $('#preview-banner');
+const planFeasibilityEl = $('#plan-feasibility');
+const planDecisionRow = $('#plan-decision-row');
+const planPreviewRow = $('#plan-preview-row');
+const previewCloseBtn = $('#preview-close-btn');
 const planFeedbackEl = $('#plan-feedback');
 const planConfirmBtn = $('#plan-confirm-btn');
 const planRejectBtn = $('#plan-reject-btn');
@@ -59,6 +66,7 @@ const state = {
   run: null, // { runId, planId, es, pollTimer, timelineEl, assistantEl }
   modalPlanId: null,
   defaultModel: null,
+  modalPreview: false,
 };
 
 // ─── Utilities ───────────────────────────────────────────────────
@@ -439,17 +447,117 @@ async function cancelRun() {
 // ─── Plan confirmation modal ─────────────────────────────────────
 
 async function openPlanModal(run) {
-  state.modalPlanId = run.planId;
-  planModelEl.textContent = run.model ? `Model: ${run.model}` : '';
+  // U4: a preview passes { preview: true, plan, ... } — the plan object is
+  // rendered directly (there is no stored plan id to fetch) and the modal
+  // is read-only.
+  const isPreview = run.preview === true;
+  state.modalPreview = isPreview;
+  state.modalPlanId = isPreview ? null : run.planId;
+  planModelEl.textContent = run.model
+    ? `Model: ${run.model}`
+    : isPreview && state.defaultModel
+      ? `Planner model: ${state.defaultModel}`
+      : '';
+  previewBannerEl.classList.toggle('hidden', !isPreview);
+  planDecisionRow.classList.toggle('hidden', isPreview);
+  planPreviewRow.classList.toggle('hidden', !isPreview);
+  planFeedbackEl.value = '';
+  renderFeasibility(isPreview ? run : null);
   planSummaryEl.textContent = run.planText || '';
-  planTableWrap.innerHTML = 'Loading plan…';
   modalEl.classList.remove('hidden');
 
+  if (isPreview) {
+    planTableWrap.innerHTML = '';
+    if (run.plan) renderPlanTable(run.plan);
+    else planTableWrap.innerHTML = '<p class="muted">No plan could be produced.</p>';
+    return;
+  }
+
+  planTableWrap.innerHTML = 'Loading plan…';
   try {
     const plan = await api(`/api/plans/${encodeURIComponent(run.planId)}`);
     renderPlanTable(plan);
   } catch (err) {
     planTableWrap.innerHTML = `<p class="muted">Plan table unavailable: ${escapeHtml(err.message)}</p>`;
+  }
+}
+
+/** U4: feasibility + cycle summary for a preview (hidden when not previewing). */
+function renderFeasibility(preview) {
+  if (!preview || (!preview.feasibility && !preview.cycles && !preview.error)) {
+    planFeasibilityEl.classList.add('hidden');
+    planFeasibilityEl.textContent = '';
+    return;
+  }
+  const lines = [];
+  if (preview.feasibility) {
+    lines.push(
+      preview.feasibility.feasible
+        ? `✔ Feasibility: every step resolves against the registries (${preview.feasibility.errors.length} issue(s))`
+        : `✖ Feasibility: ${preview.feasibility.errors.length} issue(s) — ${
+            preview.feasibility.errors
+              .slice(0, 3)
+              .map((e) => `${e.stepId}/${e.field}: ${e.message}`)
+              .join(' · ')
+          }`,
+    );
+  }
+  if (preview.cycles) {
+    lines.push(
+      preview.cycles.hasCycle
+        ? `✖ Dependency cycle: ${(preview.cycles.cyclePath || []).join(' → ')}`
+        : '✔ No dependency cycles',
+    );
+  }
+  if (preview.error) lines.push(preview.error);
+  planFeasibilityEl.innerHTML = lines.map((l) => `<div>${escapeHtml(l)}</div>`).join('');
+  planFeasibilityEl.classList.toggle('ok', preview.ok !== false);
+  planFeasibilityEl.classList.toggle('bad', preview.ok === false);
+  planFeasibilityEl.classList.remove('hidden');
+}
+
+/** U4: POST /api/preview — plan only; nothing is saved, nothing runs. */
+async function startPreview() {
+  const message = goalInput.value.trim();
+  if (!message) {
+    showToast('Type a goal first.');
+    return;
+  }
+  previewBtn.disabled = true;
+  try {
+    const res = await fetch('/api/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message }),
+    });
+    const body = await res.json().catch(() => null);
+    // 400 + questions: the planner needs clarification before planning.
+    if (res.status === 400 && body && Array.isArray(body.questions)) {
+      const el = appendAssistantBubble('needs clarification (preview)');
+      el.querySelector('.bubble-body').innerHTML = renderMarkdown(
+        `The planner needs clarification before planning:\n\n${body.questions
+          .map((q) => `- ${q}`)
+          .join('\n')}`,
+      );
+      showToast('Preview: clarification needed — see chat.');
+      return;
+    }
+    if (!res.ok || !body) {
+      throw new Error((body && body.error) || `${res.status} ${res.statusText}`);
+    }
+    openPlanModal({
+      preview: true,
+      plan: body.plan || null,
+      planText: body.planText || '',
+      feasibility: body.feasibility || null,
+      cycles: body.cycles || null,
+      error: body.error || null,
+      ok: body.ok,
+    });
+  } catch (err) {
+    showToast(`Preview failed: ${err.message}`);
+  } finally {
+    previewBtn.disabled = false;
   }
 }
 
@@ -487,11 +595,17 @@ function renderPlanTable(plan) {
 function closePlanModal() {
   modalEl.classList.add('hidden');
   state.modalPlanId = null;
+  state.modalPreview = false;
   planFeedbackEl.value = '';
+  previewBannerEl.classList.add('hidden');
+  planFeasibilityEl.classList.add('hidden');
+  planDecisionRow.classList.remove('hidden');
+  planPreviewRow.classList.add('hidden');
 }
 
 async function decidePlan(confirmed) {
-  if (!state.modalPlanId) return;
+  // U4: previews are read-only — nothing to confirm.
+  if (state.modalPreview || !state.modalPlanId) return;
   const feedback = planFeedbackEl.value.trim();
   const btn = confirmed ? planConfirmBtn : planRejectBtn;
   btn.disabled = true;
@@ -511,6 +625,8 @@ async function decidePlan(confirmed) {
 // ─── Wire-up ─────────────────────────────────────────────────────
 
 runBtn.addEventListener('click', () => void startRun());
+previewBtn.addEventListener('click', () => void startPreview());
+previewCloseBtn.addEventListener('click', closePlanModal);
 goalInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
     e.preventDefault();

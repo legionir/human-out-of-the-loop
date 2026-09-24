@@ -147,11 +147,33 @@ UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>`
 **تست‌ها:** e2e mock — بعد از preview: `/api/sessions` **تغییری نکرده**، planStore خالی، feasibility در پاسخ؛ preview برای goal نامفهوم (clarification) → 400 با سؤال‌ها (نه 500).
 
 **معیارهای پذیرش:**
-- [ ] تست صفر-side-effect سبز (sessions + plans هر دو بی‌تغییر)
-- [ ] مودال preview در UI feasibility/cycles را نشان می‌دهد
-- [ ] ≥۳ تست جدید سبز
+- [x] تست صفر-side-effect سبز (sessions + plans هر دو بی‌تغییر)
+- [x] مودال preview در UI feasibility/cycles را نشان می‌دهد
+- [x] ≥۳ تست جدید سبز (۵ تست)
 
 **فایل‌ها:** `src/server/routes/preview.ts` (جدید)، `public/{app.js,index.html}`، تست
+
+---
+
+### [🟢] فاز U4 — نتیجه (2026-09-24)
+
+**نتیجه:** endpoint جدید `POST /api/preview` (`src/server/routes/preview.ts`، mount در `src/server.ts`):
+- ورودی `{message}` (خالی/غیر-string → 400 بدون فراخوانی planner).
+- موفق: `200 {ok:true, planId:null, plan, planText, feasibility, cycles}`.
+- goal نامفهوم (planner `isClear:false`): `400 {error, questions[]}` — سؤال‌های **خام** planner (نه ۵۰۰، نه پیام فرمت‌شده).
+- plan غیرقابل‌اجرا (feasibility/cycle): `200 {ok:false, plan, feasibility, cycles, error}` — چون این «نتیجه‌ی planning» است نه خطای درخواست؛ UI همان plan رد‌شده را render می‌کند.
+- **صفر side-effect** تضمین‌شده: مسیر `previewPlan` نه session می‌سازد، نه interaction ثبت می‌کند، نه در planStore می‌نویسد، نه اجرا می‌کند.
+
+**تغییر orchestrator (additive):** `previewPlan` علاوه بر `{ok,plan,planText,error}` حالا `needsClarification[]`، `feasibility` و `cycles` هم برمی‌گرداند (سه فیلد اختیاری؛ مصرف‌کننده‌های قبلی — CLI `--dry-run` — بدون تغییر رفتار).
+
+**UI:** دکمه «Plan only» کنار Run؛ مودال در حالت preview: بنر زرد «Preview — nothing was saved…»، بلوک feasibility/cycles (✔/✖ + مسیر cycle)، جدول plan از خود پاسخ (بدون fetch)، ردیف Confirm/Reject مخفی و به‌جایش «Close preview»؛ هوک `decidePlan` در حالت preview بی‌اثر است.
+
+**تست‌ها (۵ عدد، `src/server/__tests__/u4-preview.test.ts`):** خروجی کامل + `planId:null` و اثبات صفر-نوشتن (sessions=[]، plans=[]، محتوای `.ai-runtime` قبل/بعد یکسان، `generateText` صدا زده نشده)؛ تکرار preview → باز هم صفر state؛ goal نامفهوم → 400 با questions + صفر state؛ plan غیرقابل‌اجرا → 200 `{ok:false}` با feasibility.errors؛ بدنه خالی → 400 بدون فراخوانی planner.
+**Regression:** 511/511 تست سبز (33 فایل) + tsc سبز. **Smoke زنده:** markup/app.js سرو می‌شوند؛ `POST /api/preview` روی سرور واقعی پاسخ 400+`questions` (planner بدون API key در sandbox در حالت clarification برمی‌گردد) و plans/sessions بدون تغییر.
+
+**انحراف ثبت‌شده:** (1) برای نمایش feasibility/cycles لازم بود `previewPlan` گسترش یابد (پلن فقط «`orchestrator.previewPlan(message)` → `{plan, feasibility, cycles}`» را گفته بود) — تغییر additive و بدون شکستن CLI. (2) خطای planner (مثل نبود API key) در سرور به‌شکل 400+`questions` برمی‌گردد چون از مسیر `isClear:false` همین planner می‌آید؛ در CLI همان متن در خروجی dry-run چاپ می‌شود — رفتار یکسان، فقط status متفاوت با «خطای زیرساخت».
+
+---
 
 ---
 
@@ -260,7 +282,7 @@ UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>`
 | U1 config parity | 🟢 | کامل شد 2026-09-24 — نتایج در زیر |
 | U2 registry | 🟢 | کامل شد 2026-09-24 — ۶ endpoint + پنل Registry در sidebar؛ ۹ تست؛ انحراف: تست success مسیر MCP با mock کنترل‌شونده connector (سرور واقعی MCP در sandbox وجود ندارد؛ منطق connector در فاز ۲ تست شده) |
 | U3 run overrides | 🟢 | کامل شد 2026-09-24 — `RunOverrides` تا `AgentRuntime.run()`؛ ۹ تست؛ باگ جانبی: `OrchestratorConfig.maxSteps`/`--max-steps` که مرده بودند وصل شدند |
-| U4 preview | ⬜ | |
+| U4 preview | 🟢 | کامل شد 2026-09-24 — `POST /api/preview` (planId:null، صفر side-effect) + دکمه «Plan only» و مودال read-only با feasibility/cycles؛ ۵ تست |
 | U5 clarification | ⬜ | |
 | U6 usage + tasks | ⬜ | |
 | U7 label + follow | ⬜ | |

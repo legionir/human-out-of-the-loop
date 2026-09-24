@@ -24,7 +24,7 @@ import { AgentRegistry } from './registries/agent-registry.js';
 
 import { Planner } from './planning/planner.js';
 import { runFeasibilityGate } from './planning/feasibility-gate.js';
-import { detectCycles } from './planning/cycle-detector.js';
+import { detectCycles, type CycleDetectionResult } from './planning/cycle-detector.js';
 import {
   summarizePlan,
   formatPlanForUser,
@@ -44,7 +44,7 @@ import {
   localProviderFactory,
 } from './models/providers/index.js';
 
-import type { Plan } from './schemas/plan.js';
+import type { FeasibilityCheckResult, Plan } from './schemas/plan.js';
 import { emptyReviewUsage, type Review } from './schemas/review.js';
 import type { ResolvedAgent } from './agents/agent-factory.js';
 
@@ -807,6 +807,16 @@ export class Orchestrator {
     plan?: Plan;
     planText?: string;
     error?: string;
+    /**
+     * U4: the planner's clarification questions when the request was
+     * not clear enough to plan (empty otherwise).  The HTTP preview
+     * route surfaces these to the UI as a 400 payload.
+     */
+    needsClarification?: string[];
+    /** U4: feasibility-gate outcome for the produced plan (when any). */
+    feasibility?: FeasibilityCheckResult;
+    /** U4: dependency-cycle detection result for the produced plan. */
+    cycles?: CycleDetectionResult;
   }> {
     if (!this.initialized) {
       await this.initialize();
@@ -821,6 +831,10 @@ export class Orchestrator {
           : planningResult.errors.join('\n');
       return {
         ok: false,
+        needsClarification:
+          planningResult.needsClarification.length > 0
+            ? planningResult.needsClarification
+            : planningResult.errors,
         error: `The request needs clarification before a plan can be produced:\n${clarificationMsg}`,
       };
     }
@@ -836,7 +850,12 @@ export class Orchestrator {
       const errorMsg = feasibility.errors
         .map((e) => `[${e.stepId}] ${e.field}: ${e.message}`)
         .join('\n');
-      return { ok: false, plan, error: `Plan failed feasibility check:\n${errorMsg}` };
+      return {
+        ok: false,
+        plan,
+        feasibility,
+        error: `Plan failed feasibility check:\n${errorMsg}`,
+      };
     }
 
     const cycleCheck = detectCycles(plan);
@@ -844,11 +863,19 @@ export class Orchestrator {
       return {
         ok: false,
         plan,
+        feasibility,
+        cycles: cycleCheck,
         error: `Circular dependency detected: ${cycleCheck.cyclePath?.join(' → ')}`,
       };
     }
 
-    return { ok: true, plan, planText: formatPlanForUser(summarizePlan(plan)) };
+    return {
+      ok: true,
+      plan,
+      planText: formatPlanForUser(summarizePlan(plan)),
+      feasibility,
+      cycles: cycleCheck,
+    };
   }
 
   async cancelPlan(planId: string) {
