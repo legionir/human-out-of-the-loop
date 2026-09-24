@@ -38,6 +38,7 @@ import { bootstrapDelegateTask } from './tools/delegate-bootstrap.js';
 import type { DelegateTaskDeps } from './tools/implementations/delegate-task.js';
 import { bootstrapTaskControlTools } from './tools/task-control-bootstrap.js';
 import { bootstrapMcpServers } from './tools/mcp-bootstrap.js';
+import type { McpConnector } from './tools/mcp-connector.js';
 import { bootstrapTools } from './tools/bootstrap.js';
 import { DelegationGuard } from './runtime/delegation-guard.js';
 
@@ -229,6 +230,8 @@ export class Orchestrator {
   readonly observabilityLogger: ObservabilityLogger;
   readonly acceptanceChecker: AcceptanceChecker;
   readonly finalReviewer: FinalReviewer;
+  /** Phase 30 (P6): live MCP connections — closed by `shutdown()`. */
+  private mcpConnector?: McpConnector;
   readonly planner: Planner;
   readonly delegationGuard: DelegationGuard;
 
@@ -443,12 +446,17 @@ export class Orchestrator {
       });
     }
 
-    await bootstrapMcpServers(
+    // Phase 30 (P6): keep the connector — its connections (a spawned stdio
+    // server, an HTTP session) must be closed on shutdown, otherwise the
+    // child process/socket keeps the Node event loop alive and the CLI
+    // never exits after a successful run.
+    const mcp = await bootstrapMcpServers(
       forEachLayer('mcp-servers').map((l) => l.dir),
       this.toolRegistry,
       undefined,
       this.env
     );
+    this.mcpConnector = mcp.connector;
 
     // Catalog tools must exist before skills load (skills cross-validate
     // their tool references against the ToolRegistry).
@@ -1119,6 +1127,8 @@ export class Orchestrator {
     // Phase 20 (CORR-02): let in-flight tasks finish BEFORE
     // unsubscribing — otherwise their completion events are lost.
     await this.taskRuntime.waitForAll();
+    // Phase 30 (P6): release MCP connections (stdio children, HTTP sessions).
+    await this.mcpConnector?.closeAll();
     this.streamingManager.stop();
     // Phase 20 (CORR-04): acceptanceChecker has no subscription to stop
     this.observabilityLogger.unsubscribeFromEventBus();

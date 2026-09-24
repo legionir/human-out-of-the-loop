@@ -184,7 +184,7 @@ human-out-of-the-loop run "Build a login page" --dry-run
 | `plans cancel <id>` | Mark a plan cancelled (no execution state touched) | `--project-root` |
 | `plans resume <id>` | Re-execute a plan that is not in a terminal state | `--project-root`, `--model`, `--timeout-ms` |
 | `mcp list` | MCP servers from `registry/mcp-servers` | `--json` |
-| `mcp test <serverId>` | Connect to one MCP server, list its tools | `--json` |
+| `mcp test <serverId>` | Connect to one MCP server (`stdio` child process, `http` or `sse`), list its tools | `--json` |
 | `models` / `personas` / `skills` / `tools` | List registry entries | `--json` |
 | `usage` | Token usage per plan (prompt/completion/total + task count) | `--plan <planId>`, `--json` |
 | `tasks list` | Tasks from the observability log (derived status, tokens) | `--plan <planId>`, `--json` |

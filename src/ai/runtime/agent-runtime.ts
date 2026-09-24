@@ -120,7 +120,32 @@ function describeToolFailure(part: unknown): ToolFailure | null {
     }
   }
 
+  // (4) MCP servers report failures as a RESULT with `isError: true`
+  // (@ai-sdk/mcp returns it verbatim instead of throwing).  Without this
+  // case a failing MCP tool looked like a success to the runtime:
+  // `task.errors` stayed empty and acceptance could not see it.
+  if (output && typeof output === 'object') {
+    const out = output as { isError?: unknown; content?: unknown };
+    if (out.isError === true) {
+      const message = mcpErrorText(out.content);
+      return { toolName, callId, error: compactToolError(message ?? 'MCP tool reported an error') };
+    }
+  }
+
   return null;
+}
+
+/** Flatten an MCP `content` array into a one-line message. */
+function mcpErrorText(content: unknown): string | null {
+  if (!Array.isArray(content)) return null;
+  const texts = content
+    .map((item) => {
+      if (!item || typeof item !== 'object') return null;
+      const entry = item as { type?: unknown; text?: unknown };
+      return entry.type === 'text' && typeof entry.text === 'string' ? entry.text : null;
+    })
+    .filter((t): t is string => t !== null);
+  return texts.length > 0 ? texts.join(' ') : null;
 }
 
 function errorMessage(value: unknown): string {

@@ -80,8 +80,17 @@ export async function mcpTestCommand(serverId: string, opts: McpCommandOptions):
 
   out(color.dim(`Connecting to "${config.id}" (${config.transport})...`));
   const connector = new McpConnector({ toolRegistry: new ToolRegistry() });
-  const ok = await connector.connectServer(config);
-  const state = connector.getServerState(config.id);
+  let ok = false;
+  let state: ReturnType<McpConnector['getServerState']>;
+  try {
+    ok = await connector.connectServer(config);
+    state = connector.getServerState(config.id);
+  } finally {
+    // Phase 30 (P6): a stdio server is a CHILD PROCESS — leaving the
+    // connection open kept the CLI alive forever after a successful test
+    // (`mcp test <stdio>` never returned until it was killed).
+    await connector.closeAll();
+  }
 
   if (ok) {
     out(color.done(`✔ Connected. ${state?.toolIds.length ?? 0} tool(s) registered.`));

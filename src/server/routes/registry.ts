@@ -108,12 +108,18 @@ export function registryRouter(ctx: ServerContext): Router {
       // fresh registry — a probe must not touch the live tool registry
       const probe = new ToolRegistry();
       const connector = new McpConnector({ toolRegistry: probe });
-      const ok = await connector.connectServer(config);
-      const state = connector.getServerState(config.id);
-      if (ok) {
-        res.json({ ok: true, toolIds: state?.toolIds ?? [] });
-      } else {
-        res.json({ ok: false, error: state?.lastError ?? 'connection failed' });
+      try {
+        const ok = await connector.connectServer(config);
+        const state = connector.getServerState(config.id);
+        if (ok) {
+          res.json({ ok: true, toolIds: state?.toolIds ?? [] });
+        } else {
+          res.json({ ok: false, error: state?.lastError ?? 'connection failed' });
+        }
+      } finally {
+        // Phase 30 (P6): a probe must not leak the connection — a stdio
+        // server is a child process and an http server holds a session.
+        await connector.closeAll();
       }
     } catch (e) {
       res.json({ ok: false, error: e instanceof Error ? e.message : String(e) });

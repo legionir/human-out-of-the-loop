@@ -3,6 +3,7 @@ import type { McpServerConfig, McpAuth } from '../schemas/mcp-server.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { EnvSource } from '../env.js';
 import { resolveEnv } from '../env.js';
+import { createStdioTransport } from './mcp-stdio-transport.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -134,12 +135,10 @@ function defaultCreateTransport(config: McpServerConfig, env: EnvSource): unknow
     if (!config.command) {
       throw new Error(`[mcp:${config.id}] stdio transport requires "command" field.`);
     }
-    // For now, stdio is not supported in this bootstrap without extra deps.
-    // We return a descriptor that will fail gracefully if attempted.
-    // In production, this would instantiate Experimental_StdioMCPTransport.
-    throw new Error(
-      `[mcp:${config.id}] stdio transport is not supported in this version — use http/sse or provide a custom createTransport.`
-    );
+    // Phase 30 (P6): stdio is a real transport now — see
+    // `mcp-stdio-transport.ts` (newline-delimited JSON-RPC over the
+    // child's stdio, no extra dependency).
+    return createStdioTransport({ command: config.command, args: config.args });
   }
 
   // http / sse — use plain transport descriptor object accepted by
@@ -171,6 +170,20 @@ function loadMcpSdk(): Promise<typeof import('@ai-sdk/mcp')> {
     });
   }
   return mcpSdkPromise;
+}
+
+/**
+ * Phase 30 (P6): release a transport that never produced a client —
+ * best-effort, never throws.  For stdio this kills the child process.
+ */
+async function closeTransport(transport: unknown): Promise<void> {
+  const close = (transport as { close?: unknown } | null | undefined)?.close;
+  if (typeof close !== 'function') return;
+  try {
+    await (close as () => unknown).call(transport);
+  } catch {
+    // Best-effort: the connection already failed.
+  }
 }
 
 async function defaultCreateClient(options: {
@@ -260,11 +273,18 @@ export class McpConnector {
     // timer that keeps the process alive.
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
 
+    // Phase 30 (P6): remember the transport of THIS attempt.  A failed or
+    // timed-out attempt never reaches `state.client`, so nothing else could
+    // release it — for stdio that left the spawned child process alive and
+    // the CLI hung forever after printing the error.
+    let transport: unknown;
+
     try {
       // Race the connection against the configured timeout
+      transport = this.createTransport(config);
       const client = await Promise.race([
         this.createClient({
-          transport: this.createTransport(config),
+          transport,
           name: config.id,
         }),
         new Promise<never>((_, reject) => {
@@ -314,6 +334,7 @@ export class McpConnector {
     } catch (err) {
       state.status = 'unavailable';
       state.lastError = sanitiseError(err, credentials);
+      if (!state.client) await closeTransport(transport);
       return false;
     } finally {
       if (timeoutTimer) clearTimeout(timeoutTimer);

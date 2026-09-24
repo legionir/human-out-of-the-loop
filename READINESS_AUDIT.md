@@ -3,7 +3,7 @@
 **Date:** 2026-09-24
 **Baseline:** commit `71b5047` (Phase 29) — `tsc` clean، **۵۸۵ تست در ۳۹ فایل** سبز، باینری سراسری `hootl` 27.2.0
 **E2E موجود:** ۴۳ سناریوی PTY واقعی در `/tmp/e2e` (استاب LLM محلی Responses API — هیچ provider واقعی)
-**پیشرفت:** P2 🟢 (v27.2.1) · **P3 🟢 (v27.2.2)** · **P4 🟢 (بدون تغییر کد)** · **P5 🟢 (v27.2.4)** — ۶۰۵ تست در ۴۲ فایل، `tsc` clean
+**پیشرفت:** P2 🟢 (v27.2.1) · **P3 🟢 (v27.2.2)** · **P4 🟢 (بدون تغییر کد)** · **P5 🟢 (v27.2.4)** · **P6 🟢 (v27.2.5)** — ۶۱۶ تست در ۴۳ فایل، `tsc` clean
 **سؤال مبنا (کاربر):** «باگ‌ها از runtime بود؟ الان می‌تونی بگی که سیستم ۱۰۰٪ آماده استفاده هست؟»
 
 ---
@@ -33,7 +33,7 @@
 | **P9** | UI/سرور پس از تغییرات فاز ۲۹ | مسیر غیر-CLI محصول |
 | **P10** | محتوای خصمانه (prompt-injection، فرار از sandbox، نشت credential) | امنیت در شرایط واقعی |
 
-**وضعیت فعلی:** P1 ⛔ · P2 🟢 · P3 🟢 · P4 🟢 · P5 🟢 · P6–P10 ⬜
+**وضعیت فعلی:** P1 ⛔ · P2 🟢 · P3 🟢 · P4 🟢 · P5 🟢 · P6 🟢 · P7–P10 ⬜
 
 **چرا این ترتیب:** P1 مسدود است (کلید واقعی). بقیه بر اساس «احتمال شکست × هزینه‌ی شکست» چیده شده‌اند: P2/P3/P4 می‌توانند به از دست رفتن کار یا داده منجر شوند؛ P5 در حد fidelity است (مسیر abort واحد-تست دارد)؛ P6–P10 وابستگی محیطی/مقیاسی دارند.
 
@@ -209,15 +209,55 @@ Ctrl-C امروز «توقف سخت» است: پروسه فوراً می‌می�
 
 ---
 
-## P6 — MCP واقعی (stdio + http) ⬜
+## P6 — MCP واقعی (stdio + http + sse) 🟢
 
-**چرا Unknown:** `mcp test` فقط روی یک registry با URL مرده آزموده شد (شکست درست). هیچ سرور MCP واقعی — نه stdio نه http — وصل نشده؛ ادعای «ابزارهای MCP در run در دسترس‌اند» عملاً آزموده نشده.
-
-**چطور راستی‌آزمایی می‌شود:** یک سرور stdio محلی ساده (اسکریپت node که tools/list و یک tool را جواب دهد) + یک سرور http محلی؛ اجرای `mcp test` روی هر دو و سپس یک run که از آن ابزار استفاده کند.
+**چرا Unknown بود:** `mcp test` فقط روی یک registry با URL مرده آزموده شده بود (شکست درست). هیچ سرور MCP واقعی وصل نشده بود؛ ادعای «ابزارهای MCP در run در دسترس‌اند» عملاً آزموده نشده بود. بدتر: transport استاندارد `stdio` در schema و help تبلیغ می‌شد ولی کانکتور `throw` می‌کرد («stdio transport is not supported in this version») — یعنی همه‌ی سرورهای محلی (npx/python) غیرقابل‌استفاده بودند.
 
 **معیار پذیرش:** `mcp test` ابزارها را لیست کند (exit 0)؛ tool با `source: "mcp"` در run قابل استفاده باشد؛ خطای سرور مرده پیام redacted و exit 1 بدهد.
 
-**وضعیت:** ⬜
+**وضعیت:** 🟢 **تأیید شد (۲۰۲۶-۰۹۲۴)** — stdio از صفر ساخته شد و ۴ باگ در درزهایش پیدا و رفع شد (R/S/T/U).
+
+### نتیجه‌ی اجرا (CLI واقعی + سرورهای واقعی محلی)
+
+| سناریو | نتیجه |
+|---|---|
+| `mcp test e2e-stdio` (child واقعی node، JSON-RPC روی stdin/stdout) | `✔ Connected. 2 tool(s) registered.` → `stdio_demo_echo`, `stdio_demo_fail` — **exit 0 در ۲۴۸ms** (قبلاً: هرگز خارج نمی‌شد؛ `timeout 60` → exit 124) |
+| `mcp test e2e-http` (Streamable HTTP روی 127.0.0.1:8940) | `✔ Connected. 1 tool(s) registered.` → `http_http_echo` — exit 0 در ۳۳۸ms |
+| `mcp test e2e-sse` (HTTP+SSE روی 127.0.0.1:8941) | `✔ Connected. 1 tool(s) registered.` → `sse_sse_echo` — exit 0 در ۳۲۲ms |
+| `run` با ابزار MCP روی stdio (`MCP:stdio_demo_echo`) | `Outcome: SUCCESS` (exit 0) در ۱.۴s؛ سرور در لاگ خودش ثبت کرد `demo_echo {text:"from-mcp"}`؛ مدل `stdio-echo:from-mcp` را دید؛ رویداد `task:tool-call | Tool "stdio_demo_echo" called by "plan-step-step-1"` |
+| `run` با ابزار MCP روی http (`MCP:http_http_echo`) | `Outcome: SUCCESS`؛ خروجی `http-echo:from-mcp` |
+| `run` با ابزار MCP روی sse (`MCP:sse_sse_echo`) | `Outcome: SUCCESS`؛ سرور ثبت کرد `sse_echo {text:"from-mcp"}`؛ خروجی `sse-echo:from-mcp` |
+| ابزار MCP که `isError: true` برمی‌گرداند | دیگر موفقیت به‌حساب نمی‌آید: `✖ tool failed: stdio_demo_fail — demo_fail always fails` → acceptance رد شد → `Outcome: FAILURE`، exit 1 |
+| سرور مرده: DNS نامعتبر (`demo`) | exit 1 در ۱.۲۸s؛ پیام خطا **بدون نشت توکن** (با `DEMO_MCP_TOKEN=supersecret-token-abc`) |
+| سرور مرده: پورت بسته (`e2e-dead-http`) | exit 1 در ۱.۲۳s؛ بدون نشت `E2E_DEAD_TOKEN=supersecret-token-xyz` |
+| سرور مرده: اسکریپت ناموجود (`e2e-dead-stdio`) | exit 1 در ۰.۲۷s (`Connection closed`) |
+| سرور stdio بی‌پاسخ (`e2e-hang-stdio`، هرگز JSON-RPC جواب نمی‌دهد) | exit 1 در **۳.۲۵s** = `connectTimeoutMs: 3000` واقعاً قطع می‌کند (قبلاً exit 124 بعد از ۳۰s) |
+| config ناقص: stdio بدون `command` / http بدون `url` | exit 1 با پیام روشن و سریع (۲۱۴ms / ۱۸۵ms): `[mcp:e2e-bad-stdio] stdio transport requires "command" field.` |
+| بعد از همه‌ی موارد بالا | `ps` هیچ پروسه‌ی یتیم (stdio child یا سرور تست) نشان نمی‌دهد |
+
+**نکته‌ی صداقتی (محدودیت، نه باگ):** `hootl tools` فقط تعریف‌های استاتیک `registry/tools/*.json` را لیست می‌کند و به سرورهای MCP وصل نمی‌شود؛ پس id ابزارهای MCP را باید از `mcp test <serverId>` یا لاگ اجرا دید. (اتصال به همه‌ی سرورها در یک دستور «list» عمداً انجام نمی‌شود: هر سرور stdio یک child process است.)
+
+**محدودیت دوم:** برای سرور stdio، فیلدهای `auth` (که header می‌سازند) معنایی ندارند؛ child **محیط پدر را ارث می‌برد**، پس credentialها باید یا در محیط شل export شده باشند یا خود سرور از راه دیگری بگیرد. (این رفتار مستند شد؛ افزودن فیلد `env` به schema یک قابلیت جدید است، نه رفع باگ — انجام نشد.)
+
+### باگ‌های پیدا و رفع‌شده (R/S/T/U)
+
+**R — `mcp test <stdio>` هرگز تمام نمی‌شد.** اتصال موفق بود و ابزارها لیست می‌شدند، اما `mcpTestCommand` کانکتور را close نمی‌کرد؛ childِ زنده event loop را باز نگه می‌داشت (هارنس: `timeout 60` → exit 124). رفع: `await connector.closeAll()` در مسیر `finally` (پس شکست هم می‌بندد).
+
+**S — تلاشِ ناموفق، transport را جا می‌گذاشت.** اگر اتصال fail می‌شد یا timeout می‌خورد، `state.client` هرگز ست نمی‌شد، پس هیچ‌کس نمی‌توانست transport را ببندد: child زنده می‌ماند و CLI بعد از چاپ خطا hang می‌کرد (سرور بی‌پاسخ → exit 124 بعد از ۳۰s). رفع: transport همان تلاش در `catch` آزاد می‌شود (`closeTransport`). همان نشت در سرور هم وجود داشت: `POST /api/mcp/:id/test` حالا در `finally` می‌بندد.
+
+**T — مرگ child وسط کار، کل CLI را با unhandled `EPIPE` می‌کشت.** در یک اجرای واقعی، write روی stdin بعد از مرگ child خطای `EPIPE` را به‌شکل **unhandled 'error' event** بالا آورد و پروسه با stack trace crash کرد. رفع: listener خطا روی stdin/stdout + محافظت write. (تست واحد: childی که fd ورودی‌اش را می‌بندد و زنده می‌ماند → `send()` reject می‌شود، پروسه زنده می‌ماند.)
+
+**U — شکست ابزار MCP نامرئی بود.** `@ai-sdk/mcp` نتیجه‌ی `isError: true` را به‌عنوان یک نتیجه‌ی عادی برمی‌گرداند (نه throw)؛ پس نه رویداد خطا ثبت می‌شد و نه acceptance آن را می‌دید — همان کلاس باگ O، این‌بار برای ابزار بیرونی. رفع: `describeToolFailure` حالا `isError: true` (و متن `content`) را به `ToolFailure` تبدیل می‌کند.
+
+### پوشش تست
+
+`src/ai/__tests__/phase30-p6.test.ts` — ۱۰ تست: framing (دو پیام JSON در یک chunk)، close = SIGTERM واقعی (child خودش فایل نشانه می‌نویسد)، refuse-to-send-after-close، زنده‌ماندن روی EPIPE، بسته‌شدن transport در timeout و در خطای ساخت client، ثبت `source: "mcp"` + `closeAll` روی یک child واقعی، و «ابزار MCP با `isError`» در `AgentRuntime` (خطا به `task.errors` و summary می‌رسد).
+
+جهت‌دار (بررسی شد): حذف تشخیص `isError` → ۲ تست fail؛ حذف `closeTransport` → ۲ تست fail؛ حذف `closeAll` از `mcp test` → ۱ تست fail؛ حذف listener خطای stdin → ۱ تست fail.
+
+**هارنس:** سرورهای تست در `/tmp/e2e/mcp-stdio-server.mjs`، `/tmp/e2e/mcp-http-server.mjs`، `/tmp/e2e/mcp-sse-server.mjs` (خارج از ریپو؛ فقط ابزار آزمون).
+
+**وضعیت:** 🟢
 
 ---
 
@@ -279,3 +319,4 @@ Ctrl-C امروز «توقف سخت» است: پروسه فوراً می‌می�
 | 2026-09-24 | **P2** (پیگیری) | علت «taskِ ابدی running» پس از crash + resume | 🟢 رفع شد؛ رویداد `task:interrupted` + وضعیت `interrupted` در `tasks list`؛ ۱ تست جدید (نسخه ۲۷.۲.۳) |
 | 2026-09-24 | **P4** | ۲ و ۴ اجرای هم‌زمان روی یک پروژه + crash وسط هم‌زمانی + رقابت روی یک فایل | 🟢 تأیید شد بدون تغییر کد؛ صفر فایل خراب/overwrite، لاگ سالم، `usage`/`tasks` درست |
 | 2026-09-24 | **P5** | مدل کند + `--timeout-ms`، حلقه‌ی ابزار + `--max-steps`، planner بی‌پاسخ، Ctrl-C | 🟢 تأیید شد؛ باگ Q (انتظار بی‌کران: درخواست رهاشده + نبود مهلت در فراخوانی‌های ساختاریافته) رفع شد؛ ۵ تست جدید (نسخه ۲۷.۲.۴) |
+| 2026-09-24 | **P6** | سرورهای واقعی MCP: stdio (child محلی)، http، sse + ابزار MCP در run + سرورهای مرده/بی‌پاسخ + redaction | 🟢 تأیید شد؛ stdio از صفر ساخته شد و ۴ باگ رفع شد: R (hang بی‌پایان `mcp test`)، S (نشت child در اتصال ناموفق)، T (crash با unhandled EPIPE)، U (شکست `isError` نامرئی)؛ ۱۰ تست جدید (نسخه ۲۷.۲.۵) |

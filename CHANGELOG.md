@@ -5,6 +5,41 @@ All notable changes to this project. The format follows
 delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.2.5] — 2026-09-24 — real MCP stdio transport (Phase 30 / P6 of READINESS_AUDIT.md)
+
+`transport: "stdio"` was advertised by the registry schema and the CLI help, but
+the connector threw `stdio transport is not supported in this version` — every
+local MCP server (`npx …`, a python server, …) was unusable. Driving real stdio,
+http and sse servers then exposed four bugs at the seams.
+
+### Added
+
+- **`src/ai/tools/mcp-stdio-transport.ts`** — a real stdio transport:
+  newline-delimited JSON-RPC 2.0 over the child's stdin/stdout (no extra
+  dependency; `@ai-sdk/mcp` ships no stdio transport). stderr is drained but
+  never forwarded, `onclose` fires exactly once, and `close()` is
+  SIGTERM → SIGKILL after 1 s.
+
+### Fixed
+
+- **`hootl mcp test <stdio server>` never returned.** The connection opened, the
+  tools were listed, and then the CLI hung until it was killed (exit 124 at a
+  60 s timeout) — the spawned child held the event loop open. `mcp test` now
+  closes the connector in a `finally` path, so a failing test closes it too.
+- **A failed or timed-out connection leaked its child process.** An attempt that
+  never produced a client stored nothing that could be closed, so
+  `Connection timeout after 3000ms` was followed by a hang (exit 124 at 30 s).
+  The transport of every attempt is now released on failure — including the
+  registry probe behind `POST /api/mcp/:id/test`.
+- **A child dying mid-session crashed the whole CLI.** The next stdin write
+  emitted an unhandled `'error'` event: `Error: write EPIPE` plus a stack trace.
+  stdin/stdout errors are handled now (the pending `send()` rejects instead).
+- **An MCP tool failure looked like a success.** `@ai-sdk/mcp` returns
+  `isError: true` results as ordinary tool results, so `task.errors` stayed
+  empty and the acceptance judge never saw the failure — the same invisibility
+  bug O fixed for built-in tools. `describeToolFailure` now recognises the MCP
+  error shape.
+
 ## [27.2.4] — 2026-09-24 — bounded LLM calls (Phase 30 / P5 of READINESS_AUDIT.md)
 
 Driving the real CLI against a deliberately silent stub exposed two ways to
