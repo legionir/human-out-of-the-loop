@@ -334,6 +334,10 @@ async function handleChat(body, req, res) {
   } else {
     message.content = 'Stub response.';
   }
+  if (body.stream) {
+    await streamChat(res, body.model ?? 'stub', message, finish, promptText, Boolean(body.stream_options?.include_usage));
+    return;
+  }
   res.writeHead(200, { 'content-type': 'application/json' });
   res.end(
     JSON.stringify({
@@ -345,6 +349,239 @@ async function handleChat(body, req, res) {
       usage: { prompt_tokens: 30, completion_tokens: 10, total_tokens: 40 },
     })
   );
+}
+
+// ─── streaming (SSE) ─────────────────────────────────────────────
+//
+// An agent turn is streamed (`streamText`) whenever the run shows the
+// model's thinking: deltas are the only way a provider hands over
+// reasoning *while* it is being produced.  A stub that answered a
+// streaming request with a single JSON body would look like a broken
+// provider, so both endpoints speak their wire format:
+//
+//   * Chat Completions -> `data: {...}` chunks, reasoning in
+//     `choices[0].delta.reasoning_content` (what OpenAI-compatible
+//     gateways send), then `data: [DONE]`;
+//   * Responses -> `response.*` events, reasoning as
+//     `response.reasoning_summary_text.delta`.
+//
+// `THINK:<text>` in the prompt makes the stub think out loud before it
+// answers (`-` and `_` in the marker become spaces), which is how a
+// scenario asserts that reasoning reached the terminal.
+
+const SSE_HEADERS = {
+  'content-type': 'text/event-stream',
+  'cache-control': 'no-cache',
+  connection: 'keep-alive',
+};
+/** Delay between streamed chunks (a real provider is not instant). */
+const STREAM_MS = Number(process.env.FAKE_STREAM_MS ?? 5);
+
+const sseData = (res, payload) =>
+  res.write(`data: ${typeof payload === 'string' ? payload : JSON.stringify(payload)}\n\n`);
+
+const sseEvent = (res, event, payload) =>
+  res.write(`event: ${event}\ndata: ${JSON.stringify(payload)}\n\n`);
+
+/** The `THINK:` marker's text, or null. */
+function thinkingFor(promptText) {
+  const match = /\bTHINK:([^\s"'#]+)/.exec(promptText);
+  if (!match) return null;
+  return match[1].replace(/[-_]+/g, ' ');
+}
+
+/** Split text into small pieces, the way a token stream arrives. */
+function pieces(text) {
+  return (text ?? '').match(/.{1,8}/gs) ?? [];
+}
+
+const USAGE_PAYLOAD = { prompt_tokens: 30, completion_tokens: 10, total_tokens: 40 };
+
+/** Chat Completions streaming — `stream: true`. */
+async function streamChat(res, model, message, finish, promptText, includeUsage) {
+  const id = `chatcmpl_${++seq}`;
+  const created = Math.floor(Date.now() / 1000);
+  res.writeHead(200, SSE_HEADERS);
+  const chunk = (delta, extra = {}) =>
+    sseData(res, {
+      id,
+      object: 'chat.completion.chunk',
+      created,
+      model,
+      choices: [{ index: 0, delta, finish_reason: null, ...extra }],
+    });
+
+  chunk({ role: 'assistant', content: '' });
+  const thinking = thinkingFor(promptText);
+  if (thinking) {
+    for (const piece of pieces(thinking)) {
+      chunk({ reasoning_content: piece });
+      await sleep(STREAM_MS);
+    }
+  }
+  if (message.tool_calls) {
+    chunk({ tool_calls: message.tool_calls.map((call, index) => ({ index, ...call })) });
+  } else if (message.content) {
+    for (const piece of pieces(message.content)) {
+      chunk({ content: piece });
+      await sleep(STREAM_MS);
+    }
+  }
+  sseData(res, {
+    id,
+    object: 'chat.completion.chunk',
+    created,
+    model,
+    choices: [{ index: 0, delta: {}, finish_reason: finish }],
+    ...(includeUsage ? { usage: USAGE_PAYLOAD } : {}),
+  });
+  sseData(res, '[DONE]');
+  res.end();
+}
+
+/** Responses API streaming — `stream: true`. */
+async function streamResponses(res, model, output, promptText) {
+  const base = envelope(model, output);
+  const empty = { ...base, status: 'in_progress', output: [] };
+  res.writeHead(200, SSE_HEADERS);
+  sseEvent(res, 'response.created', { type: 'response.created', response: base });
+  sseEvent(res, 'response.in_progress', { type: 'response.in_progress', response: empty });
+
+  let outputIndex = 0;
+  const thinking = thinkingFor(promptText);
+  if (thinking) {
+    const itemId = `rs_${++seq}`;
+    const part = (text) => ({ type: 'summary_text', text });
+    sseEvent(res, 'response.output_item.added', {
+      type: 'response.output_item.added',
+      response_id: base.id,
+      output_index: outputIndex,
+      item: { type: 'reasoning', id: itemId, summary: [] },
+    });
+    sseEvent(res, 'response.reasoning_summary_part.added', {
+      type: 'response.reasoning_summary_part.added',
+      response_id: base.id,
+      item_id: itemId,
+      output_index: outputIndex,
+      summary_index: 0,
+      part: part(''),
+    });
+    for (const piece of pieces(thinking)) {
+      sseEvent(res, 'response.reasoning_summary_text.delta', {
+        type: 'response.reasoning_summary_text.delta',
+        response_id: base.id,
+        item_id: itemId,
+        output_index: outputIndex,
+        summary_index: 0,
+        delta: piece,
+      });
+      await sleep(STREAM_MS);
+    }
+    sseEvent(res, 'response.reasoning_summary_text.done', {
+      type: 'response.reasoning_summary_text.done',
+      response_id: base.id,
+      item_id: itemId,
+      output_index: outputIndex,
+      summary_index: 0,
+      text: thinking,
+    });
+    sseEvent(res, 'response.reasoning_summary_part.done', {
+      type: 'response.reasoning_summary_part.done',
+      response_id: base.id,
+      item_id: itemId,
+      output_index: outputIndex,
+      summary_index: 0,
+      part: part(thinking),
+    });
+    sseEvent(res, 'response.output_item.done', {
+      type: 'response.output_item.done',
+      response_id: base.id,
+      output_index: outputIndex,
+      item: { type: 'reasoning', id: itemId, summary: [part(thinking)] },
+    });
+    outputIndex += 1;
+  }
+
+  for (const item of output) {
+    if (item.type === 'message') {
+      const text = item.content.map((c) => c.text).join('');
+      sseEvent(res, 'response.output_item.added', {
+        type: 'response.output_item.added',
+        response_id: base.id,
+        output_index: outputIndex,
+        item: { type: 'message', id: item.id, role: 'assistant', status: 'in_progress', content: [] },
+      });
+      sseEvent(res, 'response.content_part.added', {
+        type: 'response.content_part.added',
+        response_id: base.id,
+        item_id: item.id,
+        output_index: outputIndex,
+        content_index: 0,
+        part: { type: 'output_text', text: '' },
+      });
+      for (const piece of pieces(text)) {
+        sseEvent(res, 'response.output_text.delta', {
+          type: 'response.output_text.delta',
+          response_id: base.id,
+          item_id: item.id,
+          output_index: outputIndex,
+          content_index: 0,
+          delta: piece,
+        });
+        await sleep(STREAM_MS);
+      }
+      sseEvent(res, 'response.output_text.done', {
+        type: 'response.output_text.done',
+        response_id: base.id,
+        item_id: item.id,
+        output_index: outputIndex,
+        content_index: 0,
+        text,
+      });
+      sseEvent(res, 'response.content_part.done', {
+        type: 'response.content_part.done',
+        response_id: base.id,
+        item_id: item.id,
+        output_index: outputIndex,
+        content_index: 0,
+        part: { type: 'output_text', text },
+      });
+    } else if (item.type === 'function_call') {
+      sseEvent(res, 'response.output_item.added', {
+        type: 'response.output_item.added',
+        response_id: base.id,
+        output_index: outputIndex,
+        item: { type: 'function_call', id: item.id, call_id: item.call_id, name: item.name, arguments: '' },
+      });
+      for (const piece of pieces(item.arguments)) {
+        sseEvent(res, 'response.function_call_arguments.delta', {
+          type: 'response.function_call_arguments.delta',
+          response_id: base.id,
+          item_id: item.id,
+          output_index: outputIndex,
+          delta: piece,
+        });
+        await sleep(STREAM_MS);
+      }
+      sseEvent(res, 'response.function_call_arguments.done', {
+        type: 'response.function_call_arguments.done',
+        response_id: base.id,
+        item_id: item.id,
+        output_index: outputIndex,
+        arguments: item.arguments,
+      });
+    }
+    sseEvent(res, 'response.output_item.done', {
+      type: 'response.output_item.done',
+      response_id: base.id,
+      output_index: outputIndex,
+      item,
+    });
+    outputIndex += 1;
+  }
+
+  sseEvent(res, 'response.completed', { type: 'response.completed', response: base });
+  res.end();
 }
 
 /** Without a schema name (json_object mode) guess it from the prompt. */
@@ -424,6 +661,10 @@ const server = http.createServer((req, res) => {
       output = [messageItem('Stub response.')];
     }
     if (DELAY_MS > 0) await new Promise((r) => setTimeout(r, DELAY_MS));
+    if (body.stream) {
+      await streamResponses(res, body.model ?? 'stub', output, promptText);
+      return;
+    }
     res.writeHead(200, { 'content-type': 'application/json' });
     res.end(JSON.stringify(envelope(body.model ?? 'stub', output)));
   });

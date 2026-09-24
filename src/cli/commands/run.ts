@@ -29,6 +29,16 @@ import {
 import { prepareCliEnvironment } from '../utils/config.js';
 import { createProgressRenderer } from '../utils/streaming.js';
 import { color, err, out } from '../utils/output.js';
+import {
+  ActivityIndicator,
+  resolveActivityEnabled,
+  resolveActivityIntervalMs,
+} from '../utils/activity.js';
+import {
+  createReasoningRenderer,
+  resolveThinkingMode,
+  type ThinkingMode,
+} from '../utils/reasoning.js';
 
 export interface RunCommandOptions {
   /** Default: '.' (or the global config's projectRoot) */
@@ -55,6 +65,11 @@ export interface RunCommandOptions {
   maxDelegationDepth?: number;
   /** C3: label for the NEW session (mutually exclusive with --session) */
   label?: string;
+  /**
+   * Phase 32: show the model's own thinking text while it answers
+   * (`auto` = only in a terminal).  See `resolveThinkingMode`.
+   */
+  thinking?: ThinkingMode | string;
 }
 
 /** C3: option validation → undefined when OK, error message otherwise (exit 2). */
@@ -87,6 +102,13 @@ function validateRunOptions(opts: RunCommandOptions): string | undefined {
     (!Number.isInteger(opts.timeoutMs) || opts.timeoutMs < 1000 || opts.timeoutMs > 600000)
   ) {
     return '--timeout-ms must be an integer between 1000 and 600000';
+  }
+  // Phase 32: a typo in --thinking must fail fast, not silently do nothing.
+  if (
+    opts.thinking !== undefined &&
+    !['auto', 'on', 'off'].includes(String(opts.thinking).trim().toLowerCase())
+  ) {
+    return `--thinking must be auto, on or off (got "${String(opts.thinking)}")`;
   }
   return undefined;
 }
@@ -155,6 +177,31 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
   const persistent = opts.persistent ?? globalConfig.persistent ?? false;
   const model = opts.model ?? envDefaultModelId(projectRoot) ?? globalConfig.defaultModel;
 
+  // ── Phase 32: tell the user the run is alive, and stream its thinking ──
+  //
+  // Everything from here to the report can wait on a model: planning,
+  // clarification, a step's agent turn, the acceptance judgment, the final
+  // review.  The spinner covers "no result yet"; the reasoning renderer
+  // shows the model's own thinking when the provider exposes it (showing it
+  // switches agent turns to `streamText` — see AgentRuntime).
+  const showThinking = resolveThinkingMode(opts.thinking);
+  const activity = new ActivityIndicator({
+    enabled: resolveActivityEnabled(),
+    intervalMs: resolveActivityIntervalMs(),
+  });
+  const reasoning = createReasoningRenderer({ indicator: activity });
+  activity.start();
+
+  /** Run a prompt with the spinner out of the way. */
+  const withoutActivity = async <T>(fn: () => Promise<T>): Promise<T> => {
+    activity.pause();
+    try {
+      return await fn();
+    } finally {
+      activity.resume();
+    }
+  };
+
   // Phase 30 (P10 follow-up): graceful Ctrl-C.
   //
   //   first  Ctrl-C -> cancel the running plan the same way
@@ -199,7 +246,8 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       }
     : (planText: string, plan?: Plan) => {
         currentPlanId = plan?.id ?? currentPlanId;
-        return confirmPlanInteractively(planText);
+        // The prompt owns the terminal while it is up.
+        return withoutActivity(() => confirmPlanInteractively(planText));
       };
 
   // C4: clarification only when interactive AND not auto-confirming.
@@ -212,7 +260,8 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
   const clarificationCallback =
     opts.yes || !process.stdout.isTTY || !process.stdin.isTTY
       ? undefined
-      : (questions: string[], round: number) => promptClarifications(questions, round);
+      : (questions: string[], round: number) =>
+          withoutActivity(() => promptClarifications(questions, round));
 
   const renderer = createProgressRenderer({ verbose: opts.verbose ?? false });
 
@@ -227,6 +276,10 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     ...(opts.maxReplans !== undefined ? { maxReplanningAttempts: opts.maxReplans } : {}),
     ...(opts.maxDelegationDepth !== undefined ? { maxDelegationDepth: opts.maxDelegationDepth } : {}),
     onProgress: (event: ProgressEvent) => renderer(event),
+    // Phase 32: the model's thinking text, streamed (always absent when the
+    // terminal cannot show it, which keeps every non-interactive run — and
+    // the tests over them — on the non-streaming call path).
+    ...(showThinking ? { onThought: reasoning } : {}),
   });
   orchestratorRef = orchestrator;
 
@@ -285,6 +338,9 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       ...(clarificationCallback ? { clarificationCallback } : {}),
     });
 
+    // A thinking block that was still streaming must not run into the
+    // report; the spinner belongs to the waiting, which is over.
+    reasoning.close();
     out('');
     out(result.report);
 
@@ -311,6 +367,9 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     return { exitCode: 1 };
   } finally {
     process.removeListener('SIGINT', onSigint);
+    // ...including an error path that left a thinking block open.
+    reasoning.close();
+    activity.stop();
     await orchestrator.shutdown();
   }
 }

@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { generateText, stepCountIs } from 'ai';
+import { generateText, streamText, stepCountIs } from 'ai';
 import { toTokenUsage } from './llm-usage.js';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { EventBus, type TokenUsage } from './event-bus.js';
+import {
+  emitThought,
+  reasoningFromRawChunk,
+  type ThoughtSink,
+} from './thought-stream.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -22,6 +27,24 @@ export interface AgentRunResult {
   usage?: TokenUsage;
   /** Failure classification (Phase 11 uses this) */
   failureType?: 'technical' | 'quality' | null;
+}
+
+/**
+ * Phase 32: the slice of an AI SDK result this runtime consumes.  Typing
+ * it structurally keeps the `generateText` and `streamText` branches
+ * interchangeable — both produce text, steps (tool calls, content) and
+ * usage — without leaking the SDK's generic parameters into this file.
+ */
+interface SdkStepLike {
+  toolCalls?: ReadonlyArray<{ toolName?: string; toolCallId?: string }>;
+  content?: unknown;
+}
+
+interface SdkRunOutcome {
+  text: string;
+  steps?: ReadonlyArray<SdkStepLike>;
+  /** Raw SDK usage — normalized with `toTokenUsage` by the caller. */
+  usage?: unknown;
 }
 
 export interface AgentRunOptions {
@@ -51,6 +74,15 @@ export interface AgentRunOptions {
    * which is surfaced as a structured failure (code "ABORTED").
    */
   signal?: AbortSignal;
+  /**
+   * Phase 32: live model thinking (reasoning) text.
+   *
+   * When set, the turn is executed with `streamText` instead of
+   * `generateText` so reasoning deltas can be forwarded as they are
+   * produced; the returned result is the same (text, tool calls, usage).
+   * Left undefined, the runtime stays on the non-streaming call.
+   */
+  onThought?: ThoughtSink;
 }
 
 // ─── Constants ────────────────────────────────────────────────────
@@ -203,6 +235,7 @@ export class AgentRuntime {
       planId,
       planStepId,
       signal,
+      onThought,
     } = options;
 
     const agentId = agent.agentId;
@@ -258,6 +291,7 @@ export class AgentRuntime {
         toolErrors,
         planContext,
         signal: abortSignal,
+        ...(onThought ? { onThought } : {}),
       });
       // The loser of the race must not surface as an unhandled rejection
       // when the aborted request settles.
@@ -362,6 +396,8 @@ export class AgentRuntime {
     planContext: { planId?: string; planStepId?: string };
     /** Phase 22: cancellation signal, forwarded to generateText */
     signal?: AbortSignal;
+    /** Phase 32: live thinking text (switches the turn to `streamText`) */
+    onThought?: ThoughtSink;
   }): Promise<{ text: string; usage?: TokenUsage }> {
     const {
       agent,
@@ -374,6 +410,7 @@ export class AgentRuntime {
       toolErrors,
       planContext,
       signal,
+      onThought,
     } = params;
 
     const hasTools = Object.keys(agent.tools).length > 0;
@@ -388,7 +425,22 @@ export class AgentRuntime {
       ...(signal ? { abortSignal: signal } : {}),
     };
 
-    const result = await generateText(generateOptions);
+    // Phase 32: with a thinking sink the same turn is executed by
+    // `streamText`, so reasoning deltas can be forwarded while the model
+    // is still answering.  Without one the call — and therefore the
+    // token stream, the retries and the result — is exactly what it was.
+    const result: SdkRunOutcome = onThought
+      ? await this.streamWithThoughts({
+          model: agent.model,
+          system: agent.systemPrompt,
+          prompt,
+          maxSteps,
+          tools: hasTools ? agent.tools : undefined,
+          signal,
+          onThought,
+          context: { taskId, agentId, ...planContext },
+        })
+      : await generateText(generateOptions);
 
     // Phase 22: `step.toolCalls` is fully typed (Array<TypedToolCall>)
     // in AI SDK v7 — no unsafe cast needed.  The Array.isArray guard
@@ -449,6 +501,140 @@ export class AgentRuntime {
       text: result.text ?? '',
       usage,
     };
+  }
+
+  // ── Private: streaming (Phase 32) ───────────────────────────
+
+  /**
+   * Execute one turn with `streamText` and forward the model's thinking
+   * text as it arrives.
+   *
+   * Returns the same information the `generateText` branch produces, so
+   * the rest of the runtime (tool-call events, usage, summaries) is
+   * untouched by the choice.  Tool calls and their failures are still
+   * collected from `steps` afterwards — the event order of a run does not
+   * change because a terminal is watching.
+   */
+  private async streamWithThoughts(params: {
+    model: ResolvedAgent['model'];
+    system: string;
+    prompt: string;
+    maxSteps: number;
+    tools?: ResolvedAgent['tools'];
+    signal?: AbortSignal;
+    onThought: ThoughtSink;
+    context: { taskId?: string; agentId?: string; planId?: string; planStepId?: string };
+  }): Promise<SdkRunOutcome> {
+    const { model, system, prompt, maxSteps, tools, signal, onThought, context } = params;
+
+    const streamed = streamText({
+      model,
+      system,
+      prompt,
+      stopWhen: stepCountIs(maxSteps),
+      ...(tools ? { tools } : {}),
+      ...(signal ? { abortSignal: signal } : {}),
+      // OpenAI-compatible gateways answer reasoning in
+      // `delta.reasoning_content`, which the SDK's chat chunk schema
+      // drops; the raw chunk still carries it.
+      includeRawChunks: true,
+    });
+
+    await this.pipeThoughts(streamed.fullStream, onThought, context);
+
+    const [text, steps, usage] = await Promise.all([
+      streamed.text,
+      streamed.steps,
+      streamed.usage,
+    ]);
+
+    return { text, steps: steps as ReadonlyArray<SdkStepLike>, usage };
+  }
+
+  /**
+   * Read the SDK stream, forwarding reasoning to the sink.
+   *
+   * Two sources, in priority order:
+   *   1. real reasoning parts (`reasoning-start/-delta/-end`) — OpenAI
+   *      reasoning summaries, Anthropic extended thinking, …;
+   *   2. the raw provider chunk, for gateways whose reasoning lives in a
+   *      field the SDK does not model (`delta.reasoning_content`).
+   *
+   * Only one of the two is used per turn: a provider that emits reasoning
+   * parts also ships the same text in its raw chunks, and printing both
+   * would duplicate every thought.
+   */
+  private async pipeThoughts(
+    stream: AsyncIterable<unknown>,
+    onThought: ThoughtSink,
+    context: { taskId?: string; agentId?: string; planId?: string; planStepId?: string },
+  ): Promise<void> {
+    let blockOpen = false;
+    let nativeReasoning = false;
+
+    const openBlock = (source: 'reasoning' | 'provider-field'): void => {
+      if (blockOpen) return;
+      blockOpen = true;
+      emitThought(onThought, { kind: 'start', source, ...context });
+    };
+    const closeBlock = (): void => {
+      if (!blockOpen) return;
+      blockOpen = false;
+      emitThought(onThought, { kind: 'end', ...context });
+    };
+
+    for await (const chunk of stream) {
+      const part = (chunk ?? {}) as {
+        type?: unknown;
+        text?: unknown;
+        delta?: unknown;
+        rawValue?: unknown;
+      };
+      switch (part.type) {
+        case 'reasoning-start':
+          nativeReasoning = true;
+          openBlock('reasoning');
+          break;
+        case 'reasoning-delta': {
+          // The public stream uses `text`; the language-model part uses
+          // `delta` — accept both so a shape change cannot silence it.
+          const text =
+            typeof part.text === 'string'
+              ? part.text
+              : typeof part.delta === 'string'
+                ? part.delta
+                : '';
+          if (text.length === 0) break;
+          nativeReasoning = true;
+          openBlock('reasoning');
+          emitThought(onThought, { kind: 'delta', text, source: 'reasoning', ...context });
+          break;
+        }
+        case 'reasoning-end':
+          nativeReasoning = true;
+          closeBlock();
+          break;
+        case 'raw': {
+          if (nativeReasoning) break;
+          const text = reasoningFromRawChunk(part.rawValue);
+          if (!text) break;
+          openBlock('provider-field');
+          emitThought(onThought, { kind: 'delta', text, source: 'provider-field', ...context });
+          break;
+        }
+        case 'text-start':
+        case 'tool-call':
+        case 'start-step':
+        case 'finish-step':
+          // The thinking block is over; the answer (or the next turn) begins.
+          closeBlock();
+          break;
+        default:
+          break;
+      }
+    }
+
+    closeBlock();
   }
 
   // ── Private: helpers ────────────────────────────────────────

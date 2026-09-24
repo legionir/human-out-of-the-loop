@@ -11,6 +11,7 @@ import { PlanRuntime, type PlanExecutionResult } from './runtime/plan-runtime.js
 import { AcceptanceChecker } from './runtime/acceptance-checker.js';
 import { FinalReviewer } from './runtime/final-reviewer.js';
 import { StreamingManager, type ProgressEvent } from './runtime/streaming-manager.js';
+import type { ThoughtSink } from './runtime/thought-stream.js';
 import { CancellationManager } from './runtime/cancellation-manager.js';
 import { RateLimiter } from './runtime/rate-limiter.js';
 import { UsageAggregator } from './runtime/usage-aggregator.js';
@@ -100,6 +101,12 @@ export const OrchestratorConfigSchema = z.object({
  */
 export type OrchestratorConfig = z.input<typeof OrchestratorConfigSchema> & {
   onProgress?: (event: ProgressEvent) => void;
+  /**
+   * Phase 32: live model thinking (reasoning) text for every agent turn of
+   * the run.  Absent (the default — and always absent in CI, pipes and
+   * tests) agent turns stay on the non-streaming call.
+   */
+  onThought?: ThoughtSink;
 };
 
 /**
@@ -215,7 +222,11 @@ export class Orchestrator {
    * `Required<Omit<…>> & { env: EnvSource }` rather than plain
    * `Required<OrchestratorConfig>`.
    */
-  readonly config: Required<Omit<OrchestratorConfig, 'env'>> & { env: EnvSource };
+  readonly config: Required<Omit<OrchestratorConfig, 'env' | 'onThought'>> & {
+    env: EnvSource;
+    /** Phase 32: absent means "agent turns are not streamed". */
+    onThought?: ThoughtSink;
+  };
 
   readonly personaRegistry: PersonaRegistry;
   readonly skillRegistry: SkillRegistry;
@@ -287,6 +298,8 @@ export class Orchestrator {
       redactKeys: data.redactKeys,
       maxClarificationRounds: data.maxClarificationRounds,
       onProgress: config.onProgress ?? (() => {}),
+      // Phase 32: thinking is optional by design — no sink, no streaming.
+      onThought: config.onThought,
     };
 
     // Phase 27 (CFG-08): resolve the env once, before any registry or
@@ -324,6 +337,8 @@ export class Orchestrator {
       // U3: wire the configured max tool-call iterations (before U3 this
       // value was set on the config but never reached the runtime).
       maxSteps: this.config.maxSteps,
+      // Phase 32: forward the thinking sink to every agent turn.
+      ...(this.config.onThought ? { onThought: this.config.onThought } : {}),
     });
     // Phase 19 (CFG-03/04): DelegationGuard instantiated from config
     // and wired into the delegate_task tool.
@@ -411,6 +426,10 @@ export class Orchestrator {
       modelRegistry: this.modelRegistry,
       modelId: this.config.defaultModelId,
       timeoutMs: this.config.agentTimeoutMs,
+      // Phase 32: the planner is told WHERE it is working.  Without the
+      // project root it answered "which project?" to a goal like "scan
+      // this project" — the provider has no idea what the cwd is.
+      projectRoot: this.config.projectRoot,
       onUsage: (report) => this.recordLlmUsage(report),
     });
   }

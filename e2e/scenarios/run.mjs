@@ -28,6 +28,8 @@ const CLI = path.join(REPO, 'dist', 'src', 'cli.js');
 const STUB = path.join(REPO, 'e2e', 'fake-llm.mjs');
 const FIXTURES = path.join(HERE, 'fixtures');
 const ARTIFACTS = path.join(REPO, 'e2e', '.artifacts');
+/** Every request the stub receives, so a scenario can assert on the prompt. */
+const REQUEST_DUMP = path.join(ARTIFACTS, 'requests.jsonl');
 const MODEL = 'gpt-4o';
 const STUB_PORT = Number(process.env.E2E_PORT ?? 8931);
 const STUB_URL = `http://127.0.0.1:${STUB_PORT}/v1`;
@@ -139,6 +141,22 @@ function readLog(root = scratchRoot) {
         return JSON.parse(line);
       } catch {
         return { eventType: '__unparsable__', raw: line };
+      }
+    });
+}
+
+/** Every request the stub has received so far (see FAKE_DUMP). */
+function stubRequests() {
+  if (!fs.existsSync(REQUEST_DUMP)) return [];
+  return fs
+    .readFileSync(REQUEST_DUMP, 'utf-8')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      try {
+        return JSON.parse(line);
+      } catch {
+        return { raw: line };
       }
     });
 }
@@ -424,6 +442,89 @@ scenarios.faults = async () => {
  * (what OpenAI-compatible gateways implement).  Every model call, the
  * acceptance judge included, must reach that endpoint.
  */
+/**
+ * Phase 32 — the model's thinking, streamed.  An agent turn is streamed
+ * (`streamText`) whenever the run shows thinking, so this is also the only
+ * scenario that exercises the streaming wire formats end to end: reasoning
+ * as `response.reasoning_summary_text.delta` events, and the tool call and
+ * answer that follow it on the same stream.
+ */
+scenarios.thinking = async () => {
+  const root = makeProject('thinking');
+  const goal = 'write the notes THINK:checking-the-project-files WRITE:notes/think.txt';
+  const { code, stdout, stderr } = await run(runArgs(goal, root, ['--thinking', 'on']), {
+    env: { FORCE_COLOR: '1' },
+  });
+
+  // The reasoning arrives in small deltas, each styled on its own, so the
+  // plain text has to be reassembled before it can be read.
+  const plain = stdout.replace(/\x1b\[[0-9;]*m/g, '');
+  check('thinking: exit code 0', code === 0, `exit=${code} ${(stderr || '').split('\n')[0]}`);
+  check('thinking: the step wrote its file', fs.existsSync(path.join(root, 'notes', 'think.txt')));
+  check(
+    'thinking: the model reasoning reached the terminal',
+    plain.includes('checking the project files'),
+    plain.slice(0, 200).replace(/\n/g, ' / ')
+  );
+  check('thinking: it is rendered italic, in a colour of its own', stdout.includes('\x1b[3m'));
+  check(
+    'thinking: the block is announced as thinking',
+    plain.includes('💭 checking the project files'),
+    plain.split('\n').find((l) => l.includes('checking')) ?? '(no line)'
+  );
+  // Display-only: thinking text is never written to the plan or the log.
+  const artifacts = JSON.stringify(planStore(root).plans) + JSON.stringify(readLog(root));
+  check('thinking: thinking text is not persisted', !artifacts.includes('checking the project files'));
+
+  // A dropped connection mid-stream must not hang or crash the run: the
+  // CUT fault destroys the socket before any event is sent.
+  const cut = makeProject('thinking-cut');
+  const cutRun = await run(
+    runArgs('write notes THINK:cut-stream WRITE:notes/cut.txt FAULT:CUT#e2e-thinking-cut', cut, ['--thinking', 'on']),
+    { env: { FORCE_COLOR: '1' }, timeoutMs: 90_000 }
+  );
+  check('thinking: a stream that dies mid-flight still ends the run', cutRun.code === 0 || cutRun.code === 1, `exit=${cutRun.code}`);
+
+  // Outside a terminal (no TTY here) thinking stays off unless asked for.
+  const quiet = makeProject('thinking-quiet');
+  const off = await run(runArgs('write the notes THINK:quiet-reasoning WRITE:notes/quiet.txt', quiet));
+  check(
+    'thinking: off by default outside a terminal',
+    off.code === 0 && !off.stdout.includes('quiet reasoning'),
+    `exit=${off.code}`
+  );
+  check('thinking: the quiet run still wrote its file', fs.existsSync(path.join(quiet, 'notes', 'quiet.txt')));
+  return root;
+};
+
+/**
+ * The planner knows where it is.  A real session failed here: asked to scan
+ * "this project", the planner asked *which* project and the run ended with
+ * "No plan could be produced after 2 clarification round(s)".  The prompt
+ * must carry the project root before the model can ask.
+ */
+scenarios.context = async () => {
+  const root = makeProject('context');
+  const { code } = await run(runArgs('list the top-level files CONTEXTPROBE', root));
+  check('context: exit code 0', code === 0, `exit=${code}`);
+
+  const requests = stubRequests().filter((body) => JSON.stringify(body).includes('CONTEXTPROBE'));
+  const assessment = requests.find((body) => JSON.stringify(body).includes('PlannerAssessment'));
+  const text = JSON.stringify(assessment ?? {});
+  check('context: the planner request carries a PROJECT CONTEXT block', text.includes('PROJECT CONTEXT'), text.slice(0, 200));
+  check('context: ...with the absolute project root', text.includes(root), root);
+  check(
+    'context: ...and what is in the project',
+    text.includes('README.md') && text.includes('top-level entries'),
+    text.slice(0, 200)
+  );
+  check(
+    'context: ...told never to ask for it',
+    /never ask the user/i.test(text),
+  );
+  return root;
+};
+
 scenarios.envendpoint = async () => {
   const root = fs.mkdtempSync(path.join(scratchRoot, 'envendpoint-'));
   fs.writeFileSync(path.join(root, 'README.md'), '# Scratch project\n');
@@ -488,11 +589,12 @@ async function main() {
 
   fs.rmSync(ARTIFACTS, { recursive: true, force: true });
   fs.mkdirSync(ARTIFACTS, { recursive: true });
+  fs.writeFileSync(REQUEST_DUMP, '');
   scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hootl-e2e-'));
   log(`scratch: ${scratchRoot}`);
 
   stubProcess = spawn(process.execPath, [STUB], {
-    env: { ...process.env, FAKE_PORT: String(STUB_PORT) },
+    env: { ...process.env, FAKE_PORT: String(STUB_PORT), FAKE_DUMP: REQUEST_DUMP },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   stubProcess.stdout.on('data', (d) => process.stdout.write(`[stub] ${d}`));

@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { generateObject } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from '../runtime/llm-timeout.js';
@@ -28,6 +30,13 @@ export interface PlannerConfig {
    * never answers must not leave the CLI waiting forever.
    */
   timeoutMs?: number;
+  /**
+   * Phase 32: the directory the run works in.  It is put in front of the
+   * model as PROJECT CONTEXT — without it the planner has no idea which
+   * project "scan this project" means and answers with questions the user
+   * already answered by standing in that directory.
+   */
+  projectRoot?: string;
   /** Token usage of every planning call (assessment, generation, re-planning). */
   onUsage?: LlmUsageReporter;
 }
@@ -68,6 +77,115 @@ export function finalizePlan(plan: Plan): Plan {
   };
 }
 
+// ─── Project context (Phase 32) ───────────────────────────────────
+
+/** Directory entries never worth a model's attention (and often huge). */
+const CONTEXT_SKIP = new Set([
+  'node_modules', '.git', '.ai-runtime', 'dist', 'build', 'out', 'coverage',
+  '.next', '.cache', '.venv', '__pycache__', '.turbo', '.svelte-kit',
+]);
+
+/** How many top-level entries the context block lists. */
+export const PROJECT_CONTEXT_MAX_ENTRIES = 40;
+
+/** Shallow listing of `projectRoot`: directories first, heavy ones dropped. */
+export function projectTopLevelEntries(projectRoot: string, max = PROJECT_CONTEXT_MAX_ENTRIES): string[] {
+  try {
+    return fs
+      .readdirSync(projectRoot, { withFileTypes: true })
+      .filter((entry) => !CONTEXT_SKIP.has(entry.name))
+      .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
+      .sort((a, b) => {
+        const dirA = a.endsWith('/');
+        const dirB = b.endsWith('/');
+        if (dirA !== dirB) return dirA ? -1 : 1;
+        return a.localeCompare(b);
+      })
+      .slice(0, max);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The PROJECT CONTEXT block prepended to every planner prompt.
+ *
+ * It answers the two questions the model otherwise asks the user: *which*
+ * project, and *where* it lives.  Paths in a plan are relative to this
+ * root, and the file tools refuse to leave it (see path-security.ts).
+ */
+export function buildProjectContext(projectRoot: string | undefined): string {
+  if (!projectRoot) return '';
+  const root = path.resolve(projectRoot);
+  const entries = projectTopLevelEntries(root);
+  const lines = [
+    'PROJECT CONTEXT (known — never ask the user for it):',
+    `- project root: ${root}`,
+    `- platform: ${process.platform}`,
+    '- every path in the plan is relative to that root; read_file/write_file/search_code work inside it and nowhere else',
+    '- the project already exists: questions like "which project?" or "what is the current directory?" are already answered by this block',
+  ];
+  if (entries.length > 0) {
+    lines.push(`- top-level entries: ${entries.join('  ')}`);
+  }
+  if (fs.existsSync(path.join(root, 'package.json'))) {
+    lines.push('- package.json is present (Node.js project)');
+  }
+  return lines.join('\n');
+}
+
+/**
+ * The assessment prompt — exported so the PROJECT CONTEXT it carries can
+ * be asserted without a model call.
+ */
+export function buildAssessmentPrompt(userRequest: string, projectRoot?: string): string {
+  const context = buildProjectContext(projectRoot);
+  const note = context
+    ? `${context}\n\nA request that only lacks the project, its location or its technology stack is CLEAR: the context above supplies them.\n`
+    : '';
+  return `
+You are assessing whether the following user request is clear enough
+to produce a detailed execution plan.
+${note ? `\n${note}` : ''}USER REQUEST:
+"""
+${userRequest}
+"""
+
+If the request is vague, ambiguous, or missing critical information,
+set isClear=false and list specific clarification questions.
+
+If the request is clear enough, set isClear=true and provide the full plan.
+`.trim();
+}
+
+/**
+ * The plan-generation prompt (same PROJECT CONTEXT, plus the answers the
+ * user gave during clarification).
+ */
+export function buildPlanPrompt(
+  userRequest: string,
+  clarifications?: Record<string, string>,
+  projectRoot?: string
+): string {
+  const context = buildProjectContext(projectRoot);
+  let prompt = `
+Decompose the following user request into a detailed execution plan.
+${context ? `\n${context}\n` : ''}
+USER REQUEST:
+"""
+${userRequest}
+"""
+`.trim();
+
+  if (clarifications && Object.keys(clarifications).length > 0) {
+    prompt += `\n\nCLARIFICATIONS PROVIDED BY USER:\n`;
+    for (const [q, a] of Object.entries(clarifications)) {
+      prompt += `Q: ${q}\nA: ${a}\n\n`;
+    }
+  }
+  return prompt;
+}
+
 export class Planner {
   private readonly config: PlannerConfig;
 
@@ -90,20 +208,7 @@ export class Planner {
   ): Promise<PlannerAssessment> {
     const agent = this.buildPlannerAgent(modelId);
 
-    const assessmentPrompt = `
-You are assessing whether the following user request is clear enough
-to produce a detailed execution plan.
-
-USER REQUEST:
-"""
-${userRequest}
-"""
-
-If the request is vague, ambiguous, or missing critical information,
-set isClear=false and list specific clarification questions.
-
-If the request is clear enough, set isClear=true and provide the full plan.
-`.trim();
+    const assessmentPrompt = buildAssessmentPrompt(userRequest, this.config.projectRoot);
 
     try {
       const { object, usage } = await withStructuredRetry(() =>
@@ -158,21 +263,7 @@ If the request is clear enough, set isClear=true and provide the full plan.
   ): Promise<Plan> {
     const agent = this.buildPlannerAgent(modelId);
 
-    let prompt = `
-Decompose the following user request into a detailed execution plan.
-
-USER REQUEST:
-"""
-${userRequest}
-"""
-`.trim();
-
-    if (clarifications && Object.keys(clarifications).length > 0) {
-      prompt += `\n\nCLARIFICATIONS PROVIDED BY USER:\n`;
-      for (const [q, a] of Object.entries(clarifications)) {
-        prompt += `Q: ${q}\nA: ${a}\n\n`;
-      }
-    }
+    const prompt = buildPlanPrompt(userRequest, clarifications, this.config.projectRoot);
 
     const { object, usage } = await withStructuredRetry(() =>
       withLlmTimeout(

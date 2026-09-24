@@ -29,6 +29,7 @@ import {
 import { color, err, out, renderTable } from './utils/output.js';
 import type { Command } from 'commander';
 import { readLine, type Suggestion } from './line-editor.js';
+import { stopActiveActivity } from './utils/activity.js';
 import { showSplash } from './splash.js';
 import { listRemoteModels, type RemoteModel } from '../ai/models/list-models.js';
 import { modelIdForSpec } from '../ai/models/env-endpoint.js';
@@ -245,6 +246,9 @@ export class Repl {
     void this.refreshRemoteModels();
     this.printBanner();
     while (!this.closed) {
+      // Phase 32: a goal's status line (or a thinking block) must never run
+      // into the prompt the user is about to type into.
+      stopActiveActivity();
       const result = await readLine({
         input: (this.opts.input ?? process.stdin) as NodeJS.ReadStream,
         output,

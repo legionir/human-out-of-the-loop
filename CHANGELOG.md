@@ -5,6 +5,66 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.5.0] — 2026-09-24 — the run says it is working, and the model thinks out loud
+
+Two complaints from a real session, both about **not being able to see what is
+happening**: a long planning call printed nothing at all (three model requests
+went out and the terminal stayed empty — "is it hung?"), and the planner did
+not know where it was running, so it asked *"Which project should be scanned?"*
+until the run gave up with "No plan could be produced after 2 clarification
+round(s)".
+
+**The terminal is never blank while a result is pending**
+- One self-overwriting status line shows a spinner and a message that changes
+  every **3 seconds**, picked at random from the twelve requested texts
+  (*dreaming…*, *Crunching the numbers…*, *Analyzing the data…*,
+  *Generating insights…*, *Processing your request…*, *Thinking deeply…*,
+  *Working on it…*, *Hold tight, almost there…*, *Just a moment, please…*,
+  *Loading the magic…*, *Preparing the response…*, *Hang tight, we're on it…*),
+  never the same one twice in a row. It covers the whole run: planning,
+  clarification, agent turns, acceptance, final review.
+- Every line of real output erases the status line first (one capture point:
+  `out()`), and it pauses for prompts — nothing is ever mangled or duplicated.
+- Terminal-only: without a TTY (pipes, CI, tests, `--json`) nothing is written.
+  `HOTL_NO_ACTIVITY=1` / `HOTL_ACTIVITY=off` turn it off, and
+  `HOTL_ACTIVITY_INTERVAL_MS` changes the rotation (minimum 250 ms).
+
+**The model's thinking, streamed**
+- When thinking is shown, an agent turn is executed with `streamText` and every
+  reasoning part the provider emits is rendered live: italic, violet
+  (`#a78bfa`), prefixed with 💭, indented on the model's own line breaks, and
+  capped at 4000 characters per block so a chatty model cannot flood the
+  terminal. Blocks close on the first answer token, tool call, or step
+  boundary — and always close at the end of the run, so the spinner is never
+  left paused.
+- Providers that answer reasoning in `choices[0].delta.reasoning_content`
+  (OpenAI-compatible gateways; the SDK's chat schema drops the field) are
+  covered through `includeRawChunks`, and native reasoning parts win when both
+  exist, so nothing is printed twice. A failing renderer can never fail a run.
+- `--thinking <auto|on|off>` (default `auto` = only in a terminal),
+  `HOTL_THINKING` / `HOTL_SHOW_THINKING`, and **nothing is persisted** —
+  thinking text never reaches a plan, the observability log or a report, and
+  without a sink the runtime keeps its non-streaming `generateText` path
+  byte-for-byte.
+
+**The planner knows the project it is planning for**
+- Both planning prompts (`assess` and `generatePlan`) now carry a
+  `PROJECT CONTEXT` block: the absolute project root, the platform, that paths
+  are relative to that root and stay inside it, the top-level entries (directories
+  first, heavy ones like `node_modules`/`dist`/`.git` skipped, max 40) and
+  whether a `package.json` is present. A request that only lacks the project,
+  its location or its stack is now explicitly *clear*, so the model no longer
+  spends a clarification round asking for what the CLI already knows.
+
+The e2e stub answers streaming requests with real SSE now (Responses:
+`response.reasoning_summary_text.delta`; Chat Completions:
+`delta.reasoning_content`), and a `THINK:<text>` marker makes it think out loud.
+Two new scenarios: `thinking` proves the reasoning reaches the terminal, is
+styled, is never persisted, stays off outside a terminal, and that a stream
+killed mid-flight still ends the run; `context` reads the planner request the
+stub actually received and proves the PROJECT CONTEXT block is in it.
+758 tests (55 files), e2e 60/60.
+
 ## [27.4.0] — 2026-09-24 — start screen, the `/` menu, and models chosen at runtime
 
 **Interactive mode**

@@ -275,6 +275,11 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .option('--max-replans <n>', 'automatic re-planning attempts on failure (0-10)', (v: string) => Number(v))
     .option('--max-delegation-depth <n>', 'max agent-to-subagent delegation depth (0-5)', (v: string) => Number(v))
     .option('--label <text>', 'label for the NEW session (max 64 chars)')
+    // Phase 32: the model's own thinking text, streamed as it is produced.
+    .option(
+      '--thinking <mode>',
+      "show the model's live thinking text: auto|on|off (default: auto = on in a terminal)",
+    )
     .action(async (goal: string, opts: Record<string, string | boolean | undefined>) => {
       // `persistent` stays undefined when the flag is absent so
       // runCommand can fall back to the global config default.
@@ -291,6 +296,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         maxReplans: opts.maxReplans as number | undefined,
         maxDelegationDepth: opts.maxDelegationDepth as number | undefined,
         label: opts.label as string | undefined,
+        thinking: opts.thinking as string | undefined,
       });
       process.exitCode = result.exitCode;
     })
@@ -330,6 +336,12 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '  --max-replans    caps automatic re-planning of failed steps;',
         '  --max-delegation-depth caps agent -> sub-agent nesting (0 = no delegation).',
         '  --verbose        additionally streams tool calls and low-level status.',
+        '  --thinking       auto|on|off — stream the model\'s own thinking text while it',
+        '                   answers, in italic and a colour of its own (auto: only in a',
+        '                   terminal).  While no result is available the CLI shows a',
+        '                   rotating status line (its message changes every 3 seconds);',
+        '                   HOTL_NO_ACTIVITY=1 silences it and HOTL_THINKING=on|off sets',
+        '                   the default for --thinking.',
         '',
         'EXIT CODES',
         '  0  the review outcome is success or partial-success',

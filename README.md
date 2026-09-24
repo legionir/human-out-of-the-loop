@@ -244,7 +244,7 @@ human-out-of-the-loop run "Build a login page" --dry-run
 
 | Command | Purpose | Key options |
 |---|---|---|
-| `run <goal>` | Plan, confirm (once), execute to completion | `--project-root`, `--persistent`, `--model <id>`, `--session <id>`, `--yes`, `--verbose`, `--dry-run`, `--timeout-ms <ms>`, `--max-steps <n>`, `--max-replans <0-10>`, `--max-delegation-depth <0-5>`, `--label <text>` |
+| `run <goal>` | Plan, confirm (once), execute to completion | `--project-root`, `--persistent`, `--model <id>`, `--session <id>`, `--yes`, `--verbose`, `--dry-run`, `--thinking <auto\|on\|off>`, `--timeout-ms <ms>`, `--max-steps <n>`, `--max-replans <0-10>`, `--max-delegation-depth <0-5>`, `--label <text>` |
 | `sessions list` | List persisted sessions | `--project-root` |
 | `sessions show <id>` | Session detail (interactions, plan ids, summaries) | `--project-root` |
 | `sessions label <id> <label>` | Rename a session (empty string clears the label) | `--project-root` |
@@ -272,6 +272,42 @@ bad flag values). With `--yes` or in a non-TTY environment the CLI never
 prompts: an unclear request fails with the planner's questions instead of
 hanging. In an interactive terminal the CLI asks clarification questions
 before planning and shows the plan summary before executing.
+
+### While it works: the terminal is never blank
+
+A model call can take a while — a slow gateway, a reasoning model, a
+rate-limited provider. `run` says so while it waits:
+
+- **A rotating status line.** While a result is pending, one self-overwriting
+  line shows a spinner and a message that changes every **3 seconds**, picked
+  at random from: *dreaming…*, *Crunching the numbers…*, *Analyzing the data…*,
+  *Generating insights…*, *Processing your request…*, *Thinking deeply…*,
+  *Working on it…*, *Hold tight, almost there…*, *Just a moment, please…*,
+  *Loading the magic…*, *Preparing the response…*, *Hang tight, we're on it…*.
+  Every real line of output erases it first, so the two never collide.
+- **The model's thinking, streamed.** Every reasoning token a provider exposes
+  is printed as it arrives — italic, violet, prefixed with 💭 — instead of
+  showing up only once the answer is complete. Agent turns switch to a
+  streaming call to make that possible. Thinking text is display-only: it is
+  never persisted to a plan, the observability log or a report.
+- **The planner is told where it works.** Planning prompts carry a
+  `PROJECT CONTEXT` block (absolute project root, platform, top-level
+  entries), so "which project should be scanned?" is answered before the model
+  can ask it.
+
+```bash
+hootl run "list every TypeScript file" --yes           # status line + 💭 thinking
+hootl run "list every TypeScript file" --thinking off  # plain, non-streaming path
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HOTL_THINKING` / `HOTL_SHOW_THINKING` | `auto` | `on`/`off`/`1`/`0`; `--thinking <mode>` wins over the environment, and `auto` shows thinking only when stdout is a terminal |
+| `HOTL_NO_ACTIVITY=1` / `HOTL_ACTIVITY=off` | — | turn the status line off in a terminal |
+| `HOTL_ACTIVITY_INTERVAL_MS` | `3000` | how often the status message changes (minimum 250) |
+
+Both are terminal-only by default, so pipes, CI logs and `--json` output stay
+exactly what they were.
 
 ### Examples
 
@@ -420,10 +456,11 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 16 | Hardening + 15 Fixes | 🟢 |
 | 17 | Documentation & Delivery | 🟢 |
 | 18–26 | Runtime hardening, CLI parity, server-side controls, registry introspection, clarification, usage/tasks | 🟢 |
+| 27–32 | Env-injected endpoints, registry layers, the REPL and `/` menu, runtime models, live run feedback (status line + streamed thinking) & project context for the planner | 🟢 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**723 tests green (53 files), 0 tsc errors — plus 46 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
+**758 tests green (55 files), 0 tsc errors — plus 60 committed end-to-end checks (`npm run e2e`)** (phases 18–32 complete — see `docs/history/`)
 
 ## Law Compliance
 

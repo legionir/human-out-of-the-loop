@@ -4,11 +4,17 @@
  * All CLI output funnels through `out()` so tests can capture it with a
  * single spy on process.stdout.write.  (The CLI — unlike the src/ai
  * runtime — is user-facing and may use any output channel it likes.)
+ *
+ * Phase 32: `out()` also erases the line an active activity spinner
+ * (`utils/activity.ts`) draws on, so the "still working" line can never
+ * eat or duplicate a real line of output.
  */
-import chalk from 'chalk';
+import chalk, { type ChalkInstance } from 'chalk';
+import { clearActiveActivityLine } from './activity.js';
 
 /** Write a line to stdout (the single capture point for tests). */
 export function out(text = ''): void {
+  clearActiveActivityLine();
   process.stdout.write(text + '\n');
 }
 
@@ -26,6 +32,19 @@ export const color = {
   warn: chalk.magenta,
   dim: chalk.dim,
   bold: chalk.bold,
+  /**
+   * Phase 32: the model's own thinking text — italic and violet, so it is
+   * never mistaken for the run's status lines (which are yellow/cyan).
+   *
+   * A getter on purpose: `chalk.hex()` resolves the escape codes against
+   * `chalk.level` when it is called, and `chalk.level` is only known once
+   * stdout has been inspected (0 under a test runner, 3 in a colour
+   * terminal).  Building it eagerly would freeze whatever the level was at
+   * import time.
+   */
+  get thinking(): ChalkInstance {
+    return chalk.italic.hex('#a78bfa');
+  },
 };
 
 /**

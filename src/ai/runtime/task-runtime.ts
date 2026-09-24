@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { EventBus, type AgentEvent } from './event-bus.js';
 import { AgentRuntime, type AgentRunResult } from './agent-runtime.js';
+import type { ThoughtSink } from './thought-stream.js';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { createTaskRecord, type Task, type TaskStatus } from '../schemas/task.js';
 
@@ -33,6 +34,12 @@ export interface TaskRuntimeConfig {
    * default); now it actually applies.
    */
   maxSteps?: number;
+  /**
+   * Phase 32: default sink for the model's thinking text, forwarded to
+   * every `AgentRuntime.run()` call that does not carry its own.  When it
+   * is absent, agent turns use the non-streaming call exactly as before.
+   */
+  onThought?: ThoughtSink;
 }
 
 export interface CreateTaskOptions {
@@ -52,6 +59,10 @@ export interface CreateTaskOptions {
    */
   agentTimeoutMs?: number;
   maxSteps?: number;
+  /**
+   * Phase 32: per-task thinking sink (wins over `TaskRuntimeConfig.onThought`).
+   */
+  onThought?: ThoughtSink;
 }
 
 // ─── Resource Lock Manager ───────────────────────────────────────
@@ -153,11 +164,13 @@ export class TaskRuntime {
   private readonly maxConcurrentTasks: number;
   private readonly agentTimeoutMs?: number;
   private readonly maxSteps?: number;
+  /** Phase 32: default thinking sink for every task of this runtime. */
+  private readonly onThought?: ThoughtSink;
   private readonly eventBus: EventBus;
   /** U3: per-task execution overrides (runOverrides from Orchestrator.run). */
   private readonly taskOverrides = new Map<
     string,
-    Pick<CreateTaskOptions, 'agentTimeoutMs' | 'maxSteps'>
+    Pick<CreateTaskOptions, 'agentTimeoutMs' | 'maxSteps' | 'onThought'>
   >();
   private readonly runtime: AgentRuntime;
   private readonly runningPromises = new Map<string, Promise<AgentRunResult>>();
@@ -174,6 +187,7 @@ export class TaskRuntime {
     this.maxConcurrentTasks = config.maxConcurrentTasks ?? 5;
     this.agentTimeoutMs = config.agentTimeoutMs;
     this.maxSteps = config.maxSteps;
+    this.onThought = config.onThought;
     this.eventBus = config.eventBus;
     this.runtime = config.agentRuntime ?? new AgentRuntime();
 
@@ -205,10 +219,15 @@ export class TaskRuntime {
     this.pendingIds.add(taskId);
 
     // U3: remember per-run execution overrides for this task
-    if (options.agentTimeoutMs !== undefined || options.maxSteps !== undefined) {
+    if (
+      options.agentTimeoutMs !== undefined ||
+      options.maxSteps !== undefined ||
+      options.onThought !== undefined
+    ) {
       this.taskOverrides.set(taskId, {
         agentTimeoutMs: options.agentTimeoutMs,
         maxSteps: options.maxSteps,
+        ...(options.onThought !== undefined ? { onThought: options.onThought } : {}),
       });
     }
 
@@ -303,6 +322,8 @@ export class TaskRuntime {
         const overrides = this.taskOverrides.get(task.id) ?? {};
         const timeoutMs = overrides.agentTimeoutMs ?? this.agentTimeoutMs;
         const maxSteps = overrides.maxSteps ?? this.maxSteps;
+        // Phase 32: live thinking text (per-task sink wins over the default).
+        const onThought = overrides.onThought ?? this.onThought;
         this.taskOverrides.delete(task.id);
         const promise = this.runtime
           .run({
@@ -318,6 +339,8 @@ export class TaskRuntime {
             // Phase 20 (CORR-03/05): carry plan context on emitted events
             ...(task.planId !== undefined ? { planId: task.planId } : {}),
             ...(task.planStepId !== undefined ? { planStepId: task.planStepId } : {}),
+            // Phase 32: none/undefined keeps the turn non-streaming
+            ...(onThought ? { onThought } : {}),
           })
           .then((result) => {
             this.handleRunResult(task.id, result);
