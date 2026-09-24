@@ -79,6 +79,25 @@
 
 ---
 
+### [🟢] فاز U2 — نتیجه (2026-09-24)
+
+**نتیجه:** `src/server/routes/registry.ts` (جدید) — ۶ endpoint با منبع داده از registryهای **in-memory** خود orchestrator (که middleware lazy-init در server.ts تضمین می‌کند قبل از هر route لود شده‌اند):
+- `GET /api/models` → `[{id,provider,model,description}]` (منبع model-picker فاز U3)
+- `GET /api/personas` → `[{id,name,allowedTools,description}]`
+- `GET /api/skills` → `[{id,name,version,tools(resolved)}]`
+- `GET /api/tools` → `[{id,name,source,category,description}]`
+- `GET /api/mcp` → `{servers:[{id,name,transport,endpoint,auth}], errors:[]}`
+- `POST /api/mcp/:id/test` → `{ok:true,toolIds}` | `{ok:false,error}` (404 برای id نامعتبر). منطق دقیقاً مثل CLI فاز ۲۳: `loadMcpServerConfigs` + `McpConnector` روی یک `ToolRegistry` **جدید** (probe هرگز registry زنده را تغییر نمی‌دهد).
+
+UI: پنل جمع‌شونده «Registry» در بالای sidebar (`<details>` بومی، بدون state management) — ۵ گروه (Models/Personas/Skills/Tools/MCP) با count، لیست scroll (max-height + overflow)، و دکمه **Test** برای هر MCP server با نتیجه inline (`✔ n tool(s)` سبز / `✖ error` قرمز). داده‌ها با `loadRegistry()` در boot بارگذاری می‌شوند.
+
+تست‌ها (9 عدد، `src/server/__tests__/u2-registry.test.ts`): shape هر ۶ endpoint با registry نمونه repo؛ 404 برای MCP غایب؛ success `{ok,toolIds}` و failure `{ok:false,error}` (200 نه 500) با mock کنترل‌شونده connector.
+**Regression:** 497/497 تست سبز (30 فایل) + tsc سبز. **Smoke زنده:** HTML پنل + app.js served؛ همه endpointها 200 با داده واقعی؛ MCP test 404 صحیح.
+
+**انحراف ثبت‌شده:** (1) success مسیر MCP در تست با `vi.mock` کنترل‌شونده روی `McpConnector` (flag hoisted `mcpMode`) شبیه‌سازی شد — سرور واقعی MCP در sandbox در دسترس نیست؛ منطق خود connector (connect/list-tools) در تست‌های فاز ۲ پوشش دارد و این‌جا فقط **wiring route** (404/config lookup/shape پاسخ/registry جدا برای probe) تست می‌شود. (2) `GET /api/mcp` در نبود configها `{servers:[],errors:[]}` می‌دهد (نه 404) تا UI render ساده بماند.
+
+---
+
 ## فاز U3 — model و گزینه‌های run به‌ازای هر درخواست
 
 **گام‌ها:**
@@ -222,7 +241,7 @@
 | فاز | وضعیت | نتیجه / انحراف |
 |---|---|---|
 | U1 config parity | 🟢 | کامل شد 2026-09-24 — نتایج در زیر |
-| U2 registry | ⬜ | |
+| U2 registry | 🟢 | کامل شد 2026-09-24 — ۶ endpoint + پنل Registry در sidebar؛ ۹ تست؛ انحراف: تست success مسیر MCP با mock کنترل‌شونده connector (سرور واقعی MCP در sandbox وجود ندارد؛ منطق connector در فاز ۲ تست شده) |
 | U3 run overrides | ⬜ | |
 | U4 preview | ⬜ | |
 | U5 clarification | ⬜ | |

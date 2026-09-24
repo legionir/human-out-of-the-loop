@@ -32,6 +32,7 @@ import { sessionsRouter } from './server/routes/sessions.js';
 import { plansRouter } from './server/routes/plans.js';
 import { runRouter } from './server/routes/run.js';
 import { streamRouter } from './server/routes/stream.js';
+import { registryRouter } from './server/routes/registry.js';
 import type { ServerContext } from './server/types.js';
 
 export interface ServerOptions {
@@ -137,6 +138,7 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
   app.use(plansRouter(ctx));
   app.use(runRouter(ctx));
   app.use(streamRouter(ctx));
+  app.use(registryRouter(ctx));
 
   // U1: surface the effective config — never any secret VALUES.
   app.get('/api/health', (req, res) => {

@@ -275,3 +275,70 @@ code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; 
 
 .hidden { display: none !important; }
 .muted { color: var(--text-dim); }
+
+/* ── U2: Registry panel ───────────────────────────────────────── */
+.registry-panel {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 10px;
+  background: var(--bg-soft, rgba(255, 255, 255, 0.02));
+}
+.registry-panel > summary {
+  cursor: pointer;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.registry-panel > summary::-webkit-details-marker { display: none; }
+.registry-panel > summary::before { content: '▸'; color: var(--text-dim); }
+.registry-panel[open] > summary::before { content: '▾'; }
+.registry-counts { margin-left: auto; color: var(--text-dim); font-weight: 400; font-size: 11px; }
+.registry-body { padding: 0 8px 8px; }
+.registry-group { margin-top: 6px; }
+.registry-group-summary {
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  list-style: none;
+}
+.registry-group-summary::-webkit-details-marker { display: none; }
+.registry-group-summary::before { content: '· '; }
+.registry-list {
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0 0 0 6px;
+  max-height: 180px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.registry-item {
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+.registry-item:hover { background: rgba(255, 255, 255, 0.04); }
+.registry-item code {
+  font-size: 10px;
+  color: var(--accent);
+  white-space: nowrap;
+}
+.registry-desc { color: var(--text); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.registry-dim { color: var(--text-dim); font-size: 10px; white-space: nowrap; }
+.registry-empty { color: var(--text-dim); font-size: 11px; font-style: italic; }
+.mcp-item { flex-wrap: wrap; }
+.mcp-test-btn { flex: none; }
+.mcp-result { font-size: 10px; width: 100%; padding-left: 2px; color: var(--text-dim); }
+.mcp-result.ok { color: var(--green, #3fb950); }
+.mcp-result.fail { color: var(--red); }

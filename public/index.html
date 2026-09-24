@@ -17,6 +17,34 @@
           <p class="tagline">Confirm once. Walk away.</p>
         </div>
       </div>
+
+      <!-- ── U2: Registry panel (collapsible introspection) ── -->
+      <details id="registry-panel" class="registry-panel">
+        <summary id="registry-summary">Registry <span id="registry-counts" class="registry-counts"></span></summary>
+        <div class="registry-body">
+          <details class="registry-group">
+            <summary class="registry-group-summary" data-kind="models">Models</summary>
+            <ul id="registry-models" class="registry-list"></ul>
+          </details>
+          <details class="registry-group">
+            <summary class="registry-group-summary" data-kind="personas">Personas</summary>
+            <ul id="registry-personas" class="registry-list"></ul>
+          </details>
+          <details class="registry-group">
+            <summary class="registry-group-summary" data-kind="skills">Skills</summary>
+            <ul id="registry-skills" class="registry-list"></ul>
+          </details>
+          <details class="registry-group">
+            <summary class="registry-group-summary" data-kind="tools">Tools</summary>
+            <ul id="registry-tools" class="registry-list"></ul>
+          </details>
+          <details class="registry-group">
+            <summary class="registry-group-summary" data-kind="mcp">MCP</summary>
+            <ul id="registry-mcp" class="registry-list"></ul>
+          </details>
+        </div>
+      </details>
+
       <button id="new-session-btn" class="btn primary wide">+ New session</button>
       <div class="sessions-label">Sessions</div>
       <ul id="session-list" class="session-list"></ul>

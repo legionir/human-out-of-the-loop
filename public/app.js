@@ -509,8 +509,143 @@ cancelRunBtn.addEventListener('click', () => void cancelRun());
 planConfirmBtn.addEventListener('click', () => void decidePlan(true));
 planRejectBtn.addEventListener('click', () => void decidePlan(false));
 
+// ─── U2: Registry panel ─────────────────────────────────────────
+// Collapsible introspection of the runtime's registries. Data comes
+// from /api/{models,personas,skills,tools,mcp}; the MCP group has a
+// per-server Test button (POST /api/mcp/:id/test) with an inline
+// success/error result.
+
+function regItem(code, text, dim) {
+  const li = document.createElement('li');
+  li.className = 'registry-item';
+  const c = document.createElement('code');
+  c.textContent = code;
+  li.appendChild(c);
+  if (text) {
+    const span = document.createElement('span');
+    span.className = 'registry-desc';
+    span.textContent = text;
+    li.appendChild(span);
+  }
+  if (dim) {
+    const d = document.createElement('span');
+    d.className = 'registry-dim';
+    d.textContent = dim;
+    li.appendChild(d);
+  }
+  return li;
+}
+
+function fillList(el, rows) {
+  el.textContent = '';
+  if (!rows.length) {
+    const li = document.createElement('li');
+    li.className = 'registry-empty';
+    li.textContent = '— none —';
+    el.appendChild(li);
+    return;
+  }
+  for (const r of rows) el.appendChild(r);
+}
+
+async function testMcp(id, btn, resultEl) {
+  btn.disabled = true;
+  btn.textContent = '…';
+  resultEl.textContent = 'testing…';
+  resultEl.className = 'mcp-result';
+  try {
+    const r = await api(`/api/mcp/${encodeURIComponent(id)}/test`, { method: 'POST' });
+    if (r.ok) {
+      resultEl.textContent = `✔ ${r.toolIds.length} tool(s)`;
+      resultEl.classList.add('ok');
+    } else {
+      resultEl.textContent = `✖ ${r.error}`;
+      resultEl.classList.add('fail');
+    }
+  } catch (e) {
+    resultEl.textContent = `✖ ${e.message}`;
+    resultEl.classList.add('fail');
+  }
+  btn.disabled = false;
+  btn.textContent = 'Test';
+}
+
+async function loadRegistry() {
+  const groups = {};
+  const countsEl = $('#registry-counts');
+  try {
+    const [models, personas, skills, tools, mcp] = await Promise.all([
+      api('/api/models'),
+      api('/api/personas'),
+      api('/api/skills'),
+      api('/api/tools'),
+      api('/api/mcp').catch(() => ({ servers: [], errors: ['failed to load MCP configs'] })),
+    ]);
+
+    groups.models = models.map((m) => regItem(m.id, m.description, `${m.provider}:${m.model}`));
+    groups.personas = personas.map((p) => regItem(p.id, p.description, `${p.allowedTools.length} tools`));
+    groups.skills = skills.map((s) => regItem(s.id, `v${s.version}`, `${s.tools.length} tools`));
+    groups.tools = tools.map((t) => regItem(t.id, t.description, t.category || t.source));
+
+    // MCP: item + Test button + inline result
+    const mcpRows = mcp.servers.map((s) => {
+      const li = document.createElement('li');
+      li.className = 'registry-item mcp-item';
+      const c = document.createElement('code');
+      c.textContent = s.id;
+      const d = document.createElement('span');
+      d.className = 'registry-desc';
+      d.textContent = `${s.name} · ${s.transport}`;
+      const btn = document.createElement('button');
+      btn.className = 'btn small mcp-test-btn';
+      btn.textContent = 'Test';
+      const result = document.createElement('span');
+      result.className = 'mcp-result';
+      btn.addEventListener('click', () => void testMcp(s.id, btn, result));
+      li.append(c, d, btn, result);
+      return li;
+    });
+    if (mcp.errors && mcp.errors.length) {
+      for (const e of mcp.errors) {
+        const li = document.createElement('li');
+        li.className = 'registry-empty';
+        li.textContent = e;
+        mcpRows.push(li);
+      }
+    }
+    groups.mcp = mcpRows;
+
+    fillList($('#registry-models'), groups.models);
+    fillList($('#registry-personas'), groups.personas);
+    fillList($('#registry-skills'), groups.skills);
+    fillList($('#registry-tools'), groups.tools);
+    fillList($('#registry-mcp'), groups.mcp);
+
+    // Show counts on each group summary + the header
+    const counts = {
+      models: models.length,
+      personas: personas.length,
+      skills: skills.length,
+      tools: tools.length,
+      mcp: mcp.servers.length,
+    };
+    document.querySelectorAll('.registry-group-summary').forEach((sum) => {
+      const k = sum.dataset.kind;
+      const n = counts[k];
+      if (typeof n === 'number') {
+        sum.textContent = `${sum.textContent.replace(/\s*\(\d+\)\s*$/, '')} (${n})`;
+      }
+    });
+    countsEl.textContent = `${counts.models + counts.personas + counts.skills + counts.tools} items`;
+  } catch (e) {
+    countsEl.textContent = '';
+    fillList($('#registry-models'), [regItem('error', e.message)]);
+  }
+}
+
 // Initial load
 loadSessions();
+loadRegistry();
 api('/api/health')
   .then((h) => {
     $('#sidebar-footer').textContent = `root: ${h.projectRoot}`;
