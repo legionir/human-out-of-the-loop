@@ -192,20 +192,22 @@ describe('U3 — POST /api/run per-run options', () => {
     expect(modelOfCall(0).modelId).toBe(SERVER_DEFAULT_MODEL);
   }, 30_000);
 
-  it('unknown model id → 400 with the valid ids, and no run/plan is created', async () => {
-    const res = await request(app)
+  // v27.4: a model the provider serves does not need a registry file — the
+  // UI picker lists provider models and the server registers them on use.
+  it('a model name outside the registry is registered at runtime, not rejected', async () => {
+    await request(app)
       .post('/api/run')
-      .send({ message: 'Build a login page', confirm: true, model: 'nope-9000' })
-      .expect(400);
-    expect(res.body.error).toContain('nope-9000');
-    expect(res.body.validIds).toEqual(
-      expect.arrayContaining(['gpt-4o', 'claude-sonnet', 'local-llama']),
-    );
+      .send({ message: 'Build a login page', confirm: true, model: '@aur/auto' })
+      .expect(202);
+    const cfg = created.ctx.orchestrator.modelRegistry.getConfig('aur-auto');
+    expect(cfg).toMatchObject({ provider: 'openai', model: '@aur/auto' });
+  });
 
-    // Nothing was started: no plan persisted, no model call made.
-    expect((await request(app).get('/api/plans').expect(200)).body).toHaveLength(0);
-    expect(mockGenerateText).not.toHaveBeenCalled();
-    expect(mockGenerateObject).not.toHaveBeenCalled();
+  it('an empty model is still a 400', async () => {
+    await request(app)
+      .post('/api/run')
+      .send({ message: 'Build a login page', confirm: true, model: '  ' })
+      .expect(400);
   });
 
   it('timeoutMs and maxSteps reach AgentRuntime.run (spy, numeric)', async () => {

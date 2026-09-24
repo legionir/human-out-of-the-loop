@@ -808,7 +808,7 @@ async function startPreview() {
     const res = await fetch('/api/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify({ message, ...(runModelEl.value ? { model: runModelEl.value } : {}) }),
     });
     const body = await res.json().catch(() => null);
     // 400 + questions: the planner needs clarification before planning.
@@ -1063,17 +1063,11 @@ async function loadRegistry() {
     ]);
 
     groups.models = models.map((m) => regItem(m.id, m.description, `${m.provider}:${m.model}`));
-    // U3: the run model selector is sourced from the same registry endpoint.
-    runModelEl.innerHTML = '';
-    for (const m of models) {
-      const option = document.createElement('option');
-      option.value = m.id;
-      option.textContent = `${m.id} (${m.provider}:${m.model})`;
-      runModelEl.appendChild(option);
-    }
-    if (state.defaultModel && models.some((m) => m.id === state.defaultModel)) {
-      runModelEl.value = state.defaultModel;
-    }
+    // U3: the run model selector — the registry first, then whatever the
+    // configured providers serve (loaded separately, it needs the network).
+    state.registryModels = models;
+    renderModelPicker();
+    void loadRemoteModels();
     groups.personas = personas.map((p) => regItem(p.id, p.description, `${p.allowedTools.length} tools`));
     groups.skills = skills.map((s) => regItem(s.id, `v${s.version}`, `${s.tools.length} tools`));
     groups.tools = tools.map((t) => regItem(t.id, t.description, t.category || t.source));
@@ -1134,6 +1128,57 @@ async function loadRegistry() {
   }
 }
 
+/**
+ * The model picker: registered models, plus the models the providers
+ * actually serve (GET /api/models/remote).  Any of them can be run — the
+ * server registers a provider model on first use.
+ */
+function renderModelPicker() {
+  const previous = runModelEl.value;
+  runModelEl.innerHTML = '';
+  const group = (label, items) => {
+    if (!items.length) return;
+    const og = document.createElement('optgroup');
+    og.label = label;
+    for (const [value, text] of items) {
+      const option = document.createElement('option');
+      option.value = value;
+      option.textContent = text;
+      og.appendChild(option);
+    }
+    runModelEl.appendChild(og);
+  };
+  const registry = state.registryModels || [];
+  group('Registry', registry.map((m) => [m.id, `${m.id} (${m.provider}:${m.model})`]));
+  const remote = (state.remoteModels || []).filter((m) => !registry.some((r) => r.id === m.spec));
+  const bySource = {};
+  for (const m of remote) (bySource[m.source] = bySource[m.source] || []).push([m.spec, m.name]);
+  for (const [source, items] of Object.entries(bySource)) group(`From ${source}`, items);
+
+  const wanted = previous || state.defaultModel;
+  if (wanted && runModelEl.querySelector(`option[value="${CSS.escape(wanted)}"]`)) {
+    runModelEl.value = wanted;
+  }
+}
+
+async function loadRemoteModels() {
+  const status = $('#run-model-status');
+  status.textContent = 'loading provider models…';
+  try {
+    const list = await api('/api/models/remote');
+    state.remoteModels = list.models;
+    renderModelPicker();
+    const failed = list.errors.map((e) => `${e.source}: ${e.error}`).join(' · ');
+    status.textContent = list.models.length
+      ? `${list.models.length} from providers${failed ? ` · ${failed}` : ''}`
+      : failed || 'no provider configured for listing';
+  } catch (e) {
+    status.textContent = `provider models unavailable: ${e.message}`;
+  }
+}
+
+$('#run-model-refresh').addEventListener('click', () => void loadRemoteModels());
+
 // Initial load
 loadSessions();
 loadRegistry();
@@ -1146,9 +1191,7 @@ api('/api/health')
     // registry's first item is the default. Preserve a user's selection
     // if they changed it before this request completed.
     state.defaultModel = h.model;
-    if (h.model && runModelEl.querySelector(`option[value="${CSS.escape(h.model)}"]`)) {
-      runModelEl.value = h.model;
-    }
+    renderModelPicker();
   })
   .catch(() => {
     $('#sidebar-footer').textContent = 'server unreachable';

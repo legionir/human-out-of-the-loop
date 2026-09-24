@@ -83,8 +83,12 @@ export class Planner {
    * @param usagePlanId plan the call's token usage is billed to — set when
    *   re-planning an existing plan; otherwise the new plan's own id is used.
    */
-  async assess(userRequest: string, usagePlanId?: string): Promise<PlannerAssessment> {
-    const agent = this.buildPlannerAgent();
+  async assess(
+    userRequest: string,
+    usagePlanId?: string,
+    modelId?: string
+  ): Promise<PlannerAssessment> {
+    const agent = this.buildPlannerAgent(modelId);
 
     const assessmentPrompt = `
 You are assessing whether the following user request is clear enough
@@ -149,9 +153,10 @@ If the request is clear enough, set isClear=true and provide the full plan.
   async generatePlan(
     userRequest: string,
     clarifications?: Record<string, string>,
-    usagePlanId?: string
+    usagePlanId?: string,
+    modelId?: string
   ): Promise<Plan> {
-    const agent = this.buildPlannerAgent();
+    const agent = this.buildPlannerAgent(modelId);
 
     let prompt = `
 Decompose the following user request into a detailed execution plan.
@@ -193,9 +198,13 @@ ${userRequest}
   /**
    * Combined assess + generate in one call.
    */
-  async plan(userRequest: string, usagePlanId?: string): Promise<PlanningResult> {
+  /**
+   * @param modelId model for this call (a per-run override); default: the
+   *   planner's configured model.
+   */
+  async plan(userRequest: string, usagePlanId?: string, modelId?: string): Promise<PlanningResult> {
     try {
-      const assessment = await this.assess(userRequest, usagePlanId);
+      const assessment = await this.assess(userRequest, usagePlanId, modelId);
 
       if (!assessment.isClear) {
         return {
@@ -214,7 +223,7 @@ ${userRequest}
         };
       }
 
-      const plan = await this.generatePlan(userRequest, undefined, usagePlanId);
+      const plan = await this.generatePlan(userRequest, undefined, usagePlanId, modelId);
       return {
         isClear: true,
         needsClarification: [],
@@ -233,8 +242,8 @@ ${userRequest}
 
   // ── Private helpers ───────────────────────────────────────────
 
-  private buildPlannerAgent(): ResolvedAgent {
-    const modelId = this.config.modelId ?? 'gpt-4o';
+  private buildPlannerAgent(override?: string): ResolvedAgent {
+    const modelId = override ?? this.config.modelId ?? 'gpt-4o';
 
     return createAgent({
       agentDefinition: {

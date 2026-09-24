@@ -41,6 +41,16 @@ export function registryRouter(ctx: ServerContext): Router {
     );
   });
 
+  // Models the configured providers actually serve (not just the registry
+  // files) — the UI's model picker lists these next to the registered ones.
+  router.get('/api/models/remote', async (req, res) => {
+    try {
+      res.json(await ctx.orchestrator.listRemoteModels());
+    } catch (e) {
+      res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+    }
+  });
+
   router.get('/api/personas', (req, res) => {
     res.json(
       ctx.orchestrator.personaRegistry

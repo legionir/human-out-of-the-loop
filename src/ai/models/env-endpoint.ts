@@ -75,3 +75,67 @@ export function envEndpoint(env: EnvLike, known: ReadonlyArray<ModelConfig>): En
     },
   };
 }
+
+// ─── Runtime model specs ─────────────────────────────────────────
+
+/**
+ * A model chosen at runtime (CLI `--model`, `/model`, the web UI) does not
+ * have to be in the registry.  A spec is:
+ *
+ *   <registered id>           gpt-4o, claude-sonnet, custom …
+ *   <provider>:<model name>   anthropic:claude-3-5-haiku-latest,
+ *                             openai:gpt-4.1, local:llama3:8b
+ *   <model name>              @aur/auto, gpt-4.1 — on the default endpoint:
+ *                             HOTL_BASE_URL when set, else OpenAI
+ */
+export const SPEC_PROVIDERS = ['openai', 'anthropic', 'local'] as const;
+
+export function parseModelSpec(spec: string): { provider?: string; name: string } {
+  const colon = spec.indexOf(':');
+  if (colon > 0) {
+    const provider = spec.slice(0, colon);
+    if ((SPEC_PROVIDERS as readonly string[]).includes(provider)) {
+      return { provider, name: spec.slice(colon + 1) };
+    }
+  }
+  return { name: spec };
+}
+
+/** The registry id a spec is stored under (ids allow only [a-z0-9_-]). */
+export function modelIdForSpec(spec: string): string {
+  const trimmed = spec.trim();
+  if (REGISTRY_ID.test(trimmed)) return trimmed;
+  const slug = trimmed
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return slug || ENV_MODEL_ID;
+}
+
+/** The config a runtime spec registers (when its id is not registered yet). */
+export function runtimeModelConfig(spec: string, env: EnvLike): ModelConfig {
+  const { provider, name } = parseModelSpec(spec.trim());
+  const id = modelIdForSpec(spec);
+  const description = `Selected at runtime (${spec.trim()})`;
+  if (provider === 'anthropic' || provider === 'local') {
+    return { id, provider, model: name, description };
+  }
+  if (provider === 'openai') {
+    // Explicitly the official OpenAI API — no gateway override.
+    return { id, provider: 'openai', model: name, description };
+  }
+  const baseURL = nonEmpty(env.HOTL_BASE_URL);
+  const style = nonEmpty(env.HOTL_API_STYLE)?.toLowerCase();
+  const api = style === 'responses' || style === 'chat' ? style : baseURL ? 'chat' : undefined;
+  return {
+    id,
+    provider: 'openai',
+    model: name,
+    config: {
+      ...(baseURL ? { baseURL } : {}),
+      ...(api ? { api } : {}),
+      ...(nonEmpty(env.HOTL_API_KEY) ? { apiKeyEnv: 'HOTL_API_KEY' } : {}),
+    },
+    description,
+  };
+}

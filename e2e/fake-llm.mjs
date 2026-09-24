@@ -358,6 +358,17 @@ const server = http.createServer((req, res) => {
   let raw = '';
   req.on('data', (c) => (raw += c));
   req.on('end', async () => {
+    if (req.method === 'GET' && /\/models$/.test(req.url.split('?')[0])) {
+      // Model listing (OpenAI shape) — what `/model` and the UI picker load.
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          object: 'list',
+          data: ['@aur/auto', 'stub-large', 'stub-small'].map((id) => ({ id, object: 'model', owned_by: 'stub' })),
+        })
+      );
+      return;
+    }
     if (req.method === 'POST' && /\/chat\/completions$/.test(req.url.split('?')[0])) {
       await handleChat(JSON.parse(raw || '{}'), req, res);
       return;

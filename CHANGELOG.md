@@ -5,6 +5,43 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.4.0] — 2026-09-24 — start screen, the `/` menu, and models chosen at runtime
+
+**Interactive mode**
+- The screen is cleared and **HOOTL** is drawn in block letters (yellow,
+  orange shadow, centered) for 3 seconds, then the console opens.
+  `--no-splash` or `HOTL_NO_SPLASH=1` skips it.
+- A new line editor: typing `/` opens the command menu under the prompt,
+  filtered as you type; ↑/↓ select, Tab completes, Enter runs, Esc closes.
+  Arguments get menus too: `/model ` lists models, `/cd ` directories,
+  `/persistent ` on/off, `/plans ` its subcommands.  ↑/↓ walk the history
+  when the menu is closed.
+- The prompt and banner say **HOOTL** (`HOOTL my-project ›`); with the long
+  binary name a project with the same name read
+  `human-out-of-the-loop human-out-of-the-loop ›`.
+- **`hootl --project-root=<dir>` (and `--model`, `--persistent`, `--yes`)
+  without a subcommand opens interactive mode** in that directory.  Before,
+  it failed with "unknown option": those flags only existed on subcommands.
+
+**Models are not limited to the registry**
+- `--model`, `/model`, `defaultModel` and the web UI accept a registered id,
+  **any model name the provider serves**, or `<provider>:<name>`
+  (`anthropic:…`, `openai:…`, `local:…`).  An unregistered name is
+  registered at runtime (e.g. `@aur/auto` → id `aur-auto`) on the HOTL
+  endpoint when one is set, else OpenAI; the run says so before starting.
+- The providers are asked what they serve: `hootl models --remote`, the
+  `/model` menu, and `GET /api/models/remote` (the UI's model picker now has
+  a "From <provider>" group and a ↻ reload button).
+- The per-run model now drives **every** call of the run — planning,
+  re-planning, acceptance and the final review — not only the agents (the
+  web UI's per-run model used to reach the agents only).
+
+Contract changes: an unknown `--model` is no longer exit 2, and an unknown
+model in `POST /api/run` is no longer a 400 — both run it as a provider
+model name (an empty model is still a 400).  The tests that pinned the old
+contract were updated.  723 tests, e2e 46/46; the interactive flow was
+checked in a real PTY rendered through a terminal emulator.
+
 ## [27.3.1] — 2026-09-24 — an endpoint from the environment
 
 `HOTL_BASE_URL`, `HOTL_API_KEY` and `HOTL_MODEL` were only read by the CI

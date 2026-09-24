@@ -71,7 +71,9 @@ export class FinalReviewer {
    */
   async review(
     plan: Plan,
-    executionResult: PlanExecutionResult
+    executionResult: PlanExecutionResult,
+    /** The run's model (a per-run override); default: the configured one. */
+    modelId?: string
   ): Promise<Review> {
     const outcome = this.classifyOutcome(plan, executionResult);
     const stepSummaries = this.buildStepSummaries(plan);
@@ -88,7 +90,8 @@ export class FinalReviewer {
         plan,
         executionResult,
         stepSummaries,
-        outcome
+        outcome,
+        modelId
       );
       return review;
     } catch (err) {
@@ -110,9 +113,10 @@ export class FinalReviewer {
     plan: Plan,
     executionResult: PlanExecutionResult,
     stepSummaries: StepSummary[],
-    outcome: Review['outcome']
+    outcome: Review['outcome'],
+    modelId?: string
   ): Promise<Review> {
-    const reviewerAgent = this.buildReviewerAgent();
+    const reviewerAgent = this.buildReviewerAgent(modelId);
 
     const prompt = this.buildReviewPrompt(
       plan,
@@ -217,14 +221,14 @@ Be honest and specific. Do not invent findings that aren't in the results.
 `.trim();
   }
 
-  private buildReviewerAgent(): ResolvedAgent {
+  private buildReviewerAgent(modelId?: string): ResolvedAgent {
     return createAgent({
       agentDefinition: {
         id: 'final-reviewer',
         name: 'Final Reviewer',
         personaId: 'reviewer',
         skillIds: [],
-        modelId: this.modelId,
+        modelId: modelId ?? this.modelId,
       },
       refs: {
         personaRegistry: this.config.personaRegistry,

@@ -10,7 +10,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { Repl, splitArgs, parseOnOff, displayPath, type ReplState } from '../repl.js';
+import { Repl, splitArgs, parseOnOff, displayPath, parseInteractiveArgs, type ReplState } from '../repl.js';
+import { PassThrough } from 'node:stream';
+import { readLine, type Suggestion } from '../line-editor.js';
+import { renderSplash, bigText } from '../splash.js';
 import { createProgram, main } from '../../cli.js';
 import { useIsolatedHome, type HomeHandle } from '../../test-utils/isolated-home.js';
 import { globalConfigPath, loadGlobalConfig } from '../utils/config.js';
@@ -90,15 +93,16 @@ describe('interactive mode — session settings', () => {
     expect(r.state.persistent).toBe(false);
   });
 
-  it('/model lists models and switches only to a known id', async () => {
+  it('/model lists models and switches to a registered id or any provider model name', async () => {
     const r = repl();
     await r.handle('/model');
     expect(stdout).toContain('gpt-4o');
     await r.handle('/model claude-sonnet');
     expect(r.state.model).toBe('claude-sonnet');
-    await r.handle('/model no-such-model');
-    expect(stderr).toContain('Unknown model "no-such-model"');
-    expect(r.state.model).toBe('claude-sonnet');
+    // Models are chosen at runtime: an unlisted name is a provider model name.
+    await r.handle('/model @aur/auto');
+    expect(r.state.model).toBe('@aur/auto');
+    expect(stdout).toContain('used as a provider model name');
   });
 
   it('/cd changes the active directory, and rejects a missing one', async () => {
@@ -140,12 +144,10 @@ describe('interactive mode — /config', () => {
     expect(loadGlobalConfig()).toEqual({ defaultModel: 'claude-sonnet' });
   });
 
-  it('refuses unknown keys and unknown models', async () => {
+  it('refuses unknown keys (API keys never go into the config file)', async () => {
     const r = repl();
     await r.handle('/config set apiKey sk-123');
     expect(stderr).toContain('Unknown key "apiKey"');
-    await r.handle('/config set defaultModel nope');
-    expect(stderr).toContain('Unknown model "nope"');
     expect(fs.existsSync(globalConfigPath())).toBe(false);
   });
 
@@ -180,5 +182,110 @@ describe('interactive mode — entry point', () => {
     const code = await main(['node', 'hootl']);
     expect(stdout + stderr).toContain('Usage:');
     expect(code).not.toBe(0);
+  });
+});
+
+describe('interactive mode — command-line options', () => {
+  it('options without a subcommand open interactive mode (the Windows `--x=y` form too)', () => {
+    expect(parseInteractiveArgs([])).toEqual({});
+    expect(parseInteractiveArgs(['--project-root=I:\\vs-ai-coder\\packages'])).toEqual({
+      projectRoot: 'I:\\vs-ai-coder\\packages',
+    });
+    expect(parseInteractiveArgs(['--project-root', 'x', '--model', '@aur/auto', '--persistent', '--yes', '--no-splash'])).toEqual({
+      projectRoot: 'x',
+      model: '@aur/auto',
+      persistent: true,
+      yes: true,
+      splash: false,
+    });
+  });
+
+  it('anything else is left to commander', () => {
+    expect(parseInteractiveArgs(['run', 'goal'])).toBeUndefined();
+    expect(parseInteractiveArgs(['--help'])).toBeUndefined();
+    expect(parseInteractiveArgs(['--bogus'])).toBeUndefined();
+    expect(parseInteractiveArgs(['--project-root'])).toBeUndefined();
+  });
+});
+
+describe('interactive mode — the / menu', () => {
+  it('"/" lists every command, and typing filters it', () => {
+    const r = repl();
+    const all = r.suggest('/').map((s) => s.value);
+    expect(all).toEqual(expect.arrayContaining(['/help', '/model', '/config', '/plans', '/exit']));
+    expect(r.suggest('/mo').map((s) => s.value)).toEqual(['/model', '/models']);
+    expect(r.suggest('hello')).toEqual([]);
+  });
+
+  it('a complete command closes the menu; its argument gets its own menu', () => {
+    const r = repl();
+    expect(r.suggest('/help')).toEqual([]);
+    expect(r.suggest('/persistent ').map((s) => s.value)).toEqual(['/persistent on', '/persistent off']);
+    expect(r.suggest('/model gpt').map((s) => s.label)).toContain('gpt-4o');
+    expect(r.suggest('/cd s').map((s) => s.label)).toContain('sub');
+  });
+});
+
+describe('the start screen', () => {
+  it('draws HOOTL in block letters, centered, after clearing the screen', () => {
+    const rows = bigText('HOOTL');
+    expect(rows).toHaveLength(6);
+    expect(rows[0]).toContain('██╗  ██╗');
+    const screen = renderSplash({ columns: 120, rows: 30 });
+    expect(screen.startsWith('\x1b[2J')).toBe(true);
+    const firstArt = screen.split('\n').find((l) => l.includes('█'))!;
+    const indent = firstArt.replace(/\x1b\[[0-9;]*m/g, '').search(/\S/);
+    expect(indent).toBe(Math.floor((120 - rows[0]!.length) / 2));
+  });
+});
+
+describe('the line editor', () => {
+  const KEYS = {
+    down: '\x1b[B',
+    up: '\x1b[A',
+    tab: '\t',
+    enter: '\r',
+    esc: '\x1b',
+    ctrlC: '\x03',
+  };
+
+  async function type(chunks: string[], suggest: (l: string) => Suggestion[], history: string[] = []) {
+    const input = new PassThrough() as unknown as NodeJS.ReadStream;
+    const output = new PassThrough() as unknown as NodeJS.WriteStream;
+    const done = readLine({ input, output, prompt: '> ', history, suggest });
+    for (const c of chunks) {
+      (input as unknown as PassThrough).write(c);
+      // A lone ESC is only reported after readline's escape timeout (500ms).
+      await new Promise((r) => setTimeout(r, c === KEYS.esc ? 600 : 5));
+    }
+    return done;
+  }
+
+  const menu = (line: string): Suggestion[] =>
+    line.startsWith('/') && !line.includes(' ')
+      ? ['/help', '/model', '/models'].filter((v) => v.startsWith(line)).map((value) => ({ value }))
+      : [];
+
+  it('Enter runs the highlighted command; ↓ moves the highlight', async () => {
+    expect(await type(['/', KEYS.enter], menu)).toEqual({ kind: 'line', line: '/help' });
+    expect(await type(['/', KEYS.down, KEYS.enter], menu)).toEqual({ kind: 'line', line: '/model' });
+    expect(await type(['/', KEYS.up, KEYS.enter], menu)).toEqual({ kind: 'line', line: '/models' });
+  });
+
+  it('Tab completes and keeps editing', async () => {
+    expect(await type(['/mo', KEYS.tab, 's', KEYS.enter], menu)).toEqual({ kind: 'line', line: '/models' });
+  });
+
+  it('Esc closes the menu so Enter submits what was typed', async () => {
+    expect(await type(['/mo', KEYS.esc, KEYS.enter], menu)).toEqual({ kind: 'line', line: '/mo' });
+  });
+
+  it('↑ walks the history when the menu is closed', async () => {
+    expect(await type([KEYS.up, KEYS.enter], menu, ['fix the tests'])).toEqual({ kind: 'line', line: 'fix the tests' });
+  });
+
+  it('Ctrl-C clears a typed line, and interrupts on an empty one', async () => {
+    expect(await type(['abc', KEYS.ctrlC, 'x', KEYS.enter], menu)).toEqual({ kind: 'line', line: 'x' });
+    expect(await type([KEYS.ctrlC], menu)).toEqual({ kind: 'interrupt' });
   });
 });

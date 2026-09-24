@@ -21,14 +21,17 @@ export function previewRouter(ctx: ServerContext): Router {
   const router = Router();
 
   router.post('/api/preview', async (req, res) => {
-    const { message } = (req.body ?? {}) as { message?: unknown };
+    const { message, model } = (req.body ?? {}) as { message?: unknown; model?: unknown };
     if (typeof message !== 'string' || message.trim() === '') {
       res.status(400).json({ error: 'Body must include a non-empty "message".' });
       return;
     }
 
     try {
-      const preview = await ctx.orchestrator.previewPlan(message.trim());
+      const preview = await ctx.orchestrator.previewPlan(
+        message.trim(),
+        typeof model === 'string' && model.trim() ? model.trim() : undefined,
+      );
 
       // Unclear request: the planner wants clarification before planning.
       // This is a *request* problem, not a planning outcome → 400 + questions.

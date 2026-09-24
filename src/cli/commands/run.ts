@@ -154,9 +154,6 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
 
   const persistent = opts.persistent ?? globalConfig.persistent ?? false;
   const model = opts.model ?? envDefaultModelId(projectRoot) ?? globalConfig.defaultModel;
-  // The effective model id: the flag, the global config default, or the
-  // runtime default ('gpt-4o').  Validated against the registry below.
-  const effectiveModelId = model ?? 'gpt-4o';
 
   // Phase 30 (P10 follow-up): graceful Ctrl-C.
   //
@@ -254,15 +251,13 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       return { exitCode: 2 };
     }
 
-    if (!orchestrator.modelRegistry.hasConfig(effectiveModelId)) {
-      const validIds = orchestrator.modelRegistry.listConfigs().map((c) => c.id);
-      err(
-        color.failed(
-          `Unknown model id "${effectiveModelId}". Valid ids: ${validIds.join(', ') || '(none registered)'}`,
-        ),
-      );
-      err(color.dim('Pick one with --model <id>, or see `hootl models`.'));
-      return { exitCode: 2 };
+    // Any model spec runs — a registered id, `<provider>:<name>`, or a
+    // provider model name (registered on the fly by the orchestrator).  Say
+    // which one, so a typo is visible before the first call fails.
+    const active = orchestrator.modelRegistry.getConfig(orchestrator.config.defaultModelId);
+    if (active && active.description?.startsWith('Selected at runtime')) {
+      const where = (active.config?.baseURL as string | undefined) ?? `the ${active.provider} API`;
+      out(color.dim(`Model: ${active.model} (not in the registry) via ${where}`));
     }
 
     // ── Dry run: plan, show, stop ─────────────────────────────

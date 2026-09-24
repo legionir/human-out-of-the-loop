@@ -143,43 +143,59 @@ Precedence: `--model` > `HOTL_MODEL` > `defaultModel` in the global config.
 
 ### Interactive mode
 
-Run `hootl` with no arguments in a terminal and it opens a prompt, like
-Claude Code. The prompt shows the active directory, which is the project root.
+Run `hootl` with no subcommand in a terminal. The screen is cleared, **HOOTL**
+is shown for 3 seconds, and then the console opens. The prompt shows the
+active directory, which is the project root:
 
 ```text
-╭──────────────────────────────────────────────────────────────╮
-│ hootl v27.3.0  — plan once, confirm once, then out of the loop│
-│ cwd:   ~/work/my-project                                      │
-│ model: gpt-4o   persistent: off                               │
-│ keys:  OPENAI_API_KEY ✓  ANTHROPIC_API_KEY ✗                  │
-╰──────────────────────────────────────────────────────────────╯
-hootl my-project › fix the failing tests
+HOOTL my-project › /mo
+ /model   list models  ·  /model <id> to switch for this session
+ /models  registered models (--remote: what the providers serve)
+ ↑↓ select · Tab complete · Enter run · Esc close
+```
+
+```bash
+hootl                                   # in the current directory
+hootl --project-root=../other-project   # or --model <name>, --persistent, --yes, --no-splash
 ```
 
 - **A plain line is a goal**: it is planned, shown for confirmation once, then
   executed, the same as `hootl run`. With `/persistent on`, the goals of one
   interactive session are recorded in the same session.
-- **Slash commands** configure the session:
+- **`/` opens the command menu**, filtered as you type: ↑/↓ select, Tab
+  completes, Enter runs, Esc closes. Arguments have menus too (`/model `,
+  `/cd `, `/persistent `, `/plans `). When the menu is closed, ↑/↓ walk the
+  history.
 
 | command | effect |
 | --- | --- |
-| `/help` | list the commands |
-| `/status` | directory, model, persistence, session, API keys (present or not, never the value) |
-| `/config` | show the session settings and the saved defaults |
-| `/config set <key> <value>` · `/config unset <key>` | save `defaultModel`, `persistent` or `projectRoot` to `~/.human-out-of-the-loop/config.json` |
-| `/model` · `/model <id>` | list models · switch for this session |
+| `/help` · `/status` | commands · directory, model, endpoint, session, API keys (present or not) |
+| `/model` · `/model <name>` | list registered models and **the models your providers serve** · switch |
+| `/config` · `/config set <key> <value>` · `/config unset <key>` | show · save `defaultModel`, `persistent`, `projectRoot` |
 | `/persistent on\|off` · `/yes on\|off` · `/verbose on\|off` | write `.ai-runtime` · auto-confirm plans · stream tool calls |
 | `/cd <dir>` · `/pwd` | change or print the active directory (loads that directory's `.env`) |
 | `/new` · `/clear` · `/exit` | new session · clear the screen · leave (also Ctrl-D, or Ctrl-C twice) |
 
-- **Every regular subcommand** works with a slash, in the active directory:
-  `/plans list`, `/plans resume <id>`, `/usage`, `/logs --tail 20`,
-  `/tools --mcp`, `/mcp test <id>`, and `--help` on any of them.
-- **Ctrl-C** while a goal is running cancels the plan: the step in flight
-  finishes and you return to the prompt. A second Ctrl-C leaves the program.
+Every regular subcommand also works with a slash, in the active directory:
+`/plans list`, `/plans resume <id>`, `/usage`, `/logs --tail 20`,
+`/tools --mcp`, `/mcp test <id>`, and `--help` on any of them.
+**Ctrl-C** while a goal is running cancels the plan and returns to the prompt.
+Without a terminal (pipes, CI, scripts), `hootl` with no arguments prints the
+help, as before.
 
-Without a terminal (pipes, CI, scripts), `hootl` with no arguments still prints
-the help, and every command works as before.
+### Models: registered, or whatever your provider serves
+
+`--model`, `/model`, `defaultModel` and the web UI accept any of these:
+
+- a registered id (`hootl models`), for example `gpt-4o`;
+- a model name your provider serves (`hootl models --remote`), for example
+  `@aur/auto`. It is called on `HOTL_BASE_URL` when that is set, otherwise
+  on OpenAI;
+- `<provider>:<name>`, for example `anthropic:claude-3-5-haiku-latest`,
+  `openai:gpt-4.1` or `local:llama3:8b`.
+
+The web UI's model picker lists the registered models and, under "From
+<provider>", the models the providers serve (↻ reloads them).
 
 ### Help
 
@@ -407,7 +423,7 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**705 tests green (52 files), 0 tsc errors — plus 46 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
+**723 tests green (53 files), 0 tsc errors — plus 46 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
 
 ## Law Compliance
 

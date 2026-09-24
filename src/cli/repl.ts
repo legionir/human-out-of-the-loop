@@ -15,7 +15,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import fs from 'node:fs';
-import readline from 'node:readline';
+import chalk from 'chalk';
 import { CommanderError } from 'commander';
 import { runCommand } from './commands/run.js';
 import { envDefaultModelId, loadRegistries } from './utils/registries.js';
@@ -28,6 +28,13 @@ import {
 } from './utils/config.js';
 import { color, err, out, renderTable } from './utils/output.js';
 import type { Command } from 'commander';
+import { readLine, type Suggestion } from './line-editor.js';
+import { showSplash } from './splash.js';
+import { listRemoteModels, type RemoteModel } from '../ai/models/list-models.js';
+import { modelIdForSpec } from '../ai/models/env-endpoint.js';
+
+/** The product name as the prompt and banner show it. */
+export const BRAND = 'HOOTL';
 
 /** Mutable settings of one interactive session. */
 export interface ReplState {
@@ -74,6 +81,21 @@ const PASSTHROUGH = [
   'plans', 'sessions', 'usage', 'tasks', 'logs',
   'models', 'personas', 'skills', 'tools', 'mcp', 'run',
 ];
+
+/** One-line descriptions of the passthrough commands (for the `/` menu). */
+const PASSTHROUGH_HELP: Record<string, string> = {
+  plans: 'list · show · cancel · resume persisted plans',
+  sessions: 'list · show · label · delete sessions',
+  usage: 'token usage per plan',
+  tasks: 'tasks from the observability log',
+  logs: 'read the observability log (--tail N, --follow)',
+  models: 'registered models (--remote: what the providers serve)',
+  personas: 'registered personas',
+  skills: 'registered skills',
+  tools: 'registered tools (--mcp: include MCP servers)',
+  mcp: 'list MCP servers · test one',
+  run: 'run a goal with flags (/run "goal" --dry-run)',
+};
 
 /** Keys `/config set` accepts, with how to parse them. */
 const CONFIG_KEYS: Record<string, (v: string) => GlobalCliConfig[keyof GlobalCliConfig]> = {
@@ -134,16 +156,71 @@ function keyStatus(): string {
     .join('  ');
 }
 
-export function initialState(cwd: string = process.cwd()): ReplState {
+/** Options given on the command line (`hootl --project-root X --model Y`). */
+export interface InteractiveArgs {
+  projectRoot?: string;
+  model?: string;
+  persistent?: boolean;
+  yes?: boolean;
+  splash?: boolean;
+}
+
+/**
+ * `hootl` with only options and no subcommand opens interactive mode with
+ * them.  Returns undefined when the arguments are something else (a
+ * subcommand, --help, --version, an unknown option) — commander handles those.
+ */
+export function parseInteractiveArgs(args: string[]): InteractiveArgs | undefined {
+  const result: InteractiveArgs = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    const eq = arg.indexOf('=');
+    const name = eq > 0 ? arg.slice(0, eq) : arg;
+    const inline = eq > 0 ? arg.slice(eq + 1) : undefined;
+    const value = (): string | undefined => inline ?? args[++i];
+    switch (name) {
+      case '--project-root': {
+        const v = value();
+        if (!v) return undefined;
+        result.projectRoot = v;
+        break;
+      }
+      case '--model': {
+        const v = value();
+        if (!v) return undefined;
+        result.model = v;
+        break;
+      }
+      case '--persistent':
+        result.persistent = true;
+        break;
+      case '--yes':
+        result.yes = true;
+        break;
+      case '--no-splash':
+        result.splash = false;
+        break;
+      default:
+        return undefined;
+    }
+  }
+  return result;
+}
+
+export function initialState(cwd: string = process.cwd(), args: InteractiveArgs = {}): ReplState {
   const config = loadGlobalConfig();
-  const root = config.projectRoot ? path.resolve(cwd, config.projectRoot) : cwd;
+  const root = args.projectRoot
+    ? path.resolve(cwd, args.projectRoot)
+    : config.projectRoot
+      ? path.resolve(cwd, config.projectRoot)
+      : cwd;
   // The project's .env may carry HOTL_MODEL / HOTL_BASE_URL.
   loadDotEnv([root]);
   return {
     cwd: root,
-    model: envDefaultModelId(root) ?? config.defaultModel,
-    persistent: config.persistent ?? false,
-    autoConfirm: false,
+    model: args.model ?? envDefaultModelId(root) ?? config.defaultModel,
+    persistent: args.persistent ?? config.persistent ?? false,
+    autoConfirm: args.yes ?? false,
     verbose: false,
   };
 }
@@ -151,7 +228,6 @@ export function initialState(cwd: string = process.cwd()): ReplState {
 export class Repl {
   readonly state: ReplState;
   private readonly history: string[] = [];
-  private rl?: readline.Interface;
   private pendingExit = false;
   private closed = false;
 
@@ -159,84 +235,134 @@ export class Repl {
     this.state = state;
   }
 
-  /** Banner + prompt loop.  Resolves when the user leaves. */
-  async start(): Promise<void> {
+  /** Splash, banner, then the prompt loop.  Resolves when the user leaves. */
+  async start(opts: { splash?: boolean } = {}): Promise<void> {
     this.enterDirectory(this.state.cwd);
+    const output = (this.opts.output ?? process.stdout) as NodeJS.WriteStream;
+    if (opts.splash !== false) {
+      await showSplash(output, { ms: 3000, subtitle: 'plan once, confirm once — then out of the loop' });
+    }
+    void this.refreshRemoteModels();
     this.printBanner();
-    await new Promise<void>((resolve) => {
-      this.onExit = resolve;
-      this.openPrompt();
-    });
+    while (!this.closed) {
+      const result = await readLine({
+        input: (this.opts.input ?? process.stdin) as NodeJS.ReadStream,
+        output,
+        prompt: this.promptText(),
+        history: this.history,
+        suggest: (line) => this.suggest(line),
+        style: { selected: (t) => chalk.inverse(t), dim: (t) => chalk.dim(t) },
+      });
+      if (result.kind === 'eof') {
+        this.exit();
+      } else if (result.kind === 'interrupt') {
+        if (this.pendingExit) {
+          this.exit();
+        } else {
+          this.pendingExit = true;
+          out(color.dim('(press Ctrl-C again, or type /exit, to leave)'));
+        }
+      } else {
+        await this.handle(result.line);
+      }
+    }
   }
-
-  private onExit: () => void = () => undefined;
 
   // ── prompt ───────────────────────────────────────────────────
 
   private promptText(): string {
     const dir = path.basename(this.state.cwd) || this.state.cwd;
-    return `${color.info(this.opts.binName)} ${color.dim(dir)} ${color.bold('›')} `;
+    return `${chalk.bold.yellow(BRAND)} ${color.dim(dir)} ${color.bold('›')} `;
   }
 
-  /**
-   * A fresh readline per prompt: while a goal runs, inquirer (plan
-   * confirmation, clarification questions) must own stdin alone — two
-   * readline interfaces on one stream would both consume every key.
-   */
-  private openPrompt(): void {
-    if (this.closed) return;
-    const rl = readline.createInterface({
-      input: this.opts.input ?? process.stdin,
-      output: this.opts.output ?? process.stdout,
-      terminal: true,
-      history: [...this.history],
-      historySize: 500,
-      completer: (line: string) => this.complete(line),
-    });
-    this.rl = rl;
-    rl.on('SIGINT', () => {
-      if (rl.line.length > 0) {
-        // Ctrl-C on a half-typed line clears it, like a shell.
-        rl.write(null, { ctrl: true, name: 'u' });
-        out('');
-        rl.prompt();
-        return;
-      }
-      if (this.pendingExit) {
-        this.exit();
-        return;
-      }
-      this.pendingExit = true;
-      out(color.dim('\n(press Ctrl-C again, or type /exit, to leave)'));
-      rl.prompt();
-    });
-    rl.on('close', () => {
-      // Ctrl-D (or /exit).  A close we caused ourselves to hand stdin to a
-      // running command is not an exit.
-      if (this.rl === rl) this.exit();
-    });
-    rl.once('line', (line) => {
-      this.rl = undefined;
-      rl.close();
-      void this.handle(line).then(() => this.openPrompt());
-    });
-    rl.setPrompt(this.promptText());
-    rl.prompt();
+  /** What the menu under the prompt offers for the current line. */
+  suggest(line: string): Suggestion[] {
+    if (!line.startsWith('/')) return [];
+    const space = line.indexOf(' ');
+    if (space === -1) {
+      const typed = line.slice(1).toLowerCase();
+      const all: Suggestion[] = [
+        ...Object.entries(BUILTINS).map(([name, description]) => ({ value: `/${name}`, description })),
+        ...PASSTHROUGH.map((name) => ({ value: `/${name}`, description: PASSTHROUGH_HELP[name] ?? '' })),
+      ];
+      const starts = all.filter((s) => s.value.slice(1).startsWith(typed));
+      const contains = all.filter((s) => !starts.includes(s) && s.value.slice(1).includes(typed));
+      const hits = [...starts, ...contains];
+      // Nothing to offer once the line IS a complete command.
+      return hits.length === 1 && hits[0]!.value === line ? [] : hits;
+    }
+    const command = line.slice(1, space);
+    const arg = line.slice(space + 1);
+    const pick = (values: Array<[string, string?]>): Suggestion[] =>
+      values
+        .filter(([v]) => v.toLowerCase().includes(arg.toLowerCase()) && v !== arg)
+        .map(([v, description]) => ({ value: `/${command} ${v}`, label: v, description }));
+    switch (command) {
+      case 'model':
+        return pick(this.modelChoices());
+      case 'persistent':
+      case 'yes':
+      case 'verbose':
+        return pick([['on'], ['off']]);
+      case 'config':
+        if (!arg.includes(' ')) return pick([['set'], ['unset']]);
+        return [];
+      case 'cd':
+        return pick(this.subdirectories(arg));
+      case 'plans':
+        return pick([['list'], ['show '], ['cancel '], ['resume ']]);
+      case 'sessions':
+        return pick([['list'], ['show '], ['label '], ['delete ']]);
+      case 'mcp':
+        return pick([['list'], ['test ']]);
+      case 'tasks':
+        return pick([['list'], ['show ']]);
+      default:
+        return [];
+    }
   }
 
-  private complete(line: string): [string[], string] {
-    if (!line.startsWith('/')) return [[], line];
-    const names = [...Object.keys(BUILTINS), 'quit', ...PASSTHROUGH].map((n) => `/${n}`);
-    const hits = names.filter((n) => n.startsWith(line));
-    return [hits.length > 0 ? hits : names, line];
+  /** Registered models first, then what the providers serve. */
+  private modelChoices(): Array<[string, string?]> {
+    const registry = loadRegistries(this.state.cwd).models;
+    const choices: Array<[string, string?]> = registry.map((m) => [m.id, `${m.provider}:${m.model}`]);
+    for (const m of this.remoteModels) {
+      if (!choices.some(([v]) => v === m.spec)) choices.push([m.spec, `from ${m.source}`]);
+    }
+    return choices;
+  }
+
+  private subdirectories(arg: string): Array<[string, string?]> {
+    const base = arg.includes('/') || arg.includes(path.sep) ? arg.slice(0, Math.max(arg.lastIndexOf('/'), arg.lastIndexOf(path.sep)) + 1) : '';
+    try {
+      return fs
+        .readdirSync(path.resolve(this.state.cwd, base || '.'), { withFileTypes: true })
+        .filter((d) => d.isDirectory() && !d.name.startsWith('.') && d.name !== 'node_modules')
+        .slice(0, 200)
+        .map((d) => [`${base}${d.name}`] as [string]);
+    } catch {
+      return [];
+    }
+  }
+
+  private remoteModels: RemoteModel[] = [];
+  private remoteErrors: Array<{ source: string; error: string }> = [];
+
+  /** Ask the providers for their models (in the background at start). */
+  async refreshRemoteModels(): Promise<void> {
+    try {
+      const list = await listRemoteModels(process.env);
+      this.remoteModels = list.models;
+      this.remoteErrors = list.errors;
+    } catch (e) {
+      this.remoteErrors = [{ source: 'providers', error: e instanceof Error ? e.message : String(e) }];
+    }
   }
 
   private exit(): void {
     if (this.closed) return;
     this.closed = true;
-    this.rl?.close();
     out(color.dim('Bye.'));
-    this.onExit();
   }
 
   // ── dispatch ─────────────────────────────────────────────────
@@ -308,7 +434,7 @@ export class Repl {
         this.state.verbose = parseOnOff(args[0]);
         return out(`verbose: ${this.state.verbose ? 'on' : 'off'}`);
       case 'model':
-        return this.model(args[0]);
+        return this.model(args.join(' ') || undefined);
       case 'config':
         return this.config(args);
       default:
@@ -356,25 +482,31 @@ export class Repl {
     out(displayPath(this.state.cwd));
   }
 
-  private model(id: string | undefined): void {
-    const models = loadRegistries(this.state.cwd).models;
-    const current = this.state.model ?? DEFAULT_MODEL;
-    if (!id) {
-      out(
-        renderTable(
-          ['', 'ID', 'PROVIDER', 'MODEL'],
-          models.map((m) => [m.id === current ? '●' : '', m.id, m.provider, m.model]),
-        ),
-      );
-      out(color.dim('\n/model <id> switches for this session; /config set defaultModel <id> saves it.'));
+  private async model(spec: string | undefined): Promise<void> {
+    if (!spec) {
+      // A fresh look at what the providers serve.
+      await this.refreshRemoteModels();
+      const current = this.state.model ?? DEFAULT_MODEL;
+      const registry = loadRegistries(this.state.cwd).models;
+      out(color.bold('Registered'));
+      out(renderTable(['', 'MODEL', 'PROVIDER', 'NAME'], registry.map((m) => [m.id === current ? '●' : '', m.id, m.provider, m.model])));
+      if (this.remoteModels.length > 0) {
+        out('');
+        out(color.bold('From your providers'));
+        out(renderTable(['', 'MODEL', 'SOURCE'], this.remoteModels.map((m) => [m.spec === current ? '●' : '', m.spec, m.source])));
+      }
+      for (const e of this.remoteErrors) err(color.dim(`${e.source}: ${e.error}`));
+      out(color.dim('\nType "/model " and pick with ↑↓, or /model <name>.  /config set defaultModel <name> saves it.'));
       return;
     }
-    if (!models.some((m) => m.id === id)) {
-      err(color.failed(`Unknown model "${id}".`) + color.dim(`  Available: ${models.map((m) => m.id).join(', ')}`));
-      return;
+    const registry = loadRegistries(this.state.cwd).models;
+    this.state.model = spec;
+    const known =
+      registry.some((m) => m.id === spec) || this.remoteModels.some((m) => m.spec === spec);
+    out(`model: ${this.modelLabel()}`);
+    if (!known) {
+      out(color.dim('  (not in the registry or the provider list — it is used as a provider model name)'));
     }
-    this.state.model = id;
-    out(`model: ${id}`);
   }
 
   private config(args: string[]): void {
@@ -418,10 +550,6 @@ export class Repl {
         err(color.failed(`Usage: /config set ${key} <value>`));
         return;
       }
-      if (key === 'defaultModel' && !loadRegistries(this.state.cwd).models.some((m) => m.id === value)) {
-        err(color.failed(`Unknown model "${value}".`) + color.dim('  See /model.'));
-        return;
-      }
       saved[key] = CONFIG_KEYS[key]!(value);
     }
     saveGlobalConfig(saved as GlobalCliConfig);
@@ -434,9 +562,9 @@ export class Repl {
   // ── output ───────────────────────────────────────────────────
 
   private printBanner(): void {
-    const title = `${this.opts.binName}${this.opts.version ? ` v${this.opts.version}` : ''}`;
+    const title = `${BRAND}${this.opts.version ? ` v${this.opts.version}` : ''}`;
     const lines = [
-      color.bold(title) + color.dim('  — plan once, confirm once, then out of the loop'),
+      chalk.bold.yellow(title) + color.dim('  — human out of the loop'),
       '',
       `${color.dim('cwd:  ')} ${shorten(displayPath(this.state.cwd), 72)}`,
       `${color.dim('model:')} ${this.modelLabel()}   ${color.dim('persistent:')} ${this.state.persistent ? 'on' : 'off'}`,
@@ -453,9 +581,10 @@ export class Repl {
 
   /** `custom (@aur/auto)` — the id, plus the provider model when it differs. */
   private modelLabel(): string {
-    const id = this.state.model ?? DEFAULT_MODEL;
-    const cfg = loadRegistries(this.state.cwd).models.find((m) => m.id === id);
-    return cfg && cfg.model !== id ? `${id} (${cfg.model})` : id;
+    const spec = this.state.model ?? DEFAULT_MODEL;
+    const cfg = loadRegistries(this.state.cwd).models.find((m) => m.id === spec || m.id === modelIdForSpec(spec));
+    if (!cfg) return spec;
+    return cfg.model !== spec && cfg.id === spec ? `${spec} (${cfg.model})` : spec;
   }
 
   private printStatus(): void {
@@ -493,7 +622,8 @@ function stripAnsi(text: string): string {
 }
 
 /** Entry point used by `main()` when `hootl` runs with no arguments in a TTY. */
-export async function startRepl(opts: ReplOptions): Promise<number> {
-  await new Repl(opts).start();
+export async function startRepl(opts: ReplOptions, args: InteractiveArgs = {}): Promise<number> {
+  const splash = args.splash ?? !/^(1|true|yes)$/i.test(process.env.HOTL_NO_SPLASH ?? '');
+  await new Repl(opts, initialState(process.cwd(), args)).start({ splash });
   return 0;
 }

@@ -69,9 +69,11 @@ export class AcceptanceChecker {
    */
   async checkStep(
     step: PlanStep,
-    taskResult: Task
+    taskResult: Task,
+    /** The run's model (a per-run override); default: the configured one. */
+    modelId?: string
   ): Promise<AcceptanceResult> {
-    const reviewerAgent = this.buildReviewerAgent();
+    const reviewerAgent = this.buildReviewerAgent(modelId);
 
     const prompt = `
 You are verifying whether a completed task meets its acceptance criteria.
@@ -132,14 +134,14 @@ a JSON object containing "accepted" (boolean) and "reason" (string).
     this.config.onQualityFailure?.(planId, stepId, reason);
   }
 
-  private buildReviewerAgent(): ResolvedAgent {
+  private buildReviewerAgent(modelId?: string): ResolvedAgent {
     return createAgent({
       agentDefinition: {
         id: 'acceptance-reviewer',
         name: 'Acceptance Reviewer',
         personaId: 'reviewer',
         skillIds: ['acceptance_check'],
-        modelId: this.modelId,
+        modelId: modelId ?? this.modelId,
       },
       refs: {
         personaRegistry: this.config.personaRegistry,
