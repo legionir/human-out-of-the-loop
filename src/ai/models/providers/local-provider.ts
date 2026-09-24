@@ -1,5 +1,6 @@
 import type { ProviderFactory } from '../../registries/model-registry.js';
 import type { ModelConfig } from '../../schemas/model-config.js';
+import type { EnvSource } from '../../env.js';
 import type { LanguageModel } from 'ai';
 
 /**
@@ -11,9 +12,11 @@ import type { LanguageModel } from 'ai';
 export const localProviderFactory: ProviderFactory = {
   name: 'local',
 
-  create(config: ModelConfig): LanguageModel {
-    // Check env var for configurability (DevOps gate expects process.env usage)
-    const envBase = process.env.LOCAL_MODEL_BASE_URL;
+  create(config: ModelConfig, env?: EnvSource): LanguageModel {
+    // Phase 27 (CFG-08): `LOCAL_MODEL_BASE_URL` comes from the injected
+    // env when given, otherwise from `process.env` (unchanged default).
+    // Phase 27 (CFG-08): injected env wins; explicit process.env fallback.
+    const envBase = env ? env.LOCAL_MODEL_BASE_URL : process.env.LOCAL_MODEL_BASE_URL;
     const baseURL = (config.config?.baseURL as string) ?? envBase ?? 'http://localhost:11434/v1';
 
     const { createOpenAI } = getOpenAISdkLocal();

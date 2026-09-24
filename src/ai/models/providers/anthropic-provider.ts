@@ -1,17 +1,21 @@
 import type { ProviderFactory } from '../../registries/model-registry.js';
 import type { ModelConfig } from '../../schemas/model-config.js';
+import type { EnvSource } from '../../env.js';
 import type { LanguageModel } from 'ai';
 
 /**
  * Anthropic provider factory.
  *
- * Requires `ANTHROPIC_API_KEY` environment variable.
+ * Requires `ANTHROPIC_API_KEY`.  Phase 27 (CFG-08): the key is read from
+ * the injected `env` when given, otherwise from `process.env`.
  */
 export const anthropicProviderFactory: ProviderFactory = {
   name: 'anthropic',
 
-  create(config: ModelConfig): LanguageModel {
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+  create(config: ModelConfig, env?: EnvSource): LanguageModel {
+    // Phase 27 (CFG-08): an injected env wins; process.env is the
+    // default — the DevOps gate asserts this explicit fallback.
+    const apiKey = env ? env.ANTHROPIC_API_KEY : process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       throw new Error(`[anthropicProvider] ANTHROPIC_API_KEY environment variable is not set.`);
     }

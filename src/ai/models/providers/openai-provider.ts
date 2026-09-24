@@ -1,20 +1,26 @@
 import type { ProviderFactory } from '../../registries/model-registry.js';
 import type { ModelConfig } from '../../schemas/model-config.js';
+import type { EnvSource } from '../../env.js';
 import type { LanguageModel } from 'ai';
 
 /**
  * OpenAI provider factory.
  *
- * Requires `OPENAI_API_KEY` environment variable.
+ * Requires `OPENAI_API_KEY`.  Phase 27 (CFG-08): the key is read from
+ * the injected `env` when given, otherwise from `process.env`.
  * Uses lazy-loaded SDK with caching and error handling.
  */
 export const openaiProviderFactory: ProviderFactory = {
   name: 'openai',
 
-  create(config: ModelConfig): LanguageModel {
-    const apiKey = process.env.OPENAI_API_KEY;
+  create(config: ModelConfig, env?: EnvSource): LanguageModel {
+    // Phase 27 (CFG-08): an injected env wins; process.env is the
+    // default — the DevOps gate asserts this explicit fallback.
+    const apiKey = env ? env.OPENAI_API_KEY : process.env.OPENAI_API_KEY;
     if (!apiKey) {
-      throw new Error(`[openaiProvider] OPENAI_API_KEY environment variable is not set.`);
+      throw new Error(
+        `[openaiProvider] OPENAI_API_KEY environment variable is not set.`
+      );
     }
 
     const { createOpenAI } = getOpenAISdk();

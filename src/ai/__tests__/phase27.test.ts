@@ -8,7 +8,7 @@
  *   CFG-08   env injection: providers + MCP connector read an injected env
  *   PERS-04  cross-process file locking around store writes
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import fsSync from 'node:fs';
 import fsP from 'node:fs/promises';
 import os from 'node:os';
@@ -21,6 +21,17 @@ vi.mock('ai', async () => {
 
 import { createSearchCodeTool } from '../tools/implementations/search-code.js';
 import { EventBus, type AgentEvent } from '../runtime/event-bus.js';
+import {
+  openaiProviderFactory,
+  anthropicProviderFactory,
+  localProviderFactory,
+} from '../models/providers/index.js';
+import { ModelRegistry } from '../registries/model-registry.js';
+import { ToolRegistry } from '../registries/tool-registry.js';
+import { McpConnector } from '../tools/mcp-connector.js';
+import { Orchestrator } from '../orchestrator.js';
+import type { ModelConfig } from '../schemas/model-config.js';
+import type { McpServerConfig } from '../schemas/mcp-server.js';
 import { FilePlanStore } from '../runtime/plan-store.js';
 import { FileSessionStore } from '../runtime/session-store.js';
 import { createPlan, type Plan } from '../schemas/plan.js';
@@ -270,14 +281,32 @@ describe('PERF-06: store list() only parses unseen files', () => {
 // ---------------------------------------------------------------------------
 
 describe('PERF-08: EventBus emit allocation', () => {
+  const running = (taskId = 'task-1'): AgentEvent => ({
+    type: 'agent:running',
+    status: 'running',
+    prompt: 'do the thing',
+    taskId,
+    agentId: 'agent-1',
+    timestamp: 1,
+  });
+  const completed = (taskId = 'task-1'): AgentEvent => ({
+    type: 'agent:completed',
+    status: 'completed',
+    summary: 'done',
+    toolsUsed: [],
+    taskId,
+    agentId: 'agent-1',
+    timestamp: 2,
+  });
+
   it('reuses one dedup buffer for every non-nested emit', () => {
     const bus = new EventBus();
     const seen: string[] = [];
     bus.subscribe('*', (e) => seen.push(`wild:${e.type}`));
-    bus.subscribe('step-start', (e) => seen.push(`typed:${e.type}`));
+    bus.subscribe('agent:running', (e) => seen.push(`typed:${e.type}`));
 
     for (let i = 0; i < 1000; i++) {
-      bus.emit({ type: 'step-start', stepId: `s${i}` } as AgentEvent);
+      bus.emit(running(`task-${i}`));
     }
 
     expect(seen).toHaveLength(2000);
@@ -289,26 +318,26 @@ describe('PERF-08: EventBus emit allocation', () => {
     const bus = new EventBus();
     const calls: string[] = [];
     const both = () => calls.push('both');
-    bus.subscribe('step-start', both);
+    bus.subscribe('agent:running', both);
     bus.subscribe('*', both);
 
-    bus.emit({ type: 'step-start', stepId: 's1' } as AgentEvent);
+    bus.emit(running());
     expect(calls).toEqual(['both']);
   });
 
   it('keeps every subscriber when only one of the two sets is populated', () => {
     const bus = new EventBus();
     const calls: string[] = [];
-    bus.subscribe('step-start', () => calls.push('typed-1'));
-    bus.subscribe('step-start', () => calls.push('typed-2'));
-    bus.emit({ type: 'step-start', stepId: 's1' } as AgentEvent);
+    bus.subscribe('agent:running', () => calls.push('typed-1'));
+    bus.subscribe('agent:running', () => calls.push('typed-2'));
+    bus.emit(running());
     expect(calls.sort()).toEqual(['typed-1', 'typed-2']);
 
     const bus2 = new EventBus();
     const wild: string[] = [];
     bus2.subscribe('*', () => wild.push('w1'));
     bus2.subscribe('*', () => wild.push('w2'));
-    bus2.emit({ type: 'step-complete', stepId: 's1' } as AgentEvent);
+    bus2.emit(completed());
     expect(wild.sort()).toEqual(['w1', 'w2']);
   });
 
@@ -317,20 +346,20 @@ describe('PERF-08: EventBus emit allocation', () => {
     const outer: string[] = [];
     const inner: string[] = [];
     bus.subscribe('*', (e) => {
-      if (e.type === 'step-start') {
+      if (e.type === 'agent:running') {
         outer.push('outer');
         // A handler that emits: must use a different buffer, otherwise
         // the outer iteration would be clobbered mid-flight.
-        bus.emit({ type: 'step-complete', stepId: 'nested' } as AgentEvent);
+        bus.emit(completed('nested'));
       } else {
         inner.push('inner');
       }
     });
-    bus.subscribe('step-start', () => outer.push('outer-typed'));
+    bus.subscribe('agent:running', () => outer.push('outer-typed'));
     // The nested event hits BOTH sets → it needs its own dedup buffer.
-    bus.subscribe('step-complete', () => inner.push('inner-typed'));
+    bus.subscribe('agent:completed', () => inner.push('inner-typed'));
 
-    bus.emit({ type: 'step-start', stepId: 's1' } as AgentEvent);
+    bus.emit(running());
     // The outer iteration was not clobbered by the nested emit.
     expect(outer.sort()).toEqual(['outer', 'outer-typed']);
     expect(inner.sort()).toEqual(['inner', 'inner-typed']);
@@ -338,8 +367,149 @@ describe('PERF-08: EventBus emit allocation', () => {
     expect(bus.emitBufferCount).toBe(2);
 
     // Depth tracking unwound — a later emit reuses the depth-0 buffer.
-    bus.emit({ type: 'step-complete', stepId: 's2' } as AgentEvent);
+    bus.emit(completed('later'));
     expect(bus.emitBufferCount).toBe(2);
     expect(inner.sort()).toEqual(['inner', 'inner', 'inner-typed', 'inner-typed']);
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// CFG-08 — environment injection (providers, MCP connector, Orchestrator)
+// ---------------------------------------------------------------------------
+
+describe('CFG-08: injectable environment', () => {
+  const KEYS = [
+    'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY',
+    'LOCAL_MODEL_BASE_URL',
+    'PHASE27_MCP_TOKEN',
+  ] as const;
+  let saved: Record<string, string | undefined> = {};
+
+  const modelConfig = (provider: string): ModelConfig => ({
+    id: `m-${provider}`,
+    provider,
+    model: provider === 'local' ? 'llama3' : 'test-model',
+  });
+
+  beforeEach(() => {
+    saved = {};
+    for (const key of KEYS) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+  });
+
+  afterEach(() => {
+    for (const key of KEYS) {
+      if (saved[key] === undefined) delete process.env[key];
+      else process.env[key] = saved[key];
+    }
+  });
+
+  it('provider factories read the injected env and ignore process.env', () => {
+    const env = {
+      OPENAI_API_KEY: 'injected-openai-key',
+      ANTHROPIC_API_KEY: 'injected-anthropic-key',
+      LOCAL_MODEL_BASE_URL: 'http://injected.local:1234/v1',
+    };
+
+    // No process.env values set at all — injected env is sufficient.
+    expect(openaiProviderFactory.create(modelConfig('openai'), env)).toBeTruthy();
+    expect(anthropicProviderFactory.create(modelConfig('anthropic'), env)).toBeTruthy();
+    expect(localProviderFactory.create(modelConfig('local'), env)).toBeTruthy();
+
+    // An injected env WITHOUT the key wins over a populated process.env…
+    process.env.OPENAI_API_KEY = 'process-key';
+    expect(() =>
+      openaiProviderFactory.create(modelConfig('openai'), { OPENAI_API_KEY: undefined })
+    ).toThrow(/OPENAI_API_KEY/);
+
+    // …while omitting the param keeps the previous behaviour exactly.
+    expect(openaiProviderFactory.create(modelConfig('openai'))).toBeTruthy();
+  });
+
+  it('ModelRegistry threads its env into provider factories (default: process.env)', () => {
+    const registry = new ModelRegistry({ env: { OPENAI_API_KEY: 'registry-key' } });
+    registry.registerProvider(openaiProviderFactory);
+    registry.registerConfig({ id: 'cfg-injected', provider: 'openai', model: 'gpt-4o' });
+
+    expect(registry.envSource.OPENAI_API_KEY).toBe('registry-key');
+    expect(registry.get('cfg-injected')).toBeTruthy();
+
+    // A default registry still reads process.env (which is empty here).
+    const legacy = new ModelRegistry();
+    legacy.registerProvider(openaiProviderFactory);
+    legacy.registerConfig({ id: 'cfg-legacy', provider: 'openai', model: 'gpt-4o' });
+    expect(() => legacy.get('cfg-legacy')).toThrow(/OPENAI_API_KEY/);
+  });
+
+  it('McpConnector resolves credentials from the injected env', async () => {
+    const captured: Array<{ headers?: Record<string, string> }> = [];
+    const createClient = async (options: { transport: unknown }) => {
+      captured.push(options.transport as { headers?: Record<string, string> });
+      return { tools: async () => ({}), close: async () => {} };
+    };
+    const serverConfig: McpServerConfig = {
+      id: 'phase27srv',
+      name: 'Phase 27 server',
+      transport: 'http',
+      url: 'https://example.test/mcp',
+      args: [],
+      auth: { type: 'bearer', tokenEnvVar: 'PHASE27_MCP_TOKEN' },
+      connectTimeoutMs: 1000,
+    };
+
+    const connector = new McpConnector({
+      toolRegistry: new ToolRegistry(),
+      env: { PHASE27_MCP_TOKEN: 'injected-mcp-token' },
+      createClient,
+    });
+    expect(connector.envSource.PHASE27_MCP_TOKEN).toBe('injected-mcp-token');
+    await expect(connector.connectServer(serverConfig)).resolves.toBe(true);
+    // The default transport (not stubbed) received the injected token.
+    expect(captured[0]?.headers?.Authorization).toBe('Bearer injected-mcp-token');
+
+    // An injected env WITHOUT the variable never falls back to process.env.
+    process.env.PHASE27_MCP_TOKEN = 'process-mcp-token';
+    const denied = new McpConnector({
+      toolRegistry: new ToolRegistry(),
+      env: {},
+      createClient,
+    });
+    await expect(denied.connectServer(serverConfig)).resolves.toBe(false);
+    expect(denied.getServerState('phase27srv')?.lastError).toMatch(/not set/);
+  });
+
+  it('Orchestrator exposes a per-instance env to its registries and MCP bootstrap', async () => {
+    const projectRoot = fsSync.mkdtempSync(path.join(os.tmpdir(), 'phase27-cfg08-'));
+    fsSync.cpSync(path.join(process.cwd(), 'registry'), path.join(projectRoot, 'registry'), {
+      recursive: true,
+    });
+
+    const injected = new Orchestrator({
+      projectRoot,
+      env: { OPENAI_API_KEY: 'orchestrator-key' },
+    });
+    const other = new Orchestrator({ projectRoot });
+
+    try {
+      await injected.initialize();
+      await other.initialize();
+
+      // The injected env reached the ModelRegistry…
+      expect(injected.modelRegistry.envSource.OPENAI_API_KEY).toBe('orchestrator-key');
+      // …so a model resolves with no process.env key at all.
+      expect(injected.modelRegistry.get('gpt-4o')).toBeTruthy();
+
+      // Instances do not share env: a default Orchestrator still fails.
+      expect(other.modelRegistry.envSource).toBe(process.env);
+      expect(() => other.modelRegistry.get('gpt-4o')).toThrow(/OPENAI_API_KEY/);
+    } finally {
+      await injected.shutdown();
+      await other.shutdown();
+      fsSync.rmSync(projectRoot, { recursive: true, force: true });
+    }
   });
 });

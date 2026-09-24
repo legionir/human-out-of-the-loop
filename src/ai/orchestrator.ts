@@ -1,6 +1,8 @@
 import path from 'node:path';
 import { z } from 'zod';
 import { EventBus } from './runtime/event-bus.js';
+import type { EnvSource } from './env.js';
+import { resolveEnv } from './env.js';
 import { AgentRuntime } from './runtime/agent-runtime.js';
 import { TaskRuntime } from './runtime/task-runtime.js';
 import { MemoryPlanStore, FilePlanStore, type PlanStore } from './runtime/plan-store.js';
@@ -76,6 +78,11 @@ export const OrchestratorConfigSchema = z.object({
   redactKeys: z.array(z.string().min(1)).default([]),
   // C4: max question-and-answer rounds before the run fails.
   maxClarificationRounds: z.number().int().min(0).max(10).default(3),
+  // Phase 27 (CFG-08): optional per-Orchestrator environment.  When set,
+  // every secret lookup (provider API keys, MCP auth vars,
+  // LOCAL_MODEL_BASE_URL) resolves from this object instead of
+  // process.env.  Omitted → previous behaviour (live process env).
+  env: z.custom<EnvSource>((v) => typeof v === 'object' && v !== null).optional(),
 });
 
 /**
@@ -194,7 +201,13 @@ export class Orchestrator {
    * consumers (CLI, server health endpoint, tests) can inspect the
    * effective settings without duplicating resolution logic.
    */
-  readonly config: Required<OrchestratorConfig>;
+  /**
+   * Fully-resolved config.  `env` is guaranteed present here (it is
+   * defaulted to the live process env in the constructor), hence
+   * `Required<Omit<…>> & { env: EnvSource }` rather than plain
+   * `Required<OrchestratorConfig>`.
+   */
+  readonly config: Required<Omit<OrchestratorConfig, 'env'>> & { env: EnvSource };
 
   readonly personaRegistry: PersonaRegistry;
   readonly skillRegistry: SkillRegistry;
@@ -218,6 +231,12 @@ export class Orchestrator {
   readonly planner: Planner;
   readonly delegationGuard: DelegationGuard;
 
+  /**
+   * Phase 27 (CFG-08): environment threaded into the ModelRegistry and
+   * the MCP bootstrap (default: the live process env).
+   */
+  private readonly env: EnvSource;
+
   private initialized = false;
 
   constructor(config: OrchestratorConfig) {
@@ -229,6 +248,8 @@ export class Orchestrator {
     }
     const data = parsed.data;
     this.config = {
+      // Phase 27 (CFG-08): resolved here so `config.env` is always set.
+      env: data.env ?? process.env,
       projectRoot: data.projectRoot,
       persistent: data.persistent,
       // runtimeDir is optional in the schema — derive the default here
@@ -252,10 +273,14 @@ export class Orchestrator {
       onProgress: config.onProgress ?? (() => {}),
     };
 
+    // Phase 27 (CFG-08): resolve the env once, before any registry or
+    // connector is built, so providers and MCP credentials see it.
+    this.env = resolveEnv(data.env);
+
     this.personaRegistry = new PersonaRegistry();
     this.toolRegistry = new ToolRegistry();
     this.skillRegistry = new SkillRegistry({ toolRegistry: this.toolRegistry });
-    this.modelRegistry = new ModelRegistry();
+    this.modelRegistry = new ModelRegistry({ env: this.env });
     this.agentRegistry = new AgentRegistry();
 
     // Phase 19 (SING-01/02): each Orchestrator owns its bus/runtime —
@@ -372,7 +397,9 @@ export class Orchestrator {
 
     await bootstrapMcpServers(
       path.join(registryDir, 'mcp-servers'),
-      this.toolRegistry
+      this.toolRegistry,
+      undefined,
+      this.env
     );
 
     // Catalog tools must exist before skills load (skills cross-validate

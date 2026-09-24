@@ -3,6 +3,7 @@ import path from 'node:path';
 import { McpServerConfigSchema, type McpServerConfig } from '../schemas/mcp-server.js';
 import { McpConnector } from './mcp-connector.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
+import type { EnvSource } from '../env.js';
 
 // ─── Loading MCP configs from disk ───────────────────────────────
 
@@ -56,7 +57,12 @@ export function loadMcpServerConfigs(directory: string): {
 export async function bootstrapMcpServers(
   mcpDir: string,
   toolRegistry: ToolRegistry,
-  connector?: McpConnector
+  connector?: McpConnector,
+  /**
+   * Phase 27 (CFG-08): environment for credential resolution — used
+   * only when `connector` is not supplied.  Default: `process.env`.
+   */
+  env?: EnvSource
 ): Promise<{
   connector: McpConnector;
   configErrors: Array<{ file: string; error: string }>;
@@ -64,7 +70,7 @@ export async function bootstrapMcpServers(
 }> {
   const { configs, errors: configErrors } = loadMcpServerConfigs(mcpDir);
 
-  const conn = connector ?? new McpConnector({ toolRegistry });
+  const conn = connector ?? new McpConnector({ toolRegistry, ...(env ? { env } : {}) });
   const connectionResults = configs.length > 0 ? await conn.connectAll(configs) : [];
 
   return {

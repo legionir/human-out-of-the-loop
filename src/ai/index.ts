@@ -6,3 +6,5 @@ export * from './tools/index.js';
 export * from './models/index.js';
 export * from './agents/index.js';
 export { Orchestrator, type OrchestratorConfig, type OrchestratorResult } from './orchestrator.js';
+// Phase 27 (CFG-08): injectable environment source.
+export { type EnvSource, resolveEnv } from './env.js';

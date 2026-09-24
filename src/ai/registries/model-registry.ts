@@ -1,6 +1,8 @@
 import { createRegistry, Registry } from './base-registry.js';
 import { loadRegistryFromDirectory } from './loader.js';
 import { ModelConfigSchema, type ModelConfig } from '../schemas/model-config.js';
+import type { EnvSource } from '../env.js';
+import { resolveEnv } from '../env.js';
 import type { LanguageModel } from 'ai';
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -20,8 +22,21 @@ export interface ProviderFactory {
    * Create a LanguageModel instance from the given config.
    * The factory is responsible for reading API keys from env vars
    * and applying provider-specific options.
+   *
+   * Phase 27 (CFG-08): `env` is the optional injected environment
+   * source.  When omitted, the factory falls back to `process.env`
+   * (unchanged default behaviour).
    */
-  create(config: ModelConfig): LanguageModel;
+  create(config: ModelConfig, env?: EnvSource): LanguageModel;
+}
+
+/** Phase 27 (CFG-08): options accepted by the registry. */
+export interface ModelRegistryOptions {
+  /**
+   * Environment used when instantiating provider factories.
+   * Default: the live `process.env`.
+   */
+  env?: EnvSource;
 }
 
 /**
@@ -53,12 +68,23 @@ export class ModelRegistry {
   private readonly configs: Registry<ModelConfig>;
   private readonly providers = new Map<string, ProviderFactory>();
   private readonly cache = new Map<string, ResolvedModel>();
+  /**
+   * Phase 27 (CFG-08): environment source threaded to every provider
+   * factory.  Defaults to `process.env` (previous behaviour).
+   */
+  private readonly env: EnvSource;
 
-  constructor() {
+  constructor(options: ModelRegistryOptions = {}) {
     this.configs = createRegistry<ModelConfig>({
       schema: ModelConfigSchema,
       label: 'ModelRegistry',
     });
+    this.env = resolveEnv(options.env);
+  }
+
+  /** The environment this registry resolves credentials from. */
+  get envSource(): EnvSource {
+    return this.env;
   }
 
   // ── Provider management ───────────────────────────────────────
@@ -136,7 +162,7 @@ export class ModelRegistry {
     }
 
     // Create and cache
-    const model = factory.create(config);
+    const model = factory.create(config, this.env);
     const resolved: ResolvedModel = { config, model };
     this.cache.set(id, resolved);
     return resolved;

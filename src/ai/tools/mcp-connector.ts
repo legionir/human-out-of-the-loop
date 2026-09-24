@@ -1,6 +1,8 @@
 import type { Tool } from 'ai';
 import type { McpServerConfig, McpAuth } from '../schemas/mcp-server.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
+import type { EnvSource } from '../env.js';
+import { resolveEnv } from '../env.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -33,6 +35,12 @@ export interface McpConnectorOptions {
    * Default: AI SDK's built-in HTTP/SSE/stdio transports.
    */
   createTransport?: (config: McpServerConfig) => unknown;
+  /**
+   * Phase 27 (CFG-08): environment source used to resolve MCP
+   * credentials (`auth.tokenEnvVar` / `auth.keyEnvVar`).  Default:
+   * the live `process.env`.
+   */
+  env?: EnvSource;
 }
 
 // ─── Credential resolution ───────────────────────────────────────
@@ -44,13 +52,17 @@ export interface McpConnectorOptions {
  * contains env var *names*, not values — but this makes the split
  * explicit).
  */
-function resolveAuthHeaders(auth: McpAuth, serverId: string): Record<string, string> {
+function resolveAuthHeaders(
+  auth: McpAuth,
+  serverId: string,
+  env: EnvSource
+): Record<string, string> {
   switch (auth.type) {
     case 'none':
       return {};
 
     case 'bearer': {
-      const token = process.env[auth.tokenEnvVar];
+      const token = env[auth.tokenEnvVar];
       if (!token) {
         throw new Error(
           `[mcp:${serverId}] Environment variable "${auth.tokenEnvVar}" is not set (required for bearer auth).`
@@ -60,7 +72,7 @@ function resolveAuthHeaders(auth: McpAuth, serverId: string): Record<string, str
     }
 
     case 'api-key': {
-      const key = process.env[auth.keyEnvVar];
+      const key = env[auth.keyEnvVar];
       if (!key) {
         throw new Error(
           `[mcp:${serverId}] Environment variable "${auth.keyEnvVar}" is not set (required for api-key auth).`
@@ -115,8 +127,8 @@ function sanitiseError(err: unknown, credentials: Record<string, string>): strin
  * Default transport factory.  Uses AI SDK's built-in transports.
  * Kept as a separate function so tests can override it.
  */
-function defaultCreateTransport(config: McpServerConfig): unknown {
-  const headers = resolveAuthHeaders(config.auth, config.id);
+function defaultCreateTransport(config: McpServerConfig, env: EnvSource): unknown {
+  const headers = resolveAuthHeaders(config.auth, config.id, env);
 
   if (config.transport === 'stdio') {
     if (!config.command) {
@@ -199,11 +211,24 @@ export class McpConnector {
   private readonly createTransport: (config: McpServerConfig) => unknown;
   private readonly createClient: NonNullable<McpConnectorOptions['createClient']>;
   private readonly servers = new Map<string, McpServerState>();
+  /**
+   * Phase 27 (CFG-08): environment used for credential resolution.
+   * Defaults to `process.env` — a per-Orchestrator source can be
+   * injected instead (see `OrchestratorConfig.env`).
+   */
+  private readonly env: EnvSource;
 
   constructor(options: McpConnectorOptions) {
     this.toolRegistry = options.toolRegistry;
-    this.createTransport = options.createTransport ?? defaultCreateTransport;
+    this.env = resolveEnv(options.env);
+    this.createTransport =
+      options.createTransport ?? ((config) => defaultCreateTransport(config, this.env));
     this.createClient = options.createClient ?? defaultCreateClient;
+  }
+
+  /** The environment this connector resolves credentials from. */
+  get envSource(): EnvSource {
+    return this.env;
   }
 
   /**
@@ -223,7 +248,7 @@ export class McpConnector {
     // Capture credentials for sanitisation, then discard
     let credentials: Record<string, string> = {};
     try {
-      credentials = resolveAuthHeaders(config.auth, config.id);
+      credentials = resolveAuthHeaders(config.auth, config.id, this.env);
     } catch (err) {
       state.status = 'unavailable';
       state.lastError = err instanceof Error ? err.message : String(err);
