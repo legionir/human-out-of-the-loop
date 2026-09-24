@@ -1,5 +1,6 @@
 import { generateObject } from 'ai';
-import { withLlmTimeout } from './llm-timeout.js';
+import { withLlmTimeout, withStructuredRetry } from './llm-timeout.js';
+import { reportLlmUsage, type LlmUsageReporter } from './llm-usage.js';
 import { z } from 'zod';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
@@ -29,6 +30,8 @@ export interface AcceptanceCheckerConfig {
   onQualityFailure?: (planId: string, stepId: string, reason: string) => void;
   /** Phase 30 (P5): deadline for the judgment call (default 120s). */
   timeoutMs?: number;
+  /** Token usage of every judgment call. */
+  onUsage?: LlmUsageReporter;
 }
 
 /**
@@ -66,9 +69,11 @@ export class AcceptanceChecker {
    */
   async checkStep(
     step: PlanStep,
-    taskResult: Task
+    taskResult: Task,
+    /** The run's model (a per-run override); default: the configured one. */
+    modelId?: string
   ): Promise<AcceptanceResult> {
-    const reviewerAgent = this.buildReviewerAgent();
+    const reviewerAgent = this.buildReviewerAgent(modelId);
 
     const prompt = `
 You are verifying whether a completed task meets its acceptance criteria.
@@ -93,21 +98,24 @@ a JSON object containing "accepted" (boolean) and "reason" (string).
 `.trim();
 
     try {
-      const { object } = await withLlmTimeout(
-        'Acceptance check',
-        this.config.timeoutMs,
-        (abortSignal) =>
-          generateObject({
-            model: reviewerAgent.model,
-            system: reviewerAgent.systemPrompt,
-            prompt,
-            schema: AcceptanceResultSchema,
-            schemaName: 'AcceptanceJudgment',
-            schemaDescription:
-              'Whether the step output meets its acceptance criteria, with a reason.',
-            abortSignal,
-          })
+      const { object, usage } = await withStructuredRetry(() =>
+        withLlmTimeout(
+          'Acceptance check',
+          this.config.timeoutMs,
+          (abortSignal) =>
+            generateObject({
+              model: reviewerAgent.model,
+              system: reviewerAgent.systemPrompt,
+              prompt,
+              schema: AcceptanceResultSchema,
+              schemaName: 'AcceptanceJudgment',
+              schemaDescription:
+                'Whether the step output meets its acceptance criteria, with a reason.',
+              abortSignal,
+            })
+        )
       );
+      reportLlmUsage(this.config.onUsage, 'acceptance', usage, taskResult.planId);
 
       return object;
     } catch (err) {
@@ -126,14 +134,14 @@ a JSON object containing "accepted" (boolean) and "reason" (string).
     this.config.onQualityFailure?.(planId, stepId, reason);
   }
 
-  private buildReviewerAgent(): ResolvedAgent {
+  private buildReviewerAgent(modelId?: string): ResolvedAgent {
     return createAgent({
       agentDefinition: {
         id: 'acceptance-reviewer',
         name: 'Acceptance Reviewer',
         personaId: 'reviewer',
         skillIds: ['acceptance_check'],
-        modelId: this.modelId,
+        modelId: modelId ?? this.modelId,
       },
       refs: {
         personaRegistry: this.config.personaRegistry,

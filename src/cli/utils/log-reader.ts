@@ -65,7 +65,11 @@ export function filterEntries(
   });
 }
 
-/** Usage totals from `task:completed` payloads (TokenUsage shape). */
+/**
+ * Usage totals from `task:completed` (agent turns) and `llm:usage`
+ * (planning / acceptance / review calls) payloads, both TokenUsage-shaped.
+ * Only `task:completed` counts as a task.
+ */
 export function sumUsageFromEntries(entries: RawLogEntry[]): {
   promptTokens: number;
   completionTokens: number;
@@ -74,8 +78,8 @@ export function sumUsageFromEntries(entries: RawLogEntry[]): {
 } {
   const totals = { promptTokens: 0, completionTokens: 0, totalTokens: 0, taskCount: 0 };
   for (const e of entries) {
-    if (e.eventType !== 'task:completed') continue;
-    totals.taskCount++;
+    if (e.eventType === 'task:completed') totals.taskCount++;
+    else if (e.eventType !== 'llm:usage') continue;
     const usage = e.payload?.usage as
       | { promptTokens?: number; completionTokens?: number; totalTokens?: number }
       | undefined;

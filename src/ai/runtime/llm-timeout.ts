@@ -1,3 +1,4 @@
+import { NoObjectGeneratedError } from 'ai';
 /**
  * Phase 30 (P5): bounded LLM calls.
  *
@@ -56,5 +57,26 @@ export async function withLlmTimeout<T>(
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * One more attempt when a structured call's answer could not be parsed or
+ * did not match the schema (`NoObjectGeneratedError`).  Real models do
+ * this occasionally; without a retry a single malformed answer ended the
+ * whole run at planning, or failed a finished step and forced a re-plan.
+ * Transport errors are NOT retried here — the provider SDK already retries
+ * those (429/5xx) with backoff.
+ */
+export async function withStructuredRetry<T>(
+  call: () => Promise<T>,
+  attempts = 2
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await call();
+    } catch (err) {
+      if (attempt >= attempts || !NoObjectGeneratedError.isInstance(err)) throw err;
+    }
   }
 }

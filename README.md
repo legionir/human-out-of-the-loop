@@ -127,6 +127,76 @@ startup because it runs plain JavaScript from `dist/`.
 npx tsx src/cli.ts models        # same commands, from inside the repository
 ```
 
+### Use any OpenAI-compatible endpoint (no registry edits)
+
+```bash
+export HOTL_BASE_URL=http://localhost:4414/p/free/v1   # Windows: set HOTL_BASE_URL=...
+export HOTL_API_KEY=...
+export HOTL_MODEL=@aur/auto        # a provider model name, or a registered id
+hootl                               # model: custom (@aur/auto)
+```
+
+A model name that is not a registered id is registered as `custom`. The
+endpoint is called over Chat Completions; set `HOTL_API_STYLE=responses` for
+the Responses API. The three variables can also live in the project's `.env`.
+Precedence: `--model` > `HOTL_MODEL` > `defaultModel` in the global config.
+
+### Interactive mode
+
+Run `hootl` with no subcommand in a terminal. The screen is cleared, **HOOTL**
+is shown for 3 seconds, and then the console opens. The prompt shows the
+active directory, which is the project root:
+
+```text
+HOOTL my-project › /mo
+ /model   list models  ·  /model <id> to switch for this session
+ /models  registered models (--remote: what the providers serve)
+ ↑↓ select · Tab complete · Enter run · Esc close
+```
+
+```bash
+hootl                                   # in the current directory
+hootl --project-root=../other-project   # or --model <name>, --persistent, --yes, --no-splash
+```
+
+- **A plain line is a goal**: it is planned, shown for confirmation once, then
+  executed, the same as `hootl run`. With `/persistent on`, the goals of one
+  interactive session are recorded in the same session.
+- **`/` opens the command menu**, filtered as you type: ↑/↓ select, Tab
+  completes, Enter runs, Esc closes. Arguments have menus too (`/model `,
+  `/cd `, `/persistent `, `/plans `). When the menu is closed, ↑/↓ walk the
+  history.
+
+| command | effect |
+| --- | --- |
+| `/help` · `/status` | commands · directory, model, endpoint, session, API keys (present or not) |
+| `/model` · `/model <name>` | list registered models and **the models your providers serve** · switch |
+| `/config` · `/config set <key> <value>` · `/config unset <key>` | show · save `defaultModel`, `persistent`, `projectRoot` |
+| `/persistent on\|off` · `/yes on\|off` · `/verbose on\|off` | write `.ai-runtime` · auto-confirm plans · stream tool calls |
+| `/cd <dir>` · `/pwd` | change or print the active directory (loads that directory's `.env`) |
+| `/new` · `/clear` · `/exit` | new session · clear the screen · leave (also Ctrl-D, or Ctrl-C twice) |
+
+Every regular subcommand also works with a slash, in the active directory:
+`/plans list`, `/plans resume <id>`, `/usage`, `/logs --tail 20`,
+`/tools --mcp`, `/mcp test <id>`, and `--help` on any of them.
+**Ctrl-C** while a goal is running cancels the plan and returns to the prompt.
+Without a terminal (pipes, CI, scripts), `hootl` with no arguments prints the
+help, as before.
+
+### Models: registered, or whatever your provider serves
+
+`--model`, `/model`, `defaultModel` and the web UI accept any of these:
+
+- a registered id (`hootl models`), for example `gpt-4o`;
+- a model name your provider serves (`hootl models --remote`), for example
+  `@aur/auto`. It is called on `HOTL_BASE_URL` when that is set, otherwise
+  on OpenAI;
+- `<provider>:<name>`, for example `anthropic:claude-3-5-haiku-latest`,
+  `openai:gpt-4.1` or `local:llama3:8b`.
+
+The web UI's model picker lists the registered models and, under "From
+<provider>", the models the providers serve (↻ reloads them).
+
 ### Help
 
 The CLI documents itself — every command and subcommand carries a full
@@ -322,11 +392,11 @@ See [src/ai/README.md](./src/ai/README.md) for full architecture diagram, layers
 
 ## Adding New Components
 
-See [src/ai/CONTRIBUTING.md](./src/ai/CONTRIBUTING.md) for step-by-step guides to add Tool / Skill / Persona / Agent / MCP Server.
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for step-by-step guides to add Tool / Skill / Persona / Agent / MCP Server.
 
 ## Configuration
 
-See [src/ai/CONFIGURATION.md](./src/ai/CONFIGURATION.md) for env vars, configurable ceilings, file structures, runtime directory, and scope audit.
+See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable ceilings, file structures, runtime directory, and scope audit.
 
 ## Project Status
 
@@ -350,10 +420,10 @@ See [src/ai/CONFIGURATION.md](./src/ai/CONFIGURATION.md) for env vars, configura
 | 16 | Hardening + 15 Fixes | 🟢 |
 | 17 | Documentation & Delivery | 🟢 |
 | 18–26 | Runtime hardening, CLI parity, server-side controls, registry introspection, clarification, usage/tasks | 🟢 |
-| C1–C5 | CLI completion plan (`CLI_COMPLETION_PLAN.md`) | 🟢 |
-| U1–U7 | UI completion plan (`UI_COMPLETION_PLAN.md`) | 🟢 |
+| C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
+| U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**670 tests green (49 files), 0 tsc errors — plus 32 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `EXECUTION_PLAN_V2.md`; CLI + UI completion plans: `CLI_COMPLETION_PLAN.md`, `UI_COMPLETION_PLAN.md`)
+**723 tests green (53 files), 0 tsc errors — plus 46 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
 
 ## Law Compliance
 

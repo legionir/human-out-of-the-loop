@@ -218,8 +218,12 @@ describe('Phase 29 — run pre-flight is a usage error, not a crash', () => {
     expect(errOut).toContain('--timeout-ms must be an integer between 1000 and 600000');
   });
 
-  it('rejects an unknown --model with the list of valid ids', async () => {
-    const { code, errOut } = await runCli([
+  // v27.4: models are chosen at runtime — a name that no registry file
+  // defines is a provider model name, not a usage error.  The run says so
+  // up front, so a typo is still visible before the first call.
+  it('accepts a model that is not in the registry and says it is a provider model name', async () => {
+    mockGenerateObject.mockRejectedValue(new Error('stop after the pre-flight'));
+    const { code, out, errOut } = await runCli([
       'run',
       'goal',
       '--model',
@@ -227,10 +231,8 @@ describe('Phase 29 — run pre-flight is a usage error, not a crash', () => {
       '--project-root',
       projectRoot,
     ]);
-    expect(code).toBe(2);
-    expect(errOut).toContain('Unknown model id "ghost-model"');
-    expect(errOut).toContain('gpt-4o');
-    expect(errOut).toContain('hootl models');
+    expect(code).not.toBe(2);
+    expect(out + errOut).toContain('Model: ghost-model (not in the registry) via the openai API');
   });
 
   it('rejects an unknown --session instead of silently creating nothing', async () => {

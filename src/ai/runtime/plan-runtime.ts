@@ -395,7 +395,7 @@ export class PlanRuntime {
       // (e.g. resume) cannot double-judge the same step.
       this.acceptanceChecked.add(step.id);
 
-      const judgment = await checker.checkStep(step, task);
+      const judgment = await checker.checkStep(step, task, this.defaultModelId);
 
       if (judgment.accepted) {
         step.resultSummary = `${step.resultSummary ?? ''}\n[Acceptance: PASSED — ${judgment.reason}]`.trim();
@@ -546,7 +546,7 @@ Produce a new plan that:
 3. Preserves the original goal.
 `.trim();
 
-      const result = await this.config.planner.plan(replanRequest);
+      const result = await this.config.planner.plan(replanRequest, plan.id, this.defaultModelId);
 
       if (!result.isClear || !result.plan) {
         return false; // Planner couldn't produce a valid revision

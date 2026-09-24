@@ -12,6 +12,8 @@
  *   human-out-of-the-loop tasks list [--plan X] | tasks show <taskId>
  *   human-out-of-the-loop logs [--plan X] [--tail N] [--follow]
  *
+ *   human-out-of-the-loop                          interactive mode (in a terminal)
+ *
  * The heavy lifting lives in src/ai (the Orchestrator); this layer only
  * parses commands, renders progress, and manages exit codes.
  */
@@ -45,6 +47,7 @@ import {
 import { usageCommand } from './cli/commands/usage.js';
 import { tasksListCommand, tasksShowCommand } from './cli/commands/tasks.js';
 import { err } from './cli/utils/output.js';
+import { startRepl, parseInteractiveArgs } from './cli/repl.js';
 
 const DEFAULT_BIN_NAME = 'human-out-of-the-loop';
 
@@ -155,7 +158,7 @@ const MCP_HELP = helpBlock(
       '  auth block.  Credentials are NEVER stored inline: auth names an ENVIRONMENT',
       '  VARIABLE (tokenEnvVar / keyEnvVar) whose value is read at connect time and',
       '  stripped from every error message.  Required env values are documented in',
-      '  src/ai/CONFIGURATION.md.',
+      '  docs/CONFIGURATION.md.',
       '',
       'NOTE',
       '  MCP servers are also loaded during `run`, so tools exposed here become',
@@ -197,6 +200,18 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '  that plan ONCE, then executes it autonomously with a team of agents',
         '  (planner, coder, reviewer, ...) until every step is done.  Everything is',
         '  driven by the local Orchestrator in src/ai — no server is required.',
+        '',
+        'INTERACTIVE MODE',
+        `  Run \`${binName}\` with no subcommand in a terminal to open a prompt: type a`,
+        '  goal to plan and run it, or "/" for the command menu (↑↓ to pick).  The',
+        '  prompt shows the active directory, which is the project root.',
+        `    ${binName} [--project-root <dir>] [--model <name>] [--persistent] [--yes]`,
+        '          [--no-splash]          (HOTL_NO_SPLASH=1 also skips the start screen)',
+        '',
+        'MODELS',
+        '  --model / /model take a registered id, a provider model name (e.g. what',
+        `  \`${binName} models --remote\` lists), or <provider>:<name> (anthropic:…, openai:…).`,
+        '  HOTL_BASE_URL / HOTL_API_KEY / HOTL_MODEL configure an OpenAI-compatible endpoint.',
         '',
         'COMMAND GROUPS',
         '  run          plan + confirm + execute a goal (the main entry point)',
@@ -250,7 +265,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .argument('<goal>', 'the goal to achieve, in plain language')
     .option('--project-root <dir>', 'project root (default: current directory)')
     .option('--persistent', 'persist plans/sessions in .ai-runtime (default: global config or off)')
-    .option('--model <id>', 'model id to use (default: global config or gpt-4o)')
+    .option('--model <name>', 'model: registered id, provider model name, or provider:name')
     .option('--session <id>', 'continue an existing session')
     .option('--yes', 'auto-confirm the plan without prompting (CI mode)')
     .option('--verbose', 'show tool calls and low-level status')
@@ -309,8 +324,8 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '  --session <id>   continue an existing session: the goal is recorded as a new',
         '                   interaction of that session instead of starting a new one.',
         '  --label <text>   label for a NEW session (ignored when --session is used).',
-        '  --model <id>     an id from `models` (for example gpt-4o, claude-sonnet);',
-        '                   unknown ids fail immediately with the list of valid ids.',
+        '  --model <name>   a registered id (`models`), a provider model name',
+        '                   (`models --remote`), or <provider>:<name>.',
         '  --timeout-ms     per-agent budget; --max-steps caps tool-call iterations;',
         '  --max-replans    caps automatic re-planning of failed steps;',
         '  --max-delegation-depth caps agent -> sub-agent nesting (0 = no delegation).',
@@ -467,11 +482,13 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
 
   registryOptions(program
     .command('models')
-    .description('List available models (project registry + built-in)')
+    .description('List available models (project registry + built-in, or --remote)')
+    .option('--remote', 'ask the configured providers which models they serve')
     .action(async (opts: Record<string, string | boolean | undefined>) => {
       process.exitCode = await modelsCommand({
         projectRoot: opts.projectRoot as string | undefined,
         json: opts.json === true,
+        remote: opts.remote === true,
       });
     }));
 
@@ -635,7 +652,20 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
  * and stdio flushing can finish).
  */
 export async function main(argv: string[] = process.argv): Promise<number> {
-  const program = createProgram(detectBinName(argv));
+  const binName = detectBinName(argv);
+  // No subcommand (only interactive options, e.g. `--project-root X`) in a
+  // real terminal → interactive mode (like Claude Code).  Pipes, CI and
+  // scripts keep the old behaviour: no arguments prints the help.
+  const interactive = parseInteractiveArgs(argv.slice(2));
+  if (interactive && process.stdin.isTTY && process.stdout.isTTY) {
+    return startRepl({ binName, version: packageVersion(), createProgram }, interactive);
+  }
+  if (interactive && argv.length > 2) {
+    err(chalk.red('Interactive mode needs a terminal.'));
+    err(chalk.dim(`To run a goal from a script: ${binName} run "<goal>" --yes [--project-root <dir>]`));
+    return 2;
+  }
+  const program = createProgram(binName);
   applyExitOverride(program);
   try {
     await program.parseAsync(argv);

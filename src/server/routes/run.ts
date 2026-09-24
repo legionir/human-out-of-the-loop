@@ -62,12 +62,12 @@ export function runRouter(ctx: ServerContext): Router {
         res.status(400).json({ error: '"model" must be a non-empty string when present.' });
         return;
       }
-      const validIds = ctx.orchestrator.modelRegistry.listConfigs().map((m) => m.id);
-      if (!ctx.orchestrator.modelRegistry.hasConfig(model)) {
-        res.status(400).json({ error: `Unknown model id "${model}".`, validIds });
-        return;
-      }
-      runOverrides.modelId = model;
+      // Any spec: a registered id, `<provider>:<name>`, or a model name the
+      // provider listed (GET /api/models/remote) — registered on first use.
+      // The registry files must be loaded first, or a registered id would be
+      // mistaken for a provider model name.
+      await ctx.orchestrator.initialize();
+      runOverrides.modelId = ctx.orchestrator.useModel(model);
     }
     // [key, value, lo, hi, mustBeInteger]
     for (const [key, field, lo, hi, isInt] of [

@@ -117,7 +117,8 @@ describe('DevOps Quality Gate', () => {
     for (const file of providerFiles) {
       const content = fs.readFileSync(path.join(providersDir, file), 'utf-8');
       if (content.includes('create(')) {
-        expect(content).toMatch(/process\.env\./);
+        // `process.env.X` or a `process.env` fallback source (`env ?? process.env`).
+        expect(content).toMatch(/process\.env\b/);
       }
     }
   });

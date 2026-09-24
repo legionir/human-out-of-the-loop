@@ -81,3 +81,17 @@ export function prepareCliEnvironment(projectRoot: string): GlobalCliConfig {
   loadDotEnv([projectRoot, process.cwd()]);
   return loadGlobalConfig();
 }
+
+/**
+ * Write `~/.human-out-of-the-loop/config.json` (the interactive `/config set`).
+ * Keys set to `undefined` are removed.  Throws on I/O errors so the caller
+ * can report them.
+ */
+export function saveGlobalConfig(config: GlobalCliConfig): void {
+  const file = globalConfigPath();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const clean = Object.fromEntries(
+    Object.entries(config).filter(([, value]) => value !== undefined),
+  );
+  fs.writeFileSync(file, JSON.stringify(clean, null, 2) + '\n');
+}

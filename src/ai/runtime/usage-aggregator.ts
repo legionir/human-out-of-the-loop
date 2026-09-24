@@ -11,6 +11,12 @@ export interface UsageRecord {
   personaId?: string;
   usage: TokenUsage;
   timestamp: number;
+  /**
+   * Set for a structured model call (planning, acceptance, review) rather
+   * than an agent task: its tokens count toward every total, but it is not
+   * a task, so it does not count toward `taskCount`.
+   */
+  llmCall?: boolean;
 }
 
 export interface UsageSummary {
@@ -101,7 +107,7 @@ export class UsageAggregator {
       totalPromptTokens: 0,
       totalCompletionTokens: 0,
       totalTokens: 0,
-      taskCount: this.records.length,
+      taskCount: this.records.filter((r) => !r.llmCall).length,
       byAgent: {},
       byPlan: {},
     };
@@ -155,7 +161,7 @@ export class UsageAggregator {
       promptTokens: planRecords.reduce((sum, r) => sum + r.usage.promptTokens, 0),
       completionTokens: planRecords.reduce((sum, r) => sum + r.usage.completionTokens, 0),
       totalTokens: planRecords.reduce((sum, r) => sum + r.usage.totalTokens, 0),
-      taskCount: planRecords.length,
+      taskCount: planRecords.filter((r) => !r.llmCall).length,
     };
   }
 

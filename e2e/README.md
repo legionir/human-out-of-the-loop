@@ -31,6 +31,8 @@ Exit code is 0 only when every check passed. `E2E_SCENARIO_TIMEOUT_MS`
 | `credential` | a hostile note makes the model echo an API key; it never reaches any artifact, and the redaction marker proves the trap fired |
 | `mcp` | `hootl tools --mcp` starts a real stdio server, lists its tool, reports a dead server, and stays valid under `--json` |
 | `cancel` | `hootl plans cancel` mid-run ends the plan as `cancelled` and the run exits on its own |
+| `faults` | provider faults: retried 5xx, a clear 401, a retried and a persistently unparsable planner answer, an empty answer, and usage that includes the structured calls |
+| `envendpoint` | `HOTL_BASE_URL`/`HOTL_API_KEY`/`HOTL_MODEL` alone (no registry edit, no `OPENAI_API_KEY`) drive a full run over Chat Completions, the acceptance judge included |
 | `ctrlc` | one Ctrl-C cancels gracefully (skipped on Windows — no POSIX signals) |
 
 ## The provider stub
@@ -39,7 +41,8 @@ Exit code is 0 only when every check passed. `E2E_SCENARIO_TIMEOUT_MS`
 node e2e/fake-llm.mjs            # or: e2e/start-stub.sh   (writes a pid file)
 ```
 
-It speaks the OpenAI **Responses API** on `http://127.0.0.1:8931/v1`:
+It speaks the OpenAI **Responses API** on `http://127.0.0.1:8931/v1`, and
+**Chat Completions** on any path ending in `/chat/completions`:
 
 - structured requests (`text.format.type === "json_schema"`) answer with a
   payload derived from `schemaName` — `PlannerAssessment`, `ExecutionPlan`,
@@ -58,6 +61,11 @@ It speaks the OpenAI **Responses API** on `http://127.0.0.1:8931/v1`:
 | `GITSTATUS` | `git_status` |
 | `SLOW:<ms>` | delay the agent turns (a window to cancel) |
 | `SLOWALL:<ms>` | delay every reply |
+| `FAULT:<kind>x<n>` | the first `<n>` agent turns fail (no `x<n>` = all); kind = `429`, `500`, `401`, `CUT` (drop the socket), `HANG` (never answer), `EMPTY` (empty output) |
+| `BADJSON:<Schema>x<n>` | the first `<n>` structured calls for `<Schema>` (`PlannerAssessment`, `ExecutionPlan`, `AcceptanceJudgment`, `FinalReview`) get unparsable text |
+
+Fault counters are keyed by the marker text and live as long as the stub, so
+give each scenario its own tag: `FAULT:500x2#my-scenario`.
 
 A goal that reads `OPENAI_API_KEY=…` is echoed back verbatim — that is the
 worst case the credential scenario needs: a model under the control of a

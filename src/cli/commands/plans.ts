@@ -8,6 +8,7 @@
  *
  * Plans live in `<projectRoot>/.ai-runtime/plans/` (persistent mode).
  */
+import { envDefaultModelId } from '../utils/registries.js';
 import path from 'node:path';
 import { Orchestrator } from '../../ai/orchestrator.js';
 import { CancellationManager } from '../../ai/runtime/cancellation-manager.js';
@@ -150,15 +151,13 @@ export async function plansCancelCommand(planId: string, opts: PlansCommandOptio
 /** Resume a previously interrupted plan (needs the full orchestrator). */
 export async function plansResumeCommand(planId: string, opts: PlansCommandOptions): Promise<number> {
   const projectRoot = projectRootFor(opts);
-  prepareCliEnvironment(projectRoot);
   const globalConfig = prepareCliEnvironment(projectRoot);
+  const model = opts.model ?? envDefaultModelId(projectRoot) ?? globalConfig.defaultModel;
 
   const orchestrator = new Orchestrator({
     projectRoot,
     persistent: true,
-    ...(opts.model ?? globalConfig.defaultModel
-      ? { defaultModelId: opts.model ?? globalConfig.defaultModel }
-      : {}),
+    ...(model ? { defaultModelId: model } : {}),
     ...(opts.timeoutMs !== undefined ? { agentTimeoutMs: opts.timeoutMs } : {}),
   });
 

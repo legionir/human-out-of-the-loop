@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { generateText, stepCountIs, type LanguageModelUsage } from 'ai';
+import { generateText, stepCountIs } from 'ai';
+import { toTokenUsage } from './llm-usage.js';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { EventBus, type TokenUsage } from './event-bus.js';
 
@@ -272,6 +273,14 @@ export class AgentRuntime {
 
       const sdkResult = await Promise.race([executionPromise, timeoutPromise]);
 
+      // A turn with no text and no tool call did nothing; counting it as a
+      // completed task let an empty answer pass as a finished step.
+      if (!sdkResult.text.trim() && toolsUsed.length === 0) {
+        throw new EmptyResponseError(
+          'The model returned an empty response (no text and no tool calls).'
+        );
+      }
+
       // ── Build compact summary ─────────────────────────────
       const summary = this.buildSummary(sdkResult.text, toolsUsed, toolErrors);
       const toolErrorMessages = toolErrors.map(
@@ -433,19 +442,8 @@ export class AgentRuntime {
       }
     }
 
-    // Phase 22: typed usage extraction.  `LanguageModelUsage` is the
-    // AI SDK v7 shape (inputTokens/outputTokens/totalTokens); the
-    // promptTokens/completionTokens fallback keeps compatibility with
-    // test mocks built against the older SDK shape.
-    type LegacyUsageShape = { promptTokens?: number; completionTokens?: number };
-    const rawUsage = result.usage as (LanguageModelUsage & LegacyUsageShape) | undefined;
-    const usage: TokenUsage | undefined = rawUsage
-      ? {
-          promptTokens: rawUsage.promptTokens ?? rawUsage.inputTokens ?? 0,
-          completionTokens: rawUsage.completionTokens ?? rawUsage.outputTokens ?? 0,
-          totalTokens: rawUsage.totalTokens ?? 0,
-        }
-      : undefined;
+    // Phase 22: typed usage extraction (SDK v7 shape, legacy-mock fallback).
+    const usage: TokenUsage | undefined = toTokenUsage(result.usage);
 
     return {
       text: result.text ?? '',
@@ -498,6 +496,9 @@ export class AgentRuntime {
     if (err instanceof TimeoutError) {
       return { message: err.message, code: 'TIMEOUT' };
     }
+    if (err instanceof EmptyResponseError) {
+      return { message: err.message, code: 'EMPTY_RESPONSE' };
+    }
 
     if (err instanceof Error) {
       // Phase 22: cancellation — an aborted run is a controlled failure,
@@ -541,3 +542,11 @@ class TimeoutError extends Error {
  * compatibility — do not use in new code.
  */
 export const agentRuntime = new AgentRuntime();
+
+/** The model answered, but with nothing: no text and no tool call. */
+export class EmptyResponseError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'EmptyResponseError';
+  }
+}

@@ -17,6 +17,8 @@ import { loadRegistries } from '../utils/registries.js';
 import { describeRegistryLayers, registryLayersFor } from '../../ai/registries/layout.js';
 import { color, err, out, renderTable } from '../utils/output.js';
 import { loadMcpServerConfigs } from '../../ai/tools/mcp-bootstrap.js';
+import { listRemoteModels, modelSources } from '../../ai/models/list-models.js';
+import { prepareCliEnvironment } from '../utils/config.js';
 import { McpConnector } from '../../ai/tools/mcp-connector.js';
 import { ToolRegistry } from '../../ai/registries/tool-registry.js';
 
@@ -84,9 +86,15 @@ function render<T>(opts: RegistryCommandOptions, input: RenderInput<T>): number 
   return errors.length > 0 ? 1 : 0;
 }
 
-export async function modelsCommand(opts: RegistryCommandOptions): Promise<number> {
+export interface ModelsCommandOptions extends RegistryCommandOptions {
+  /** Ask the configured providers which models they serve. */
+  remote?: boolean;
+}
+
+export async function modelsCommand(opts: ModelsCommandOptions): Promise<number> {
   const root = resolveProjectRoot(opts);
   if (!root) return 2;
+  if (opts.remote) return remoteModelsCommand(root, opts);
   const loaded = loadRegistries(root);
   return render(opts, {
     kind: 'models',
@@ -211,4 +219,27 @@ async function collectMcpTools(root: string): Promise<{
     await connector.closeAll();
   }
   return { rows, items, notes, failed };
+}
+
+/** `models --remote`: the models the providers serve, usable as --model specs. */
+async function remoteModelsCommand(root: string, opts: ModelsCommandOptions): Promise<number> {
+  prepareCliEnvironment(root);
+  const sources = modelSources(process.env);
+  if (sources.length === 0) {
+    err(
+      color.failed('No provider to ask.') +
+        color.dim(' Set HOTL_BASE_URL (+ HOTL_API_KEY), OPENAI_API_KEY or ANTHROPIC_API_KEY.'),
+    );
+    return 1;
+  }
+  const list = await listRemoteModels(process.env);
+  if (opts.json) {
+    out(JSON.stringify(list, null, 2));
+  } else {
+    if (list.models.length > 0) {
+      out(renderTable(['MODEL (use with --model)', 'SOURCE'], list.models.map((m) => [m.spec, m.source])));
+    }
+    for (const e of list.errors) err(color.failed(`${e.source}: ${e.error}`));
+  }
+  return list.models.length > 0 ? 0 : 1;
 }

@@ -12,6 +12,7 @@
  *      otherwise: run() → confirm (inquirer, or --yes) → execute → report
  *   4. exit code: 0 success/partial, 1 failure, 2 usage error
  */
+import { envDefaultModelId } from '../utils/registries.js';
 import path from 'node:path';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
@@ -102,6 +103,8 @@ function formatZodError(err: unknown): string | undefined {
 
 export interface RunCommandResult {
   exitCode: number;
+  /** The session the run was recorded in (full runs only). */
+  sessionId?: string;
 }
 
 /**
@@ -150,10 +153,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
   const globalConfig = prepareCliEnvironment(projectRoot);
 
   const persistent = opts.persistent ?? globalConfig.persistent ?? false;
-  const model = opts.model ?? globalConfig.defaultModel;
-  // The effective model id: the flag, the global config default, or the
-  // runtime default ('gpt-4o').  Validated against the registry below.
-  const effectiveModelId = model ?? 'gpt-4o';
+  const model = opts.model ?? envDefaultModelId(projectRoot) ?? globalConfig.defaultModel;
 
   // Phase 30 (P10 follow-up): graceful Ctrl-C.
   //
@@ -251,15 +251,13 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       return { exitCode: 2 };
     }
 
-    if (!orchestrator.modelRegistry.hasConfig(effectiveModelId)) {
-      const validIds = orchestrator.modelRegistry.listConfigs().map((c) => c.id);
-      err(
-        color.failed(
-          `Unknown model id "${effectiveModelId}". Valid ids: ${validIds.join(', ') || '(none registered)'}`,
-        ),
-      );
-      err(color.dim('Pick one with --model <id>, or see `hootl models`.'));
-      return { exitCode: 2 };
+    // Any model spec runs — a registered id, `<provider>:<name>`, or a
+    // provider model name (registered on the fly by the orchestrator).  Say
+    // which one, so a typo is visible before the first call fails.
+    const active = orchestrator.modelRegistry.getConfig(orchestrator.config.defaultModelId);
+    if (active && active.description?.startsWith('Selected at runtime')) {
+      const where = (active.config?.baseURL as string | undefined) ?? `the ${active.provider} API`;
+      out(color.dim(`Model: ${active.model} (not in the registry) via ${where}`));
     }
 
     // ── Dry run: plan, show, stop ─────────────────────────────
@@ -303,7 +301,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       result.review.outcome === 'success' || result.review.outcome === 'partial-success'
         ? 0
         : 1;
-    return { exitCode };
+    return { exitCode, sessionId: result.sessionId };
   } catch (e) {
     const message = formatZodError(e) ?? (e instanceof Error ? e.message : String(e));
     err(color.failed(`Error: ${message}`));

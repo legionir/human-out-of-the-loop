@@ -14,6 +14,9 @@ import { StreamingManager, type ProgressEvent } from './runtime/streaming-manage
 import { CancellationManager } from './runtime/cancellation-manager.js';
 import { RateLimiter } from './runtime/rate-limiter.js';
 import { UsageAggregator } from './runtime/usage-aggregator.js';
+import { envEndpoint, modelIdForSpec, runtimeModelConfig } from './models/env-endpoint.js';
+import { listRemoteModels, type RemoteModelList } from './models/list-models.js';
+import type { LlmUsageReport } from './runtime/llm-usage.js';
 import { MemorySessionStore, FileSessionStore, type SessionStore } from './runtime/session-store.js';
 import { ObservabilityLogger } from './runtime/observability-logger.js';
 import { collectSecretValues } from './runtime/secret-scrub.js';
@@ -245,6 +248,8 @@ export class Orchestrator {
    * the MCP bootstrap (default: the live process env).
    */
   private readonly env: EnvSource;
+  /** The model as the caller named it (before `modelIdForSpec`). */
+  private readonly defaultModelSpec: string;
 
   private initialized = false;
 
@@ -266,7 +271,9 @@ export class Orchestrator {
       runtimeDir: data.runtimeDir ?? path.join(data.projectRoot, '.ai-runtime'),
       maxConcurrentTasks: data.maxConcurrentTasks,
       maxReplanningAttempts: data.maxReplanningAttempts,
-      defaultModelId: data.defaultModelId,
+      // A runtime spec ("@aur/auto", "anthropic:claude-…") is stored under
+      // its registry id; `initialize()` registers it when no file does.
+      defaultModelId: modelIdForSpec(data.defaultModelId),
       agentTimeoutMs: data.agentTimeoutMs,
       maxDelegationDepth: data.maxDelegationDepth,
       // Phase 19 (CFG-06): RateLimiter settings now come from config
@@ -285,6 +292,7 @@ export class Orchestrator {
     // Phase 27 (CFG-08): resolve the env once, before any registry or
     // connector is built, so providers and MCP credentials see it.
     this.env = resolveEnv(data.env);
+    this.defaultModelSpec = data.defaultModelId;
 
     this.personaRegistry = new PersonaRegistry();
     this.toolRegistry = new ToolRegistry();
@@ -366,9 +374,14 @@ export class Orchestrator {
       skillRegistry: this.skillRegistry,
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
+      // The judge runs on the run's model like every other call — without
+      // it every acceptance check went to the built-in default (gpt-4o),
+      // whatever `--model` / HOTL_MODEL selected.
+      modelId: this.config.defaultModelId,
       // Phase 30 (P5): the same deadline `--timeout-ms` gives an agent run
       // now also covers the judgment call.
       timeoutMs: this.config.agentTimeoutMs,
+      onUsage: (report) => this.recordLlmUsage(report),
       onQualityFailure: (planId, stepId, reason) => {
         this.observabilityLogger.logQualityCheck(planId, stepId, false, reason);
         this.streamingManager.emitProgress({
@@ -388,6 +401,7 @@ export class Orchestrator {
       modelRegistry: this.modelRegistry,
       modelId: this.config.defaultModelId,
       timeoutMs: this.config.agentTimeoutMs,
+      onUsage: (report) => this.recordLlmUsage(report),
     });
 
     this.planner = new Planner({
@@ -397,7 +411,64 @@ export class Orchestrator {
       modelRegistry: this.modelRegistry,
       modelId: this.config.defaultModelId,
       timeoutMs: this.config.agentTimeoutMs,
+      onUsage: (report) => this.recordLlmUsage(report),
     });
+  }
+
+  /**
+   * Structured model calls (planning, acceptance, review) are billed like
+   * agent turns but never reach the EventBus — record them here so the final
+   * report and `hootl usage` show what the provider actually charged.
+   */
+  private recordLlmUsage(report: LlmUsageReport): void {
+    this.usageAggregator.recordDirect({
+      taskId: `llm:${report.purpose}`,
+      planId: report.planId,
+      agentId: `llm:${report.purpose}`,
+      usage: report.usage,
+      timestamp: Date.now(),
+      llmCall: true,
+    });
+    this.observabilityLogger.logLlmUsage(report.purpose, report.usage, report.planId);
+  }
+
+  /**
+   * Make a model usable by spec — a registered id, `<provider>:<name>`, or a
+   * provider model name on the default endpoint — and return its registry
+   * id.  Models no longer have to be declared in a registry file to be run.
+   */
+  useModel(spec: string): string {
+    if (!this.initialized) {
+      throw new Error('useModel() needs initialize() first (the registry files decide what a name means).');
+    }
+    return this.registerModelSpec(spec);
+  }
+
+  private registerModelSpec(spec: string): string {
+    const trimmed = spec.trim();
+    if (!trimmed) throw new InvalidModelError(spec, this.modelRegistry.listConfigs().map((m) => m.id));
+    if (this.modelRegistry.hasConfig(trimmed)) return trimmed;
+    const id = modelIdForSpec(trimmed);
+    if (!this.modelRegistry.hasConfig(id)) {
+      this.modelRegistry.replaceConfig(runtimeModelConfig(trimmed, this.env));
+    }
+    return id;
+  }
+
+  /** Ask the configured providers which models they serve (see list-models). */
+  listRemoteModels(): Promise<RemoteModelList> {
+    return listRemoteModels(this.env);
+  }
+
+  /** Usage of one plan only — the aggregator lives as long as the orchestrator. */
+  private planUsage(planId: string | undefined): Review['usage'] {
+    if (!planId) return emptyReviewUsage;
+    const u = this.usageAggregator.getPlanUsage(planId);
+    return {
+      totalPromptTokens: u.promptTokens,
+      totalCompletionTokens: u.completionTokens,
+      totalTokens: u.totalTokens,
+    };
   }
 
   async initialize(): Promise<void> {
@@ -492,6 +563,12 @@ export class Orchestrator {
     for (const layer of forEachLayer('models')) {
       this.modelRegistry.loadConfigsFromDirectory(layer.dir, false, layer.override);
     }
+    // HOTL_BASE_URL / HOTL_MODEL: an endpoint from the environment, on top
+    // of every registry layer.
+    const fromEnv = envEndpoint(this.env, this.modelRegistry.listConfigs()).config;
+    if (fromEnv) this.modelRegistry.replaceConfig(fromEnv);
+    // A default model that no registry file defines is a runtime spec.
+    this.registerModelSpec(this.defaultModelSpec);
 
     try {
       this.modelRegistry.resolveAll(false);
@@ -582,10 +659,11 @@ export class Orchestrator {
 
     // U3: validate per-run overrides BEFORE any side effect (a bad model
     // id must fail fast, not after planning/session creation).
-    const ov = options?.runOverrides;
-    if (ov?.modelId !== undefined && !this.modelRegistry.hasConfig(ov.modelId)) {
-      throw new InvalidModelError(ov.modelId, this.modelRegistry.listConfigs().map((m) => m.id));
-    }
+    const requested = options?.runOverrides;
+    // A per-run model may be any spec; it is registered on first use.
+    const ov = requested?.modelId !== undefined
+      ? { ...requested, modelId: this.useModel(requested.modelId) }
+      : requested;
 
     const sessionId =
       options?.sessionId ?? this.sessionStore.createSession(options?.sessionLabel);
@@ -603,7 +681,9 @@ export class Orchestrator {
     // user, fold the answers back into the request, and re-plan — up to
     // `maxClarificationRounds`.  Without a callback (CI, server, --yes)
     // the legacy failure-with-questions path below is unchanged.
-    let planningResult = await this.planner.plan(userRequest);
+    // The run's model (a per-run override wins) — for EVERY call of the run.
+    const runModelId = ov?.modelId ?? this.config.defaultModelId;
+    let planningResult = await this.planner.plan(userRequest, undefined, runModelId);
     let clarifyRound = 0;
     let clarificationDeclined = false;
     while (!planningResult.isClear) {
@@ -632,6 +712,8 @@ export class Orchestrator {
         .join('\n');
       planningResult = await this.planner.plan(
         `${userRequest}\n\nCLARIFICATIONS FROM USER:\n${block}`,
+        undefined,
+        runModelId,
       );
     }
 
@@ -932,14 +1014,11 @@ export class Orchestrator {
 
     this.observabilityLogger.logPlanCompleted(plan);
 
-    const review = await this.finalReviewer.review(plan, executionResult);
+    const review = await this.finalReviewer.review(plan, executionResult, runModelId);
 
-    const usageSummary = this.usageAggregator.getSummary();
-    review.usage = {
-      totalPromptTokens: usageSummary.totalPromptTokens,
-      totalCompletionTokens: usageSummary.totalCompletionTokens,
-      totalTokens: usageSummary.totalTokens,
-    };
+    // Per plan: a long-lived orchestrator (the web server) would otherwise
+    // report the sum of every run it has ever made.
+    review.usage = this.planUsage(plan.id);
 
     const report = formatFinalReview(review);
 
@@ -970,7 +1049,7 @@ export class Orchestrator {
    * could not be planned).  Nothing is persisted, confirmed, or
    * executed; no session interaction is recorded.
    */
-  async previewPlan(userRequest: string): Promise<{
+  async previewPlan(userRequest: string, modelSpec?: string): Promise<{
     ok: boolean;
     plan?: Plan;
     planText?: string;
@@ -990,7 +1069,8 @@ export class Orchestrator {
       await this.initialize();
     }
 
-    const planningResult = await this.planner.plan(userRequest);
+    const modelId = modelSpec ? this.useModel(modelSpec) : undefined;
+    const planningResult = await this.planner.plan(userRequest, undefined, modelId);
 
     if (!planningResult.isClear) {
       const clarificationMsg =
@@ -1105,6 +1185,7 @@ export class Orchestrator {
 
     const executionResult = await planRuntime.resume(planId);
     const review = await this.finalReviewer.review(plan, executionResult);
+    review.usage = this.planUsage(plan.id);
     const report = formatFinalReview(review);
 
     // Phase 30 (P2): the run that owned this plan was interrupted, so its

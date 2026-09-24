@@ -1,5 +1,6 @@
 import { generateObject } from 'ai';
-import { withLlmTimeout } from './llm-timeout.js';
+import { withLlmTimeout, withStructuredRetry } from './llm-timeout.js';
+import { reportLlmUsage, type LlmUsageReporter } from './llm-usage.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
@@ -20,6 +21,8 @@ export interface FinalReviewerConfig {
   modelId?: string;
   /** Phase 30 (P5): deadline for the review call (default 120s). */
   timeoutMs?: number;
+  /** Token usage of the review call. */
+  onUsage?: LlmUsageReporter;
 }
 
 /**
@@ -68,7 +71,9 @@ export class FinalReviewer {
    */
   async review(
     plan: Plan,
-    executionResult: PlanExecutionResult
+    executionResult: PlanExecutionResult,
+    /** The run's model (a per-run override); default: the configured one. */
+    modelId?: string
   ): Promise<Review> {
     const outcome = this.classifyOutcome(plan, executionResult);
     const stepSummaries = this.buildStepSummaries(plan);
@@ -85,7 +90,8 @@ export class FinalReviewer {
         plan,
         executionResult,
         stepSummaries,
-        outcome
+        outcome,
+        modelId
       );
       return review;
     } catch (err) {
@@ -107,9 +113,10 @@ export class FinalReviewer {
     plan: Plan,
     executionResult: PlanExecutionResult,
     stepSummaries: StepSummary[],
-    outcome: Review['outcome']
+    outcome: Review['outcome'],
+    modelId?: string
   ): Promise<Review> {
-    const reviewerAgent = this.buildReviewerAgent();
+    const reviewerAgent = this.buildReviewerAgent(modelId);
 
     const prompt = this.buildReviewPrompt(
       plan,
@@ -118,23 +125,26 @@ export class FinalReviewer {
       outcome
     );
 
-    const { object } = await withLlmTimeout(
-      'Final review',
-      this.config.timeoutMs,
-      (abortSignal) =>
-        generateObject({
-          model: reviewerAgent.model,
-          system: reviewerAgent.systemPrompt,
-          prompt,
-          schema: ReviewSchema,
-          schemaName: 'FinalReview',
-          schemaDescription:
-            'Structured review of a completed plan execution, including ' +
-            'accepted findings, rejected findings, incomplete steps, and ' +
-            'a human-readable summary.',
-          abortSignal,
-        })
+    const { object, usage } = await withStructuredRetry(() =>
+      withLlmTimeout(
+        'Final review',
+        this.config.timeoutMs,
+        (abortSignal) =>
+          generateObject({
+            model: reviewerAgent.model,
+            system: reviewerAgent.systemPrompt,
+            prompt,
+            schema: ReviewSchema,
+            schemaName: 'FinalReview',
+            schemaDescription:
+              'Structured review of a completed plan execution, including ' +
+              'accepted findings, rejected findings, incomplete steps, and ' +
+              'a human-readable summary.',
+            abortSignal,
+          })
+      )
     );
+    reportLlmUsage(this.config.onUsage, 'review', usage, plan.id);
 
     // Ensure planId and goal match (the model might hallucinate)
     return {
@@ -211,14 +221,14 @@ Be honest and specific. Do not invent findings that aren't in the results.
 `.trim();
   }
 
-  private buildReviewerAgent(): ResolvedAgent {
+  private buildReviewerAgent(modelId?: string): ResolvedAgent {
     return createAgent({
       agentDefinition: {
         id: 'final-reviewer',
         name: 'Final Reviewer',
         personaId: 'reviewer',
         skillIds: [],
-        modelId: this.modelId,
+        modelId: modelId ?? this.modelId,
       },
       refs: {
         personaRegistry: this.config.personaRegistry,

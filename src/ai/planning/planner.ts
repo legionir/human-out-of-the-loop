@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { generateObject } from 'ai';
-import { withLlmTimeout } from '../runtime/llm-timeout.js';
+import { withLlmTimeout, withStructuredRetry } from '../runtime/llm-timeout.js';
+import { reportLlmUsage, type LlmUsageReporter } from '../runtime/llm-usage.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
@@ -27,6 +28,8 @@ export interface PlannerConfig {
    * never answers must not leave the CLI waiting forever.
    */
   timeoutMs?: number;
+  /** Token usage of every planning call (assessment, generation, re-planning). */
+  onUsage?: LlmUsageReporter;
 }
 
 export interface PlanningResult {
@@ -76,8 +79,16 @@ export class Planner {
    * Phase 1: Assess whether the request is clear enough.
    * Uses generateObject for guaranteed schema compliance.
    */
-  async assess(userRequest: string): Promise<PlannerAssessment> {
-    const agent = this.buildPlannerAgent();
+  /**
+   * @param usagePlanId plan the call's token usage is billed to — set when
+   *   re-planning an existing plan; otherwise the new plan's own id is used.
+   */
+  async assess(
+    userRequest: string,
+    usagePlanId?: string,
+    modelId?: string
+  ): Promise<PlannerAssessment> {
+    const agent = this.buildPlannerAgent(modelId);
 
     const assessmentPrompt = `
 You are assessing whether the following user request is clear enough
@@ -95,21 +106,23 @@ If the request is clear enough, set isClear=true and provide the full plan.
 `.trim();
 
     try {
-      const { object } = await withLlmTimeout(
-        'Planner assessment',
-        this.config.timeoutMs,
-        (abortSignal) =>
-          generateObject({
-            model: agent.model,
-            system: agent.systemPrompt,
-            prompt: assessmentPrompt,
-            schema: PlannerAssessmentSchema,
-            schemaName: 'PlannerAssessment',
-            schemaDescription:
-              'Assessment of whether a user request is clear enough to plan, ' +
-              'with optional clarification questions or a full plan.',
-            abortSignal,
-          })
+      const { object, usage } = await withStructuredRetry(() =>
+        withLlmTimeout(
+          'Planner assessment',
+          this.config.timeoutMs,
+          (abortSignal) =>
+            generateObject({
+              model: agent.model,
+              system: agent.systemPrompt,
+              prompt: assessmentPrompt,
+              schema: PlannerAssessmentSchema,
+              schemaName: 'PlannerAssessment',
+              schemaDescription:
+                'Assessment of whether a user request is clear enough to plan, ' +
+                'with optional clarification questions or a full plan.',
+              abortSignal,
+            })
+        )
       );
 
       // Phase 30 (P10 follow-up): a plan that arrives inside the assessment
@@ -120,18 +133,16 @@ If the request is clear enough, set isClear=true and provide the full plan.
       if (object.plan) {
         object.plan = finalizePlan(object.plan);
       }
+      reportLlmUsage(this.config.onUsage, 'planning', usage, usagePlanId ?? object.plan?.id);
 
       return object;
     } catch (err) {
-      // Phase 30 (P5): say WHY (a deadline, a provider error, bad output)
-      // instead of pretending the request was unclear.
+      // Phase 30 (P5): say WHY (a deadline, a provider error, bad output).
+      // It is a failure, not a question for the user — `plan()` reports it
+      // as an error, so the run ends with "Planning failed: <reason>"
+      // instead of asking the user to "provide more details".
       const reason = err instanceof Error ? err.message : String(err);
-      return {
-        isClear: false,
-        needsClarification: [
-          `The planner was unable to process the request: ${reason}. Please provide more details.`,
-        ],
-      };
+      throw new Error(`The planner was unable to process the request: ${reason}`);
     }
   }
 
@@ -141,9 +152,11 @@ If the request is clear enough, set isClear=true and provide the full plan.
    */
   async generatePlan(
     userRequest: string,
-    clarifications?: Record<string, string>
+    clarifications?: Record<string, string>,
+    usagePlanId?: string,
+    modelId?: string
   ): Promise<Plan> {
-    const agent = this.buildPlannerAgent();
+    const agent = this.buildPlannerAgent(modelId);
 
     let prompt = `
 Decompose the following user request into a detailed execution plan.
@@ -161,30 +174,37 @@ ${userRequest}
       }
     }
 
-    const { object } = await withLlmTimeout(
-      'Plan generation',
-      this.config.timeoutMs,
-      (abortSignal) =>
-        generateObject({
-          model: agent.model,
-          system: agent.systemPrompt,
-          prompt,
-          schema: PlanSchema,
-          schemaName: 'ExecutionPlan',
-          schemaDescription: 'A dependency-aware execution plan with atomic steps.',
-          abortSignal,
-        })
+    const { object, usage } = await withStructuredRetry(() =>
+      withLlmTimeout(
+        'Plan generation',
+        this.config.timeoutMs,
+        (abortSignal) =>
+          generateObject({
+            model: agent.model,
+            system: agent.systemPrompt,
+            prompt,
+            schema: PlanSchema,
+            schemaName: 'ExecutionPlan',
+            schemaDescription: 'A dependency-aware execution plan with atomic steps.',
+            abortSignal,
+          })
+      )
     );
-
-    return finalizePlan(object);
+    const plan = finalizePlan(object);
+    reportLlmUsage(this.config.onUsage, 'planning', usage, usagePlanId ?? plan.id);
+    return plan;
   }
 
   /**
    * Combined assess + generate in one call.
    */
-  async plan(userRequest: string): Promise<PlanningResult> {
+  /**
+   * @param modelId model for this call (a per-run override); default: the
+   *   planner's configured model.
+   */
+  async plan(userRequest: string, usagePlanId?: string, modelId?: string): Promise<PlanningResult> {
     try {
-      const assessment = await this.assess(userRequest);
+      const assessment = await this.assess(userRequest, usagePlanId, modelId);
 
       if (!assessment.isClear) {
         return {
@@ -203,7 +223,7 @@ ${userRequest}
         };
       }
 
-      const plan = await this.generatePlan(userRequest);
+      const plan = await this.generatePlan(userRequest, undefined, usagePlanId, modelId);
       return {
         isClear: true,
         needsClarification: [],
@@ -222,8 +242,8 @@ ${userRequest}
 
   // ── Private helpers ───────────────────────────────────────────
 
-  private buildPlannerAgent(): ResolvedAgent {
-    const modelId = this.config.modelId ?? 'gpt-4o';
+  private buildPlannerAgent(override?: string): ResolvedAgent {
+    const modelId = override ?? this.config.modelId ?? 'gpt-4o';
 
     return createAgent({
       agentDefinition: {

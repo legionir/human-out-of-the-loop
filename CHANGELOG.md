@@ -2,8 +2,125 @@
 
 All notable changes to this project. The format follows
 [Keep a Changelog](https://keepachangelog.com/); versions are aligned with the
-delivery plans (`EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
+delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
+
+## [27.4.0] — 2026-09-24 — start screen, the `/` menu, and models chosen at runtime
+
+**Interactive mode**
+- The screen is cleared and **HOOTL** is drawn in block letters (yellow,
+  orange shadow, centered) for 3 seconds, then the console opens.
+  `--no-splash` or `HOTL_NO_SPLASH=1` skips it.
+- A new line editor: typing `/` opens the command menu under the prompt,
+  filtered as you type; ↑/↓ select, Tab completes, Enter runs, Esc closes.
+  Arguments get menus too: `/model ` lists models, `/cd ` directories,
+  `/persistent ` on/off, `/plans ` its subcommands.  ↑/↓ walk the history
+  when the menu is closed.
+- The prompt and banner say **HOOTL** (`HOOTL my-project ›`); with the long
+  binary name a project with the same name read
+  `human-out-of-the-loop human-out-of-the-loop ›`.
+- **`hootl --project-root=<dir>` (and `--model`, `--persistent`, `--yes`)
+  without a subcommand opens interactive mode** in that directory.  Before,
+  it failed with "unknown option": those flags only existed on subcommands.
+
+**Models are not limited to the registry**
+- `--model`, `/model`, `defaultModel` and the web UI accept a registered id,
+  **any model name the provider serves**, or `<provider>:<name>`
+  (`anthropic:…`, `openai:…`, `local:…`).  An unregistered name is
+  registered at runtime (e.g. `@aur/auto` → id `aur-auto`) on the HOTL
+  endpoint when one is set, else OpenAI; the run says so before starting.
+- The providers are asked what they serve: `hootl models --remote`, the
+  `/model` menu, and `GET /api/models/remote` (the UI's model picker now has
+  a "From <provider>" group and a ↻ reload button).
+- The per-run model now drives **every** call of the run — planning,
+  re-planning, acceptance and the final review — not only the agents (the
+  web UI's per-run model used to reach the agents only).
+
+Contract changes: an unknown `--model` is no longer exit 2, and an unknown
+model in `POST /api/run` is no longer a 400 — both run it as a provider
+model name (an empty model is still a 400).  The tests that pinned the old
+contract were updated.  723 tests, e2e 46/46; the interactive flow was
+checked in a real PTY rendered through a terminal emulator.
+
+## [27.3.1] — 2026-09-24 — an endpoint from the environment
+
+`HOTL_BASE_URL`, `HOTL_API_KEY` and `HOTL_MODEL` were only read by the CI
+workflow; the CLI ignored them and failed with "OPENAI_API_KEY environment
+variable is not set".  They now configure the CLI, the interactive mode, the
+web server and `plans resume` directly:
+
+- `HOTL_MODEL` is a registered id (`gpt-4o`) or any provider model name
+  (`@aur/auto`, `llama3:8b`); a name that is not an id is registered as
+  **`custom`** and becomes the default model.  Precedence: `--model` >
+  `HOTL_MODEL` > the global config.
+- `HOTL_BASE_URL` points that model at an OpenAI-compatible endpoint, over
+  **Chat Completions** by default (what gateways implement;
+  `HOTL_API_STYLE=responses` keeps the Responses API).
+- `HOTL_API_KEY` is the key (`OPENAI_API_KEY` still works; an empty one no
+  longer hides the other).
+- The interactive banner shows the model (`custom (@aur/auto)`), the URL and
+  which keys are present.
+
+Found on the way: **the acceptance judge ignored the selected model** — it
+always ran on the built-in `gpt-4o`, so with `--model` (or an env endpoint)
+every step failed its quality check against a provider it was never meant to
+call.  It now uses the run's model like the planner and the reviewer.
+
+The e2e stub speaks Chat Completions too; a new `envendpoint` scenario runs
+the real CLI from the three variables alone.  705 tests, e2e 46/46.
+
+## [27.3.0] — 2026-09-24 — interactive mode
+
+`hootl` with no arguments in a terminal now opens a prompt, like Claude Code,
+instead of printing the help:
+
+- a banner with the version, the **active directory** (the project root), the
+  model, persistence and which API keys are present; the prompt shows the
+  directory too;
+- a plain line is a goal (plan → confirm once → execute), and with
+  `/persistent on` the goals of one interactive session share a session;
+- slash commands for configuration: `/config` (show; `set`/`unset` of
+  `defaultModel`, `persistent`, `projectRoot` in the global config), `/model`,
+  `/persistent`, `/yes`, `/verbose`, `/cd`, `/pwd`, `/status`, `/new`,
+  `/clear`, `/help`, `/exit`;
+- every regular subcommand as `/<command>` in the active directory
+  (`/plans list`, `/usage`, `/logs --tail 20`, …), including `--help`;
+- history, Tab completion of commands, Ctrl-C clears the line / cancels a
+  running plan and returns to the prompt, Ctrl-C twice or Ctrl-D leaves.
+
+Pipes, CI and scripts are unchanged: without a TTY, no arguments still prints
+the help.  Verified in a real PTY (goals with and without auto-confirm, the
+inquirer confirmation, session reuse, `/cd`, Ctrl-C cancel); 15 new tests.
+
+## [27.2.14] — 2026-09-24 — provider faults (P1 without a key)
+
+The e2e stub can now misbehave like a real provider — `FAULT:<429|500|401|CUT|HANG|EMPTY>x<n>`
+on agent turns and `BADJSON:<Schema>x<n>` on structured calls — and a new
+`faults` scenario drives the real CLI through them.  Transient 5xx/429,
+dropped connections and timeouts were already handled.  Four things were not:
+
+- **Token usage was half the bill.** Only agent turns reached the usage
+  aggregator; every planning, acceptance and final-review call
+  (`generateObject`) was billed by the provider but missing from the final
+  report and from `hootl usage` (a two-step plan: 160 reported, 320 used).
+  Structured calls now report through an `onUsage` callback, are logged as
+  `llm:usage`, count toward all totals (not toward `taskCount`), and are
+  billed to their plan — including re-planning, which bills the plan being
+  revised.
+- **The final report summed every run the orchestrator had made.** On the
+  long-lived web server the "Usage" of each new run included all previous
+  runs.  The report (and `plans resume`, which reported zero) now shows the
+  plan's own usage.
+- **One malformed structured answer ended the run.** An unparsable planner
+  answer stopped the run as "Clarification needed … please provide more
+  details"; an unparsable acceptance verdict failed a finished step and
+  forced a re-plan.  Structured calls now retry once on
+  `NoObjectGeneratedError`, and a planner that still fails is reported as
+  `Planning failed: <reason>` (exit 1) instead of as a question.
+- **An empty model answer counted as a completed step.** A turn with no text
+  and no tool call now fails the task (`EMPTY_RESPONSE`).
+
+679 tests in 50 files, `tsc` clean; `npm run e2e` → 42/42.
 
 ## [27.2.13] — 2026-09-24 — the Windows list, closed (annotations paid off)
 
