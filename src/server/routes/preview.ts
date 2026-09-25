@@ -33,6 +33,13 @@ export function previewRouter(ctx: ServerContext): Router {
         typeof model === 'string' && model.trim() ? model.trim() : undefined,
       );
 
+      // v27.17.0: a request the planner answers instead of planning.  There is
+      // no plan to render — the answer IS the response (ok: true, no planId).
+      if (preview.ok && preview.answer !== undefined) {
+        res.json({ ok: true, answer: preview.answer, planId: null });
+        return;
+      }
+
       // Unclear request: the planner wants clarification before planning.
       // This is a *request* problem, not a planning outcome → 400 + questions.
       if (!preview.ok && preview.needsClarification?.length) {

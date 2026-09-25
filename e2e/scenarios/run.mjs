@@ -1408,6 +1408,141 @@ scenarios.clarify = async () => {
   return root;
 };
 
+/**
+ * v27.17.0 — chat mode: a question is answered, not planned.
+ *
+ * The stub marks a request as a conversation (`CHATREPLY`): the assessment
+ * answers kind="answer" and the chat agent's turn returns prose.  The scenario
+ * asserts what the user sees (💬 Answer + the reply, exit 0), what did NOT
+ * happen (no plan on disk, no plan id, nothing executed) and that the request
+ * really carried the language rule — the Persian request must be answered in
+ * Persian by a model that only follows what it was told.  Then `@plan` on the
+ * same request must go back to planning.
+ */
+scenarios.chat = async () => {
+  const root = makeProject('chat');
+  const persian = 'این پروژه چه کاری انجام می‌دهد؟';
+
+  // 1. @chat: one model call, an answer, no plan.
+  const chat = await run(runArgs(`@chat CHATREPLY ${persian}`, root));
+  check('chat: @chat exits 0 (an answer is a success)', chat.code === 0, `exit=${chat.code}`);
+  check(
+    'chat: the answer reached the terminal',
+    chat.stdout.includes('💬 Answer') && chat.stdout.includes('رانتایم Human-Out-Of-The-Loop'),
+    chat.stdout.split('\n').slice(0, 4).join(' | ')
+  );
+  check(
+    'chat: the footer says nothing was planned',
+    chat.stdout.includes('Plan: none (answered in chat mode)'),
+    chat.stdout.split('\n').filter((l) => l.includes('Plan:')).join(' | ')
+  );
+  const plansDir = path.join(root, '.ai-runtime', 'plans');
+  check(
+    'chat: no plan was written, nothing executed',
+    !fs.existsSync(plansDir) || fs.readdirSync(plansDir).length === 0,
+    fs.existsSync(plansDir) ? fs.readdirSync(plansDir).join(',') : '(no plans dir)'
+  );
+  check(
+    'chat: the session records an answered interaction',
+    readSessions(root).some(
+      (session) => session.includes('"outcome": "success"') && session.includes('رانتایم')
+    ),
+    'session file'
+  );
+
+  // 2. Chat may READ the project (and only read): CHATREAD makes the chat turn
+  //    read the README, which must show up in the request, in the journal, and
+  //    in the answer.
+  const readRoot = makeProject('chat-read');
+  const readRun = await run(
+    runArgs('@chat CHATREPLY CHATREAD این پروژه چه چیزی دارد؟', readRoot, ['--verbose'])
+  );
+  check(
+    'chat: a chat turn can read the project to answer',
+    readRun.code === 0 && readRun.stdout.includes('README خوانده شد'),
+    readRun.stdout.split('\n').filter((l) => l.includes('read_file')).join(' | ')
+  );
+  const journalDir = path.join(readRoot, '.ai-runtime', 'journal');
+  const journalRecords =
+    fs.existsSync(journalDir) && fs.readdirSync(journalDir).length > 0
+      ? fs
+          .readdirSync(journalDir)
+          .flatMap((file) =>
+            fs
+              .readFileSync(path.join(journalDir, file), 'utf-8')
+              .split('\n')
+              .filter((line) => line.trim() !== '')
+              .map((line) => JSON.parse(line))
+          )
+      : [];
+  const chatRead = journalRecords.find((record) => record.kind === 'tool' && record.tool === 'read_file');
+  check(
+    'chat: ...and the read is journalled like any tool call (agentId: chat)',
+    chatRead?.ok === true && String(chatRead?.agentId).includes('chat'),
+    JSON.stringify({ tool: chatRead?.tool, agentId: chatRead?.agentId, ok: chatRead?.ok })
+  );
+  const chatTools = new Set(
+    stubRequests()
+      .filter((body) => JSON.stringify(body).includes('CHATREPLY'))
+      .flatMap((body) => (Array.isArray(body.tools) ? body.tools : []))
+      .map((tool) => tool.name ?? tool.function?.name)
+  );
+  check(
+    'chat: only read-only tools were offered (no writer, ever)',
+    chatTools.has('read_file') &&
+      !chatTools.has('write_file') &&
+      !chatTools.has('edit_file') &&
+      !chatTools.has('git_commit') &&
+      !chatTools.has('run_command'),
+    [...chatTools].join(', ')
+  );
+
+  // 3. The language rule really travelled: the Persian request's answer prompt
+  //    says Persian (the stub answers in English without it).
+  const chatRequests = stubRequests().filter((body) => JSON.stringify(body).includes('CHATREPLY'));
+  check(
+    'chat: the model was told to answer in Persian',
+    chatRequests.some((body) => JSON.stringify(body).includes('The user wrote in Persian')),
+    `${chatRequests.length} chat request(s)`
+  );
+  check(
+    'chat: the answer prompt carries the project context too',
+    chatRequests.some((body) => JSON.stringify(body).includes(root)),
+    'root in the request'
+  );
+
+  // 4. auto mode: the same conversation is recognised without a prefix.
+  const autoRoot = makeProject('chat-auto');
+  const auto = await run(runArgs(`CHATREPLY ${persian}`, autoRoot));
+  check('chat: auto mode answers a question without a prefix', auto.code === 0 && auto.stdout.includes('💬 Answer'), `exit=${auto.code}`);
+  check(
+    'chat: auto mode planned nothing either',
+    !fs.existsSync(path.join(autoRoot, '.ai-runtime', 'plans')) ||
+      fs.readdirSync(path.join(autoRoot, '.ai-runtime', 'plans')).length === 0
+  );
+
+  // 5. @plan on the same request: the prefix wins, and a plan is produced.
+  const planRoot = makeProject('chat-plan');
+  const planned = await run(runArgs(`@plan CHATREPLY ${persian}`, planRoot, ['--dry-run']));
+  check(
+    'chat: @plan still plans the very same request',
+    planned.code === 0 && planned.stdout.includes('Planned steps'),
+    planned.stdout.split('\n').slice(0, 4).join(' | ')
+  );
+  return root;
+};
+
+/**
+
+ * Every session file's content, concatenated (the scenario above asserts the
+ * recorded interaction; the sessions store is one JSON file per session).
+ */
+function readSessions(root) {
+  const dir = path.join(root, '.ai-runtime', 'sessions');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir).map((file) => fs.readFileSync(path.join(dir, file), 'utf-8'));
+}
+
 scenarios.resume = async () => {
   const root = makeProject('resume');
   await run(runArgs('write the project notes WRITE:notes/first.txt', root));

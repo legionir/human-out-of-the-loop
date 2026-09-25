@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { buildEnvironmentContext } from '../environment-context.js';
+import { languageSection, type DetectedLanguage } from '../language.js';
 import type { Tool, LanguageModel } from 'ai';
 import type { AgentRegistry, CrossRegistryRefs } from '../registries/agent-registry.js';
 import type { AgentDefinition } from '../schemas/agent-definition.js';
@@ -59,6 +60,12 @@ export interface CreateAgentOptions {
   delegationDepth?: number;
   /** Delegation guard instance */
   delegationGuard?: DelegationGuard;
+  /**
+   * v27.17.0: the language of the request this agent works for.  The plan's
+   * goal is written in it, so the agent's own prose (summaries, notes) comes
+   * back in it instead of switching to English.
+   */
+  languageHint?: DetectedLanguage;
 }
 
 // ─── Constants ────────────────────────────────────────────────────
@@ -101,7 +108,8 @@ const KNOWN_MODEL_LIMITS: Record<string, number> = {
  * that the runtime can consume.
  */
 export function createAgent(options: CreateAgentOptions): ResolvedAgent {
-  const { agentDefinition: def, refs, delegationDepth = 0, delegationGuard } = options;
+  const { agentDefinition: def, refs, delegationDepth = 0, delegationGuard, languageHint } =
+    options;
 
   // ── 1. Resolve references ───────────────────────────────────
 
@@ -207,7 +215,14 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
   // file contents, so it is the one that must not emit `sed -i` on macOS or
   // `rm -rf` on Windows.  Appended after trimming on purpose: the persona and
   // the skills stay within budget, and this block is small and never trimmed.
-  const systemPromptWithEnvironment = `${systemPrompt}\n\n${buildEnvironmentContext()}`;
+  // The hint when the caller knows the request's language (a plan step knows
+  // its goal); otherwise the generic rule, which matches whatever request the
+  // agent is handed in its prompt.  Appended with the environment block: after
+  // trimming, so persona and skills stay within budget.
+  const systemPromptWithEnvironment = `${systemPrompt}\n\n${buildEnvironmentContext()}\n\n${languageSection(
+    '',
+    languageHint
+  )}`;
 
   return {
     agentId: def.id,

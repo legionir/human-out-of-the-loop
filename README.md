@@ -267,15 +267,55 @@ Registry introspection commands (`models`, `personas`, `skills`, `tools`) exit
 fails validation (the valid entries are still printed) and **2** when no registry
 layer exists at all.
 
-`run` exits **0** on success/partial-success, **1** on failure (plan rejected,
-clarification unanswered, agent failure), **2** on usage errors (unknown model,
-bad flag values). With `--yes` or in a non-TTY environment the CLI never
+`run` exits **0** on success/partial-success — including a chat answer, which
+executes nothing — **1** on failure (plan rejected, clarification unanswered,
+agent failure), **2** on usage errors (unknown model, bad flag values, unknown
+mode). With `--yes` or in a non-TTY environment the CLI never
 prompts: an unclear request fails with the planner's questions instead of
 hanging — and an unclear verdict always carries at least one question, so if a
 provider ever omits them the runtime asks one built from the project context
 rather than printing a blank `⚠️ Clarification needed:`. In an interactive
 terminal the CLI asks clarification questions before planning and shows the
 plan summary before executing.
+
+### Chat or plan: the mode decides
+
+A request is not automatically a plan.  `auto` — the default — lets the planner
+decide, and the three outcomes are the three things a user can actually want:
+
+| the request | what happens |
+| --- | --- |
+| a greeting, a question, an explanation | **answered** (`💬 Answer`): the `chat` persona with the read-only tools (it can read files, search, inspect git — it cannot write). No plan is created, nothing is executed, the run exits 0. |
+| real work (files to change, commands to run, several steps) | **planned**: the plan is shown, confirmed once, executed, reviewed — exactly as before. |
+| too vague for either | **clarified**: the planner asks, and a run without an interactive prompt fails with the questions rather than guessing. |
+
+Say which you want, wherever it is most natural:
+
+```bash
+hootl run "hello"                          # auto → answered
+hootl run "@chat what does this repo do?"  # forced to a conversation
+hootl run "@plan tidy the fixtures"        # forced to a plan
+hootl run "tidy the fixtures" --mode plan  # the same, as a flag
+```
+
+`HOTL_MODE=chat` and `defaultMode` in `~/.human-out-of-the-loop/config.json`
+set the default; the order is **prefix in the request > `--mode` > `HOTL_MODE`
+> `defaultMode` > auto**.  In the REPL: `/mode [auto|chat|plan]` and
+`/chat <message>`.  Only `@chat`, `@plan` and `@auto` followed by a space are
+prefixes — `@aur/auto fix the tests` is an @mention and stays in the request.
+
+A chat answer that reads the project is journalled like any other tool call
+(`hootl journal`), and it counts in `hootl usage`.
+
+**Everything the model writes for you is in your language.**  The request's
+script is detected (Persian, Arabic, Russian, Greek, Hebrew, Hindi, Bengali,
+Thai, Japanese, Korean, Chinese) and named in the prompt; when the Arabic
+script cannot tell Persian from Arabic the instruction names the script and
+tells the model to match the request instead of guessing.  That rule reaches
+the assessment, the plan, every agent turn, the acceptance judgment and the
+final review — so plan steps, questions and summaries come back in Persian for
+a Persian request (`هشدار`/`Error:` labels stay English: they are the CLI's own
+chrome, not the model's prose).
 
 ### While it works: the terminal is never blank
 
@@ -660,6 +700,7 @@ HOTL_PORT=4000 HOTL_MODEL=claude-sonnet npx tsx src/server.ts
 | `GET /api/health` | `{ok, projectRoot, model, persistent, redactKeysCount}` |
 | `POST /api/run` | `{message, sessionId?, confirm?, model?, timeoutMs?, maxSteps?, maxReplans?}` → `202 {runId}` |
 | `GET /api/runs/:runId` | Live run state (`planning` → `awaiting-clarification` → `awaiting-confirmation` → `running` → `done`/`error`) |
+| `POST /api/run` | `{message, sessionId?, confirm?, model?, mode?}` — `mode` is `auto\|chat\|plan` (400 on anything else); a chat run ends `done` with the answer as its report and **no plan id** |
 | `POST /api/runs/:runId/clarification` | `{answers:{question:answer}}` or `{decline:true}` (400 on incomplete answers, 409 when not awaiting) |
 | `GET /api/runs/:runId/tasks` | Tasks of the run's plan + counts |
 | `POST /api/runs/:runId/tasks/:taskId/cancel` | Cancel one pending/running task |
@@ -773,7 +814,7 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**1125 tests green (67 files), 0 tsc errors — plus 169 committed end-to-end checks (`npm run e2e`)** (phases 18–43 complete — see `docs/history/`)
+**1164 tests green (69 files), 0 tsc errors — plus 182 committed end-to-end checks (`npm run e2e`)** (phases 18–43 complete — see `docs/history/`)
 
 ## Law Compliance
 

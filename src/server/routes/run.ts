@@ -23,13 +23,14 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import type { Plan } from '../../ai/schemas/plan.js';
 import type { RunOverrides } from '../../ai/orchestrator.js';
+import { parseRunMode, type RunMode } from '../../ai/modes.js';
 import type { ServerContext } from '../types.js';
 
 export function runRouter(ctx: ServerContext): Router {
   const router = Router();
 
   router.post('/api/run', async (req, res) => {
-    const { message, sessionId, confirm, model, timeoutMs, maxSteps, maxReplans } =
+    const { message, sessionId, confirm, model, timeoutMs, maxSteps, maxReplans, mode } =
       (req.body ?? {}) as {
         message?: unknown;
         sessionId?: unknown;
@@ -39,6 +40,8 @@ export function runRouter(ctx: ServerContext): Router {
         timeoutMs?: unknown;
         maxSteps?: unknown;
         maxReplans?: unknown;
+        /** v27.17.0: auto (default) / chat / plan */
+        mode?: unknown;
       };
     // NOTE (UI security step): `projectRoot` intentionally does NOT come
     // from the request body — it is fixed server-side (config/env).
@@ -53,6 +56,16 @@ export function runRouter(ctx: ServerContext): Router {
       return;
     }
     const autoConfirm = confirm === true;
+
+    // v27.17.0: an unknown mode is a request error, not a silent fallback.
+    let runMode: RunMode | undefined;
+    if (mode != null) {
+      if (typeof mode !== 'string' || !parseRunMode(mode)) {
+        res.status(400).json({ error: '"mode" must be one of: auto, chat, plan.' });
+        return;
+      }
+      runMode = parseRunMode(mode);
+    }
 
     // U3: per-run overrides — validate now (synchronous) so the UI gets
     // a clean 400 with the list of valid model ids, not a failed run.
@@ -106,6 +119,7 @@ export function runRouter(ctx: ServerContext): Router {
       try {
         const result = await ctx.orchestrator.run(message.trim(), {
           sessionId: run.sessionId,
+          ...(runMode ? { mode: runMode } : {}),
           // U3: per-run overrides (validated above)
           ...(Object.keys(runOverrides).length > 0 ? { runOverrides } : {}),
           // U5: interactive clarification.  The planner asks questions during

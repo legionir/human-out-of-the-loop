@@ -348,6 +348,7 @@ describe('phase 28 — registry layering', () => {
     // …packaged siblings survive, and project-only entries are added.
     expect(loaded.personas.map((p) => p.id).sort()).toEqual([
       'architect',
+      'chat',
       'coder',
       'house',
       'planner',

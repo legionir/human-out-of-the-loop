@@ -1,5 +1,6 @@
 import { generateObject } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from './llm-timeout.js';
+import { detectLanguage, languageSection } from '../language.js';
 import { reportLlmUsage, type LlmUsageReporter } from './llm-usage.js';
 import { z } from 'zod';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
@@ -77,6 +78,8 @@ export class AcceptanceChecker {
 
     const prompt = `
 You are verifying whether a completed task meets its acceptance criteria.
+
+${languageSection(step.description, detectLanguage(step.description))}
 
 ## Step Description
 ${step.description}

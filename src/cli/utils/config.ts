@@ -18,6 +18,12 @@ export interface GlobalCliConfig {
   defaultModel?: string;
   /** Default project root (relative paths resolve against the cwd) */
   projectRoot?: string;
+  /**
+   * v27.17.0: how goals are handled by default — `auto` (the planner decides
+   * between a plan and a chat answer), `chat` (never plan) or `plan` (never
+   * answer).  `--mode` and an `@chat`/`@plan` prefix win over it.
+   */
+  defaultMode?: string;
 }
 
 export function globalConfigPath(): string {

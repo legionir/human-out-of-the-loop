@@ -273,6 +273,10 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .option('--yes', 'auto-confirm the plan without prompting (CI mode)')
     .option('--verbose', 'show tool calls and low-level status')
     .option('--dry-run', 'show the plan without executing anything')
+    .option(
+      '--mode <mode>',
+      'auto|chat|plan — auto (default) answers a question and plans real work; chat never plans; plan never answers. An @chat/@plan prefix in the goal wins',
+    )
     .option('--timeout-ms <ms>', 'per-agent timeout in milliseconds (1000-600000)', (v: string) => Number(v))
     .option('--max-steps <n>', 'max tool-call iterations per agent run (1-100)', (v: string) => Number(v))
     .option('--max-replans <n>', 'automatic re-planning attempts on failure (0-10)', (v: string) => Number(v))
@@ -294,6 +298,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         yes: opts.yes === true,
         verbose: opts.verbose === true,
         dryRun: opts.dryRun === true,
+        mode: opts.mode as string | undefined,
         timeoutMs: opts.timeoutMs as number | undefined,
         maxSteps: opts.maxSteps as number | undefined,
         maxReplans: opts.maxReplans as number | undefined,
@@ -307,6 +312,12 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
       'after',
       helpBlock(
         'HOW A RUN PROCEEDS',
+        '  0. Mode           auto (default) decides: a greeting, a question or a',
+        '                    conversation is ANSWERED (read-only tools, no plan,',
+        '                    nothing executed); real work becomes a plan.  Force it',
+        '                    with --mode chat|plan or inside the goal: "@chat hello",',
+        '                    "@plan tidy the fixtures".  The prefix wins over the flag,',
+        '                    the flag over HOTL_MODE, that over the config default.',
         '  1. Clarification  If the goal is ambiguous the planner asks questions and',
         '                    waits for your answers (at most --max-replans below and',
         '                    the configured clarification-round ceiling).',
@@ -326,7 +337,10 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '',
         'NOTES ON THE FLAGS',
         '  --dry-run        plans and prints the steps, executes nothing, persists',
-        '                   nothing (a preview has no plan id) and exits 0.',
+        '                   nothing (a preview has no plan id) and exits 0.  In chat',
+        '                   mode it prints the answer instead (still nothing executed).',
+        '  --mode           auto|chat|plan — see step 0 above.  The reply to a chat',
+        '                   request is written in the language of the request.',
         '  --persistent     writes .ai-runtime (plans, sessions, observability log);',
         '                   without it (and without config) the run is in-memory and',
         '                   plans/sessions/usage/logs will have nothing to show.',
@@ -347,7 +361,8 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '                   the default for --thinking.',
         '',
         'EXIT CODES',
-        '  0  the review outcome is success or partial-success',
+        '  0  the review outcome is success or partial-success (an answered chat',
+        '     request counts as success — nothing was executed, nothing failed)',
         '  1  failure, rejected plan, unanswered clarification, or a runtime error',
         '  2  invalid usage (unknown model, out-of-range flag value, bad timeout)',
         '',

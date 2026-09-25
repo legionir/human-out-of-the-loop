@@ -27,6 +27,8 @@ import {
   type ConfirmationResult,
 } from '../utils/confirm.js';
 import { prepareCliEnvironment } from '../utils/config.js';
+import { parseModePrefix, resolveRunMode, modeWords } from '../utils/mode-prefix.js';
+import type { RunMode } from '../../ai/modes.js';
 import { createProgressRenderer } from '../utils/streaming.js';
 import { color, err, out } from '../utils/output.js';
 import {
@@ -70,6 +72,12 @@ export interface RunCommandOptions {
    * (`auto` = only in a terminal).  See `resolveThinkingMode`.
    */
   thinking?: ThinkingMode | string;
+  /**
+   * v27.17.0: `auto` (default) plans or answers depending on the request,
+   * `chat` never plans, `plan` never answers.  An `@chat`/`@plan` prefix in
+   * the goal wins over this flag.
+   */
+  mode?: RunMode | string;
 }
 
 /** C3: option validation → undefined when OK, error message otherwise (exit 2). */
@@ -109,6 +117,13 @@ function validateRunOptions(opts: RunCommandOptions): string | undefined {
     !['auto', 'on', 'off'].includes(String(opts.thinking).trim().toLowerCase())
   ) {
     return `--thinking must be auto, on or off (got "${String(opts.thinking)}")`;
+  }
+  // v27.17.0: same for --mode.
+  if (
+    opts.mode !== undefined &&
+    !['auto', 'chat', 'plan'].includes(String(opts.mode).trim().toLowerCase())
+  ) {
+    return `--mode must be auto, chat or plan (got "${String(opts.mode)}")`;
   }
   return undefined;
 }
@@ -163,16 +178,37 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     err(chalk.red(invalid));
     return { exitCode: 2 };
   }
+
+  // v27.17.0: the mode can be written inside the goal (`@chat …`, `@plan …`).
+  const prefixed = parseModePrefix(goal);
+  const requested = prefixed.text;
+
   // Phase 29: an empty goal reached the planner (and produced an opaque
   // schema error); it is a usage mistake, so fail fast with exit 2.
-  if (goal.trim().length === 0) {
+  if (requested.trim().length === 0) {
     err(chalk.red('The goal must not be empty.'));
-    err(chalk.dim('Example: hootl run "summarize the README"'));
+    err(chalk.dim(`Example: hootl run "summarize the README"   (or "${'@chat'} hello")`));
     return { exitCode: 2 };
   }
 
   const projectRoot = path.resolve(opts.projectRoot ?? process.cwd());
   const globalConfig = prepareCliEnvironment(projectRoot);
+
+  const { resolved, invalid: badMode } = resolveRunMode({
+    ...(prefixed.mode ? { prefix: prefixed.mode } : {}),
+    ...(opts.mode !== undefined ? { flag: String(opts.mode) } : {}),
+    env: process.env,
+    config: globalConfig,
+  });
+  if (badMode) {
+    err(
+      chalk.red(
+        `Invalid default mode "${badMode.value}" (${badMode.source === 'env' ? 'HOTL_MODE' : 'defaultMode in the global config'}).`,
+      ),
+    );
+    err(chalk.dim(`Use one of: ${['auto', 'chat', 'plan'].join(', ')} — or an ${modeWords()} prefix in the goal.`));
+    return { exitCode: 2 };
+  }
 
   const persistent = opts.persistent ?? globalConfig.persistent ?? false;
   const model = opts.model ?? envDefaultModelId(projectRoot) ?? globalConfig.defaultModel;
@@ -313,10 +349,22 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       out(color.dim(`Model: ${active.model} (not in the registry) via ${where}`));
     }
 
+    // Say which mode is in force when the user (or their config) chose it —
+    // a stray `HOTL_MODE` must never surprise anyone.
+    if (resolved.source !== 'default') {
+      out(color.dim(`Mode: ${resolved.mode} (${resolved.source})`));
+    }
+
     // ── Dry run: plan, show, stop ─────────────────────────────
     if (opts.dryRun) {
       out(color.bold('📋 Dry run — planning only, nothing will be executed.'));
-      const preview = await orchestrator.previewPlan(goal);
+      const preview = await orchestrator.previewPlan(requested, undefined, resolved.mode);
+      if (preview.ok && preview.answer !== undefined) {
+        // Chat mode has nothing to execute, so the answer IS the preview.
+        out(color.bold('\n💬 Answer (nothing to execute)'));
+        out(preview.answer);
+        return { exitCode: 0 };
+      }
       if (preview.planText) {
         out(color.bold('\n── Planned steps ─────────────────────────────'));
         out(preview.planText);
@@ -329,8 +377,10 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     }
 
     // ── Full run (Human-Out-Of-Loop after confirmation) ───────
-    const result: OrchestratorResult = await orchestrator.run(goal, {
+    const result: OrchestratorResult = await orchestrator.run(requested, {
       sessionId: opts.session,
+      // v27.17.0: auto (default) / chat / plan — the prefix in the goal wins.
+      mode: resolved.mode,
       // C3: label the NEW session (--label is rejected with --session)
       ...(opts.label !== undefined ? { sessionLabel: opts.label } : {}),
       confirmCallback,
@@ -351,7 +401,14 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
           `(${usage.totalPromptTokens} prompt + ${usage.totalCompletionTokens} completion)`,
       ),
     );
-    out(color.dim(`Session: ${result.sessionId}   Plan: ${result.planId}`));
+    out(
+      color.dim(
+        `Session: ${result.sessionId}   ` +
+          (result.kind === 'answer'
+            ? `Plan: none (answered in ${resolved.mode === 'chat' ? 'chat' : 'auto'} mode)`
+            : `Plan: ${result.planId}`),
+      ),
+    );
 
     const exitCode =
       result.review.outcome === 'success' || result.review.outcome === 'partial-success'
