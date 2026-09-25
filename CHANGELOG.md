@@ -5,6 +5,57 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.11.0] — 2026-09-25 — the clock, time zones, and persisted reasoning
+
+Three tools ported from the reference `time` and `sequentialthinking` servers.
+
+**`get_current_time` — the reference's four fields, plus the ones a prompt uses**
+- timezone, datetime (ISO with offset), day_of_week, is_dst — and additionally
+  the wall-clock `formatted`, the `utcOffset` in both forms, the epoch and the
+  **machine's** zone (so "the user's time" is never confused with UTC).
+- `date: 'YYYY-MM-DD'` asks about another day; an offset is date-dependent, and
+  a January question about Berlin is not the same as a July one.
+- An unknown zone is refused with close matches
+  (`INVALID_TIMEZONE`: *did you mean Asia/Tehran?*) — the reference answers with
+  a protocol error, and a model that typed `Asia/Tehrn` deserves better than a
+  silent UTC.
+
+**`convert_time` — one call, several zones**
+- `sourceTimeZone`, `time` (HH:MM), and either `targetTimeZone` or
+  `targetTimeZones` (the reference's list), each target carrying its own
+  `utcOffset`, `isDST` and `timeDifference` (`+5.5h`, `-1.5h`).
+- The wall clock → instant conversion resolves the zone offset **for the target
+  day**, which is what makes it correct across a DST switch; `date` makes that
+  day explicit instead of "today, silently".
+
+**`sequentialthinking` — reasoning that survives the turn**
+- Every field of the reference tool (`thought`, `nextThoughtNeeded`,
+  `thoughtNumber`, `totalThoughts`, `isRevision`/`revisesThought`,
+  `branchFromThought`/`branchId`, `needsMoreThoughts`), the same
+  `thoughtNumber > totalThoughts` adjustment, branch bookkeeping and bordered
+  rendering.
+- The chain is **persisted** in `<project>/.ai-runtime/thinking/<sessionId>.json`
+  (atomic write), so a resumed plan or a fresh process continues the same
+  session — that is the difference between a reasoning trace and a paragraph.
+- 50 steps / 256 KB per session (`THINKING_LIMIT`), session ids sanitised so one
+  can never name a path outside the directory, a corrupt session file starts a
+  fresh chain instead of failing the step, and warnings for a dangling
+  `revisesThought` or a branch without an id.
+- Because it is a normal tool, every step also lands in the Journal (phase 37)
+  with its arguments — the reasoning trail is auditable for free.
+
+**The clock in the environment block (phase 36 follow-up):** `PROJECT CONTEXT`
+and every agent system prompt now carry `current time: 2026-09-25 04:12:33
+(Asia/Tehran, GMT+03:30)`, so a plan that says "the release from last week"
+starts from a real date instead of a guess.
+
+**Verification:** 28 new unit tests (fixed instants, so DST is deterministic in
+both hemispheres; fractional offsets like Kathmandu's +05:45; midnight and
+day-boundary crossings; typo suggestions; session persistence across instances,
+isolation between sessions, the step ceiling, corrupt-file recovery and id
+sanitisation) and a new `time` e2e scenario. Also: `local-tools` catalog 19,
+persona allow-lists and a new `reasoning` skill.
+
 ## [27.10.0] — 2026-09-25 — the Journal: what the AI did, recorded automatically
 
 `<project>/.ai-runtime/journal/YYYY-MM-DD.jsonl` — one append-only line per

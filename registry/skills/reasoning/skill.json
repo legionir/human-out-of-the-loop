@@ -1,0 +1,9 @@
+{
+  "id": "reasoning",
+  "name": "Structured Reasoning & Time",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": ["sequentialthinking", "get_current_time", "convert_time"],
+  "priority": 70,
+  "description": "Reasons in explicit numbered steps and keeps date/time facts straight"
+}

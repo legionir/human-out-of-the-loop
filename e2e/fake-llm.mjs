@@ -169,6 +169,12 @@ const MARKERS = [
   // Phase 36 — the glob scan at editor level.
   { marker: 'FIND', tool: 'search_files' },
   { marker: 'FINDDIR', tool: 'search_files' },
+  // Phase 38 — time and structured reasoning.
+  { marker: 'CLOCK', tool: 'get_current_time' },
+  { marker: 'TZCONVERT', tool: 'convert_time' },
+  // (`THINK:` is taken by the phase-32 thinking-delta fixture, so the
+  // reasoning-step marker is `REASON:`.)
+  { marker: 'REASON', tool: 'sequentialthinking' },
 ];
 
 function markersIn(text) {
@@ -245,6 +251,33 @@ function pickToolCall(promptText, offered, chained = false) {
         contextLines: 1,
         maxMatchesPerFile: 5,
         maxResults: 10,
+      },
+    };
+  }
+  // CLOCK:<IANA zone>|now — the clock, optionally for a specific zone.
+  if (marker.marker === 'CLOCK') {
+    return marker.arg === 'now'
+      ? { name: 'get_current_time', args: {} }
+      : { name: 'get_current_time', args: { timezone: marker.arg } };
+  }
+  // TZCONVERT:<source>|<time>|<target> — one wall-clock conversion.
+  if (marker.marker === 'TZCONVERT') {
+    const [sourceTimeZone, time, targetTimeZone] = marker.arg.split('|');
+    return {
+      name: 'convert_time',
+      args: { sourceTimeZone, time, targetTimeZone, date: '2026-07-01' },
+    };
+  }
+  // REASON:<session> — one reasoning step per call, in a named session.
+  if (marker.marker === 'REASON') {
+    return {
+      name: 'sequentialthinking',
+      args: {
+        thought: `Reasoning step for ${marker.arg}: inspect, then decide.`,
+        thoughtNumber: 1,
+        totalThoughts: 2,
+        nextThoughtNeeded: true,
+        sessionId: marker.arg,
       },
     };
   }

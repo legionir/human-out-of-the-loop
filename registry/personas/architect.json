@@ -13,7 +13,10 @@
     "list_allowed_directories",
     "git_status",
     "read_media_file",
-    "list_directory_with_sizes"
+    "list_directory_with_sizes",
+    "get_current_time",
+    "convert_time",
+    "sequentialthinking"
   ],
   "description": "System-level architectural analysis and design review"
 }

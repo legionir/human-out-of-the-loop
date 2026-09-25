@@ -5,7 +5,7 @@
 **هدف:** بستن شکاف ابزارها با سرورهای مرجع (git / memory / time / sequentialthinking / fetch)، افزودن **Journal** به‌عنوان ثبت خودکار همه‌کارهای AI، و عرضهٔ خود runtime به‌عنوان یک **MCP server**
 **قانون اجرا:** مثل پلن‌های قبلی — هر فاز یک commit + push مستقل روی `arena/01a0d510-human-out-of-the-loop`، معیار پذیرش کامل پیش از فاز بعد، علامت 🟢 در همین فایل، و هر فاز در بدنهٔ PR #3 اضافه می‌شود.
 
-**وضعیت (2026-09-25):** 🔵 در حال اجرا — فاز ۳۷ (Journal) 🟢 کامل و پوش‌شده (`7a5a…`+commit فاز ۳۷)؛ فازهای ۳۸–۴۳ در نوبت. ۸۹۳ تست سبز (۶۰ فایل)، e2e ۹۵/۹۵، نسخه ۲۷.۱۰.۰
+**وضعیت (2026-09-25):** 🔵 در حال اجرا — فاز ۳۷ (Journal) و فاز ۳۸ (time + sequentialthinking) 🟢 کامل و پوش‌شده؛ فازهای ۳۹–۴۳ در نوبت. ۹۲۱ تست سبز (۶۱ فایل)، e2e ۱۰۳/۱۰۳، نسخه ۲۷.۱۱.۰
 
 ---
 
@@ -122,7 +122,7 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 
 ---
 
-## فاز ۳۸ — time و sequentialthinking
+## فاز ۳۸ — time و sequentialthinking 🟢
 
 **هدف:** دو ابزار کوچک و پرکاربرد؛ زمان (با منطقهٔ زمانی) و «تفکر مرحله‌به‌مرحله» با وضعیت ماندگار.
 
@@ -138,6 +138,8 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 5. registry JSON ×۳، `local-tools.ts`، personas (coder/reviewer)، skill جدید `reasoning` (یا افزودن به `code_analysis`).
 
 **معیار پذیرش:** تست واحد برای منطقه‌های زمانی مختلف (شامل تهران +۳:۳۰ و یک منطقهٔ دارای DST مثل `Europe/Berlin`)، `convert_time` با تغییر روز (23:00 → 03:00 فردا)، منطقهٔ نامعتبر، و سقف/شاخه‌زنی sequentialthinking؛ e2e: سناریوی `time` (یک marker جدید) که نتیجهٔ ابزار در درخواست بعدی مدل دیده شود.
+
+**تحویل‌شده (۲۰۲۶-۰۹-۲۵):** `src/ai/tools/time/tz.ts` (هستهٔ منطقه‌های زمانی روی `Intl`، شامل تشخیص DST نیم‌کره‌جنوبی و پیشنهاد منطقهٔ نزدیک)، سه ابزار `get_current_time` / `convert_time` / `sequentialthinking` (ماندگاری اتمیک در `thinking/<sessionId>.json`، سقف ۵۰ گام، سانیتایز id)، ساعت محلی در بلوک ENVIRONMENT، مهارت جدید `reasoning`، به‌روزرسانی personaها (۱۹/۱۴/۱۳ ابزار)، ۲۸ تست واحد و سناریوی e2e `time`. نسخه ۲۷.۱۱.۰.
 
 ---
 

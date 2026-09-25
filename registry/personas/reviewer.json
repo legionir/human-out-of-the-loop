@@ -12,7 +12,10 @@
     "search_files",
     "list_allowed_directories",
     "read_media_file",
-    "list_directory_with_sizes"
+    "list_directory_with_sizes",
+    "get_current_time",
+    "convert_time",
+    "sequentialthinking"
   ],
   "description": "Detailed code review with actionable feedback"
 }

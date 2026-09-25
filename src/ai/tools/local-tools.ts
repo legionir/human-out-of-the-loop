@@ -20,6 +20,9 @@ import { createSearchFilesTool } from './implementations/search-files.js';
 import { createListAllowedDirectoriesTool } from './implementations/list-allowed-directories.js';
 import { createListDirectoryWithSizesTool } from './implementations/list-directory-with-sizes.js';
 import { createReadMediaFileTool } from './implementations/read-media-file.js';
+import { createGetCurrentTimeTool } from './implementations/get-current-time.js';
+import { createConvertTimeTool } from './implementations/convert-time.js';
+import { createSequentialThinkingTool } from './implementations/sequential-thinking.js';
 
 /**
  * Every local tool, keyed by the id used in `registry/tools/*.json`.
@@ -45,6 +48,10 @@ export const LOCAL_TOOL_FACTORIES: Readonly<Record<string, (projectRoot: string)
   create_directory: createCreateDirectoryTool,
   search_files: createSearchFilesTool,
   list_allowed_directories: createListAllowedDirectoriesTool,
+  // Phase 38 — time and structured reasoning.
+  get_current_time: createGetCurrentTimeTool,
+  convert_time: createConvertTimeTool,
+  sequentialthinking: createSequentialThinkingTool,
 };
 
 /** Ids of the local tools above — used by tests and by the bootstrap check. */

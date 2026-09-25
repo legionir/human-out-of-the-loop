@@ -1,0 +1,8 @@
+{
+  "id": "convert_time",
+  "name": "Convert Time",
+  "description": "Converts a wall-clock time between IANA time zones, with per-zone offsets and the hour difference",
+  "source": "local",
+  "modulePath": "./implementations/convert-time",
+  "category": "time"
+}

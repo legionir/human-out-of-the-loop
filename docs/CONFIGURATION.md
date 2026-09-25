@@ -149,7 +149,7 @@ registry/
 │   ├── git_operations/
 │   ├── task_decomposition/
 │   └── acceptance_check/
-├── tools/                   # ۱۶ ابزار محلی (فاز ۳۳–۳۵: پورت کامل سرور مرجع MCP)
+├── tools/                   # ۱۹ ابزار محلی (فاز ۳۳–۳۸: پورت کامل سرورهای مرجع)
 │   ├── read_file.json       # id, name, description, source: local, modulePath, category
 │   ├── search_code.json     #   جستجوی VS Code-style: pattern محتوا + pathPattern مسیر
 │   ├── write_file.json
@@ -165,7 +165,10 @@ registry/
 │   ├── get_file_info.json
 │   ├── create_directory.json
 │   ├── search_files.json    # گلوب editor-style: نام در هر عمق + حذف خودکار node_modules/dist + ابعاد و شمارش‌ها
-│   └── list_allowed_directories.json
+│   ├── list_allowed_directories.json
+│   ├── get_current_time.json  # ساعت حالا در هر منطقهٔ IANA + DST + offset ماشین
+│   ├── convert_time.json      # تبدیل HH:MM بین یک یا چند منطقه (درست در مرز DST)
+│   └── sequentialthinking.json # زنجیرهٔ استدلال شماره‌دار/شاخه‌دار، ماندگار در thinking/
 ├── models/
 │   ├── gpt-4o.json          # id, provider, model, config { baseURL?, maxContextTokens? }
 │   ├── claude-sonnet.json
@@ -174,6 +177,23 @@ registry/
     ├── example.json         # id, name, transport http|sse|stdio, url, auth, toolPrefix, connectTimeoutMs
     └── README.md
 ```
+
+### زمان و استدلال (فاز ۳۸)
+
+سه ابزار از سرورهای مرجع `time` و `sequentialthinking`:
+
+```json
+{ "timezone": "Asia/Tehran", "date": "2026-07-01" }          // get_current_time
+{ "sourceTimeZone": "Asia/Tehran", "time": "09:30",          // convert_time
+  "targetTimeZones": ["Europe/Berlin", "Asia/Tokyo"] }
+{ "thought": "…", "thoughtNumber": 1, "totalThoughts": 3,    // sequentialthinking
+  "nextThoughtNeeded": true, "sessionId": "release-window" }
+```
+
+نکات: منطقهٔ ناشناس با پیشنهاد رد می‌شود (`INVALID_TIMEZONE`)؛ تبدیل برای «روز هدف»
+محاسبه می‌شود پس در مرز تغییر ساعت درست است؛ زنجیرهٔ استدلال در
+`<project>/.ai-runtime/thinking/<sessionId>.json` (نوشتن اتمیک) ذخیره می‌شود و سقفش
+۵۰ گام / ۲۵۶KB است (`THINKING_LIMIT`). ساعت محلی هم در بلوک ENVIRONMENT می‌آید.
 
 ### Journal (فاز ۳۷)
 

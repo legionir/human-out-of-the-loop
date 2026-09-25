@@ -323,6 +323,21 @@ human-out-of-the-loop logs --follow --project-root ./app
 human-out-of-the-loop sessions label session_5c1d… "Login page v2"
 ```
 
+### Time and structured reasoning
+
+Three tools from the reference `time` and `sequentialthinking` servers:
+
+| Tool | What it answers |
+|------|-----------------|
+| `get_current_time` | the date and time in any IANA zone, with day of week, UTC offset and DST state — plus the **machine's** zone, so "local" is never ambiguous. `date` asks about another day (offsets are date-dependent). An unknown zone is refused with suggestions (`Asia/Tehrn` → *did you mean Asia/Tehran?*) instead of silently becoming UTC |
+| `convert_time` | a wall-clock time (HH:MM) from one zone to **one or many** others, each with its own offset, DST flag and hour difference — resolved for the target day, so it is right across a DST switch |
+| `sequentialthinking` | one step of a numbered, estimated, revisable, branchable reasoning chain — kept in `<project>/.ai-runtime/thinking/<sessionId>.json` (atomic write), so a resumed run continues the same chain instead of rebuilding it |
+
+The environment block (below) also carries the current time in the machine's
+zone, so ordinary "what is today?" questions cost no tool call. A reasoning
+session is capped at 50 steps / 256 KB with a `THINKING_LIMIT` error that asks
+for a fresh id — "think forever" is what a stuck model does.
+
 ### Journal — what the AI actually did
 
 Every tool execution and every plan/step transition is appended, automatically,
@@ -551,11 +566,12 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 35 | `read_media_file` (attached image/audio) and `list_directory_with_sizes` — the reference filesystem toolset is complete | 🟢 |
 | 36 | `search_files` at editor level (base-name matching, default excludes, type filters, sizes, counters) and the OS environment block given to the planner *and* the agent (shell, separator, GNU/BSD, line endings) | 🟢 |
 | 37 | **Journal** — every tool execution and plan/step transition recorded automatically at the runtime's tool hook, redacted and rotated (`hootl journal`) | 🟢 |
-| 38–43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): time + sequentialthinking, memory, fetch, git read, git write + PR, and exposing this runtime as an MCP server | 🔵 |
+| 38 | `get_current_time`, `convert_time`, `sequentialthinking` (persisted reasoning sessions) + the clock in the environment block | 🟢 |
+| 39–43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): memory, fetch, git read, git write + PR, and exposing this runtime as an MCP server | 🔵 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**893 tests green (60 files), 0 tsc errors — plus 95 committed end-to-end checks (`npm run e2e`)** (phases 18–37 complete — see `docs/history/`)
+**921 tests green (61 files), 0 tsc errors — plus 103 committed end-to-end checks (`npm run e2e`)** (phases 18–38 complete — see `docs/history/`)
 
 ## Law Compliance
 

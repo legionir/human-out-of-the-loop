@@ -1,0 +1,8 @@
+{
+  "id": "get_current_time",
+  "name": "Get Current Time",
+  "description": "Current date and time, optionally in an IANA time zone, with day of week, UTC offset and DST state",
+  "source": "local",
+  "modulePath": "./implementations/get-current-time",
+  "category": "time"
+}

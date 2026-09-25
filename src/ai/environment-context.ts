@@ -22,8 +22,22 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import process from 'node:process';
+import { localTimeZone, timeInZone } from './tools/time/tz.js';
 
 export type ShellFamily = 'posix' | 'cmd' | 'powershell' | 'unknown';
+
+/** The instant + zone the block reports (phase 38). */
+export interface EnvironmentClock {
+  /** `2026-09-25 04:12:33` in the machine's own zone. */
+  formatted: string;
+  /** IANA name, e.g. `Asia/Tehran`. */
+  timeZone: string;
+  /** `GMT+03:30`. */
+  utcOffset: string;
+  /** `Friday` */
+  dayOfWeek: string;
+  isDST: boolean;
+}
 
 export interface EnvironmentFacts {
   /** `process.platform` — 'linux' | 'darwin' | 'win32' | … */
@@ -54,6 +68,8 @@ export interface EnvironmentFacts {
   caseSensitive: boolean;
   /** Line ending a text file usually has on this host. */
   lineEnding: 'LF' | 'CRLF';
+  /** The clock, in the machine's own zone (phase 38). */
+  now: EnvironmentClock;
 }
 
 /** `/etc/os-release` `PRETTY_NAME`, the friendliest Linux identification. */
@@ -113,6 +129,9 @@ export function collectEnvironmentFacts(
   const pathSeparator = isWindows ? '\\' : '/';
   const pathJoinExample = ['src', 'index.ts'].join(pathSeparator);
 
+  const zone = localTimeZone();
+  const clock = timeInZone(zone, new Date());
+
   return {
     platform,
     osName,
@@ -132,6 +151,13 @@ export function collectEnvironmentFacts(
     // filesystem is not (unless it is one of the rare ciopfs/FAT mounts).
     caseSensitive: !isWindows && !isMac,
     lineEnding: isWindows ? 'CRLF' : 'LF',
+    now: {
+      formatted: clock.formatted,
+      timeZone: zone,
+      utcOffset: clock.utcOffset,
+      dayOfWeek: clock.dayOfWeek,
+      isDST: clock.isDST,
+    },
   };
 }
 
@@ -143,6 +169,11 @@ export function collectEnvironmentFacts(
 export function environmentBullets(facts: EnvironmentFacts = collectEnvironmentFacts()): string[] {
   const lines: string[] = [
     `- platform: ${facts.platform} — ${facts.osName} (${facts.arch}), node ${facts.nodeVersion}`,
+    // Phase 38: the clock.  A model that does not know today's date invents it,
+    // and a plan that says "the release from last week" depends on it.  The
+    // `get_current_time` tool is the precise form of this; one line here keeps
+    // the common case from needing a tool call at all.
+    `- current time: ${facts.now.formatted} (${facts.now.timeZone}, ${facts.now.utcOffset})`,
     `- default shell: ${facts.shell}${facts.shellFamily === 'posix' ? ' (POSIX sh syntax)' : ''}` +
       `${facts.shellFamily === 'powershell' ? ' (PowerShell syntax, not sh)' : ''}`,
     `- path separator: "${facts.pathSeparator}" — build paths with node:path (path.join('src', 'index.ts') → '${facts.pathJoinExample}'); a hard-coded "\\" only works on Windows and a hard-coded "/" only on POSIX`,

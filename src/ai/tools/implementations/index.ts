@@ -40,3 +40,6 @@ export {
   createGetTaskDetailsTool,
 } from './task-control-tools.js';
 export { createGetPreviousPlanSummaryTool } from './session-tools.js';
+export { createGetCurrentTimeTool } from './get-current-time.js';
+export { createConvertTimeTool } from './convert-time.js';
+export { createSequentialThinkingTool } from './sequential-thinking.js';

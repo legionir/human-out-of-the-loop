@@ -539,6 +539,88 @@ scenarios.journal = async () => {
   return root;
 };
 
+/**
+ * Phase 38 — time and structured reasoning, through the real CLI.
+ *
+ * One run: the clock for two zones (the machine's, and a named one the stub
+ * asks for), a wall-clock conversion, and a reasoning step written into a
+ * named session.  The assertions then read the *tool results* as the model
+ * received them and the file the reasoning step left in the project.
+ */
+scenarios.time = async () => {
+  const root = makeProject('time');
+  const goal =
+    'check the clock, the release window and think it through TIMEPROBE CHAIN ' +
+    'CLOCK:now CLOCK:Asia/Tehran TZCONVERT:Asia/Tehran|09:30|Europe/Berlin REASON:release-window';
+  const { code, stdout } = await run(runArgs(goal, root));
+  const { plans } = planStore(root);
+  const plan = plans[0];
+  const log = readLog(root);
+
+  check('time: exit code 0', code === 0, `exit=${code} ${(stdout || '').split('\n')[0]}`);
+
+  const called = log.filter((e) => e.eventType === 'task:tool-call').map((e) => e.payload?.toolName);
+  check(
+    'time: the log records the clock, the conversion and the reasoning step',
+    called.includes('get_current_time') &&
+      called.includes('convert_time') &&
+      called.includes('sequentialthinking'),
+    called.join(',')
+  );
+
+  const probeRequests = stubRequests().filter((body) => JSON.stringify(body).includes('TIMEPROBE'));
+  const dump = probeRequests.map((body) => JSON.stringify(body)).join('\n');
+
+  // The clock result: an ISO stamp with an offset, and the Berlin conversion.
+  check(
+    'time: the clock result reached the model with an offset',
+    /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+\d{2}:\d{2}/.test(dump) && dump.includes('dayOfWeek')
+  );
+  // 09:30 Tehran (+03:30) = 06:00 UTC = 08:00 Berlin (+02:00 in July).
+  check(
+    'time: the conversion reached the model (08:00 Berlin, -1.5h)',
+    dump.includes('2026-07-01T08:00:00+02:00') && dump.includes('-1.5h')
+  );
+  check(
+    'time: the reasoning step was acknowledged with its session id',
+    dump.includes('release-window') && dump.includes('thoughtHistoryLength')
+  );
+
+  // Persistence is the phase-38 addition: the step is on disk, in the project.
+  const sessionFile = path.join(root, '.ai-runtime', 'thinking', 'release-window.json');
+  const saved = fs.existsSync(sessionFile)
+    ? JSON.parse(fs.readFileSync(sessionFile, 'utf-8'))
+    : undefined;
+  check(
+    'time: the reasoning session was persisted in the project',
+    saved?.thoughts?.length === 1 && saved.thoughts[0].thought.includes('release-window'),
+    sessionFile
+  );
+
+  // And the Journal (phase 37) recorded all three calls without any extra code.
+  const journalDir = path.join(root, '.ai-runtime', 'journal');
+  const journalText = fs.existsSync(journalDir)
+    ? fs
+        .readdirSync(journalDir)
+        .map((file) => fs.readFileSync(path.join(journalDir, file), 'utf-8'))
+        .join('\n')
+    : '';
+  check(
+    'time: the Journal recorded the three tool calls automatically',
+    ['get_current_time', 'convert_time', 'sequentialthinking'].every((tool) =>
+      journalText.includes(`"tool":"${tool}"`)
+    )
+  );
+
+  check(
+    'time: every step completed without a tool error',
+    Boolean(plan) && plan.steps.every((s) => s.status === 'done') &&
+      !log.some((e) => e.eventType === 'task:tool-error'),
+    log.filter((e) => e.eventType === 'task:tool-error').map((e) => e.message).join(' | ')
+  );
+  return root;
+};
+
 scenarios.resume = async () => {
   const root = makeProject('resume');
   await run(runArgs('write the project notes WRITE:notes/first.txt', root));

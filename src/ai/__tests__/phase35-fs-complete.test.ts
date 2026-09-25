@@ -363,8 +363,12 @@ describe('Phase 35 — filesystem parity with the vendored MCP reference server'
     // The reference's 14 registrations collapse to 13 tools here (its
     // deprecated `read_file` is the same `read_file`), plus our three:
     // `search_code` (content search), `write_multiple_files` (batch) and
-    // `git_status`.
-    expect(LOCAL_TOOL_IDS.length).toBe(16);
+    // `git_status` — and the phase-38 trio (time, time conversion,
+    // sequential thinking), which comes from other reference servers.
+    expect(LOCAL_TOOL_IDS.length).toBe(19);
+    expect([...LOCAL_TOOL_IDS]).toEqual(
+      expect.arrayContaining(['get_current_time', 'convert_time', 'sequentialthinking'])
+    );
     expect([...LOCAL_TOOL_IDS]).toEqual(
       expect.arrayContaining([
         'read_file',
