@@ -21,6 +21,7 @@ import type { LlmUsageReport } from './runtime/llm-usage.js';
 import { MemorySessionStore, FileSessionStore, type SessionStore } from './runtime/session-store.js';
 import { ObservabilityLogger } from './runtime/observability-logger.js';
 import { collectSecretValues } from './runtime/secret-scrub.js';
+import type { ToolCallLogOptions, ToolCallSink } from './runtime/tool-call-log.js';
 import { ScrubbingPlanStore } from './runtime/secret-scrub.js';
 import { logStepEvent, parseStepEvent } from './runtime/step-events.js';
 import { JournalWriter, journalOptionsFromEnv } from './runtime/journal.js';
@@ -122,6 +123,13 @@ export type OrchestratorConfig = z.input<typeof OrchestratorConfigSchema> & {
    * tests) agent turns stay on the non-streaming call.
    */
   onThought?: ThoughtSink;
+  /**
+   * v27.17.3: one structured record per tool call — type, name, input,
+   * status — for every agent turn of the run (the CLI renders a line per
+   * call; a UI can consume the same records).  Absent means no records, and
+   * the tool set is handed to the model exactly as it was.
+   */
+  onToolCall?: ToolCallSink;
 };
 
 /**
@@ -249,11 +257,21 @@ export class Orchestrator {
    * `Required<Omit<…>> & { env: EnvSource }` rather than plain
    * `Required<OrchestratorConfig>`.
    */
-  readonly config: Required<Omit<OrchestratorConfig, 'env' | 'onThought'>> & {
+  readonly config: Required<Omit<OrchestratorConfig, 'env' | 'onThought' | 'onToolCall'>> & {
     env: EnvSource;
     /** Phase 32: absent means "agent turns are not streamed". */
     onThought?: ThoughtSink;
+    /** v27.17.3: absent means "no tool-call records". */
+    onToolCall?: ToolCallSink;
   };
+
+  /**
+   * v27.17.3: how a tool-call record resolves its tool's category and which
+   * credential values the shown input must not contain.  Built once from the
+   * registries (a closure, so MCP tools connected later are covered) and the
+   * same secret list the journal and the observability log use.
+   */
+  private toolCallOptions: ToolCallLogOptions = {};
 
   readonly personaRegistry: PersonaRegistry;
   readonly skillRegistry: SkillRegistry;
@@ -336,6 +354,8 @@ export class Orchestrator {
       onProgress: config.onProgress ?? (() => {}),
       // Phase 32: thinking is optional by design — no sink, no streaming.
       onThought: config.onThought,
+      // v27.17.3: tool-call records are optional the same way.
+      onToolCall: config.onToolCall,
     };
 
     // Phase 27 (CFG-08): resolve the env once, before any registry or
@@ -353,6 +373,23 @@ export class Orchestrator {
     // no shared singletons, full isolation between instances.
     this.eventBus = new EventBus();
     this.agentRuntime = new AgentRuntime();
+    // Phase 30 (P10): the persisted plan must not carry a credential the model
+    // echoed into its summary — and v27.17.3 scrubs the tool-call records with
+    // the same list, so a shown argument never prints a key.
+    this.secretValues = collectSecretValues(this.env, this.config.redactKeys);
+    // v27.17.3: the tool's CATEGORY comes from the registry (the same one the
+    // tool list is built from), resolved per call so a tool registered later —
+    // an MCP server that connects during `initialize()` — is classified too.
+    // Both fields are set here because `TaskRuntime` keeps this very object:
+    // nothing about the options may be filled in after it is handed over.
+    this.toolCallOptions = {
+      toolType: (toolName: string) => {
+        const definition = this.toolRegistry.getDefinition(toolName);
+        if (!definition) return undefined;
+        return definition.category ?? (definition.source === 'mcp' ? 'mcp' : undefined);
+      },
+      secrets: this.secretValues,
+    };
     // Phase 19 (CFG-06): RateLimiter constructed from config
     this.rateLimiter = new RateLimiter({
       maxConcurrentPerProvider: this.config.maxConcurrentPerProvider,
@@ -375,6 +412,10 @@ export class Orchestrator {
       maxSteps: this.config.maxSteps,
       // Phase 32: forward the thinking sink to every agent turn.
       ...(this.config.onThought ? { onThought: this.config.onThought } : {}),
+      // v27.17.3: forward the tool-call sink with its category resolver and
+      // the credentials its records must never show.
+      ...(this.config.onToolCall ? { onToolCall: this.config.onToolCall } : {}),
+      ...(this.toolCallOptions ? { toolCallOptions: this.toolCallOptions } : {}),
     });
     // Phase 19 (CFG-03/04): DelegationGuard instantiated from config
     // and wired into the delegate_task tool.
@@ -386,7 +427,6 @@ export class Orchestrator {
     const runtimeDir = this.config.runtimeDir;
     // Phase 30 (P10): the persisted plan must not carry a credential the
     // model echoed into its summary.
-    this.secretValues = collectSecretValues(this.env, this.config.redactKeys);
     const planStore = this.config.persistent
       ? new FilePlanStore(path.join(runtimeDir, 'plans'))
       : new MemoryPlanStore();
@@ -1213,6 +1253,8 @@ export class Orchestrator {
         maxSteps: this.config.maxSteps,
         timeoutMs: this.config.agentTimeoutMs,
         ...(this.config.onThought ? { onThought: this.config.onThought } : {}),
+        ...(this.config.onToolCall ? { onToolCall: this.config.onToolCall } : {}),
+        ...(this.toolCallOptions ? { toolCallOptions: this.toolCallOptions } : {}),
       });
       if (run.success && run.result.trim().length > 0) {
         text = run.result.trim();

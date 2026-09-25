@@ -5,6 +5,57 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.3] — 2026-09-25 — every tool call on one line, and the records behind it
+
+Asked for in the CLI: each AI tool call logged with the tool's type, its name,
+the input it was given and how it ended — and the capability placed at the
+runtime, not in the CLI, so a UI (or anything else) can consume the same
+records.
+
+    🔧 tool: write_file  type: filesystem  input: {"filePath":"notes/a.txt","content":"…"}  status: ✅ success
+    🔧 tool: read_file  type: filesystem  input: {"filePath":"notes/missing.txt","encoding":"utf-8"}  status: ❌ failed — ENOENT: no such file or directory
+    🔧 tool: git_push  type: git  input: {"directory":".","branch":"main","setUpstream":false}  status: ❌ failed — PROTECTED_BRANCH: Refusing to push "main" …
+
+- **The record is a runtime type, not a CLI string.**  `ToolCallSink` in
+  `src/ai/runtime/tool-call-log.ts` receives
+  `{ phase: 'start' | 'end', status: 'running' | 'success' | 'failure',
+  toolType, toolName, input, taskId?, agentId?, planId?, planStepId?, callId?,
+  durationMs?, error?, code? }`, wired where tools actually execute — the same
+  place the Journal hooks in, one wrapper outside it, so a call that fails
+  before or inside the Journal is still reported.  `withToolCallLog` returns
+  the tools untouched when no sink is configured, and the orchestrator passes
+  the sink down through `TaskRuntime` (including the chat path); a UI, a JSON
+  consumer or a test can register one and get the same objects the CLI renders.
+- **The type comes from the registry, not from guessing.**  A tool's type is
+  its registry `category` (git, filesystem, memory, time, web, reasoning;
+  `mcp` for MCP-sourced tools), with a static map and a name-prefix fallback
+  for tools built outside the registry; unknown names are `other`.
+- **The input is the real arguments, with secrets taken out.**  Credential-ish
+  keys are redacted (`DEFAULT_REDACT_KEYS`, now shared with the Journal) and
+  every process secret value is scrubbed from the serialized text; the result
+  is capped at 400 characters.  Successful and failed calls both carry it, so
+  a refusal can be read without digging through logs.
+- **Failure is the runtime's own verdict.**  The status uses the same contract
+  the Journal uses (`success: false`, an SDK error output, an MCP `isError`),
+  and an exception thrown by a tool is re-thrown after the `end` record — the
+  call is logged *and* the error still reaches the runtime's error handling.
+- **The CLI line, and how to turn it off.**  `--tool-log <auto|on|off>`
+  (`HOTL_TOOL_LOG=0`/`off` also works, and `auto` defers to it) prints one line
+  per finished call, after the status line is cleared; `on` also prints when a
+  call starts.  Failures carry the error message and its code (never the code
+  twice).  Default: on.
+
+Verification: `src/ai/__tests__/v27173-tool-call-log.test.ts` (18 tests — type
+resolution, input redaction and capping, the success/failure contract, the
+identity path without a sink, a throwing sink that must not break a call, the
+runtime wiring, and the options the Orchestrator hands to it — complete, secrets
+included, from the moment of the hand-over) and `src/cli/__tests__/v27173-tool-log.test.ts` (13 tests —
+the line and its status, the renderer's start/end/off behaviour, and the
+flag/environment matrix), plus 5 e2e checks: `success` renders a line and
+`HOTL_TOOL_LOG=0` silences it while the run still happens, and `gitwrite`
+shows all seven calls — the two documented refusals included — in the four
+requested fields.  1218 tests, 194 e2e checks.
+
 ## [27.17.2] — 2026-09-25 — the thinking text, and the prompt that was sent twice
 
 Two more findings from the same Windows gateway as 27.17.1, both visible in one

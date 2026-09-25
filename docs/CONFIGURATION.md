@@ -67,6 +67,7 @@
 | متغیر | ضروری | توضیح |
 |-------|-------|-------|
 | `HOTL_THINKING` / `HOTL_SHOW_THINKING` | خیر | `on`/`off`/`1`/`0`/`true`/`false`/`yes`/`no`. پیش‌فرض `auto`: فقط وقتی stdout یک terminal باشد. `--thinking <auto\|on\|off>` روی محیط اولویت دارد |
+| `HOTL_TOOL_LOG` | خیر | `0`/`off` = خاموش‌کردن لاگ فراخوانی ابزار در CLI؛ پیش‌فرض روشن. `--tool-log <auto\|on\|off>` روی محیط اولویت دارد |
 | `HOTL_NO_ACTIVITY` | خیر | `1`/`true`/`yes`/`on` = خاموش‌کردن خط وضعیت (حتی در terminal) |
 | `HOTL_ACTIVITY` | خیر | `off` هم‌ارز `HOTL_NO_ACTIVITY=1` |
 | `HOTL_ACTIVITY_INTERVAL_MS` | خیر | فاصله‌ی تعویض پیام خط وضعیت (پیش‌فرض `3000`؛ کمتر از `250` نادیده گرفته می‌شود) |

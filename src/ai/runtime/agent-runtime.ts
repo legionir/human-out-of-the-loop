@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { generateText, streamText, stepCountIs } from 'ai';
 import { withJournal, type JournalWriter } from './journal.js';
+import { withToolCallLog, type ToolCallLogOptions, type ToolCallSink } from './tool-call-log.js';
 import { toTokenUsage } from './llm-usage.js';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { EventBus, type TokenUsage } from './event-bus.js';
@@ -96,6 +97,19 @@ export interface AgentRunOptions {
    * Left undefined, the runtime stays on the non-streaming call.
    */
   onThought?: ThoughtSink;
+  /**
+   * v27.17.3: one record per tool call with type, name, input and status
+   * (see `tool-call-log.ts`).  The CLI renders a line per call; a UI can feed
+   * the same records into its own event stream.
+   */
+  onToolCall?: ToolCallSink;
+  /**
+   * v27.17.3: how the records above resolve a tool's category and which
+   * credential values to scrub out of the shown input.  Supplied by the
+   * Orchestrator (it owns the registries and the secrets); a bare runtime
+   * falls back to name-based inference.
+   */
+  toolCallOptions?: ToolCallLogOptions;
 }
 
 // ─── Constants ────────────────────────────────────────────────────
@@ -263,6 +277,8 @@ export class AgentRuntime {
       planStepId,
       signal,
       onThought,
+      onToolCall,
+      toolCallOptions,
     } = options;
 
     const agentId = agent.agentId;
@@ -319,6 +335,8 @@ export class AgentRuntime {
         planContext,
         signal: abortSignal,
         ...(onThought ? { onThought } : {}),
+        ...(onToolCall ? { onToolCall } : {}),
+        ...(toolCallOptions ? { toolCallOptions } : {}),
       });
       // The loser of the race must not surface as an unhandled rejection
       // when the aborted request settles.
@@ -430,6 +448,10 @@ export class AgentRuntime {
     signal?: AbortSignal;
     /** Phase 32: live thinking text (switches the turn to `streamText`) */
     onThought?: ThoughtSink;
+    /** v27.17.3: structured tool-call records */
+    onToolCall?: ToolCallSink;
+    /** v27.17.3: how those records resolve a tool's type, and what to redact */
+    toolCallOptions?: ToolCallLogOptions;
   }): Promise<{ text: string; usage?: TokenUsage; reaskedWithoutStreaming?: boolean }> {
     const {
       agent,
@@ -443,6 +465,8 @@ export class AgentRuntime {
       planContext,
       signal,
       onThought,
+      onToolCall,
+      toolCallOptions,
     } = params;
 
     const hasTools = Object.keys(agent.tools).length > 0;
@@ -452,7 +476,12 @@ export class AgentRuntime {
     // wrapped set, so `streamText` (the thinking path) is covered by the same
     // wiring as `generateText`; a new tool needs no journal code of its own.
     const tools = hasTools
-      ? withJournal(agent.tools, { taskId, agentId, ...planContext }, this.journal)
+      ? withToolCallLog(
+          withJournal(agent.tools, { taskId, agentId, ...planContext }, this.journal),
+          { taskId, agentId, ...planContext },
+          onToolCall,
+          toolCallOptions ?? {}
+        )
       : undefined;
 
     const generateOptions: Parameters<typeof generateText>[0] = {

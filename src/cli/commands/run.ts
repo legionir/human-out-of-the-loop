@@ -41,6 +41,7 @@ import {
   resolveThinkingMode,
   type ThinkingMode,
 } from '../utils/reasoning.js';
+import { createToolLogRenderer, resolveToolLogEnabled } from '../utils/tool-log.js';
 
 export interface RunCommandOptions {
   /** Default: '.' (or the global config's projectRoot) */
@@ -72,6 +73,11 @@ export interface RunCommandOptions {
    * (`auto` = only in a terminal).  See `resolveThinkingMode`.
    */
   thinking?: ThinkingMode | string;
+  /**
+   * v27.17.3: log every tool call (type, name, input, status).
+   * `auto` (default) = on, unless `HOTL_TOOL_LOG=0` says otherwise.
+   */
+  toolLog?: string;
   /**
    * v27.17.0: `auto` (default) plans or answers depending on the request,
    * `chat` never plans, `plan` never answers.  An `@chat`/`@plan` prefix in
@@ -117,6 +123,13 @@ function validateRunOptions(opts: RunCommandOptions): string | undefined {
     !['auto', 'on', 'off'].includes(String(opts.thinking).trim().toLowerCase())
   ) {
     return `--thinking must be auto, on or off (got "${String(opts.thinking)}")`;
+  }
+  // v27.17.3: same for --tool-log.
+  if (
+    opts.toolLog !== undefined &&
+    !['auto', 'on', 'off'].includes(String(opts.toolLog).trim().toLowerCase())
+  ) {
+    return `--tool-log must be auto, on or off (got "${String(opts.toolLog)}")`;
   }
   // v27.17.0: same for --mode.
   if (
@@ -226,6 +239,12 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     intervalMs: resolveActivityIntervalMs(),
   });
   const reasoning = createReasoningRenderer({ indicator: activity });
+  // v27.17.3: what the AI does, line by line (see utils/tool-log.ts).  The
+  // sink is wired through the Orchestrator, so plan steps AND chat turns
+  // report through it — one renderer for the whole run.
+  const toolLog = createToolLogRenderer({
+    enabled: resolveToolLogEnabled(opts.toolLog),
+  });
   activity.start();
 
   /** Run a prompt with the spinner out of the way. */
@@ -316,6 +335,8 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     // terminal cannot show it, which keeps every non-interactive run — and
     // the tests over them — on the non-streaming call path).
     ...(showThinking ? { onThought: reasoning } : {}),
+    // v27.17.3: every tool call is logged (type, name, input, status).
+    onToolCall: toolLog,
   });
   orchestratorRef = orchestrator;
 
