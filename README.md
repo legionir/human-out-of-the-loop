@@ -523,6 +523,7 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 34 | Batch writing (`write_multiple_files`) and VS Code-style `search_code` (path pattern, toggles, columns, context) | 🟢 |
 | 35 | `read_media_file` (attached image/audio) and `list_directory_with_sizes` — the reference filesystem toolset is complete | 🟢 |
 | 36 | `search_files` at editor level (base-name matching, default excludes, type filters, sizes, counters) and the OS environment block given to the planner *and* the agent (shell, separator, GNU/BSD, line endings) | 🟢 |
+| 37–43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): Journal (auto-log of every AI action), time, sequentialthinking, memory, fetch, git read+write+PR, and exposing this runtime as an MCP server | 🔵 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
