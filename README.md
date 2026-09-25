@@ -338,6 +338,37 @@ zone, so ordinary "what is today?" questions cost no tool call. A reasoning
 session is capped at 50 steps / 256 KB with a `THINKING_LIMIT` error that asks
 for a fresh id — "think forever" is what a stuck model does.
 
+### Project memory
+
+Nine tools from the reference `memory` server, so what a run *learns* is still
+there tomorrow. The Journal (below) is the history of what happened; memory is
+the current state of what the project knows — decisions, constraints, owners,
+gotchas that a future run would otherwise rediscover (or contradict).
+
+| Write | Read |
+|-------|------|
+| `create_entities` (name, type, observations; an existing name is left alone) | `read_graph` (the whole graph, paged) |
+| `create_relations` (an active verb, both endpoints must exist) | `search_nodes` (case-insensitive over name, type and observations) |
+| `add_observations` (duplicates skipped) | `open_nodes` (named entities, each with its relations) |
+| `delete_entities` (cascades its relations) · `delete_observations` · `delete_relations` | |
+
+The graph is **per project** — `<project>/.ai-runtime/memory.json`, written
+through a file lock and a temp file + `rename`, so two agents (or two terminals)
+cannot lose each other's update. Four rules are visible in the result rather
+than guessed at: a relation to a name nobody created is refused with
+`ENTITY_NOT_FOUND` (the reference's semantics — no endpoint is invented), a
+corrupt file is reported as `GRAPH_CORRUPT` and never overwritten, every result
+names the file it used (`memoryFile`), and the read tools page —
+`read_graph` at 200 entities, `search_nodes` at 100 — reporting `total` and
+`truncated` plus the names of neighbours that fell outside the page, so a graph
+that grew for months cannot blow up a prompt. `search_nodes` and `open_nodes`
+return the relations touching a hit *even when the other end is not a hit*, with
+those names listed, because "what does this depend on?" is usually the question.
+
+Reading and capturing is open to `architect` and `reviewer` as well; the three
+`delete_*` tools are granted to `coder` only — erasing history is a deliberate
+act. Every write is journalled automatically, like every other tool call.
+
 ### Journal — what the AI actually did
 
 Every tool execution and every plan/step transition is appended, automatically,
@@ -567,11 +598,12 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 36 | `search_files` at editor level (base-name matching, default excludes, type filters, sizes, counters) and the OS environment block given to the planner *and* the agent (shell, separator, GNU/BSD, line endings) | 🟢 |
 | 37 | **Journal** — every tool execution and plan/step transition recorded automatically at the runtime's tool hook, redacted and rotated (`hootl journal`) | 🟢 |
 | 38 | `get_current_time`, `convert_time`, `sequentialthinking` (persisted reasoning sessions) + the clock in the environment block | 🟢 |
-| 39–43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): memory, fetch, git read, git write + PR, and exposing this runtime as an MCP server | 🔵 |
+| 39 | Project memory — the nine reference `memory` tools, per project in `.ai-runtime/memory.json` (locked + atomic, cascading deletes, `ENTITY_NOT_FOUND`, paged reads) | 🟢 |
+| 40–43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): fetch, git read, git write + PR, and exposing this runtime as an MCP server | 🔵 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**921 tests green (61 files), 0 tsc errors — plus 103 committed end-to-end checks (`npm run e2e`)** (phases 18–38 complete — see `docs/history/`)
+**937 tests green (62 files), 0 tsc errors — plus 116 committed end-to-end checks (`npm run e2e`)** (phases 18–39 complete — see `docs/history/`)
 
 ## Law Compliance
 

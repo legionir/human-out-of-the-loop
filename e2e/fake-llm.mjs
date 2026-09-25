@@ -175,6 +175,17 @@ const MARKERS = [
   // (`THINK:` is taken by the phase-32 thinking-delta fixture, so the
   // reasoning-step marker is `REASON:`.)
   { marker: 'REASON', tool: 'sequentialthinking' },
+  // Phase 39 — project memory: one marker per tool, so a single scenario can
+  // walk the whole set.
+  { marker: 'MEMADD', tool: 'create_entities' },
+  { marker: 'MEMLINK', tool: 'create_relations' },
+  { marker: 'MEMNOTE', tool: 'add_observations' },
+  { marker: 'MEMFIND', tool: 'search_nodes' },
+  { marker: 'MEMOPEN', tool: 'open_nodes' },
+  { marker: 'MEMFORGET', tool: 'delete_observations' },
+  { marker: 'MEMUNLINK', tool: 'delete_relations' },
+  { marker: 'MEMDROP', tool: 'delete_entities' },
+  { marker: 'MEMGRAPH', tool: 'read_graph' },
 ];
 
 function markersIn(text) {
@@ -281,6 +292,43 @@ function pickToolCall(promptText, offered, chained = false) {
       },
     };
   }
+  // Phase 39 — memory.  Arguments are `name|type` / `from|to` / a bare name;
+  // the sentence each write stores is fixed so the scenario can look for text
+  // that only ever exists in a tool result.
+  if (marker.marker === 'MEMADD') {
+    const [name, entityType] = marker.arg.split('|');
+    return {
+      name: 'create_entities',
+      args: {
+        entities: [{ name, entityType, observations: [`${name} added by the e2e stub`] }],
+      },
+    };
+  }
+  if (marker.marker === 'MEMLINK' || marker.marker === 'MEMUNLINK') {
+    const [from, to] = marker.arg.split('|');
+    return {
+      name: marker.marker === 'MEMLINK' ? 'create_relations' : 'delete_relations',
+      args: { relations: [{ from, to, relationType: 'depends_on' }] },
+    };
+  }
+  if (marker.marker === 'MEMNOTE') {
+    return {
+      name: 'add_observations',
+      args: { observations: [{ entityName: marker.arg, contents: ['noted by the e2e stub'] }] },
+    };
+  }
+  if (marker.marker === 'MEMFORGET') {
+    return {
+      name: 'delete_observations',
+      args: { deletions: [{ entityName: marker.arg, observations: ['noted by the e2e stub'] }] },
+    };
+  }
+  if (marker.marker === 'MEMFIND') return { name: 'search_nodes', args: { query: marker.arg } };
+  if (marker.marker === 'MEMOPEN') return { name: 'open_nodes', args: { names: [marker.arg] } };
+  if (marker.marker === 'MEMDROP') {
+    return { name: 'delete_entities', args: { entityNames: [marker.arg] } };
+  }
+  if (marker.marker === 'MEMGRAPH') return { name: 'read_graph', args: {} };
   // FIND:<glob> — the editor-grade glob scan: a bare name matched at any depth,
   // directories filtered out, sizes reported.
   if (marker.marker === 'FIND') {

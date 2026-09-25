@@ -23,6 +23,17 @@ import { createReadMediaFileTool } from './implementations/read-media-file.js';
 import { createGetCurrentTimeTool } from './implementations/get-current-time.js';
 import { createConvertTimeTool } from './implementations/convert-time.js';
 import { createSequentialThinkingTool } from './implementations/sequential-thinking.js';
+import {
+  createAddObservationsTool,
+  createCreateEntitiesTool,
+  createCreateRelationsTool,
+  createDeleteEntitiesTool,
+  createDeleteObservationsTool,
+  createDeleteRelationsTool,
+  createOpenNodesTool,
+  createReadGraphTool,
+  createSearchNodesTool,
+} from './implementations/memory-tools.js';
 
 /**
  * Every local tool, keyed by the id used in `registry/tools/*.json`.
@@ -52,6 +63,16 @@ export const LOCAL_TOOL_FACTORIES: Readonly<Record<string, (projectRoot: string)
   get_current_time: createGetCurrentTimeTool,
   convert_time: createConvertTimeTool,
   sequentialthinking: createSequentialThinkingTool,
+  // Phase 39 — the memory knowledge graph (reference `memory` server).
+  create_entities: createCreateEntitiesTool,
+  create_relations: createCreateRelationsTool,
+  add_observations: createAddObservationsTool,
+  delete_entities: createDeleteEntitiesTool,
+  delete_observations: createDeleteObservationsTool,
+  delete_relations: createDeleteRelationsTool,
+  read_graph: createReadGraphTool,
+  search_nodes: createSearchNodesTool,
+  open_nodes: createOpenNodesTool,
 };
 
 /** Ids of the local tools above — used by tests and by the bootstrap check. */

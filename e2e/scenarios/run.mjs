@@ -621,6 +621,142 @@ scenarios.time = async () => {
   return root;
 };
 
+/**
+ * Phase 39 — project memory, through the real CLI.
+ *
+ * Two runs against one project.  The first walks all nine reference memory
+ * tools: it builds a two-entity graph with a relation and an observation, reads
+ * it back three ways, then takes it apart again — leaving exactly one entity
+ * behind.  The second run is a *new process*: it searches the graph the first
+ * one persisted, and a relation to an entity nobody created is refused with
+ * ENTITY_NOT_FOUND instead of being invented.
+ */
+scenarios.memory = async () => {
+  const root = makeProject('memory');
+  const first =
+    'remember how the services fit together MEMORYPROBE CHAIN ' +
+    'MEMADD:auth-service|service MEMADD:billing-service|service ' +
+    'MEMLINK:auth-service|billing-service MEMNOTE:billing-service ' +
+    'MEMFIND:service MEMOPEN:auth-service MEMFORGET:billing-service ' +
+    'MEMUNLINK:auth-service|billing-service MEMDROP:auth-service MEMGRAPH:all';
+  const { code, stdout } = await run(runArgs(first, root));
+  const log = readLog(root);
+
+  check('memory: exit code 0', code === 0, `exit=${code} ${(stdout || '').split('\n')[0]}`);
+
+  const called = log.filter((e) => e.eventType === 'task:tool-call').map((e) => e.payload?.toolName);
+  const memoryTools = [
+    'create_entities',
+    'create_relations',
+    'add_observations',
+    'search_nodes',
+    'open_nodes',
+    'delete_observations',
+    'delete_relations',
+    'delete_entities',
+    'read_graph',
+  ];
+  check(
+    'memory: all nine memory tools ran',
+    memoryTools.every((tool) => called.includes(tool)),
+    called.join(',')
+  );
+
+  const dump = stubRequests()
+    .filter((body) => JSON.stringify(body).includes('MEMORYPROBE'))
+    .map((body) => JSON.stringify(body))
+    .join('\n');
+
+  // Results as the model received them: the storage location, the search hit,
+  // and the observation text — which exists nowhere in the prompt.
+  check(
+    'memory: results reached the model with the project file name',
+    dump.includes('.ai-runtime/memory.json') && dump.includes('memoryFile')
+  );
+  check(
+    'memory: the search and the open call returned the stored facts',
+    dump.includes('billing-service') && dump.includes('billing-service added by the e2e stub')
+  );
+
+  // Persistence, per project: one entity survives, with its relation and its
+  // note gone again.
+  const memoryFile = path.join(root, '.ai-runtime', 'memory.json');
+  const graph = fs.existsSync(memoryFile)
+    ? JSON.parse(fs.readFileSync(memoryFile, 'utf-8'))
+    : undefined;
+  check(
+    'memory: the graph was persisted in the project',
+    graph?.entities?.length === 1 && graph.entities[0].name === 'billing-service',
+    memoryFile
+  );
+  check(
+    'memory: the relation and the note were removed, the entity kept its own fact',
+    graph?.relations?.length === 0 &&
+      graph.entities[0].observations.includes('billing-service added by the e2e stub') &&
+      !graph.entities[0].observations.includes('noted by the e2e stub')
+  );
+
+  // The write is atomic and locked — neither the temp file nor the sidecar lock
+  // may be left behind.
+  const leftovers = fs
+    .readdirSync(path.join(root, '.ai-runtime'))
+    .filter((entry) => entry.startsWith('memory.json.'));
+  check('memory: no temp or lock file was left behind', leftovers.length === 0, leftovers.join(','));
+
+  // A second process: the graph outlives the run that wrote it.
+  const second =
+    'recall what we stored MEMORYPROBE2 CHAIN MEMFIND:billing MEMLINK:ghost|billing-service';
+  const retry = await run(runArgs(second, root));
+  const dump2 = stubRequests()
+    .filter((body) => JSON.stringify(body).includes('MEMORYPROBE2'))
+    .map((body) => JSON.stringify(body))
+    .join('\n');
+
+  check('memory: the second run exits cleanly', retry.code === 0, `exit=${retry.code}`);
+  check(
+    'memory: a new run found the entity the previous one stored',
+    dump2.includes('billing-service') && dump2.includes('billing-service added by the e2e stub')
+  );
+  check(
+    'memory: a relation to an unknown entity is refused with ENTITY_NOT_FOUND',
+    dump2.includes('ENTITY_NOT_FOUND') && dump2.includes('ghost'),
+    'the missing endpoint was not reported'
+  );
+
+  const after = JSON.parse(fs.readFileSync(memoryFile, 'utf-8'));
+  check(
+    'memory: the refused relation changed nothing, and no ghost entity appeared',
+    after.entities.length === 1 && after.relations.length === 0
+  );
+
+  // Phase 37 paid for itself: every write and read above is in the Journal.
+  const journalDir = path.join(root, '.ai-runtime', 'journal');
+  const journalText = fs.existsSync(journalDir)
+    ? fs
+        .readdirSync(journalDir)
+        .map((file) => fs.readFileSync(path.join(journalDir, file), 'utf-8'))
+        .join('\n')
+    : '';
+  check(
+    'memory: the Journal recorded the memory calls automatically',
+    memoryTools.every((tool) => journalText.includes(`"tool":"${tool}"`))
+  );
+
+  const allPlans = planStore(root).plans;
+  check(
+    'memory: both runs finished every step without a tool error',
+    allPlans.length === 2 &&
+      allPlans.every((plan) => plan.steps.every((step) => step.status === 'done')) &&
+      !log.some((e) => e.eventType === 'task:tool-error'),
+    allPlans.map((plan) => plan.steps.map((step) => step.status).join('/')).join(' ') ||
+      log
+        .filter((e) => e.eventType === 'task:tool-error')
+        .map((e) => e.message)
+        .join(' | ')
+  );
+  return root;
+};
+
 scenarios.resume = async () => {
   const root = makeProject('resume');
   await run(runArgs('write the project notes WRITE:notes/first.txt', root));

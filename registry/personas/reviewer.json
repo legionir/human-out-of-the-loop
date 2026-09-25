@@ -15,7 +15,13 @@
     "list_directory_with_sizes",
     "get_current_time",
     "convert_time",
-    "sequentialthinking"
+    "sequentialthinking",
+    "read_graph",
+    "search_nodes",
+    "open_nodes",
+    "create_entities",
+    "create_relations",
+    "add_observations"
   ],
   "description": "Detailed code review with actionable feedback"
 }

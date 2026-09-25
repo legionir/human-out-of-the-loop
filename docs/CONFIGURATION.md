@@ -147,9 +147,11 @@ registry/
 │   │   └── SKILL.md         # instructions واقعی (markdown)
 │   ├── file_management/
 │   ├── git_operations/
+│   ├── reasoning/           # زنجیرهٔ استدلال ماندگار (فاز ۳۸)
+│   ├── project_memory/      # گراف دانش پروژه (فاز ۳۹)
 │   ├── task_decomposition/
 │   └── acceptance_check/
-├── tools/                   # ۱۹ ابزار محلی (فاز ۳۳–۳۸: پورت کامل سرورهای مرجع)
+├── tools/                   # ۲۸ ابزار محلی (فاز ۳۳–۳۹: پورت کامل سرورهای مرجع)
 │   ├── read_file.json       # id, name, description, source: local, modulePath, category
 │   ├── search_code.json     #   جستجوی VS Code-style: pattern محتوا + pathPattern مسیر
 │   ├── write_file.json
@@ -168,7 +170,16 @@ registry/
 │   ├── list_allowed_directories.json
 │   ├── get_current_time.json  # ساعت حالا در هر منطقهٔ IANA + DST + offset ماشین
 │   ├── convert_time.json      # تبدیل HH:MM بین یک یا چند منطقه (درست در مرز DST)
-│   └── sequentialthinking.json # زنجیرهٔ استدلال شماره‌دار/شاخه‌دار، ماندگار در thinking/
+│   ├── sequentialthinking.json # زنجیرهٔ استدلال شماره‌دار/شاخه‌دار، ماندگار در thinking/
+│   ├── create_entities.json   # حافظهٔ پروژه (فاز ۳۹): موجودیت با نام/نوع/observations
+│   ├── create_relations.json  # رابطه بین دو موجودیت موجود (وگرنه ENTITY_NOT_FOUND)
+│   ├── add_observations.json  # افزودن fact به موجودیت موجود (بدون تکرار)
+│   ├── delete_entities.json   # حذف موجودیت + آبشار relationهای وابسته
+│   ├── delete_observations.json
+│   ├── delete_relations.json
+│   ├── read_graph.json        # کل گراف با صفحه‌بندی (پیش‌فرض ۲۰۰ موجودیت) + total/truncated
+│   ├── search_nodes.json      # جست‌وجوی case-insensitive در نام/نوع/observations (سقف ۱۰۰)
+│   └── open_nodes.json        # موجودیت‌های نام‌دار + همهٔ رابطه‌های مرتبط (حتی بیرون از نتیجه)
 ├── models/
 │   ├── gpt-4o.json          # id, provider, model, config { baseURL?, maxContextTokens? }
 │   ├── claude-sonnet.json
@@ -194,6 +205,39 @@ registry/
 محاسبه می‌شود پس در مرز تغییر ساعت درست است؛ زنجیرهٔ استدلال در
 `<project>/.ai-runtime/thinking/<sessionId>.json` (نوشتن اتمیک) ذخیره می‌شود و سقفش
 ۵۰ گام / ۲۵۶KB است (`THINKING_LIMIT`). ساعت محلی هم در بلوک ENVIRONMENT می‌آید.
+
+### حافظهٔ پروژه (فاز ۳۹)
+
+نُه ابزار سرور مرجع `memory` — حافظهٔ ماندگار بین runها، **برای هر پروژه** در
+`<project>/.ai-runtime/memory.json`:
+
+```json
+{ "entities": [{ "name": "auth-service", "entityType": "service",
+                 "observations": ["توکن‌ها را با rotation صادر می‌کند"] }],
+  "relations": [{ "from": "auth-service", "to": "billing-service",
+                  "relationType": "depends_on" }] }
+```
+
+```jsonc
+// create_entities
+{ "entities": [{ "name": "auth-service", "entityType": "service", "observations": ["…"] }] }
+// create_relations  (هر دو سر رابطه باید موجود باشند)
+{ "relations": [{ "from": "auth-service", "to": "billing-service", "relationType": "depends_on" }] }
+// add_observations
+{ "observations": [{ "entityName": "auth-service", "contents": ["…"] }] }
+// search_nodes / open_nodes / read_graph
+{ "query": "auth" }      { "names": ["auth-service"] }      {}
+```
+
+نکات: نام موجود دست‌نخورده می‌ماند (نه ادغام، نه خطا) و fact تازه با
+`add_observations` می‌آید؛ observation تکراری نادیده گرفته می‌شود؛ رابطه به
+موجودیت ناموجود با `ENTITY_NOT_FOUND` رد می‌شود؛ حذف موجودیت، relationهای وابسته را
+آبشاری حذف می‌کند و `deleted`/`notFound` را برمی‌گرداند. هر نوشتن از lock فایل و
+temp+rename رد می‌شود (دو پروسه حافظه را خراب نمی‌کنند)، فایل خراب با `GRAPH_CORRUPT`
+گزارش می‌شود و **بازنویسی نمی‌شود**، و هر نتیجه `memoryFile` را نام می‌برد. خواندن‌ها
+صفحه‌بندی می‌شوند (`read_graph` ۲۰۰، `search_nodes` ۱۰۰) با `total`/`truncated` و نام
+همسایه‌هایی که بیرون صفحه ماندند. `delete_*` فقط در persona `coder` مجاز است؛
+`architect` و `reviewer` می‌خوانند و ثبت می‌کنند. هر نوشتن خودکار در Journal می‌آید.
 
 ### Journal (فاز ۳۷)
 

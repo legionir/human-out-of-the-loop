@@ -34,6 +34,7 @@ Exit code is 0 only when every check passed. `E2E_SCENARIO_TIMEOUT_MS`
 | `search` | phase 36: `search_files` twice in one run — a bare `*.ts` name matching two levels down while `node_modules` stays out, then a directories-only scan — with `matchMode`/`counts`/`ignoredDirectories` reaching the model, and the agent system prompt carrying the environment facts |
 | `journal` | phase 37: an ordinary run leaves a journal line for its `write_file` (arguments, artifact path/size/sha256, plan+step ids) — and `hootl journal --json/--stats` reads the same file back |
 | `time` | phase 38: one run asks the clock twice (local + `Asia/Tehran`), converts 09:30 Tehran to Berlin (08:00, −1.5h) and writes a reasoning step into a named session — asserting the results in the model's request, the persisted session file, and that the Journal recorded all three calls without extra code |
+| `memory` | phase 39: one run walks all nine memory tools (two entities, a relation, an observation, both read paths, then the deletes), leaving one entity in `.ai-runtime/memory.json`; a *second process* finds it again, and a relation to a ghost entity is refused with `ENTITY_NOT_FOUND` — with the Journal recording every call and no temp/lock file left behind |
 | `resume` | `plans resume` dispatches only the unfinished steps and a second resume is a no-op |
 | `sandbox` | `read_file`/`write_file` cannot escape the project root |
 | `credential` | a hostile note makes the model echo an API key; it never reaches any artifact, and the redaction marker proves the trap fired |

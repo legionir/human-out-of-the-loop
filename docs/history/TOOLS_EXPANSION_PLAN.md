@@ -5,7 +5,7 @@
 **هدف:** بستن شکاف ابزارها با سرورهای مرجع (git / memory / time / sequentialthinking / fetch)، افزودن **Journal** به‌عنوان ثبت خودکار همه‌کارهای AI، و عرضهٔ خود runtime به‌عنوان یک **MCP server**
 **قانون اجرا:** مثل پلن‌های قبلی — هر فاز یک commit + push مستقل روی `arena/01a0d510-human-out-of-the-loop`، معیار پذیرش کامل پیش از فاز بعد، علامت 🟢 در همین فایل، و هر فاز در بدنهٔ PR #3 اضافه می‌شود.
 
-**وضعیت (2026-09-25):** 🔵 در حال اجرا — فاز ۳۷ (Journal) و فاز ۳۸ (time + sequentialthinking) 🟢 کامل و پوش‌شده؛ فازهای ۳۹–۴۳ در نوبت. ۹۲۱ تست سبز (۶۱ فایل)، e2e ۱۰۳/۱۰۳، نسخه ۲۷.۱۱.۰
+**وضعیت (2026-09-25):** 🔵 در حال اجرا — فازهای ۳۷ (Journal)، ۳۸ (time + sequentialthinking) و ۳۹ (memory) 🟢 کامل و پوش‌شده؛ فازهای ۴۰–۴۳ در نوبت. ۹۳۷ تست سبز (۶۲ فایل)، e2e ۱۱۶/۱۱۶، نسخه ۲۷.۱۲.۰
 
 ---
 
@@ -143,7 +143,7 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 
 ---
 
-## فاز ۳۹ — memory (گراف دانش در `.ai-runtime`)
+## فاز ۳۹ — memory (گراف دانش در `.ai-runtime`) 🟢
 
 **هدف:** حافظهٔ ماندگار بین runها — «این پروژه چه چیزهایی را قبلاً تصمیم گرفتیم/کشف کردیم».
 
@@ -159,6 +159,10 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 7. اختیاری (stretch): `hootl memory list|search|export` برای بازرسی انسانی.
 
 **معیار پذیرش:** تست واحد: ادغام/تکرار، خطاها، حذف‌های آبشاری (حذف موجودیت → حذف relationهای وابسته)، کار همزمان دو نویسنده با lock، برخورد با فایل خراب (JSON نامعتبر → خطای واضح، بدون پاک‌کردن داده)، سقف‌ها. e2e: سناریوی `memory` — run اول یک entity می‌سازد، run دوم (پروسهٔ جدید) آن را می‌خواند (اثبات ماندگاری واقعی بین اجراها).
+
+---
+
+**تحویل‌شده (۲۰۲۶-۰۹-۲۵):** `src/ai/tools/memory/graph.ts` (هستهٔ گراف: `memoryFilePath`، `loadGraph`، `mutateGraph` با `withFileLockSync` + `atomicWriteFileSync`، معناشناسی مرجع) و `src/ai/tools/implementations/memory-tools.ts` (۹ ابزار همنام مرجع). طبق تصمیم §۶ فقط **project-scoped** — `scope: 'global'` ساخته نشد. کدها: `GRAPH_CORRUPT` (فایل خراب هرگز بازنویسی نمی‌شود)، `GRAPH_UNREADABLE`، `ENTITY_NOT_FOUND`، `LOCK_TIMEOUT`، `WRITE_FAILED`. افزوده‌های ما به مرجع: قفل روی فایل sidecar (`memory.json.lock` — قفل هرگز فایل داده را لمس نمی‌کند)، صفحه‌بندی خواندن‌ها (`read_graph` ۲۰۰ / `search_nodes` ۱۰۰) با `total`/`truncated` و `relatedOutsideResult`، و `memoryFile` در هر نتیجه. کاتالوگ ۱۹ → **۲۸ ابزار**، مهارت `project_memory` (اولویت ۷۵)، personaها: `coder` ۲۸ (کل مجموعه، شامل `delete_*`)، `architect` ۲۰ و `reviewer` ۱۹ (خواندن + ثبت، بدون حذف). ۱۶ تست واحد (فاز ۳۹) و سناریوی e2e `memory` (۱۳ چک؛ دو run: ساخت گراف با هر ۹ ابزار، سپس یافتن آن توسط **پروسهٔ جدید** و رد رابطه به موجودیت ناموجود). کل: ۹۳۷ تست (۶۲ فایل)، e2e ۱۱۶/۱۱۶. نسخه ۲۷.۱۲.۰.
 
 ---
 

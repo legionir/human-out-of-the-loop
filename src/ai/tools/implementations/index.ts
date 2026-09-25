@@ -43,3 +43,14 @@ export { createGetPreviousPlanSummaryTool } from './session-tools.js';
 export { createGetCurrentTimeTool } from './get-current-time.js';
 export { createConvertTimeTool } from './convert-time.js';
 export { createSequentialThinkingTool } from './sequential-thinking.js';
+export {
+  createAddObservationsTool,
+  createCreateEntitiesTool,
+  createCreateRelationsTool,
+  createDeleteEntitiesTool,
+  createDeleteObservationsTool,
+  createDeleteRelationsTool,
+  createOpenNodesTool,
+  createReadGraphTool,
+  createSearchNodesTool,
+} from './memory-tools.js';

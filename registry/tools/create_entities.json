@@ -1,0 +1,8 @@
+{
+  "id": "create_entities",
+  "name": "Create Entities",
+  "description": "Creates entities in the project memory; existing names are left untouched",
+  "source": "local",
+  "modulePath": "./implementations/memory-tools",
+  "category": "memory"
+}

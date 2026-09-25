@@ -5,6 +5,44 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.12.0] — 2026-09-25 — project memory
+
+The nine tools of the reference `memory` server, ported natively: what a run
+learns is still there in the next one. The Journal (27.10.0) is the history of
+what happened; this is the current state of what the project knows.
+
+**Nine tools, the reference's semantics**
+- `create_entities` · `create_relations` · `add_observations` ·
+  `delete_entities` · `delete_observations` · `delete_relations` ·
+  `read_graph` · `search_nodes` · `open_nodes`.
+- An existing entity is **left alone** (no silent merge, no error), duplicate
+  observations are skipped, and a relation whose endpoint does not exist is
+  refused with `ENTITY_NOT_FOUND` — nobody invents the other end of an edge.
+- Deleting an entity cascades its relations and reports both what went and what
+  was not there (`deleted` / `notFound`); `open_nodes` reports `notFound` for
+  the names it does not have instead of returning a short list.
+
+**Per project, locked, atomic — and honest about the file**
+- One graph per project: `<project>/.ai-runtime/memory.json`; every write goes
+  through the phase-27 file lock and a temp file + `rename`, so parallel agents
+  cannot lose an update, and no `.lock`/`.tmp` file outlives the call.
+- A corrupt file is reported as `GRAPH_CORRUPT` and is **never overwritten** —
+  losing months of accumulated context to one bad byte would be worse than
+  failing the call. Every result names the file it used (`memoryFile`).
+- Reads are paged (`read_graph` 200 entities, `search_nodes` 100) with `total`,
+  `truncated` and the names of neighbours that fell outside the page, so a graph
+  that grew for months cannot blow up a prompt.
+
+**Wiring**
+- Local catalog 19 → **28 tools**; `project_memory` skill (priority 75);
+  personas: `coder` 28 (the full set, deletes included), `architect` 20 and
+  `reviewer` 19 (read + capture, no deletes). Every write is journalled
+  automatically — memory has an audit trail for free.
+- Tests 921 → **937** (62 files); e2e **103 → 116** checks, with a new `memory`
+  scenario that walks all nine tools in one run and then proves persistence: a
+  *second process* searches the graph the first one wrote, and a relation to a
+  ghost entity comes back `ENTITY_NOT_FOUND` with the file unchanged.
+
 ## [27.11.0] — 2026-09-25 — the clock, time zones, and persisted reasoning
 
 Three tools ported from the reference `time` and `sequentialthinking` servers.
