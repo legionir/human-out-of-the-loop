@@ -16,6 +16,7 @@
  */
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
+import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -755,6 +756,141 @@ scenarios.memory = async () => {
         .join(' | ')
   );
   return root;
+};
+
+/**
+ * Phase 40 — `fetch`, against a throwaway server on loopback.
+ *
+ * Four calls in one run: the page as Markdown (script/nav gone, links
+ * absolute, tables and code kept), the same page raw, a path the site's
+ * robots.txt disallows, and — with `allowPrivate` left off — the same loopback
+ * address the SSRF gate must refuse.  The server is the e2e runner's own, so
+ * this scenario needs no network at all.
+ */
+scenarios.fetch = async () => {
+  const page = `<!doctype html><html><head><title>Widget API &mdash; Docs</title>
+    <style>.junk { color: red }</style>
+    <script>var SCRIPTLEAK = "should-not-appear";</script></head>
+    <body><nav>NAVJUNK</nav><h1>Widget API</h1>
+    <p>Use <strong>care</strong> and read the <a href="./guide.html">guide</a>.</p>
+    <pre>const a = 1;</pre>
+    <table><tr><th>Field</th><th>Type</th></tr><tr><td>id</td><td>string</td></tr></table>
+    </body></html>`;
+
+  const server = http.createServer((req, res) => {
+    const url = req.url ?? '/';
+    if (url === '/robots.txt') {
+      res.writeHead(200, { 'content-type': 'text/plain' });
+      res.end('User-agent: *\nDisallow: /private\n');
+      return;
+    }
+    if (url === '/private') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<h1>secret</h1>');
+      return;
+    }
+    if (url === '/raw') {
+      res.writeHead(200, { 'content-type': 'text/html' });
+      res.end('<html><body><h1>RAWHEAD</h1><p>RAWMARKER</p></body></html>');
+      return;
+    }
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+    res.end(page);
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const origin = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const root = makeProject('fetch');
+    const goal =
+      'read the widget docs and the private page FETCHPROBE CHAIN ' +
+      `FETCH:${origin}/docs FETCHRAW:${origin}/raw ` +
+      `FETCHFORBID:${origin}/private FETCHGUARD:${origin}/docs`;
+    const { code, stdout } = await run(runArgs(goal, root));
+    const log = readLog(root);
+
+    check('fetch: exit code 0', code === 0, `exit=${code} ${(stdout || '').split('\n')[0]}`);
+
+    const called = log
+      .filter((e) => e.eventType === 'task:tool-call')
+      .map((e) => e.payload?.toolName);
+    check(
+      'fetch: all four fetches ran',
+      called.filter((tool) => tool === 'fetch').length === 4,
+      called.join(',')
+    );
+
+    const dump = stubRequests()
+      .filter((body) => JSON.stringify(body).includes('FETCHPROBE'))
+      .map((body) => JSON.stringify(body))
+      .join('\n');
+
+    // What the model received: converted Markdown, not markup — and the junk
+    // that a naive dump would have carried is simply not there.
+    check(
+      'fetch: the page reached the model as Markdown with absolute links',
+      dump.includes('# Widget API') &&
+        dump.includes(`[guide](${origin}/guide.html)`) &&
+        dump.includes('| Field | Type |')
+    );
+    check(
+      'fetch: script, style and nav contents were dropped',
+      !dump.includes('SCRIPTLEAK') && !dump.includes('NAVJUNK') && !dump.includes('color: red')
+    );
+    check(
+      'fetch: the title was reported',
+      dump.includes('Widget API — Docs')
+    );
+    check(
+      'fetch: raw: true returned the markup itself',
+      dump.includes('RAWMARKER') && dump.includes('<h1>RAWHEAD</h1>')
+    );
+    check(
+      'fetch: robots.txt refusal came back with the rule',
+      dump.includes('ROBOTS_FORBIDDEN') && dump.includes('Disallow: /private')
+    );
+    check(
+      'fetch: the loopback page was refused without allowPrivate',
+      dump.includes('BLOCKED_PRIVATE_ADDRESS') && dump.includes('loopback')
+    );
+
+    // A refusal is an *answer*: the step still finishes, and the only failures
+    // in the whole run are the two this scenario asked for.  Anything else
+    // failing here is a real bug, so the assertion counts them.
+    const { plans } = planStore(root);
+    const toolErrors = log
+      .filter((e) => e.eventType === 'task:tool-error')
+      .map((e) => e.message ?? '');
+    check(
+      'fetch: the two refusals are the only tool failures, and every step finished',
+      Boolean(plans[0]) &&
+        plans[0].steps.every((step) => step.status === 'done') &&
+        toolErrors.length === 2 &&
+        toolErrors.every((message) => /ROBOTS_FORBIDDEN|disallows this page|Refusing to fetch/.test(message)),
+      toolErrors.length ? `${toolErrors.length}: ${toolErrors[0]?.slice(0, 90)}` : '(none)'
+    );
+
+    const journalDir = path.join(root, '.ai-runtime', 'journal');
+    const journalText = fs.existsSync(journalDir)
+      ? fs
+          .readdirSync(journalDir)
+          .map((file) => fs.readFileSync(path.join(journalDir, file), 'utf-8'))
+          .join('\n')
+      : '';
+    check(
+      'fetch: the Journal recorded the fetches automatically',
+      (journalText.match(/"tool":"fetch"/g) ?? []).length === 4
+    );
+    check(
+      'fetch: the fetched page was not written into the project',
+      !fs.readdirSync(root).includes('docs') &&
+        !fs.existsSync(path.join(root, '.ai-runtime', 'fetch'))
+    );
+    return root;
+  } finally {
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+  }
 };
 
 scenarios.resume = async () => {

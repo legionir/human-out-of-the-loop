@@ -356,7 +356,7 @@ describe('phase 28 — registry layering', () => {
     expect(loaded.skills.length).toBeGreaterThan(0); // from the package layer
     expect(loaded.tools.map((t) => t.id).sort()).toEqual([
       // the original four + the phases 33-35 filesystem set + phase 38's trio
-      // + phase 39's nine memory tools
+      // + phase 39's nine memory tools + phase 40's fetch
       'add_observations',
       'convert_time',
       'create_directory',
@@ -367,6 +367,7 @@ describe('phase 28 — registry layering', () => {
       'delete_relations',
       'directory_tree',
       'edit_file',
+      'fetch',
       'get_current_time',
       'get_file_info',
       'git_status',

@@ -54,3 +54,4 @@ export {
   createReadGraphTool,
   createSearchNodesTool,
 } from './memory-tools.js';
+export { createFetchTool } from './fetch.js';

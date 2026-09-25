@@ -30,7 +30,8 @@
     "add_observations",
     "delete_entities",
     "delete_observations",
-    "delete_relations"
+    "delete_relations",
+    "fetch"
   ],
   "description": "Hands-on coding, refactoring, and implementation"
 }

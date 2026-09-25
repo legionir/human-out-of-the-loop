@@ -338,6 +338,46 @@ zone, so ordinary "what is today?" questions cost no tool call. A reasoning
 session is capped at 50 steps / 256 KB with a `THINKING_LIMIT` error that asks
 for a fresh id — "think forever" is what a stuck model does.
 
+### Reading the web
+
+`fetch` reads one URL and returns it as **Markdown** — headings, links, lists,
+code, tables, quotes — with the page's `<title>`, the status, the content type
+and the redirect count. `script`, `style`, `nav` and `footer` are removed with
+their contents, so a page's markup never becomes prompt tokens; non-HTML text
+(JSON, plain text, XML) passes through untouched. Long pages are paged:
+`maxLength` (default 5000) plus `startIndex`, and a truncated result carries
+`nextStartIndex` and says exactly which call continues it. `raw: true` returns
+the markup itself, for the cases where the markup *is* the answer.
+
+```bash
+hootl run "read https://vitejs.dev/guide/ and use what fits" --yes
+```
+
+Three limits are the point of the port, not afterthoughts:
+
+- **Only public addresses, unless a human says otherwise.** Loopback, private,
+  link-local, CGNAT and reserved targets are refused (`BLOCKED_PRIVATE_ADDRESS`,
+  with the address and the reason). The check runs on what the host *resolves
+  to* — so `localhost`, `127.0.0.1`, `[::1]`, IPv4-mapped IPv6 and a public name
+  with a private A record are all caught — and it runs again on **every redirect
+  hop**, so a public page cannot bounce the agent into `http://169.254.169.254/`.
+  A URL reaches an agent from its context (a fetched page, a README), which is
+  exactly the prompt-injection path SSRF travels. `allowPrivate: true` is the
+  documented override, reported back as `privateAllowed`.
+- **Bounded.** 10 s per request, ≤ 5 redirects, ≤ 2 MB read from the wire (the
+  stream is cancelled at the cap), ≤ 100 000 characters returned.
+- **No credentials.** One header set for every request: our own User-Agent and a
+  plain `Accept`. Nothing from the environment is forwarded, ever.
+
+robots.txt is honoured by default (per host, cached 10 minutes; longest matching
+rule wins, Allow takes ties, and an exact token group beats `*`). A 401/403 or an
+*unreadable* robots.txt is a refusal — "we could not find out whether we are
+welcome" is not permission — and the rule is reported so the model can say why.
+`respectRobots: false` is the deliberate override. Failures are structured:
+`INVALID_URL`, `BLOCKED_PROTOCOL`, `BLOCKED_PRIVATE_ADDRESS`, `DNS_FAILED`,
+`ROBOTS_FORBIDDEN`, `ROBOTS_UNAVAILABLE`, `TIMEOUT`, `TOO_MANY_REDIRECTS`,
+`TOO_LARGE`, `HTTP_ERROR`.
+
 ### Project memory
 
 Nine tools from the reference `memory` server, so what a run *learns* is still
@@ -599,11 +639,12 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 37 | **Journal** — every tool execution and plan/step transition recorded automatically at the runtime's tool hook, redacted and rotated (`hootl journal`) | 🟢 |
 | 38 | `get_current_time`, `convert_time`, `sequentialthinking` (persisted reasoning sessions) + the clock in the environment block | 🟢 |
 | 39 | Project memory — the nine reference `memory` tools, per project in `.ai-runtime/memory.json` (locked + atomic, cascading deletes, `ENTITY_NOT_FOUND`, paged reads) | 🟢 |
-| 40–43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): fetch, git read, git write + PR, and exposing this runtime as an MCP server | 🔵 |
+| 40 | `fetch` — a URL as Markdown (in-tree HTML→Markdown, paging, `raw`), with robots.txt honoured and loopback/private addresses blocked by default | 🟢 |
+| 41–43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): git read, git write + PR, and exposing this runtime as an MCP server | 🔵 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**937 tests green (62 files), 0 tsc errors — plus 116 committed end-to-end checks (`npm run e2e`)** (phases 18–39 complete — see `docs/history/`)
+**988 tests green (63 files), 0 tsc errors — plus 127 committed end-to-end checks (`npm run e2e`)** (phases 18–40 complete — see `docs/history/`)
 
 ## Law Compliance
 

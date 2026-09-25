@@ -1,0 +1,9 @@
+{
+  "id": "web_research",
+  "name": "Web Research",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": ["fetch", "search_code", "read_file"],
+  "priority": 65,
+  "description": "Reads documentation and references from the web, then ties them back to the code in this project"
+}

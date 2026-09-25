@@ -5,7 +5,7 @@
 **هدف:** بستن شکاف ابزارها با سرورهای مرجع (git / memory / time / sequentialthinking / fetch)، افزودن **Journal** به‌عنوان ثبت خودکار همه‌کارهای AI، و عرضهٔ خود runtime به‌عنوان یک **MCP server**
 **قانون اجرا:** مثل پلن‌های قبلی — هر فاز یک commit + push مستقل روی `arena/01a0d510-human-out-of-the-loop`، معیار پذیرش کامل پیش از فاز بعد، علامت 🟢 در همین فایل، و هر فاز در بدنهٔ PR #3 اضافه می‌شود.
 
-**وضعیت (2026-09-25):** 🔵 در حال اجرا — فازهای ۳۷ (Journal)، ۳۸ (time + sequentialthinking) و ۳۹ (memory) 🟢 کامل و پوش‌شده؛ فازهای ۴۰–۴۳ در نوبت. ۹۳۷ تست سبز (۶۲ فایل)، e2e ۱۱۶/۱۱۶، نسخه ۲۷.۱۲.۰
+**وضعیت (2026-09-25):** 🔵 در حال اجرا — فازهای ۳۷ (Journal)، ۳۸ (time + sequentialthinking)، ۳۹ (memory) و ۴۰ (fetch) 🟢 کامل و پوش‌شده؛ فازهای ۴۱–۴۳ در نوبت. ۹۸۸ تست سبز (۶۳ فایل)، e2e ۱۲۷/۱۲۷، نسخه ۲۷.۱۳.۰
 
 ---
 
@@ -166,7 +166,7 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 
 ---
 
-## فاز ۴۰ — fetch (صفحهٔ وب → متن/Markdown)
+## فاز ۴۰ — fetch (صفحهٔ وب → متن/Markdown) 🟢
 
 **هدف:** خواندن یک URL و برگرداندن محتوای قابل‌استفاده برای مدل (نه HTML خام).
 
@@ -180,6 +180,10 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 5. registry JSON + skill جدید `web_research` + شخصای researcher/researcher-like (در صورت وجود) و coder.
 
 **معیار پذیرش:** تست واحد با یک HTTP server محلی (بدون شبکهٔ بیرونی): HTML→MD شامل heading/link/list/code/table، برش `maxLength/startIndex`، ریدایرکت، timeout، محتوای بزرگ (قطع در سقف)، نوع غیرمتنی، رعایت/عدم‌رعایت robots، و **مسدودبودن** `127.0.0.1`/`169.254.169.254` به‌صورت پیش‌فرض. e2e: سناریوی `fetch` با سرور استاب محلی (خارج از fake-llm) که نتیجه‌اش در درخواست بعدی مدل دیده شود.
+
+---
+
+**تحویل‌شده (۲۰۲۶-۰۹-۲۵):** `src/ai/tools/net/url-safety.ts` (دروازهٔ SSRF: کلاس‌بندی کامل IPv4/IPv6 شامل IPv4-mapped، 6to4 و NAT64؛ بررسی روی آدرس *حل‌شده* با تزریق lookup برای تست)، `src/ai/tools/net/html-to-markdown.ts` (مبدل درون‌ساخت: سرتیتر، پاراگراف، لینک **مطلق**، لیست تودرتو، `pre` فنس‌دار، جدول GFM، نقل‌قول، تأکید، تصویر؛ حذف `script/style/nav/footer/form/...` با محتوا؛ موجودیت‌ها؛ مقاوم در برابر HTML خراب)، `src/ai/tools/net/robots.ts` (پارسر RFC 9309: گروه‌ها، `*`، `$`، بلندترین قاعده با برد Allow در تساوی، اولویت توکن دقیق بر `*` + کش TTL) و `src/ai/tools/implementations/fetch.ts`. تفاوت‌های عمدی با مرجع: مسدودسازی پیش‌فرض آدرس‌های خصوصی روی **هر hop ریدایرکت** (`allowPrivate` برای عبور آگاهانه + گزارش `privateAllowed`)، سقف‌ها (۱۰s، ۵ ریدایرکت، ۲MB با *کنسل* stream، ۱۰۰k کاراکتر)، بدون هیچ هدر اعتبارنامه‌ای، و robots غیرقابل‌خواندن = امتناع. ابزارهای local: ۲۸ → **۲۹**؛ مهارت `web_research` (اولویت ۶۵)؛ personaها: `coder` ۲۹، `architect` ۲۱، `reviewer` ۲۰ (planner نه — برنامه‌ریزی پژوهش نیست). ۵۱ تست واحد (فاز ۴۰) و سناریوی e2e `fetch` (۱۱ چک؛ چهار فراخوانی روی سرور loopback خودِ runner: Markdown، `raw`، امتناع robots با قاعده، و امتناع SSRF). کل: ۹۸۸ تست (۶۳ فایل)، e2e ۱۲۷/۱۲۷. نسخه ۲۷.۱۳.۰.
 
 ---
 

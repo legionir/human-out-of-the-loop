@@ -5,6 +5,58 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.13.0] — 2026-09-25 — the web, read as Markdown
+
+`fetch`, the reference `fetch` server's tool, ported natively — with the
+question the reference does not ask: *which URLs may an agent reach on its own?*
+
+**One tool, the reference's contract**
+- `url`, `maxLength` (default 5000, max 100 000), `startIndex` (paging), `raw`
+  (HTML instead of Markdown) — and the reference's truncation affordance, spelled
+  out: a paged result carries `nextStartIndex`, `remainingChars` and a
+  `<error>Content truncated. Call fetch with startIndex N…</error>` tail.
+- HTML → Markdown in-tree (no dependency): headings, paragraphs, **absolute**
+  links, lists, fenced code, tables, quotes, emphasis, images; `script`,
+  `style`, `nav`, `footer`, `form` … are dropped *with their contents*, so a
+  page's noise never becomes prompt tokens. Non-HTML text (JSON, plain text,
+  XML) passes through untouched; a binary content type comes back as metadata
+  only, body not downloaded.
+
+**What it will not do**
+- **SSRF defence (the deliberate difference).** Loopback, private, link-local,
+  CGNAT, multicast and reserved addresses are refused **by default**
+  (`BLOCKED_PRIVATE_ADDRESS` with the reason and the address), because a URL
+  reaches the agent from the model's context — a fetched page or a README — not
+  from a human at a keyboard. The check runs on what the host *resolves to* (so
+  `localhost`, alternative IPv4 spellings, IPv4-mapped IPv6 and a public name
+  with a private A record are all caught) and again on **every redirect hop**.
+  `allowPrivate: true` is the documented override, and its use is reported back
+  as `privateAllowed`.
+- **Bounded everything**: 10 s per request, ≤ 5 redirects, ≤ 2 MB read from the
+  wire (the stream is *cancelled* at the cap — a 2 GB download costs 2 MB), and
+  a 2 MB body that was cut is an error, not silent truncation.
+- **No credentials, ever**: one header set for every request — our own
+  User-Agent (`human-out-of-the-loop/<version>`) and a plain `Accept`. Nothing
+  from the environment is forwarded.
+- **robots.txt is honoured** (default `respectRobots: true`), per host with a
+  10-minute cache; the longest matching rule wins with Allow taking ties, an
+  exact product-token group beats `*`. 401/403 is a refusal, an unreadable
+  robots.txt (5xx, network error) is a refusal too — *"we could not find out
+  whether we are welcome" is not permission* — and the rule is reported so the
+  model can explain why. `respectRobots: false` is the override.
+
+**Wiring**: local catalog 28 → **29 tools**; new `web_research` skill (priority
+65); personas coder 29 / architect 21 / reviewer 20 (not the planner — planning
+is not research). Every fetch is journalled like any other tool call.
+
+**Tests**: 988 (63 files; 51 new for phase 40 — the address classes, the
+redirect-hop re-check, the paging window, the byte cap, the timeout, robots
+modes 200/403/404/5xx, the cache, the HTML→Markdown rules, and the header set a
+request actually carries). e2e **116 → 127** checks: a new `fetch` scenario runs
+four fetches against a throwaway loopback server — Markdown with absolute links,
+`raw: true`, a robots refusal with its rule, and the SSRF refusal — and asserts
+the raw page's junk never reached the model.
+
 ## [27.12.0] — 2026-09-25 — project memory
 
 The nine tools of the reference `memory` server, ported natively: what a run

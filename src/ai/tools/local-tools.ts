@@ -23,6 +23,7 @@ import { createReadMediaFileTool } from './implementations/read-media-file.js';
 import { createGetCurrentTimeTool } from './implementations/get-current-time.js';
 import { createConvertTimeTool } from './implementations/convert-time.js';
 import { createSequentialThinkingTool } from './implementations/sequential-thinking.js';
+import { createFetchTool } from './implementations/fetch.js';
 import {
   createAddObservationsTool,
   createCreateEntitiesTool,
@@ -73,6 +74,8 @@ export const LOCAL_TOOL_FACTORIES: Readonly<Record<string, (projectRoot: string)
   read_graph: createReadGraphTool,
   search_nodes: createSearchNodesTool,
   open_nodes: createOpenNodesTool,
+  // Phase 40 — the web, read as Markdown.
+  fetch: createFetchTool,
 };
 
 /** Ids of the local tools above — used by tests and by the bootstrap check. */

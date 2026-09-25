@@ -21,7 +21,8 @@
     "open_nodes",
     "create_entities",
     "create_relations",
-    "add_observations"
+    "add_observations",
+    "fetch"
   ],
   "description": "Detailed code review with actionable feedback"
 }

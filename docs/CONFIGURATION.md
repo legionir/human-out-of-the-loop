@@ -149,9 +149,10 @@ registry/
 │   ├── git_operations/
 │   ├── reasoning/           # زنجیرهٔ استدلال ماندگار (فاز ۳۸)
 │   ├── project_memory/      # گراف دانش پروژه (فاز ۳۹)
+│   ├── web_research/        # خواندن وب و ارجاع به کد (فاز ۴۰)
 │   ├── task_decomposition/
 │   └── acceptance_check/
-├── tools/                   # ۲۸ ابزار محلی (فاز ۳۳–۳۹: پورت کامل سرورهای مرجع)
+├── tools/                   # ۲۹ ابزار محلی (فاز ۳۳–۴۰: پورت کامل سرورهای مرجع)
 │   ├── read_file.json       # id, name, description, source: local, modulePath, category
 │   ├── search_code.json     #   جستجوی VS Code-style: pattern محتوا + pathPattern مسیر
 │   ├── write_file.json
@@ -179,7 +180,8 @@ registry/
 │   ├── delete_relations.json
 │   ├── read_graph.json        # کل گراف با صفحه‌بندی (پیش‌فرض ۲۰۰ موجودیت) + total/truncated
 │   ├── search_nodes.json      # جست‌وجوی case-insensitive در نام/نوع/observations (سقف ۱۰۰)
-│   └── open_nodes.json        # موجودیت‌های نام‌دار + همهٔ رابطه‌های مرتبط (حتی بیرون از نتیجه)
+│   ├── open_nodes.json        # موجودیت‌های نام‌دار + همهٔ رابطه‌های مرتبط (حتی بیرون از نتیجه)
+│   └── fetch.json             # URL → Markdown (صفحه‌بندی، raw)، robots و مسدودسازی آدرس‌های خصوصی
 ├── models/
 │   ├── gpt-4o.json          # id, provider, model, config { baseURL?, maxContextTokens? }
 │   ├── claude-sonnet.json
@@ -238,6 +240,32 @@ temp+rename رد می‌شود (دو پروسه حافظه را خراب نمی�
 صفحه‌بندی می‌شوند (`read_graph` ۲۰۰، `search_nodes` ۱۰۰) با `total`/`truncated` و نام
 همسایه‌هایی که بیرون صفحه ماندند. `delete_*` فقط در persona `coder` مجاز است؛
 `architect` و `reviewer` می‌خوانند و ثبت می‌کنند. هر نوشتن خودکار در Journal می‌آید.
+
+### خواندن وب (فاز ۴۰)
+
+یک ابزار `fetch` با پارامترهای مرجع (`url`, `maxLength`, `startIndex`, `raw`) و سه
+افزودهٔ عمدی (`respectRobots`, `allowPrivate` + سقف‌ها و بدون هیچ اعتبارنامه‌ای):
+
+```json
+{ "url": "https://vitejs.dev/guide/", "maxLength": 5000, "startIndex": 0,
+  "raw": false, "respectRobots": true, "allowPrivate": false }
+```
+
+خروجی: Markdown (سرتیتر/لینک مطلق/لیست/کد/جدول/نقل‌قول)، `title`، `status`،
+`contentType`، `redirects`، `totalChars`/`truncated`/`nextStartIndex`، و `robots`
+(وضعیت + قاعدهٔ تصمیم). `text/html` تبدیل می‌شود؛ `application/json` و `text/*`
+دست‌نخورده؛ بقیه فقط متادیتا. محدودیت‌ها: ۱۰ ثانیه در هر درخواست، حداکثر ۵ ریدایرکت،
+۲ مگابایت خواندن از شبکه (قطع stream در سقف)، ۱۰۰٬۰۰۰ کاراکتر بازگشتی.
+
+نکات امنیتی (تفاوت عمدی با مرجع): آدرس‌های loopback/private/link-local/CGNAT
+به‌صورت پیش‌فرض رد می‌شوند (`BLOCKED_PRIVATE_ADDRESS`) — بررسی روی IP *حل‌شده* و روی
+**هر hop ریدایرکت** انجام می‌شود؛ `allowPrivate: true` برای عبور آگاهانه (و در خروجی
+`privateAllowed: true` گزارش می‌شود). robots.txt پیش‌فرض رعایت می‌شود (کش ۱۰ دقیقه‌ای
+برای هر میزبان؛ ۴۰۱/۴۰۳ و robots غیرقابل‌خواندن → امتناع)، `respectRobots: false` برای
+عبور آگاهانه. هیچ هدر احراز هویتی ارسال نمی‌شود (فقط User-Agent خودمان و `Accept`).
+کدها: `INVALID_URL`, `BLOCKED_PROTOCOL`, `BLOCKED_PRIVATE_ADDRESS`, `DNS_FAILED`,
+`ROBOTS_FORBIDDEN`, `ROBOTS_UNAVAILABLE`, `TIMEOUT`, `TOO_MANY_REDIRECTS`,
+`TOO_LARGE`, `HTTP_ERROR`.
 
 ### Journal (فاز ۳۷)
 

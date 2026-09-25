@@ -186,6 +186,11 @@ const MARKERS = [
   { marker: 'MEMUNLINK', tool: 'delete_relations' },
   { marker: 'MEMDROP', tool: 'delete_entities' },
   { marker: 'MEMGRAPH', tool: 'read_graph' },
+  // Phase 40 — the web, read as Markdown.
+  { marker: 'FETCH', tool: 'fetch' },
+  { marker: 'FETCHRAW', tool: 'fetch' },
+  { marker: 'FETCHFORBID', tool: 'fetch' },
+  { marker: 'FETCHGUARD', tool: 'fetch' },
 ];
 
 function markersIn(text) {
@@ -329,6 +334,25 @@ function pickToolCall(promptText, offered, chained = false) {
     return { name: 'delete_entities', args: { entityNames: [marker.arg] } };
   }
   if (marker.marker === 'MEMGRAPH') return { name: 'read_graph', args: {} };
+  // Phase 40 — fetch.  `FETCHGUARD` deliberately omits allowPrivate: the URL is
+  // loopback, so the SSRF gate must refuse it while the other three succeed.
+  if (marker.marker === 'FETCH' || marker.marker === 'FETCHRAW') {
+    return {
+      name: 'fetch',
+      args: {
+        url: marker.arg,
+        allowPrivate: true,
+        maxLength: 300,
+        ...(marker.marker === 'FETCHRAW' ? { raw: true } : {}),
+      },
+    };
+  }
+  if (marker.marker === 'FETCHFORBID') {
+    return { name: 'fetch', args: { url: marker.arg, allowPrivate: true } };
+  }
+  if (marker.marker === 'FETCHGUARD') {
+    return { name: 'fetch', args: { url: marker.arg } };
+  }
   // FIND:<glob> — the editor-grade glob scan: a bare name matched at any depth,
   // directories filtered out, sizes reported.
   if (marker.marker === 'FIND') {
