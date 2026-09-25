@@ -492,6 +492,21 @@ function planPayload(promptText = '') {
 function structuredPayload(name, promptText) {
   switch (name) {
     case 'PlannerAssessment':
+      // DROPISCLEAR reproduces the 2026-09-25 report verbatim: the provider
+      // returned a complete answer — the kind AND the questions — but left out
+      // `isClear`, which the response schema marks required.  The SDK refuses
+      // the object ("No object generated: response did not match schema") and
+      // the run used to die at the first call; the runtime must read the JSON
+      // anyway.  Checked before CHATREPLY so it also covers a chat run.
+      if (/\bDROPISCLEAR\b/.test(promptText)) {
+        return {
+          kind: 'clarify',
+          needsClarification: [
+            'هدف شما از این ارتباط چیست؟',
+            'آیا می‌توانید هدف یا وظیفه خاصی را توضیح دهید؟',
+          ],
+        };
+      }
       // CHATREPLY: the request is a conversation, not work — the runtime must
       // answer it and never plan.  (It also proves the assessment's `kind`
       // survives the provider round trip.)

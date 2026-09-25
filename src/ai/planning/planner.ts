@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { environmentBullets } from '../environment-context.js';
 import { randomUUID } from 'node:crypto';
-import { generateObject } from 'ai';
+import { NoObjectGeneratedError, generateObject } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from '../runtime/llm-timeout.js';
 import { reportLlmUsage, type LlmUsageReporter } from '../runtime/llm-usage.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
@@ -14,6 +14,7 @@ import { DEFAULT_RUN_MODE, type RunMode } from '../modes.js';
 import { detectLanguage, languageSection, type DetectedLanguage } from '../language.js';
 import {
   PlanSchema,
+  PlannerAssessmentRecoverySchema,
   PlannerAssessmentSchema,
   type Plan,
   type PlannerAssessment,
@@ -172,11 +173,11 @@ export function buildAssessmentPrompt(
   // model would happily answer a greeting even when the user typed `@plan`.
   const modeRule =
     mode === 'chat'
-      ? 'The user asked for a CONVERSATION: set kind="answer" and put your reply in the "answer" field. Do not plan.'
+      ? 'The user asked for a CONVERSATION: set kind="answer" and put your reply in the "answer" field. Do not plan, and never answer a conversation with kind="clarify" — a greeting, a thank-you or a short remark is answered with kind="answer" like anything else.'
       : mode === 'plan'
         ? 'The user asked for a PLAN: real work is expected. Set kind="plan" and provide the full plan, even for a short request — use kind="clarify" only when the request cannot be planned without an answer you cannot infer.'
         : 'Decide what the request needs:\n' +
-          '- a greeting, a question, an explanation, or anything you can answer yourself → kind="answer" with your reply in the "answer" field;\n' +
+          '- a greeting ("hello", "سلام"), a thank-you, small talk, a question, an explanation, or anything you can answer yourself → kind="answer" with your reply in the "answer" field;\n' +
           '- real work in this project (files to change, commands to run, several steps) → kind="plan" and provide the full plan;\n' +
           '- too vague to do either → kind="clarify" and ask.';
   return `
@@ -249,6 +250,76 @@ export function dedupeQuestions(questions: readonly string[]): string[] {
     out.push(question);
   }
   return out;
+}
+
+/**
+ * Pull the first JSON object out of a model's text (v27.17.1).
+ *
+ * The text may be a bare object (the usual case) or an object wrapped in prose
+ * or a code fence; a brace scan that respects strings and escapes finds the
+ * real end of the object where a greedy regex would swallow the text after it.
+ * Returns undefined when the text holds no complete object.
+ */
+export function extractJsonObject(text: string): unknown {
+  const start = text.indexOf('{');
+  if (start === -1) return undefined;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (ch === '\\') escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') inString = true;
+    else if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        try {
+          return JSON.parse(text.slice(start, i + 1));
+        } catch {
+          return undefined;
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Recover an assessment from a structured call that the SDK rejected (v27.17.1).
+ *
+ * Only for `NoObjectGeneratedError`: the model *did* answer, the answer just
+ * did not satisfy the response schema exactly.  Anything else (a timeout, a
+ * 401, a network error) has no text to recover and is re-thrown untouched by
+ * the caller.
+ */
+export function recoverAssessment(
+  error: unknown
+): { assessment: Partial<PlannerAssessment>; text: string } | undefined {
+  if (!NoObjectGeneratedError.isInstance(error)) return undefined;
+  const text = typeof error.text === 'string' ? error.text : '';
+  if (text.trim() === '') return undefined;
+  const parsed = PlannerAssessmentRecoverySchema.safeParse(extractJsonObject(text));
+  if (!parsed.success) return undefined;
+  return { assessment: parsed.data as Partial<PlannerAssessment>, text };
+}
+
+/**
+ * The same recovery for a plan the schema refused (v27.17.1).  `PlanSchema` is
+ * the judge here, not the provider: a `goal` + `steps` answer that the provider
+ * mangled only slightly is still a usable plan.
+ */
+export function recoverPlan(error: unknown): Plan | undefined {
+  if (!NoObjectGeneratedError.isInstance(error)) return undefined;
+  const text = typeof error.text === 'string' ? error.text : '';
+  if (text.trim() === '') return undefined;
+  const parsed = PlanSchema.safeParse(extractJsonObject(text));
+  return parsed.success ? parsed.data : undefined;
 }
 
 /**
@@ -349,9 +420,14 @@ export function normalizeAssessment(
     normalizeKind(assessment.intent) ??
     (assessment.isClear === false
       ? 'clarify'
-      : answer && !assessment.plan
-        ? 'answer'
-        : 'plan');
+      : assessment.isClear === undefined && merged.length > 0
+        ? // v27.17.1: questions without a verdict are a clarification.  A
+          // provider that dropped `isClear` (and `kind` with it) would
+          // otherwise be read as a clear request and its questions ignored.
+          'clarify'
+        : answer && !assessment.plan
+          ? 'answer'
+          : 'plan');
 
   /**
    * The mode the user chose wins over the model's own idea of the request —
@@ -438,27 +514,18 @@ export class Planner {
         )
       );
 
-      // The provider may not have enforced the response schema, so the answer is
-      // normalized before anything reads it: aliased question fields are merged,
-      // and "unclear" always carries at least one question (see the function).
-      const assessment = normalizeAssessment(object, {
-        projectRoot: this.config.projectRoot,
-        mode,
-        ...(language ? { language } : {}),
-      });
-
-      // Phase 30 (P10 follow-up): a plan that arrives inside the assessment
-      // must be given the same shape `generatePlan` produces.  Without an id
-      // it could not be cancelled/resumed via the CLI or the API, its log
-      // entries carried no planId at all, and every id-less plan was written
-      // to the SAME store file (`sha256("unknown")`).
-      if (assessment.plan) {
-        assessment.plan = finalizePlan(assessment.plan);
-      }
-      reportLlmUsage(this.config.onUsage, 'planning', usage, usagePlanId ?? assessment.plan?.id);
-
-      return assessment;
+      return this.finishAssessment(object, usage, mode, language, usagePlanId);
     } catch (err) {
+      // v27.17.1: a provider that does not enforce the response schema can
+      // answer almost correctly — one missing field is enough for the SDK to
+      // refuse the object — and the run used to die right here with
+      // "No object generated: response did not match schema", although the
+      // answer (questions, plan or reply) was sitting in the text.  Recover it.
+      const recovered = recoverAssessment(err);
+      if (recovered) {
+        const usage = NoObjectGeneratedError.isInstance(err) ? err.usage : undefined;
+        return this.finishAssessment(recovered.assessment, usage, mode, language, usagePlanId);
+      }
       // Phase 30 (P5): say WHY (a deadline, a provider error, bad output).
       // It is a failure, not a question for the user — `plan()` reports it
       // as an error, so the run ends with "Planning failed: <reason>"
@@ -466,6 +533,40 @@ export class Planner {
       const reason = err instanceof Error ? err.message : String(err);
       throw new Error(`The planner was unable to process the request: ${reason}`);
     }
+  }
+
+  /**
+   * Make whatever the model answered usable — the tail of `assess()`, shared by
+   * the normal path and the recovery path so they cannot drift apart.
+   *
+   * The provider may not have enforced the response schema, so the answer is
+   * normalized before anything reads it: aliased question fields are merged,
+   * and "unclear" always carries at least one question (see the function).
+   * A plan that arrived inside the assessment gets the same shape
+   * `generatePlan` produces (Phase 30, P10): without an id it could not be
+   * cancelled/resumed via the CLI or the API, its log entries carried no
+   * planId at all, and every id-less plan was written to the SAME store file
+   * (`sha256("unknown")`).
+   */
+  private finishAssessment(
+    object: Partial<PlannerAssessment>,
+    usage: unknown,
+    mode: RunMode,
+    language: DetectedLanguage | undefined,
+    usagePlanId?: string
+  ): PlannerAssessment {
+    const assessment = normalizeAssessment(object, {
+      projectRoot: this.config.projectRoot,
+      mode,
+      ...(language ? { language } : {}),
+    });
+
+    if (assessment.plan) {
+      assessment.plan = finalizePlan(assessment.plan);
+    }
+    reportLlmUsage(this.config.onUsage, 'planning', usage, usagePlanId ?? assessment.plan?.id);
+
+    return assessment;
   }
 
   /**
@@ -482,22 +583,35 @@ export class Planner {
 
     const prompt = buildPlanPrompt(userRequest, clarifications, this.config.projectRoot);
 
-    const { object, usage } = await withStructuredRetry(() =>
-      withLlmTimeout(
-        'Plan generation',
-        this.config.timeoutMs,
-        (abortSignal) =>
-          generateObject({
-            model: agent.model,
-            system: agent.systemPrompt,
-            prompt,
-            schema: PlanSchema,
-            schemaName: 'ExecutionPlan',
-            schemaDescription: 'A dependency-aware execution plan with atomic steps.',
-            abortSignal,
-          })
-      )
-    );
+    let object: Plan;
+    let usage: unknown;
+    try {
+      const generated = await withStructuredRetry(() =>
+        withLlmTimeout(
+          'Plan generation',
+          this.config.timeoutMs,
+          (abortSignal) =>
+            generateObject({
+              model: agent.model,
+              system: agent.systemPrompt,
+              prompt,
+              schema: PlanSchema,
+              schemaName: 'ExecutionPlan',
+              schemaDescription: 'A dependency-aware execution plan with atomic steps.',
+              abortSignal,
+            })
+        )
+      );
+      object = generated.object;
+      usage = generated.usage;
+    } catch (err) {
+      // v27.17.1: same recovery as the assessment — the provider can return a
+      // usable plan that only its own (unenforced) schema complained about.
+      const recovered = recoverPlan(err);
+      if (!recovered) throw err;
+      object = recovered;
+      usage = NoObjectGeneratedError.isInstance(err) ? err.usage : undefined;
+    }
     const plan = finalizePlan(object);
     reportLlmUsage(this.config.onUsage, 'planning', usage, usagePlanId ?? plan.id);
     return plan;
@@ -569,6 +683,13 @@ export class Planner {
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      // v27.17.1: in chat mode the user asked for a conversation, so a broken
+      // classifier must not turn a greeting into "Planning failed".  Answer
+      // without a draft — the answer call does the work, and if THAT fails too
+      // the report says so.
+      if (mode === 'chat') {
+        return { kind: 'answer', isClear: true, needsClarification: [], errors: [] };
+      }
       return {
         kind: 'clarify',
         isClear: false,

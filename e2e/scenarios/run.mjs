@@ -1734,6 +1734,36 @@ scenarios.faults = async () => {
   const b = await run(runArgs('write notes WRITE:notes/b.txt BADJSON:PlannerAssessmentx1#e2e', badjson));
   check('faults: one unparsable planner answer is retried', b.code === 0, `exit=${b.code}`);
 
+  // A provider that ANSWERS but leaves out a field the response schema marks
+  // required: the object is refused by the SDK, yet everything the runtime
+  // needs is in the text.  (Reported from a real run on 2026-09-25: `@chat
+  // سلام` ended in "Planning failed: ... response did not match schema".)
+  const droppedChat = makeProject('faults-dropped-field-chat');
+  const dc = await run(runArgs('@chat CHATREPLY سلام DROPISCLEAR#e2e-drop-chat', droppedChat));
+  const dcOut = dc.stdout + dc.stderr;
+  check(
+    'faults: a chat run survives an answer the schema refused',
+    dc.code === 0 && /💬 Answer/.test(dcOut) && /آیا|سلام|رانتایم/.test(dcOut),
+    `exit=${dc.code}`
+  );
+  check(
+    'faults: ...and it is not reported as a planning failure',
+    !/Planning failed/.test(dcOut) && !/No object generated/.test(dcOut)
+  );
+
+  const droppedAuto = makeProject('faults-dropped-field-auto');
+  const da = await run(runArgs('مرتب‌سازی پروژه DROPISCLEAR#e2e-drop-auto', droppedAuto));
+  const daOut = da.stdout + da.stderr;
+  check(
+    'faults: the recovered questions reach the user (auto mode)',
+    /Clarification needed/.test(daOut) && /هدف شما/.test(daOut),
+    `exit=${da.code}`
+  );
+  check(
+    'faults: ...without a planning failure',
+    !/Planning failed/.test(daOut) && !/No object generated/.test(daOut)
+  );
+
   // Persistently malformed: a planning FAILURE, not a clarification request.
   const broken = makeProject('faults-broken');
   const c = await run(runArgs('write notes BADJSON:PlannerAssessment#e2e-broken', broken));
