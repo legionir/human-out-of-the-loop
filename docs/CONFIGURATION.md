@@ -149,7 +149,7 @@ registry/
 │   ├── git_operations/
 │   ├── task_decomposition/
 │   └── acceptance_check/
-├── tools/                   # ۱۴ ابزار محلی (فاز ۳۳/۳۴: پورت سرور مرجع MCP)
+├── tools/                   # ۱۶ ابزار محلی (فاز ۳۳–۳۵: پورت کامل سرور مرجع MCP)
 │   ├── read_file.json       # id, name, description, source: local, modulePath, category
 │   ├── search_code.json     #   جستجوی VS Code-style: pattern محتوا + pathPattern مسیر
 │   ├── write_file.json
@@ -158,6 +158,8 @@ registry/
 │   ├── read_multiple_files.json
 │   ├── write_multiple_files.json  # scaffold دسته‌ای + وضعیت هر فایل + dryRun
 │   ├── list_directory.json  # [DIR]/[FILE]؛ symlink هرگز دنبال نمی‌شود
+│   ├── list_directory_with_sizes.json  # اندازه هر فایل + sortBy: name|size + مجموع
+│   ├── read_media_file.json # تصویر/صدا → base64 + پیوست به فراخوانی مدل (maxBytes)
 │   ├── directory_tree.json  # درخت JSON با excludePatterns و maxDepth
 │   ├── move_file.json       # مقصد موجود → خطا (بدون overwrite)
 │   ├── get_file_info.json
@@ -183,9 +185,10 @@ registry/
   "system": "You are a skilled software engineer...",
   "allowedTools": [
     "read_file", "write_file", "edit_file", "read_multiple_files",
-    "list_directory", "directory_tree", "move_file", "get_file_info",
-    "write_multiple_files", "create_directory", "search_code", "search_files",
-    "list_allowed_directories", "git_status"
+    "write_multiple_files", "list_directory", "directory_tree", "move_file",
+    "get_file_info", "create_directory", "search_code", "search_files",
+    "list_allowed_directories", "git_status",
+    "read_media_file", "list_directory_with_sizes"
   ],
   "description": "Implements features and fixes bugs"
 }
@@ -202,7 +205,7 @@ registry/
     "read_file", "read_multiple_files", "write_multiple_files", "edit_file",
     "write_file", "move_file", "create_directory", "list_directory",
     "directory_tree", "get_file_info", "search_code", "search_files",
-    "list_allowed_directories"
+    "list_allowed_directories", "read_media_file", "list_directory_with_sizes"
   ],
   "priority": 60,
   "description": "Reads, writes, edits, moves and searches files"

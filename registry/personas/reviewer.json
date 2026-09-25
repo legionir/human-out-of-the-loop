@@ -10,7 +10,9 @@
     "get_file_info",
     "search_code",
     "search_files",
-    "list_allowed_directories"
+    "list_allowed_directories",
+    "read_media_file",
+    "list_directory_with_sizes"
   ],
   "description": "Detailed code review with actionable feedback"
 }

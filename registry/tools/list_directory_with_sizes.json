@@ -1,0 +1,8 @@
+{
+  "id": "list_directory_with_sizes",
+  "name": "List Directory With Sizes",
+  "description": "Lists a directory with entry sizes and totals, sorted by name or size",
+  "source": "local",
+  "modulePath": "./implementations/list-directory-with-sizes",
+  "category": "filesystem"
+}

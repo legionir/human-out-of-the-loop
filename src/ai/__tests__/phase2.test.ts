@@ -234,8 +234,8 @@ describe('Tool loader integration', () => {
       registry: baseReg,
       schema: ToolDefinitionSchema,
     });
-    // 4 original filesystem/git tools + phases 33/34's filesystem set.
-    expect(result.loaded).toBe(14);
+    // 4 original filesystem/git tools + phases 33-35's filesystem set.
+    expect(result.loaded).toBe(16);
     expect(result.errors).toHaveLength(0);
     expect(baseReg.has('read_file')).toBe(true);
     expect(baseReg.has('search_code')).toBe(true);
@@ -243,6 +243,8 @@ describe('Tool loader integration', () => {
     expect(baseReg.has('git_status')).toBe(true);
     expect(baseReg.has('edit_file')).toBe(true);
     expect(baseReg.has('directory_tree')).toBe(true);
+    expect(baseReg.has('read_media_file')).toBe(true);
+    expect(baseReg.has('list_directory_with_sizes')).toBe(true);
     expect(baseReg.has('write_multiple_files')).toBe(true);
   });
 });

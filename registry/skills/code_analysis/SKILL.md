@@ -13,9 +13,14 @@ anti-patterns, performance issues, and security vulnerabilities.
    matter). Use `search_files` when the question is about file names, not
    content.
 3. Use `directory_tree` / `get_file_info` to map the area under analysis
-   before diving in.
-4. Categorise findings by severity: critical, warning, info.
-5. Provide line-level references for every finding.
+   before diving in, and `list_directory_with_sizes` to spot the heavy files
+   (`sortBy: 'size'`) that are most likely to be generated or checked in by
+   mistake.
+4. Use `read_media_file` when a finding is in a non-text asset (a diagram, a
+   screenshot, an audio fixture): the image is attached to the model call, so
+   look at it before commenting on it.
+5. Categorise findings by severity: critical, warning, info.
+6. Provide line-level references for every finding.
 
 ## Output Format
 Return a structured list of findings with:

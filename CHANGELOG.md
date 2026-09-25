@@ -5,6 +5,46 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.8.0] — 2026-09-25 — the filesystem set is complete
+
+The last two tools of the MCP reference filesystem server
+(`servers-main/src/filesystem/`) now exist natively, so **every tool that server
+registers has a counterpart here**. Nothing about the port's safety properties
+changed: both go through the same path validation as the rest of the set.
+
+**`read_media_file` — the read that is not text**
+- Images (png, jpg/jpeg, gif, webp, bmp, svg) and audio (mp3, wav, ogg, flac)
+  come back as base64 with their MIME type, and are **attached to the model
+  call** as a real content part (`toModelOutput`: `input_text` + `input_image`
+  on the Responses API), so a vision model can actually look at the file. Every
+  other extension is `application/octet-stream`.
+- Two deliberate deviations from the reference, both about not flooding a run:
+  `maxBytes` (default 10 MiB) refuses an oversized file with `FILE_TOO_LARGE`
+  rather than pushing tens of megabytes into every following model call, and a
+  non-media binary is reported with its metadata but **not attached**
+  (`attachedToModel: false`) — the model sees the type, the size and the path,
+  not the payload.
+- Failures keep the project's contract: `{ success: false, error, code }` on the
+  runtime side (so `describeToolFailure` still sees them) and the same JSON for
+  the model.
+
+**`list_directory_with_sizes` — where the bytes are**
+- Per-entry size and mtime, `sortBy: 'name' | 'size'` (size orders largest
+  first), and the reference's footer: `Total: N files, M directories` plus
+  `Combined size: …`, with a `[DIR]`/`[FILE]` padded rendering in `formatted`.
+- Still `lstat`: a symlink is reported as `[LINK]` and never followed, an
+  unreadable entry carries `unreadable: true` instead of failing the listing —
+  and only regular files carry a size, so the totals and the ordering talk about
+  bytes on disk rather than directory inode sizes.
+
+**Also**
+- `read_file` now refuses `head` together with `tail`
+  (`Cannot specify both head and tail parameters simultaneously.`), matching the
+  reference's `read_text_file` instead of silently returning the head.
+- 17 new unit tests (a parity map asserting every tool the reference registers
+  has a local counterpart, and the reverse — no dead entries) and a new `media`
+  end-to-end scenario that asserts on the wire body the stub received.
+
 ## [27.7.0] — 2026-09-25 — batch writing and VS Code-style search
 
 Two tools the filesystem set was still missing: writing a *set* of files in one

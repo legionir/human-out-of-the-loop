@@ -18,6 +18,8 @@ import { createGetFileInfoTool } from './implementations/get-file-info.js';
 import { createCreateDirectoryTool } from './implementations/create-directory.js';
 import { createSearchFilesTool } from './implementations/search-files.js';
 import { createListAllowedDirectoriesTool } from './implementations/list-allowed-directories.js';
+import { createListDirectoryWithSizesTool } from './implementations/list-directory-with-sizes.js';
+import { createReadMediaFileTool } from './implementations/read-media-file.js';
 
 /**
  * Every local tool, keyed by the id used in `registry/tools/*.json`.
@@ -33,8 +35,10 @@ export const LOCAL_TOOL_FACTORIES: Readonly<Record<string, (projectRoot: string)
   // Phase 33 — the reference filesystem toolset.
   edit_file: createEditFileTool,
   read_multiple_files: createReadMultipleFilesTool,
+  read_media_file: createReadMediaFileTool,
   write_multiple_files: createWriteMultipleFilesTool,
   list_directory: createListDirectoryTool,
+  list_directory_with_sizes: createListDirectoryWithSizesTool,
   directory_tree: createDirectoryTreeTool,
   move_file: createMoveFileTool,
   get_file_info: createGetFileInfoTool,

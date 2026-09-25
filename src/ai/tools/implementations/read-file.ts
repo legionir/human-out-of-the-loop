@@ -67,6 +67,16 @@ export function createReadFileTool(projectRoot: string) {
           };
         }
 
+        // Reference parity (`read_text_file`): asking for both is ambiguous,
+        // and silently returning the head would hide the mistake.
+        if (head !== undefined && tail !== undefined) {
+          return {
+            success: false as const,
+            error: 'Cannot specify both head and tail parameters simultaneously.',
+            code: 'INVALID_ARGUMENTS',
+          };
+        }
+
         const relative = path.relative(projectRoot, validation.resolvedPath) || '.';
         const sliced = head !== undefined ? 'head' : tail !== undefined ? 'tail' : undefined;
         const content =

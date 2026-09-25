@@ -10,6 +10,8 @@ export { createEditFileTool } from './edit-file.js';
 export { createReadMultipleFilesTool } from './read-multiple-files.js';
 export { createWriteMultipleFilesTool } from './write-multiple-files.js';
 export { createListDirectoryTool } from './list-directory.js';
+export { createListDirectoryWithSizesTool } from './list-directory-with-sizes.js';
+export { createReadMediaFileTool } from './read-media-file.js';
 export { createDirectoryTreeTool } from './directory-tree.js';
 export { createMoveFileTool } from './move-file.js';
 export { createGetFileInfoTool } from './get-file-info.js';

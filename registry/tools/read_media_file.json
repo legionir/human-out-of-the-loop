@@ -1,0 +1,8 @@
+{
+  "id": "read_media_file",
+  "name": "Read Media File",
+  "description": "Reads an image or audio file as base64 with its MIME type and attaches it to the model call",
+  "source": "local",
+  "modulePath": "./implementations/read-media-file",
+  "category": "filesystem"
+}

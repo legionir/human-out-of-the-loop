@@ -30,6 +30,7 @@
  *     of leaking an exception into the agent loop.
  */
 import fs from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
@@ -298,6 +299,44 @@ export async function getFileStats(filePath: string): Promise<FileInfo> {
 
 export async function readFileContent(filePath: string, encoding: string = 'utf-8'): Promise<string> {
   return await fs.readFile(filePath, encoding as BufferEncoding);
+}
+
+/**
+ * Media types by extension — the reference server's table
+ * (`servers-main/src/filesystem/index.ts`, `read_media_file`).
+ */
+const MEDIA_TYPES_BY_EXTENSION: Readonly<Record<string, string>> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.ogg': 'audio/ogg',
+  '.flac': 'audio/flac',
+};
+
+/** The MIME type of a file, from its extension (the reference's mapping). */
+export function mediaTypeForFile(filePath: string): string {
+  return MEDIA_TYPES_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
+}
+
+/**
+ * Read a file as base64 through a stream (the reference's
+ * `readFileAsBase64Stream`), so a large image is not held twice in memory.
+ */
+export async function readFileAsBase64(filePath: string): Promise<string> {
+  const chunks: Buffer[] = [];
+  const stream = createReadStream(filePath);
+  await new Promise<void>((resolve, reject) => {
+    stream.on('data', (chunk) => chunks.push(chunk as Buffer));
+    stream.on('end', () => resolve());
+    stream.on('error', (error) => reject(error));
+  });
+  return Buffer.concat(chunks).toString('base64');
 }
 
 /**

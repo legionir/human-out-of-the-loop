@@ -16,7 +16,9 @@
     "get_file_info",
     "search_code",
     "search_files",
-    "list_allowed_directories"
+    "list_allowed_directories",
+    "read_media_file",
+    "list_directory_with_sizes"
   ],
   "priority": 60,
   "description": "Reads, writes, edits, moves and searches files in the workspace"

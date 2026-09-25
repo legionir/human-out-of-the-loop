@@ -11,7 +11,9 @@
     "search_code",
     "search_files",
     "list_allowed_directories",
-    "git_status"
+    "git_status",
+    "read_media_file",
+    "list_directory_with_sizes"
   ],
   "description": "System-level architectural analysis and design review"
 }

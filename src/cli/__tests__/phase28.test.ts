@@ -355,7 +355,7 @@ describe('phase 28 — registry layering', () => {
     ]);
     expect(loaded.skills.length).toBeGreaterThan(0); // from the package layer
     expect(loaded.tools.map((t) => t.id).sort()).toEqual([
-      // the original four plus the phases 33/34 filesystem toolset
+      // the original four plus the phases 33-35 filesystem toolset
       'create_directory',
       'directory_tree',
       'edit_file',
@@ -363,8 +363,10 @@ describe('phase 28 — registry layering', () => {
       'git_status',
       'list_allowed_directories',
       'list_directory',
+      'list_directory_with_sizes',
       'move_file',
       'read_file',
+      'read_media_file',
       'read_multiple_files',
       'search_code',
       'search_files',

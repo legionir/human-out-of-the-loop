@@ -340,6 +340,77 @@ scenarios.batch = async () => {
   return root;
 };
 
+/**
+ * Phase 35 — the last two reference tools, through the real CLI.
+ *
+ * One run: `read_media_file` on a PNG (which must reach the model as a real
+ * image part — the tool's `toModelOutput` is what turns the base64 into an
+ * attachment), the same tool on a `.bin` (which must NOT), and
+ * `list_directory_with_sizes` (whose padded size report must come back).
+ */
+scenarios.media = async () => {
+  const root = makeProject('media', {
+    'assets/pixel.png': 'placeholder, overwritten with real PNG bytes below\n',
+    'assets/archive.bin': 'not an image\n',
+  });
+  // A real 1×1 PNG: the scenario asserts the *bytes* reached the model, so the
+  // file has to be a genuine image rather than text with a .png name.
+  fs.writeFileSync(
+    path.join(root, 'assets', 'pixel.png'),
+    Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AAAwAB/AF+1G0ZAAAAAElFTkSuQmCC',
+      'base64'
+    )
+  );
+
+  const goal =
+    'look at the screenshot and size up the assets MEDIA:assets/pixel.png ' +
+    'MEDIABIN:assets/archive.bin SIZES:assets CHAIN';
+  const { code, stdout } = await run(runArgs(goal, root));
+  const { plans } = planStore(root);
+  const plan = plans[0];
+  const log = readLog(root);
+
+  check('media: exit code 0', code === 0, `exit=${code} ${(stdout || '').split('\n')[0]}`);
+
+  const called = log.filter((e) => e.eventType === 'task:tool-call').map((e) => e.payload?.toolName);
+  check(
+    'media: the log records both new tools',
+    called.includes('read_media_file') && called.includes('list_directory_with_sizes'),
+    called.join(',')
+  );
+
+  const probeRequests = stubRequests().filter((body) => JSON.stringify(body).includes('MEDIABIN'));
+  const dump = probeRequests.map((body) => JSON.stringify(body)).join('\n');
+
+  // The image part, as the provider serialises it: a data URL carrying the
+  // PNG signature.  A text-only result could never produce this.
+  check(
+    'media: the image bytes reached the model as an attachment',
+    dump.includes('data:image/png;base64,iVBORw0KGgo')
+  );
+
+  // ... while the binary did not: its summary travels, its payload does not.
+  check(
+    'media: the non-media binary was summarised, not attached',
+    dump.includes('not attached: not an image or audio file') &&
+      !dump.includes('data:application/octet-stream')
+  );
+
+  check(
+    'media: the sized directory listing reached the model',
+    dump.includes('[FILE] pixel.png') && dump.includes('Combined size')
+  );
+
+  check(
+    'media: every step completed without a tool error',
+    Boolean(plan) && plan.steps.every((s) => s.status === 'done') &&
+      !log.some((e) => e.eventType === 'task:tool-error'),
+    log.filter((e) => e.eventType === 'task:tool-error').map((e) => e.message).join(' | ')
+  );
+  return root;
+};
+
 scenarios.resume = async () => {
   const root = makeProject('resume');
   await run(runArgs('write the project notes WRITE:notes/first.txt', root));

@@ -327,16 +327,30 @@ human-out-of-the-loop sessions label session_5c1d… "Login page v2"
 
 The workspace tools are a native port of the MCP reference *filesystem* server
 (`servers-main/src/filesystem/`) — the same path validation, not an MCP server
-registration. Fourteen tools, all bound to `--project-root` and refusing
-anything that escapes it (symlinked parents included):
+registration. With phase 35 the reference set is **complete**: every tool that
+server registers has a native counterpart here, plus three of our own. Sixteen
+tools, all bound to `--project-root` and refusing anything that escapes it
+(symlinked parents included):
 
 | Read | Write | Inspect |
 |------|-------|---------|
 | `read_file` (full, `head`/`tail`, base64) | `write_file` (atomic, `overwrite`) | `list_directory` |
-| `read_multiple_files` | `write_multiple_files` (batch/scaffold, per-file status) | `directory_tree` (globs, `maxDepth`) |
-| `search_code` (VS Code style, see below) | `edit_file` (line-based + diff, `dryRun`) | `get_file_info` |
-| `search_files` (glob) | `create_directory` | `list_allowed_directories` |
-| | `move_file` (never overwrites) | `git_status` |
+| `read_media_file` (image/audio attached to the model call) | `write_multiple_files` (batch/scaffold, per-file status) | `list_directory_with_sizes` (`sortBy: name\|size`, totals) |
+| `read_multiple_files` | `edit_file` (line-based + diff, `dryRun`) | `directory_tree` (globs, `maxDepth`) |
+| `search_code` (VS Code style, see below) | `create_directory` | `get_file_info` |
+| `search_files` (glob) | `move_file` (never overwrites) | `list_allowed_directories` |
+| | | `git_status` |
+
+`read_media_file` is the one read that is not text: an image or audio file comes
+back as base64 **and is attached to the model call** as a real content part, so a
+vision model can look at a screenshot or a diagram. Two deliberate deviations
+from the reference keep that from flooding a run: a `maxBytes` ceiling (default
+10 MiB) refuses an oversized file with `FILE_TOO_LARGE`, and a non-media binary
+is returned with its metadata but *not* attached (`attachedToModel: false`).
+`list_directory_with_sizes` adds what a plain listing cannot answer — where the
+bytes are: per-file sizes, `sortBy: 'size'`, and the `Total: N files, M
+directories` / `Combined size:` footer. It lists with `lstat`, so a symlink is
+reported as `[LINK]` (and never followed), and only regular files carry a size.
 
 `search_code` follows the VS Code "search in files" model: a **content** pattern
 (regex, or literal text with `literal: true`, case-insensitive unless
@@ -494,10 +508,11 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 27–32 | Env-injected endpoints, registry layers, the REPL and `/` menu, runtime models, live run feedback (status line + streamed thinking) & project context for the planner | 🟢 |
 | 33 | Native port of the MCP reference filesystem toolset (13 tools, symlink/Unicode-safe paths, atomic writes, line-based edits) | 🟢 |
 | 34 | Batch writing (`write_multiple_files`) and VS Code-style `search_code` (path pattern, toggles, columns, context) | 🟢 |
+| 35 | `read_media_file` (attached image/audio) and `list_directory_with_sizes` — the reference filesystem toolset is complete | 🟢 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**828 tests green (57 files), 0 tsc errors — plus 74 committed end-to-end checks (`npm run e2e`)** (phases 18–34 complete — see `docs/history/`)
+**845 tests green (58 files), 0 tsc errors — plus 80 committed end-to-end checks (`npm run e2e`)** (phases 18–35 complete — see `docs/history/`)
 
 ## Law Compliance
 

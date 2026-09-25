@@ -162,6 +162,10 @@ const MARKERS = [
   { marker: 'SCAFFOLD', tool: 'write_multiple_files' },
   { marker: 'SCAFFOLDDRY', tool: 'write_multiple_files' },
   { marker: 'GREP', tool: 'search_code' },
+  // Phase 35 — the last two reference tools.
+  { marker: 'MEDIA', tool: 'read_media_file' },
+  { marker: 'MEDIABIN', tool: 'read_media_file' },
+  { marker: 'SIZES', tool: 'list_directory_with_sizes' },
 ];
 
 function markersIn(text) {
@@ -240,6 +244,16 @@ function pickToolCall(promptText, offered, chained = false) {
         maxResults: 10,
       },
     };
+  }
+  // SIZES:<dir> — the reference's sized listing, ordered by size so the
+  // scenario can see the ordering travel back to the model.
+  if (marker.marker === 'SIZES') {
+    return { name: 'list_directory_with_sizes', args: { path: marker.arg, sortBy: 'size' } };
+  }
+  // MEDIA:<file> / MEDIABIN:<file> — the same tool, twice: once on an image
+  // (attached to the model call) and once on a plain binary (not attached).
+  if (marker.marker === 'MEDIA' || marker.marker === 'MEDIABIN') {
+    return { name: 'read_media_file', args: { path: marker.arg } };
   }
   if (marker.marker === 'MOVE') {
     const [source, destination] = marker.arg.split('|');
