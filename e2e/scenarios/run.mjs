@@ -1833,6 +1833,31 @@ scenarios.thinking = async () => {
   const artifacts = JSON.stringify(planStore(root).plans) + JSON.stringify(readLog(root));
   check('thinking: thinking text is not persisted', !artifacts.includes('checking the project files'));
 
+  // v27.17.2: a gateway that streams the reasoning in shapes the SDK does not
+  // map (`response.reasoning_text.delta`, the reasoning item) used to show a
+  // `💭` and nothing else.  The text must reach the terminal anyway.
+  const rawWire = makeProject('thinking-raw-wire');
+  const rawRun = await run(
+    runArgs(
+      'write the notes THINK:later-thinking WRITE:notes/raw.txt RAWTEXTWIRE',
+      rawWire,
+      ['--thinking', 'on']
+    ),
+    { env: { FORCE_COLOR: '1' } }
+  );
+  const rawPlain = rawRun.stdout.replace(/\x1b\[[0-9;]*m/g, '');
+  check('thinking: exit code 0 on the raw reasoning wire', rawRun.code === 0, `exit=${rawRun.code}`);
+  check(
+    'thinking: reasoning outside the SDK-mapped events still reaches the terminal',
+    rawPlain.includes('later thinking'),
+    rawPlain.slice(0, 200).replace(/\n/g, ' / ')
+  );
+  check(
+    'thinking: ...and the block is not left empty',
+    rawPlain.includes('💭 later thinking'),
+    rawPlain.split('\n').find((l) => l.includes('later')) ?? '(no line)'
+  );
+
   // A dropped connection mid-stream must not hang or crash the run: the
   // CUT fault destroys the socket before any event is sent.
   const cut = makeProject('thinking-cut');

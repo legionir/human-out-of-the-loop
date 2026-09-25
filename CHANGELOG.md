@@ -5,6 +5,54 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.2] — 2026-09-25 — the thinking text, and the prompt that was sent twice
+
+Two more findings from the same Windows gateway as 27.17.1, both visible in one
+session's logs:
+
+    HOOTL test-projects › @chat الان توی چه مسیری هستی؟
+    Mode: chat (prefix)
+    💭
+    💬 Answer
+
+The `💭` opened and never filled.  That gateway streams reasoning as
+`response.reasoning_text.delta` and inside the finished reasoning item — and the
+AI SDK maps **only** `response.reasoning_summary_text.delta` to a reasoning
+part, so the text was dropped before any callback could see it.
+
+- **The wire shapes the SDK does not map are read from the raw chunk.**
+  `response.reasoning_text.delta`/`.done` and the `reasoning` item's
+  `content[]`/`summary[]` (from `output_item.added`/`.done`) now reach the
+  terminal.  The SDK-mapped `reasoning_summary_text.*` events are deliberately
+  NOT read there — the provider sends the raw chunk *before* the part it maps,
+  and reading both printed every summary delta twice (which the e2e caught:
+  `checkingchecking the project files`).  If a turn streams no reasoning at all
+  but the SDK collected some, it is shown once at the end rather than lost.
+- **A recoverable answer is no longer asked for twice.**  The reporter's
+  provider omits `isClear` on *every* assessment; 27.17.1 learned to read the
+  answer anyway, but only after the retry had already sent the identical prompt
+  again.  Recovery now happens inside the retry: the JSON is used as it is, and
+  a call that CAN be read is never repeated.  Unreadable answers are still
+  retried once, exactly as before.
+- **A provider that cannot stream is asked once more, without streaming.**  The
+  gateway answers a `stream: true` Responses request with a non-streamed body
+  (`{"choices":[{"message":{"role":"assistant","content":""}}]}`), which the SDK
+  turns into an empty turn — the run then showed the *assessment's draft* as if
+  it were the answer, with nothing to indicate it.  When the streaming attempt
+  yields nothing (or fails outright), the same prompt goes out once more with
+  `generateText`; cancellation and timeouts never trigger it, and the run
+  summary records `The provider streamed no answer; the turn was repeated
+  without streaming.`  A stream that produced an answer is never repeated.
+- `streamText`'s result is awaited before its fields are read, so a provider
+  shim that returns a promise is handled like the SDK's own result object.
+
+Verification: `src/ai/__tests__/v27172-provider-wire.test.ts` (8 tests — the raw
+wire shapes, the block that used to stay empty, no double printing, the
+non-streaming re-ask on an empty stream and on a failed stream, and no re-ask
+when the stream worked) plus 3 e2e checks in the `thinking` scenario whose stub
+streams reasoning exactly the way the reported gateway does
+(`RAWTEXTWIRE`).  1187 tests, 189 e2e checks.
+
 ## [27.17.1] — 2026-09-25 — a nearly-correct answer is no longer a failed run
 
 Reported from a real run (same Windows machine as 27.16.1):

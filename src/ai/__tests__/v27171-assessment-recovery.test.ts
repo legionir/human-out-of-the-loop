@@ -240,3 +240,29 @@ describe('v27.17.1 — questions without a verdict are a clarification', () => {
     ).toBe('plan');
   });
 });
+
+describe('v27.17.2 — an answer that only the schema disliked is used as it is', () => {
+  it('does not repeat the assessment call', async () => {
+    // Exactly the reporter's assessment: the kind and the reply, no `isClear`.
+    // The retry exists for answers that CANNOT be read — this one can, so the
+    // prompt must not be sent a second time (two requests per turn in the
+    // reported run, both just as unusable as the other).
+    mockGenerateObject.mockRejectedValueOnce(
+      noObject(JSON.stringify({ kind: 'answer', answer: 'پاسخ' }))
+    );
+    mockGenerateText.mockResolvedValue({
+      text: 'پاسخ نهایی',
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+      steps: [],
+    } as never);
+
+    const result = await new Orchestrator({ projectRoot: REPO_ROOT, runtimeDir: tmpDir }).run(
+      'سلام',
+      { mode: 'chat', confirmCallback: async () => ({ confirmed: false }) }
+    );
+
+    expect(result.kind).toBe('answer');
+    expect(result.report).toContain('پاسخ نهایی');
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+  });
+});

@@ -698,6 +698,17 @@ function thinkingFor(promptText) {
   return match[1].replace(/[-_]+/g, ' ');
 }
 
+/**
+ * `RAWTEXTWIRE` (v27.17.2): deliver the `THINK:` text the way the reporter's
+ * gateway did — as `response.reasoning_text.*` and inside the reasoning item,
+ * NONE of which the AI SDK maps to a reasoning delta.  The SDK still opens a
+ * thinking block (the item and its summary part are announced), so before the
+ * fix the terminal showed `💭` with nothing after it.
+ */
+function rawTextWire(promptText) {
+  return /\bRAWTEXTWIRE\b/.test(promptText);
+}
+
 /** Split text into small pieces, the way a token stream arrives. */
 function pieces(text) {
   return (text ?? '').match(/.{1,8}/gs) ?? [];
@@ -757,7 +768,44 @@ async function streamResponses(res, model, output, promptText) {
 
   let outputIndex = 0;
   const thinking = thinkingFor(promptText);
-  if (thinking) {
+  if (thinking && rawTextWire(promptText)) {
+    const itemId = `rs_${++seq}`;
+    const content = (text) => ({ type: 'reasoning_text', text });
+    sseEvent(res, 'response.output_item.added', {
+      type: 'response.output_item.added',
+      response_id: base.id,
+      output_index: outputIndex,
+      item: { type: 'reasoning', id: itemId, summary: [], content: [] },
+    });
+    // The block is announced the way the SDK understands it…
+    sseEvent(res, 'response.reasoning_summary_part.added', {
+      type: 'response.reasoning_summary_part.added',
+      response_id: base.id,
+      item_id: itemId,
+      output_index: outputIndex,
+      summary_index: 0,
+      part: { type: 'summary_text', text: '' },
+    });
+    // …and then the text arrives ONLY in shapes the SDK drops.
+    for (const piece of pieces(thinking)) {
+      sseEvent(res, 'response.reasoning_text.delta', {
+        type: 'response.reasoning_text.delta',
+        response_id: base.id,
+        item_id: itemId,
+        output_index: outputIndex,
+        content_index: 0,
+        delta: piece,
+      });
+      await sleep(STREAM_MS);
+    }
+    sseEvent(res, 'response.output_item.done', {
+      type: 'response.output_item.done',
+      response_id: base.id,
+      output_index: outputIndex,
+      item: { type: 'reasoning', id: itemId, summary: [], content: [content(thinking)] },
+    });
+    outputIndex += 1;
+  } else if (thinking) {
     const itemId = `rs_${++seq}`;
     const part = (text) => ({ type: 'summary_text', text });
     sseEvent(res, 'response.output_item.added', {
