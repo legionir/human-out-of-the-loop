@@ -191,6 +191,12 @@ const MARKERS = [
   { marker: 'FETCHRAW', tool: 'fetch' },
   { marker: 'FETCHFORBID', tool: 'fetch' },
   { marker: 'FETCHGUARD', tool: 'fetch' },
+  // Phase 41 — git, read-only.
+  { marker: 'GITDIFF', tool: 'git_diff' },
+  { marker: 'GITLOG', tool: 'git_log' },
+  { marker: 'GITSHOW', tool: 'git_show' },
+  { marker: 'GITBRANCH', tool: 'git_branch_list' },
+  { marker: 'GITREMOTE', tool: 'git_remote_list' },
 ];
 
 function markersIn(text) {
@@ -231,7 +237,28 @@ function pickToolCall(promptText, offered, chained = false) {
     };
   }
   if (marker.marker === 'SEARCH') return { name: 'search_code', args: { pattern: marker.arg, directory: '.' } };
-  if (marker.marker === 'GITSTATUS') return { name: 'git_status', args: { directory: '.' } };
+  if (marker.marker === 'GITSTATUS') return { name: 'git_status', args: { directory: '.', porcelain: 'v2', branch: true } };
+  // Phase 41 — the read-only git set.  The argument selects the mode.
+  if (marker.marker === 'GITDIFF') {
+    const mode = marker.arg;
+    return {
+      name: 'git_diff',
+      args:
+        mode === 'staged'
+          ? { directory: '.', staged: true }
+          : mode === 'worktree'
+            ? { directory: '.', path: 'notes/changed.txt' }
+            : { directory: '.', target: mode },
+    };
+  }
+  if (marker.marker === 'GITLOG') {
+    return { name: 'git_log', args: { directory: '.', maxCount: Number(marker.arg) || 5, format: 'json' } };
+  }
+  if (marker.marker === 'GITSHOW') return { name: 'git_show', args: { directory: '.', revision: marker.arg } };
+  if (marker.marker === 'GITBRANCH') {
+    return { name: 'git_branch_list', args: { directory: '.', all: marker.arg === 'all' } };
+  }
+  if (marker.marker === 'GITREMOTE') return { name: 'git_remote_list', args: { directory: '.' } };
   // Phase 33 — the reference filesystem toolset.  EDIT replaces a fixed
   // placeholder so the scenario can assert a line-based edit, not a rewrite;
   // MOVE carries `source|destination`.

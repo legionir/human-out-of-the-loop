@@ -23,7 +23,12 @@
     "create_entities",
     "create_relations",
     "add_observations",
-    "fetch"
+    "fetch",
+    "git_diff",
+    "git_log",
+    "git_show",
+    "git_branch_list",
+    "git_remote_list"
   ],
   "description": "System-level architectural analysis and design review"
 }

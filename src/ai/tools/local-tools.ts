@@ -24,6 +24,11 @@ import { createGetCurrentTimeTool } from './implementations/get-current-time.js'
 import { createConvertTimeTool } from './implementations/convert-time.js';
 import { createSequentialThinkingTool } from './implementations/sequential-thinking.js';
 import { createFetchTool } from './implementations/fetch.js';
+import { createGitDiffTool } from './implementations/git-diff.js';
+import { createGitLogTool } from './implementations/git-log.js';
+import { createGitShowTool } from './implementations/git-show.js';
+import { createGitBranchListTool } from './implementations/git-branch-list.js';
+import { createGitRemoteListTool } from './implementations/git-remote-list.js';
 import {
   createAddObservationsTool,
   createCreateEntitiesTool,
@@ -76,6 +81,12 @@ export const LOCAL_TOOL_FACTORIES: Readonly<Record<string, (projectRoot: string)
   open_nodes: createOpenNodesTool,
   // Phase 40 — the web, read as Markdown.
   fetch: createFetchTool,
+  // Phase 41 — git, read-only (phase 42 adds the write half).
+  git_diff: createGitDiffTool,
+  git_log: createGitLogTool,
+  git_show: createGitShowTool,
+  git_branch_list: createGitBranchListTool,
+  git_remote_list: createGitRemoteListTool,
 };
 
 /** Ids of the local tools above — used by tests and by the bootstrap check. */

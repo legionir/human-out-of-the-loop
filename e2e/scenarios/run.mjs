@@ -14,7 +14,7 @@
  * GitHub windows-latest / macos-latest runners, which is what closes the P8
  * matrix.  Ctrl-C handling is the one exception — it needs a POSIX signal.
  */
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -891,6 +891,155 @@ scenarios.fetch = async () => {
     server.closeAllConnections?.();
     await new Promise((resolve) => server.close(resolve));
   }
+};
+
+/**
+ * Phase 41 — the read-only git tools, on a real repository.
+ *
+ * The scratch project is `git init`-ed and committed by the scenario itself, so
+ * the six tools have true answers to give: a staged file, an unstaged change, a
+ * commit to log and show, a branch to list and a remote to report.  Nothing
+ * here modifies the repository — that is phase 42's half.
+ */
+const gitEnv = {
+  ...process.env,
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_ASKPASS: 'echo',
+  GIT_PAGER: 'cat',
+  GIT_OPTIONAL_LOCKS: '0',
+};
+
+function git(cwd, args) {
+  return execFileSync('git', args, { cwd, env: gitEnv, encoding: 'utf-8' });
+}
+
+function initRepo(root) {
+  try {
+    git(root, ['init', '-q', '-b', 'main']);
+  } catch {
+    git(root, ['init', '-q']);
+    git(root, ['symbolic-ref', 'HEAD', 'refs/heads/main']);
+  }
+  git(root, ['config', 'user.email', 'e2e@example.com']);
+  git(root, ['config', 'user.name', 'E2E Stub']);
+}
+
+scenarios.gitread = async () => {
+  const root = makeProject('gitread', {
+    'notes/committed.txt': 'gitread-committed-line\n',
+    'notes/changed.txt': 'gitread-original-line\n',
+  });
+  initRepo(root);
+  git(root, ['add', '.']);
+  git(root, ['commit', '-q', '-m', 'fixture commit']);
+  git(root, ['remote', 'add', 'origin', 'https://example.invalid/fixture.git']);
+
+  // Working tree: one unstaged modification, one staged addition, one untracked.
+  fs.writeFileSync(path.join(root, 'notes/changed.txt'), 'gitread-original-line\ngitread-unstaged-line\n');
+  fs.writeFileSync(path.join(root, 'notes/staged.txt'), 'gitread-staged-line\n');
+  git(root, ['add', 'notes/staged.txt']);
+  fs.writeFileSync(path.join(root, 'notes/untracked.txt'), 'gitread-untracked-line\n');
+
+  const headSha = git(root, ['rev-parse', 'HEAD']).trim();
+  const { code, stdout } = await run(
+    runArgs(
+      'understand the repository before we change it GITPROBE CHAIN ' +
+        'GITSTATUS:read GITDIFF:worktree GITDIFF:staged GITDIFF:HEAD ' +
+        'GITLOG:5 GITSHOW:HEAD GITBRANCH:all GITREMOTE:v',
+      root
+    )
+  );
+  const log = readLog(root);
+
+  check('gitread: exit code 0', code === 0, `exit=${code} ${(stdout || '').split('\n')[0]}`);
+
+  const called = log.filter((e) => e.eventType === 'task:tool-call').map((e) => e.payload?.toolName);
+  const gitTools = ['git_status', 'git_diff', 'git_log', 'git_show', 'git_branch_list', 'git_remote_list'];
+  check(
+    'gitread: every read tool ran',
+    gitTools.every((tool) => called.includes(tool)),
+    called.join(',')
+  );
+
+  // The dump carries the request body as JSON *inside* JSON, so a tool result's
+  // quotes arrive escaped (`\"scope\":\"staged\"`).  Un-escaping them once
+  // lets the assertions below read like the JSON the model actually received.
+  const dump = stubRequests()
+    .filter((body) => JSON.stringify(body).includes('GITPROBE'))
+    .map((body) => JSON.stringify(body))
+    .join('\n')
+    .replace(/\\"/g, '"');
+
+  // Status: the parsed entries and the branch, not just the text.
+  check(
+    'gitread: status reported the branch and the parsed entries',
+    dump.includes('porcelain') &&
+      dump.includes('notes/staged.txt') &&
+      dump.includes('notes/untracked.txt') &&
+      dump.includes('main')
+  );
+  // The unstaged change is in the worktree diff, not in the staged one.
+  check(
+    'gitread: the worktree diff carried the unstaged line',
+    dump.includes('gitread-unstaged-line') && dump.includes('"scope":"worktree"')
+  );
+  check('gitread: the staged diff carried the staged file', dump.includes('"scope":"staged"'));
+  check(
+    'gitread: the ref diff carried the commit\'s own change',
+    dump.includes('"scope":"target"') && dump.includes('gitread-committed-line')
+  );
+  // History: parsed entries with the sha, author and subject.
+  check(
+    'gitread: the log returned parsed entries',
+    dump.includes('fixture commit') &&
+      dump.includes(headSha) &&
+      dump.includes('e2e@example.com') &&
+      dump.includes('"count":1')
+  );
+  check(
+    'gitread: show returned the commit metadata and the patch',
+    dump.includes('"revision":"HEAD"') && dump.includes('"filesChanged":1')
+  );
+  check(
+    'gitread: the branch list marked main as current',
+    dump.includes('git_branch_list') && dump.includes('"current":"main"')
+  );
+  check(
+    'gitread: the remote list reported where a push would go',
+    dump.includes('example.invalid/fixture.git') && dump.includes('"count":1')
+  );
+
+  // The repository is untouched: the tools only read.
+  // (The run itself adds `.ai-runtime/`, so the count is taken over notes/.)
+  check(
+    'gitread: nothing was staged, committed or written by the tools',
+    git(root, ['diff', '--cached', '--name-only']).trim() === 'notes/staged.txt' &&
+      git(root, ['rev-parse', 'HEAD']).trim() === headSha &&
+      git(root, ['status', '--porcelain', '--', 'notes']).split('\n').filter(Boolean).length === 3
+  );
+
+  const { plans } = planStore(root);
+  const toolErrors = log.filter((e) => e.eventType === 'task:tool-error');
+  check(
+    'gitread: every step finished without a tool error',
+    Boolean(plans[0]) &&
+      plans[0].steps.every((step) => step.status === 'done') &&
+      toolErrors.length === 0,
+    toolErrors.map((e) => e.message).join(' | ')
+  );
+
+  const journalDir = path.join(root, '.ai-runtime', 'journal');
+  const journalText = fs.existsSync(journalDir)
+    ? fs
+        .readdirSync(journalDir)
+        .map((file) => fs.readFileSync(path.join(journalDir, file), 'utf-8'))
+        .join('\n')
+    : '';
+  check(
+    'gitread: the Journal recorded every git call',
+    gitTools.every((tool) => journalText.includes(`"tool":"${tool}"`))
+  );
+  return root;
 };
 
 scenarios.resume = async () => {

@@ -55,3 +55,8 @@ export {
   createSearchNodesTool,
 } from './memory-tools.js';
 export { createFetchTool } from './fetch.js';
+export { createGitDiffTool } from './git-diff.js';
+export { createGitLogTool } from './git-log.js';
+export { createGitShowTool } from './git-show.js';
+export { createGitBranchListTool } from './git-branch-list.js';
+export { createGitRemoteListTool } from './git-remote-list.js';

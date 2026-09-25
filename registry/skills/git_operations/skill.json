@@ -1,9 +1,9 @@
 {
   "id": "git_operations",
   "name": "Git Operations",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "instructions": "SKILL.md",
-  "tools": ["git_status"],
+  "tools": ["git_status", "git_diff", "git_log", "git_show", "git_branch_list", "git_remote_list"],
   "priority": 30,
-  "description": "Inspects and reports on the state of the git working tree"
+  "description": "Reads the state, history and configuration of a repository before changing anything"
 }

@@ -5,6 +5,69 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.14.0] — 2026-09-25 — git, read-only
+
+Five new tools and a new `git_status`, so an agent can understand a repository
+before it is allowed to change one (the write half is 27.15.0).
+
+**A shared core, not six copies of `execFile`** (`src/ai/tools/git/`)
+- **No shell, ever**: `spawn('git', argv)` with an argument list, and any
+  caller-supplied ref, path or filter that starts with `-` is refused
+  (`BAD_ARGUMENT`) — a branch named `--upload-pack=…` stays a name, never an
+  option. Paths are passed after `--`.
+- **No prompts**: `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=echo`, `SSH_ASKPASS=echo`,
+  `GIT_PAGER=cat`, `GIT_OPTIONAL_LOCKS=0` — a call can never hang on a password
+  prompt or a pager, and a read never takes a lock out from under the user's
+  editor.
+- **Bounded output**: 256 KB per command, and the cap *kills the child*
+  (`OUTPUT_TOO_LARGE`), so a 40 MB `git show` costs 256 KB.
+- Codes a model can act on: `NOT_A_REPO`, `GIT_MISSING`, `TIMEOUT`,
+  `PATH_TRAVERSAL_BLOCKED`, `BAD_ARGUMENT`, `OUTPUT_TOO_LARGE`, `GIT_FAILED`.
+
+**`git_status` grew up (backward compatible)**
+- Still `directory` + `short` + `output`; new: `porcelain: 'v1' | 'v2'` parsed
+  into `entries` (index/worktree characters, renames with their `from`,
+  untracked, unmerged) and `counts`; `branch: true` for `{ name, upstream,
+  ahead, behind, detached }`; `path` to focus on one file.
+- The error code is the plan's `NOT_A_REPO` (phase 18's `NOT_A_GIT_REPO` is
+  gone) and `PATH_TRAVERSAL_BLOCKED` still comes from the ported phase-33 path
+  check.
+
+**The five reads**
+- `git_diff` — one tool for the reference's three: the working tree by default
+  (`git_diff_unstaged`), `staged: true` for the index (`git_diff_staged`), or
+  `target: 'HEAD~1'` (`git_diff`). `statOnly`/`nameOnly`, `path`,
+  `contextLines`, and a parsed file list with per-file `+`/`-` counts.
+- `git_log` — parsed entries (sha, short sha, author, ISO date, parents, refs,
+  subject, body) with `path`/`author`/`since`/`until` filters and
+  `oneline`/`short`/`json` rendering. A repository with no commits is an empty
+  log, not an error.
+- `git_show` — the commit object plus its patch, `path` to narrow it,
+  `statOnly` to keep a merge from flooding the context. (Two git subtleties are
+  encoded here: options must precede the revision, and `--unified=N` implies
+  `--patch` — so a stat-only run passes `--stat` and no `--unified`.)
+- `git_branch_list` — `for-each-ref` with an explicit field list, so the answer
+  is data (current flag, sha, upstream, ahead/behind, last commit), with the
+  reference's `contains`/`notContains`, and a detached HEAD reported as
+  detached *with its sha*.
+- `git_remote_list` — name, fetch URL and push URL (they differ more often than
+  people expect); configuration only, no network. Checked before anything is
+  pushed in 27.15.0.
+
+**Wiring**: local catalog 29 → **34 tools**; the `git_operations` skill now
+teaches the read set (priority 30, extended, not replaced); personas coder 34 /
+architect 26 / reviewer 25.
+
+**Tests**: 1034 (64 files; 46 new). The suite builds a real repository in a temp
+directory — two commits, a second branch, a staged file, an unstaged change,
+an untracked file, two remotes with differing push URLs — and asserts parsed
+fields, not substrings: porcelain v1 and v2, the branch block, flag-injection
+refusals, `PATH_TRAVERSAL_BLOCKED` outside the workspace, `NOT_A_REPO` inside a
+plain directory, the byte ceiling with its SIGKILL, the neutral environment, the
+detached-HEAD report and the empty-repository cases. e2e **127 → 140**: a new
+`gitread` scenario runs all six tools against a repository the scenario itself
+initialises, and asserts the repository is byte-for-byte unchanged afterwards.
+
 ## [27.13.0] — 2026-09-25 — the web, read as Markdown
 
 `fetch`, the reference `fetch` server's tool, ported natively — with the

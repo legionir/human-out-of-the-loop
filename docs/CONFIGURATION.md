@@ -152,7 +152,7 @@ registry/
 │   ├── web_research/        # خواندن وب و ارجاع به کد (فاز ۴۰)
 │   ├── task_decomposition/
 │   └── acceptance_check/
-├── tools/                   # ۲۹ ابزار محلی (فاز ۳۳–۴۰: پورت کامل سرورهای مرجع)
+├── tools/                   # ۳۴ ابزار محلی (فاز ۳۳–۴۱: پورت کامل سرورهای مرجع)
 │   ├── read_file.json       # id, name, description, source: local, modulePath, category
 │   ├── search_code.json     #   جستجوی VS Code-style: pattern محتوا + pathPattern مسیر
 │   ├── write_file.json
@@ -181,7 +181,12 @@ registry/
 │   ├── read_graph.json        # کل گراف با صفحه‌بندی (پیش‌فرض ۲۰۰ موجودیت) + total/truncated
 │   ├── search_nodes.json      # جست‌وجوی case-insensitive در نام/نوع/observations (سقف ۱۰۰)
 │   ├── open_nodes.json        # موجودیت‌های نام‌دار + همهٔ رابطه‌های مرتبط (حتی بیرون از نتیجه)
-│   └── fetch.json             # URL → Markdown (صفحه‌بندی، raw)، robots و مسدودسازی آدرس‌های خصوصی
+│   ├── fetch.json             # URL → Markdown (صفحه‌بندی، raw)، robots و مسدودسازی آدرس‌های خصوصی
+│   ├── git_diff.json          # کار درخت کاری / index (staged) / مقایسه با یک ref (فاز ۴۱)
+│   ├── git_log.json           # تاریخچهٔ پارس‌شده با فیلتر path/author/since/until
+│   ├── git_show.json          # یک revision: متادیتا + patch (path و statOnly)
+│   ├── git_branch_list.json   # برنچ‌ها به‌صورت داده + contains/notContains
+│   └── git_remote_list.json   # fetch/push URL هر remote (بدون شبکه)
 ├── models/
 │   ├── gpt-4o.json          # id, provider, model, config { baseURL?, maxContextTokens? }
 │   ├── claude-sonnet.json
@@ -240,6 +245,36 @@ temp+rename رد می‌شود (دو پروسه حافظه را خراب نمی�
 صفحه‌بندی می‌شوند (`read_graph` ۲۰۰، `search_nodes` ۱۰۰) با `total`/`truncated` و نام
 همسایه‌هایی که بیرون صفحه ماندند. `delete_*` فقط در persona `coder` مجاز است؛
 `architect` و `reviewer` می‌خوانند و ثبت می‌کنند. هر نوشتن خودکار در Journal می‌آید.
+
+### خواندن مخزن Git (فاز ۴۱)
+
+شش ابزار **فقط-خواندنی** روی یک هستهٔ مشترک (`src/ai/tools/git/`): اجرای git با
+`spawn` و آرایهٔ آرگومان (بدون shell)، محیط ثابت
+(`GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=echo`, `SSH_ASKPASS=echo`, `GIT_PAGER=cat`,
+`GIT_OPTIONAL_LOCKS=0`)، سقف خروجی ۲۵۶KB با kill کردن فرزند، و رد کردن هر مقدار
+کاربری که با `-` شروع شود (`BAD_ARGUMENT`) + قرار دادن مسیرها بعد از `--`.
+
+```jsonc
+// git_status — سازگار با قبل + porcelain v1/v2 + branch
+{ "directory": ".", "porcelain": "v2", "branch": true, "path": "src/app.ts" }
+// git_diff — هر سه ابزار مرجع در یکی
+{ "directory": "." }                          // درخت کاری (git_diff_unstaged)
+{ "directory": ".", "staged": true }          // index (git_diff_staged)
+{ "directory": ".", "target": "HEAD~1" }      // یک ref (git_diff)
+{ "directory": ".", "statOnly": true }        // فقط diffstat
+// git_log / git_show / git_branch_list / git_remote_list
+{ "maxCount": 20, "path": "src/app.ts", "author": "a@b.c", "since": "2 weeks ago", "format": "json" }
+{ "revision": "HEAD~1", "path": "src/app.ts", "statOnly": false }
+{ "all": true, "contains": "abc123" }         { "verbose": true }
+```
+
+خروجی‌ها پارس‌شده‌اند: `entries`/`counts` (status)، `files` با تعداد `+`/`-` (diff)،
+`entries` با sha/نویسنده/تاریخ/والدها/refs (log)، `commit` + `show` (show)،
+`branches` با `current`/`upstream`/`ahead`/`behind` (branch_list)، و `remotes` با
+`fetchUrl`/`pushUrl`. کدها: `NOT_A_REPO`، `PATH_TRAVERSAL_BLOCKED`، `BAD_ARGUMENT`،
+`TIMEOUT`، `OUTPUT_TOO_LARGE`، `GIT_MISSING`، `GIT_FAILED`. مخزن بدون commit →
+لاگ خالی (نه خطا). ابزارهای نوشتنی (add/commit/branch/checkout/reset/push/pr) فاز ۴۲
+هستند و مدل امنیتی §۶.۱ برایشان اعمال می‌شود.
 
 ### خواندن وب (فاز ۴۰)
 

@@ -1,0 +1,8 @@
+{
+  "id": "git_log",
+  "name": "Git Log",
+  "description": "Reads commit history with parsed entries (sha, author, date, refs, subject, body) and path/author/date filters",
+  "source": "local",
+  "modulePath": "./implementations/git-log",
+  "category": "git"
+}

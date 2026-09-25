@@ -31,7 +31,12 @@
     "delete_entities",
     "delete_observations",
     "delete_relations",
-    "fetch"
+    "fetch",
+    "git_diff",
+    "git_log",
+    "git_show",
+    "git_branch_list",
+    "git_remote_list"
   ],
   "description": "Hands-on coding, refactoring, and implementation"
 }

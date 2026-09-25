@@ -5,7 +5,7 @@
 **هدف:** بستن شکاف ابزارها با سرورهای مرجع (git / memory / time / sequentialthinking / fetch)، افزودن **Journal** به‌عنوان ثبت خودکار همه‌کارهای AI، و عرضهٔ خود runtime به‌عنوان یک **MCP server**
 **قانون اجرا:** مثل پلن‌های قبلی — هر فاز یک commit + push مستقل روی `arena/01a0d510-human-out-of-the-loop`، معیار پذیرش کامل پیش از فاز بعد، علامت 🟢 در همین فایل، و هر فاز در بدنهٔ PR #3 اضافه می‌شود.
 
-**وضعیت (2026-09-25):** 🔵 در حال اجرا — فازهای ۳۷ (Journal)، ۳۸ (time + sequentialthinking)، ۳۹ (memory) و ۴۰ (fetch) 🟢 کامل و پوش‌شده؛ فازهای ۴۱–۴۳ در نوبت. ۹۸۸ تست سبز (۶۳ فایل)، e2e ۱۲۷/۱۲۷، نسخه ۲۷.۱۳.۰
+**وضعیت (2026-09-25):** 🔵 در حال اجرا — فازهای ۳۷ (Journal)، ۳۸ (time + sequentialthinking)، ۳۹ (memory)، ۴۰ (fetch) و ۴۱ (Git خواندن) 🟢 کامل و پوش‌شده؛ فازهای ۴۲–۴۳ در نوبت. ۱۰۳۴ تست سبز (۶۴ فایل)، e2e ۱۴۰/۱۴۰، نسخه ۲۷.۱۴.۰
 
 ---
 
@@ -187,7 +187,7 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 
 ---
 
-## فاز ۴۱ — Git: خواندن
+## فاز ۴۱ — Git: خواندن 🟢
 
 **هدف:** درک وضعیت مخزن و تاریخچه، بدون هیچ تغییری.
 
@@ -203,6 +203,10 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 7. registry JSON، `local-tools.ts`، personaها (coder/architect/reviewer)، skill جدید `git_operations` (از قبل وجود دارد — گسترش).
 
 **معیار پذیرش:** تست واحد با مخزن git واقعی که در `mkdtemp` ساخته می‌شود (کامیت مصنوعی، فایل تغییر‌یافته، برنچ دوم): status/diff staged و unstaged/log/show/branch/remote درست؛ بیرون از workspace → `PATH_TRAVERSAL_BLOCKED`؛ دایرکتوری بدون git → `NOT_A_REPO`. e2e: سناریوی `gitread` روی پروژهٔ اسکرچ.
+
+---
+
+**تحویل‌شده (۲۰۲۶-۰۹-۲۵):** `src/ai/tools/git/git-runner.ts` (اجرای git با `spawn` و آرایهٔ آرگومان — بدون shell؛ محیط ثابت `GIT_TERMINAL_PROMPT=0`/`GIT_ASKPASS=echo`/`SSH_ASKPASS=echo`/`GIT_PAGER=cat`/`GIT_OPTIONAL_LOCKS=0`؛ سقف ۲۵۶KB با SIGKILL و `OUTPUT_TOO_LARGE`؛ `rejectFlagLike` برای هر مقدار کاربری؛ `ensureRepo` با `resolvePathInWorkspace` → `PATH_TRAVERSAL_BLOCKED` بیرون از workspace و `NOT_A_REPO` داخل پوشهٔ غیرمخزن؛ کدها: `NOT_A_REPO`, `GIT_MISSING`, `TIMEOUT`, `BAD_ARGUMENT`, `OUTPUT_TOO_LARGE`, `GIT_FAILED`) و `src/ai/tools/git/parse.ts` (porcelain v1/v2، `for-each-ref`، `--pretty` با `%x1f`/`%x1e`، `--numstat`، هدر diff، unquote). شش ابزار: `git_status` گسترش‌یافته (porcelain v1/v2 + `entries`/`counts` + `branch` با upstream/ahead/behind + `path`؛ سازگاری عقب‌رو: `directory`/`short`/`output`؛ کد phase-18 `NOT_A_GIT_REPO` به `NOT_A_REPO` تغییر نام یافت) و پنج تازه `git_diff` (یک ابزار برای هر سه ابزار مرجع: worktree / `staged` / `target` + `statOnly`/`nameOnly`/`path`/`contextLines`)، `git_log` (فیلتر path/author/since/until، فرمت oneline/short/json، مخزن بدون commit → لاگ خالی)، `git_show` (متادیتا + patch؛ دو نکتهٔ git رمزگذاری شد: option قبل از revision، و `--unified` که `--patch` را ایجاب می‌کند پس در حالت `statOnly` حذف می‌شود)، `git_branch_list` (`for-each-ref` + contains/notContains + گزارش HEAD جدا‌شده با sha) و `git_remote_list` (fetch/push URL، فقط config). کاتالوگ ۲۹ → **۳۴ ابزار**؛ مهارت `git_operations` گسترش یافت (نسخه ۱.۱.۰)؛ personaها: `coder` ۳۴، `architect` ۲۶، `reviewer` ۲۵. ۴۶ تست واحد روی یک مخزن واقعی ساخته‌شده در `mkdtemp` و سناریوی e2e `gitread` (۱۳ چک، شامل اثبات دست‌نخورده ماندن مخزن). کل: ۱۰۳۴ تست (۶۴ فایل)، e2e ۱۴۰/۱۴۰. نسخه ۲۷.۱۴.۰.
 
 ---
 
