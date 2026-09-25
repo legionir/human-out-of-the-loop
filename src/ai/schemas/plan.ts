@@ -137,6 +137,24 @@ export const PlannerAssessmentSchema = z.object({
 
 export type PlannerAssessment = z.infer<typeof PlannerAssessmentSchema>;
 
+/**
+ * The same fields, all of them optional (v27.17.1).
+ *
+ * A provider that does not enforce the response schema can return JSON that is
+ * valid but *incomplete* — a real run came back with the user's exact question
+ * list and `kind: "clarify"`, but without `isClear`, which the schema marks
+ * required.  `generateObject` then refuses the object ("No object generated:
+ * response did not match schema") and the whole run died at the first call,
+ * although everything the runtime needed was in the text.
+ *
+ * The raw text is re-parsed with this schema after such a failure, and
+ * `normalizeAssessment` derives what is missing (the kind from the fields that
+ * were filled, `isClear` from the kind).
+ */
+export const PlannerAssessmentRecoverySchema = PlannerAssessmentSchema.partial();
+
+export type RecoveredAssessment = z.infer<typeof PlannerAssessmentRecoverySchema>;
+
 // ─── Feasibility Gate Result ──────────────────────────────────────
 
 export interface FeasibilityCheckResult {

@@ -46,7 +46,7 @@ Exit code is 0 only when every check passed. `E2E_SCENARIO_TIMEOUT_MS`
 | `credential` | a hostile note makes the model echo an API key; it never reaches any artifact, and the redaction marker proves the trap fired |
 | `mcp` | `hootl tools --mcp` starts a real stdio server, lists its tool, reports a dead server, and stays valid under `--json` |
 | `cancel` | `hootl plans cancel` mid-run ends the plan as `cancelled` and the run exits on its own |
-| `faults` | provider faults: retried 5xx, a clear 401, a retried and a persistently unparsable planner answer, an empty answer, and usage that includes the structured calls |
+| `faults` | provider faults: retried 5xx, a clear 401, a retried and a persistently unparsable planner answer, an empty answer, and usage that includes the structured calls. v27.17.1: an answer the schema refuses because one field is missing (`DROPISCLEAR` — the reported `@chat سلام` run, `kind` and questions present, `isClear` left out) is read from the raw JSON instead of ending the run — the chat run answers and exits 0, and in auto mode the recovered Persian questions reach the terminal. |
 | `envendpoint` | `HOTL_BASE_URL`/`HOTL_API_KEY`/`HOTL_MODEL` alone (no registry edit, no `OPENAI_API_KEY`) drive a full run over Chat Completions, the acceptance judge included |
 | `context` | the planner request really carries the `PROJECT CONTEXT` block (absolute root, top-level entries, "never ask the user") — the prompt is read from the stub's request dump |
 | `thinking` | `--thinking on` streams the model's reasoning (SSE, both wire formats) in italic, the run still completes, the text is never persisted, a cut stream still ends the run, and thinking stays off outside a terminal |

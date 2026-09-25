@@ -5,6 +5,49 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.1] — 2026-09-25 — a nearly-correct answer is no longer a failed run
+
+Reported from a real run (same Windows machine as 27.16.1):
+
+    HOOTL test-projects › @chat سلام
+    Mode: chat (prefix)
+    🛑 Planning failed: The planner was unable to process the request:
+       No object generated: response did not match schema.
+
+The provider *had* answered — the run's own log shows the reply arriving with
+`kind: "clarify"` and the user's language, five questions and all.  It just left
+out `isClear`, which the response schema marks required and that provider does
+not enforce.  The SDK refused the object, the planner rethrew, and a greeting
+became a crash — with the answer sitting in the response text the whole time.
+
+- **Recover instead of refusing.**  When a structured call fails because the
+  object did not match the schema (`NoObjectGeneratedError`), the raw text is
+  re-read: the first complete JSON object is extracted (a brace scan that
+  respects strings and escapes, so `}` inside a string does not end it early),
+  validated against the same schema with every field optional, and handed to
+  the normalizer — which already derives what the model left implicit (the kind
+  from the fields it filled, `isClear` from the kind).  Errors that carry no
+  text (a timeout, a 401, a socket that died) are re-thrown untouched, so a real
+  failure is still a failure.  The plan-generation call recovers the same way.
+- **Questions without a verdict are a clarification.**  A provider that drops
+  `isClear` *and* `kind` used to read as "clear" — and its question list was
+  silently ignored on the way to a plan.  Now the questions decide.
+- **Chat cannot be killed by its classifier.**  In chat mode the user asked for
+  a conversation, so if the assessment call fails outright the run answers
+  anyway (the answer call does the work; if that fails too, the report says so).
+  Auto mode is unchanged: a broken provider is still reported as a failure.
+- **A greeting is never a clarification.**  The auto-mode prompt now names
+  greetings and small talk (`hello`, `سلام`) as `answer`, and chat mode says
+  explicitly that a conversation is never answered with `kind: "clarify"` — the
+  reported model had reasoned its way to "this is a greeting, therefore
+  unclear".
+
+Verification: `src/ai/__tests__/v27171-assessment-recovery.test.ts` (13 tests:
+the JSON extractor, the reported payload recovered field-by-field, the chat and
+auto-mode outcomes, and the plan recovery) plus four new e2e checks in the
+`faults` scenario whose stub omits `isClear` exactly as the provider did.
+1178 tests, 186 e2e checks.
+
 ## [27.17.0] — 2026-09-25 — it answers when talking, plans when working
 
 Until now *every* request became a plan — `hootl run "hello"` planned, confirmed
