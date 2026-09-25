@@ -496,6 +496,11 @@ function structuredPayload(name, promptText) {
       // request is unclear and puts the questions under a key the response
       // schema did not declare (`clarificationQuestions`).  A run must show
       // those questions, not an empty "Clarification needed:".
+      // NEEDSCLARIFYNONE: "unclear" with nothing listed at all — the runtime
+      // must still ask something answerable (built from the project context).
+      if (/\bNEEDSCLARIFYNONE\b/.test(promptText)) {
+        return { isClear: false };
+      }
       if (/\bNEEDSCLARIFY\b/.test(promptText)) {
         return {
           isClear: false,

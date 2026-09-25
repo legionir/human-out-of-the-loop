@@ -40,7 +40,7 @@ answered `isClear: true`, which is why no test caught it.
   questions reach the terminal, that the heading is never followed by a blank
   line, that no plan is written, and that the session record keeps the
   questions. The U5 server test now expects the fallback question to open a
-  round (previously it asserted the empty refusal) — 1125 tests, 166 e2e checks.
+  round (previously it asserted the empty refusal) — 1125 tests, 169 e2e checks.
 
 ## [27.16.0] — 2026-09-25 — this runtime *as* an MCP server
 

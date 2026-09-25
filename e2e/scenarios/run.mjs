@@ -1384,6 +1384,27 @@ scenarios.clarify = async () => {
     'clarify: the session recorded the questions',
     sessionText.includes('multi-lang-eval or unreal-engine') && sessionText.includes('outcome')
   );
+  // The same failure with *nothing* listed: the runtime must ask its own
+  // question — named after the project it already knows — instead of printing a
+  // heading with no body.
+  const fallbackRoot = makeProject('clarify-empty');
+  const none = await run(runArgs('tidy up the evaluation fixtures NEEDSCLARIFYNONE', fallbackRoot));
+  check('clarify: an unclear-with-no-questions run also fails (exit 1)', none.code === 1, `exit=${none.code}`);
+  const noneLines = none.stdout.split('\n').map((line) => line.trim());
+  const noneHeading = noneLines.findIndex((line) => line.startsWith('⚠️ Clarification needed:'));
+  check(
+    'clarify: the fallback question names the project instead of asking for it',
+    noneHeading >= 0 &&
+      noneLines[noneHeading + 1].includes('What exactly should I do') &&
+      noneLines[noneHeading + 1].includes('clarify-empty-') &&
+      !/which project|current directory/i.test(noneLines[noneHeading + 1]),
+    noneLines.slice(noneHeading, noneHeading + 3).join(' | ')
+  );
+  check(
+    'clarify: the fallback refusal has a body, not just a heading',
+    noneHeading >= 0 && noneLines[noneHeading + 1] !== '' && noneLines.length > noneHeading + 1,
+    `heading at line ${noneHeading}`
+  );
   return root;
 };
 
