@@ -844,6 +844,7 @@ export class Orchestrator {
         `${userRequest}\n\nCLARIFICATIONS FROM USER:\n${block}`,
         undefined,
         runModelId,
+        mode,
       );
     }
 
