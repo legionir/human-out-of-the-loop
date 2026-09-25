@@ -5,7 +5,7 @@
 **هدف:** بستن شکاف ابزارها با سرورهای مرجع (git / memory / time / sequentialthinking / fetch)، افزودن **Journal** به‌عنوان ثبت خودکار همه‌کارهای AI، و عرضهٔ خود runtime به‌عنوان یک **MCP server**
 **قانون اجرا:** مثل پلن‌های قبلی — هر فاز یک commit + push مستقل روی `arena/01a0d510-human-out-of-the-loop`، معیار پذیرش کامل پیش از فاز بعد، علامت 🟢 در همین فایل، و هر فاز در بدنهٔ PR #3 اضافه می‌شود.
 
-**وضعیت (2026-09-25):** 🔵 در حال اجرا — فازهای ۳۷ (Journal)، ۳۸ (time + sequentialthinking)، ۳۹ (memory)، ۴۰ (fetch) و ۴۱ (Git خواندن) 🟢 کامل و پوش‌شده؛ فازهای ۴۲–۴۳ در نوبت. ۱۰۳۴ تست سبز (۶۴ فایل)، e2e ۱۴۰/۱۴۰، نسخه ۲۷.۱۴.۰
+**وضعیت (2026-09-25):** 🔵 در حال اجرا — فازهای ۳۷ (Journal)، ۳۸ (time + sequentialthinking)، ۳۹ (memory)، ۴۰ (fetch)، ۴۱ (Git خواندن) و ۴۲ (Git نوشتن + PR) 🟢 کامل و پوش‌شده؛ فقط فاز ۴۳ (MCP server) در نوبت. ۱۰۷۸ تست سبز (۶۵ فایل)، e2e ۱۵۳/۱۵۳، نسخه ۲۷.۱۵.۰
 
 ---
 
@@ -210,7 +210,7 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 
 ---
 
-## فاز ۴۲ — Git: نوشتن + PR
+## فاز ۴۲ — Git: نوشتن + PR 🟢
 
 **هدف:** انجام کارهای واقعی مخزن — با مدل امنیتی سخت‌گیرانه — و ساخت/خواندن Pull Request.
 
@@ -227,6 +227,8 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 7. هر عملیات: قبل/بعد `HEAD` + `status --porcelain` در نتیجه برگردانده می‌شود (و در Journal ثبت) — «چه چیزی عوض شد» همیشه قابل‌بازبینی است.
 
 **معیار پذیرش:** تست واحد روی مخزن واقعی: add/commit (SHA عوض شود، پیام درست)، ساخت و checkout برنچ، `reset --hard` بدون پرچم → `CONFIRM_REQUIRED` و **بدون هیچ تغییری روی دیسک**، با پرچم → انجام شود، رد شدن `--hard` روی `main` (`PROTECTED_BRANCH`)، push به یک remote محلی bare در `mkdtemp` (بدون شبکه)، رد شدن push به `main`، و آزمون اینکه گزینهٔ force در شِمای ابزار **وجود ندارد**. PR: تست با `gh` mock (stub در PATH) و مسیر REST با یک fetch mock؛ نبود gh+token → `PR_UNAVAILABLE`. e2e: سناریوی `gitwrite` — ساخت برنچ، commit، push به remote bare محلی، سپس assert روی لاگ/Journal.
+
+**تحویل‌شده (۲۰۲۶-۰۹-۲۵):** `src/ai/tools/git/git-safe.ts` (مدل امنیتی: `protectedBranches` با پیش‌فرض `main`/`master` و `HOTL_PROTECTED_BRANCHES`؛ `protectedBranchFailure` → `PROTECTED_BRANCH`؛ `readDirty`؛ `confirmRequired` که **نام تمام فایل‌های در معرض از دست رفتن** را فهرست می‌کند؛ `snapshot`/`withSnapshot` که قبل/بعدِ HEAD+branch+porcelain را برمی‌گرداند و `changeReport` با `changed`/`headChanged`/`branchChanged`) و `src/ai/tools/git/pr-backend.ts` (اول `gh` با probe، بعد REST با `GITHUB_TOKEN`/`GH_TOKEN`، وگرنه `PR_UNAVAILABLE`؛ `parseRemoteUrl` برای `https`/`git@host:`/`ssh://` و `apiBase` برای Enterprise؛ `normalizePr` یک شکل از هر دو بک‌اند؛ `runGhDefault` با execFile و `GH_PROMPT_DISABLED=1` و سقف ۳۰s/۴MB). یازده ابزار: `git_add`، `git_commit` (پیام الزامی، `NOTHING_TO_COMMIT`، هویت از `git config` فقط-خواندنی → `MISSING_IDENTITY`، amend پشت `confirmDestructive` و ممنوع روی برنچ محافظت‌شده)، `git_create_branch` (اعتبارسنجی نام با `git check-ref-format --branch` — یعنی خودِ git)، `git_checkout` (`discardChanges` → `-f`، نه پرچم خیالی `--discard-changes`)، `git_reset` (پیش‌فرض = unstage؛ `hard` فقط با تأیید و ممنوع روی `main`)، `git_push` (بدون هیچ گزینهٔ force در schema؛ `origin` + برنچ جاری + `--set-upstream` اختیاری؛ رد برنچ محافظت‌شده پیش از اجرای git)، `git_stash` (push/list/pop/apply + drop/clear با تأیید) و چهار ابزار PR. به `git-runner.ts` یک کد اضافه شد: `gitExitOk` — چون `allowFailure` یعنی «git اجرا شد» نه «git موفق شد»، هر خوانندهٔ مقدار حالا exit code را هم می‌بیند. کاتالوگ ۳۴ → **۴۵ ابزار**؛ مهارت `git_operations` نسخه ۱.۲.۰ (۱۷ ابزار، اولویت ۵۵، بخش «Making a change» و کدهای خطای تازه)؛ personaها: `coder` ۴۵، `architect` ۲۹ و `reviewer` ۲۷ (فقط خواندن PR و کامنت، بدون push/commit). تست: ۴۴ تست واحد (فایل `phase42-git-write.test.ts`) روی مخزن واقعی + remote bare در همان `mkdtemp` — از جمله اثبات «گزینهٔ force در schema وجود ندارد» با بازرسی JSON schema، سه تست صفحهٔ reset (CONFIRM_REQUIRED بدون هیچ تغییری، انجام با تأیید، PROTECTED_BRANCH روی `main`)، و مسیرهای PR با `gh` تزریقی و `fetch` تزریقی (ورود ناموفق، نبود gh+token، ۴۰۴، remote غیر GitHub). سناریوی e2e `gitwrite` (۱۳ چک): commit واقعی روی برنچ، push به remote bare محلی، و دو گاردی که با *اثر جانبی* اثبات می‌شوند (تنها ref روی remote همان برنچ است؛ hard reset رد‌شده HEAD را تکان نمی‌دهد). کل: ۱۰۷۸ تست (۶۵ فایل)، e2e ۱۵۳/۱۵۳ (۲۱ سناریو). نسخه ۲۷.۱۵.۰.
 
 ---
 

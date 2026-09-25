@@ -58,7 +58,17 @@ export type GitErrorCode =
   | 'PATH_TRAVERSAL_BLOCKED'
   | 'BAD_ARGUMENT'
   | 'OUTPUT_TOO_LARGE'
-  | 'GIT_FAILED';
+  | 'GIT_FAILED'
+  // Phase 42 — the write half's own refusals.
+  | 'PROTECTED_BRANCH'
+  | 'CONFIRM_REQUIRED'
+  | 'NOTHING_TO_COMMIT'
+  | 'MISSING_IDENTITY'
+  | 'NOTHING_TO_STASH'
+  | 'PR_UNAVAILABLE'
+  | 'NOT_GITHUB_REMOTE'
+  | 'PR_NOT_FOUND'
+  | 'PR_FAILED';
 
 export interface GitFailure {
   ok: false;
@@ -222,6 +232,19 @@ function describeSpawnError(err: unknown): string {
 }
 
 /** Map git's own words onto the codes the tools document. */
+/**
+ * Did git *work*, as opposed to merely running?
+ *
+ * `runGit(…, { allowFailure: true })` resolves with `ok: true` and the real
+ * exit status in `code` — the flag means "the non-zero exit is mine to
+ * interpret". A caller that wants a *value* out of such a run (a config value,
+ * a ref, a remote URL) must therefore check both, and this is that check, in
+ * one place, so nobody has to remember the subtlety.
+ */
+export function gitExitOk(result: GitResult): result is GitSuccess & { code: 0 } {
+  return result.ok && result.code === 0;
+}
+
 export function failureFromGit(args: readonly string[], exit: number, stderr: string): GitFailure {
   const message = stderr.trim();
   if (/not a git repository/i.test(message)) {

@@ -197,6 +197,12 @@ const MARKERS = [
   { marker: 'GITSHOW', tool: 'git_show' },
   { marker: 'GITBRANCH', tool: 'git_branch_list' },
   { marker: 'GITREMOTE', tool: 'git_remote_list' },
+  // Phase 42 — git, writing (branch, stage, commit, push) and the guards.
+  { marker: 'GITBRANCHCREATE', tool: 'git_create_branch' },
+  { marker: 'GITADD', tool: 'git_add' },
+  { marker: 'GITCOMMIT', tool: 'git_commit' },
+  { marker: 'GITPUSH', tool: 'git_push' },
+  { marker: 'GITHARD', tool: 'git_reset' },
 ];
 
 function markersIn(text) {
@@ -259,6 +265,29 @@ function pickToolCall(promptText, offered, chained = false) {
     return { name: 'git_branch_list', args: { directory: '.', all: marker.arg === 'all' } };
   }
   if (marker.marker === 'GITREMOTE') return { name: 'git_remote_list', args: { directory: '.' } };
+  // Phase 42 — the write set.  GITPUSH carries the *mode*: `upstream` pushes the
+  // current branch and tracks it, `main` asks for the protected branch (which
+  // the tool must refuse), GITHARD asks for a hard reset with no confirmation.
+  if (marker.marker === 'GITBRANCHCREATE') {
+    return { name: 'git_create_branch', args: { directory: '.', name: marker.arg } };
+  }
+  if (marker.marker === 'GITADD') {
+    return { name: 'git_add', args: { directory: '.', files: [marker.arg] } };
+  }
+  if (marker.marker === 'GITCOMMIT') {
+    return { name: 'git_commit', args: { directory: '.', message: `add ${marker.arg} from e2e` } };
+  }
+  if (marker.marker === 'GITPUSH') {
+    return marker.arg === 'main'
+      ? { name: 'git_push', args: { directory: '.', remote: 'origin', branch: 'main' } }
+      : {
+          name: 'git_push',
+          args: { directory: '.', remote: 'origin', ...(marker.arg === 'upstream' ? { setUpstream: true } : {}) },
+        };
+  }
+  if (marker.marker === 'GITHARD') {
+    return { name: 'git_reset', args: { directory: '.', mode: 'hard' } };
+  }
   // Phase 33 — the reference filesystem toolset.  EDIT replaces a fixed
   // placeholder so the scenario can assert a line-based edit, not a rewrite;
   // MOVE carries `source|destination`.

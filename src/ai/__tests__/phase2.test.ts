@@ -235,8 +235,8 @@ describe('Tool loader integration', () => {
       schema: ToolDefinitionSchema,
     });
     // 4 original filesystem/git tools + the phases 33-35 filesystem set
-    // + the phase-38 time/reasoning trio.
-    expect(result.loaded).toBe(34);
+    // + the phase-38 time/reasoning trio + the phases 39-42 additions.
+    expect(result.loaded).toBe(45);
     expect(result.errors).toHaveLength(0);
     expect(baseReg.has('read_file')).toBe(true);
     expect(baseReg.has('search_code')).toBe(true);

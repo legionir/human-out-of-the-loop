@@ -1,0 +1,8 @@
+{
+  "id": "git_commit",
+  "name": "Git Commit",
+  "description": "Commits staged changes (or given paths); message required, identity read never written, amend gated",
+  "source": "local",
+  "modulePath": "./implementations/git-commit",
+  "category": "git"
+}

@@ -1042,6 +1042,151 @@ scenarios.gitread = async () => {
   return root;
 };
 
+/**
+ * Phase 42 — the *writing* git tools, end to end.
+ *
+ * The scratch project is a real repository with a **bare remote on disk**
+ * (`/tmp`), so the scenario can look at what actually arrived: a feature
+ * branch, a commit with the message the stub asked for, and a `main` that is
+ * still empty because the push to it was refused.  The two guards are expected
+ * failures — a protected-branch push and an unconfirmed hard reset — and both
+ * are checked for side effects, not just for the message.
+ */
+scenarios.gitwrite = async () => {
+  const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'hootl-e2e-gitwrite-bare-'));
+  try {
+    const root = makeProject('gitwrite', {
+      'feature.txt': 'e2e original line\n',
+      'notes/keep.txt': 'keep this\n',
+    });
+    initRepo(root);
+    git(root, ['add', '.']);
+    git(root, ['commit', '-q', '-m', 'fixture commit']);
+    git(bare, ['init', '-q', '--bare', '-b', 'main']);
+    git(root, ['remote', 'add', 'origin', bare]);
+    // A real change to stage: the tools must commit work, not an empty tree.
+    fs.writeFileSync(path.join(root, 'feature.txt'), 'e2e original line\ne2e feature line\n');
+
+    const goal =
+      'commit the feature on a branch and push it GITWRITEPROBE CHAIN ' +
+      'GITBRANCHCREATE:feature/e2e-write GITADD:feature.txt ' +
+      'GITCOMMIT:feature.txt GITPUSH:upstream GITPUSH:main GITHARD:now';
+    const { code, stdout } = await run(runArgs(goal, root));
+    const log = readLog(root);
+
+    check('gitwrite: exit code 0', code === 0, `exit=${code} ${(stdout || '').split('\n')[0]}`);
+
+    const called = log.filter((e) => e.eventType === 'task:tool-call').map((e) => e.payload?.toolName);
+    check(
+      'gitwrite: every write tool ran (branch, add, commit, two pushes, reset)',
+      called.includes('git_create_branch') &&
+        called.includes('git_add') &&
+        called.includes('git_commit') &&
+        called.filter((tool) => tool === 'git_push').length === 2 &&
+        called.includes('git_reset'),
+      called.join(',')
+    );
+
+    const dump = stubRequests()
+      .filter((body) => JSON.stringify(body).includes('GITWRITEPROBE'))
+      .map((body) => JSON.stringify(body))
+      .join('\n')
+      .replace(/\\"/g, '"');
+
+    // The result of the commit: a new sha, the branch, and the before/after pair
+    // that makes the change visible in the answer itself.
+    const headAfter = git(root, ['rev-parse', 'HEAD']).trim();
+    check(
+      'gitwrite: the branch was created and the commit landed on it',
+      git(root, ['rev-parse', '--abbrev-ref', 'HEAD']).trim() === 'feature/e2e-write' &&
+        git(root, ['log', '-1', '--pretty=%s']).trim() === 'add feature.txt from e2e' &&
+        dump.includes('"branch":"feature/e2e-write"') &&
+        dump.includes(headAfter) &&
+        dump.includes('"headChanged":true')
+    );
+    check(
+      'gitwrite: staging was reported with the file that was staged',
+      dump.includes('"staged"') && dump.includes('feature.txt')
+    );
+
+    // The push: what the remote actually received, not just a success flag.
+    check(
+      'gitwrite: the feature branch arrived at the remote with the commit',
+      git(bare, ['rev-parse', '--abbrev-ref', 'feature/e2e-write']).trim() === 'feature/e2e-write' &&
+        git(bare, ['rev-parse', 'feature/e2e-write']).trim() === headAfter &&
+        git(bare, ['log', '-1', '--pretty=%s', 'feature/e2e-write']).trim() === 'add feature.txt from e2e'
+    );
+    check(
+      'gitwrite: the push reported the remote, the branch and the upstream',
+      dump.includes('"remote":"origin"') && dump.includes('"upstreamSet":true')
+    );
+
+    // Guard 1: main is protected.  The refusal is a tool error, and the remote's
+    // main is untouched — the guard ran before git was allowed to push.
+    const toolErrors = log.filter((e) => e.eventType === 'task:tool-error').map((e) => e.message ?? '');
+    check(
+      'gitwrite: pushing main was refused as a protected branch',
+      toolErrors.some((message) => /protected branch/.test(message) && /main/.test(message)),
+      toolErrors.map((message) => message.slice(0, 80)).join(' | ')
+    );
+    const remoteRefs = git(bare, ['for-each-ref', '--format=%(refname)'])
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+    check(
+      'gitwrite: the only ref the remote received is the feature branch',
+      remoteRefs.length === 1 && remoteRefs[0] === 'refs/heads/feature/e2e-write',
+      remoteRefs.join(',')
+    );
+
+    // Guard 2: a hard reset without confirmation.  Zero disk change: same HEAD,
+    // same tracked content, and the refusal names what it would have destroyed.
+    check(
+      'gitwrite: the hard reset was refused for want of confirmation',
+      toolErrors.some((message) => /hard-reset/.test(message) && /confirmDestructive/.test(message)),
+      toolErrors.map((message) => message.slice(0, 80)).join(' | ')
+    );
+    check(
+      'gitwrite: the refused hard reset changed nothing',
+      git(root, ['rev-parse', 'HEAD']).trim() === headAfter &&
+        git(root, ['status', '--porcelain', '--', 'feature.txt', 'notes']).trim() === ''
+    );
+
+    const { plans } = planStore(root);
+    check(
+      'gitwrite: every step finished (the two guards are failures the plan absorbed)',
+      Boolean(plans[0]) &&
+        plans[0].steps.every((step) => step.status === 'done') &&
+        planStore(root).files.length === 1,
+      `steps=${plans[0]?.steps?.length ?? 0} errors=${toolErrors.length}`
+    );
+
+    // The Journal is written where the tools execute: it must carry the write
+    // calls, and the commit message inside their arguments — the audit trail of
+    // "what did the agent change" without reading the conversation.
+    const journalDir = path.join(root, '.ai-runtime', 'journal');
+    const journalText = fs.existsSync(journalDir)
+      ? fs
+          .readdirSync(journalDir)
+          .map((file) => fs.readFileSync(path.join(journalDir, file), 'utf-8'))
+          .join('\n')
+      : '';
+    check(
+      'gitwrite: the Journal recorded every write call',
+      ['git_create_branch', 'git_add', 'git_commit', 'git_push', 'git_reset'].every((tool) =>
+        journalText.includes(`"tool":"${tool}"`)
+      )
+    );
+    check(
+      'gitwrite: the Journal kept the commit message and the pushed branch',
+      journalText.includes('add feature.txt from e2e') && journalText.includes('feature/e2e-write')
+    );
+    return root;
+  } finally {
+    fs.rmSync(bare, { recursive: true, force: true });
+  }
+};
+
 scenarios.resume = async () => {
   const root = makeProject('resume');
   await run(runArgs('write the project notes WRITE:notes/first.txt', root));

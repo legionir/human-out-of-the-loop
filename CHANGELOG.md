@@ -5,6 +5,83 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.15.0] — 2026-09-25 — git, writing (and pull requests)
+
+Eleven new tools, so the same agent that could *read* a repository can now do
+the work — on a branch, with the destructive half fenced off. The reference
+server's `git_add` / `git_commit` / `git_create_branch` / `git_checkout` /
+`git_reset` / `git_push` / `git_stash` are here, plus the pull-request set the
+plan asked for (`git_pr_create` / `git_pr_list` / `git_pr_view` /
+`git_pr_comment`).
+
+**The safety model (`src/ai/tools/git/git-safe.ts`)**
+- **Protected branches** (`main`, `master`, or `HOTL_PROTECTED_BRANCHES`): no
+  push, no `reset --hard`, no `commit --amend` — `PROTECTED_BRANCH`, with the
+  alternative in the message ("work on a feature branch and open a pull
+  request"). Creating a branch *from* `main` and standing on `main` are
+  deliberately allowed; the guards are on rewriting.
+- **Nothing irreversible happens without `confirmDestructive: true`**, and the
+  refusal *names every file that would be lost* — `reset --hard`, a checkout
+  with `discardChanges`, `stash drop`/`clear`, `commit --amend`.
+- **No force, anywhere**: `--force`, `--force-with-lease`, `--mirror` and
+  `--no-verify` do not exist in any schema, so no prompt, context or file can
+  conjure one. A rejected push is git's answer.
+- **Every write reports `before`/`after`** — HEAD, short sha, branch and
+  porcelain — plus `changed` / `headChanged` / `branchChanged`, so "what did
+  that call actually do?" is in the result itself (and in the Journal).
+- `gitExitOk` was added to the runner: `allowFailure` means "git ran", not "git
+  worked", so every caller that wants a *value* now checks the exit code too.
+
+**The local writes**
+- `git_add` — paths resolved inside the workspace (the phase-33 check), `--`
+  before them, repo-relative, `["."]` for everything.
+- `git_commit` — staged only, or `paths` to stage-and-commit; message required;
+  an empty index is `NOTHING_TO_COMMIT`; the author identity is **read** from
+  `git config` and never written (`MISSING_IDENTITY` tells the user to set it).
+- `git_create_branch` — validated by git itself (`check-ref-format --branch`),
+  switches to the new branch by default, needs no confirmation: it is the safe
+  thing to do.
+- `git_checkout` — `create` for `-b`; uncommitted work makes it fail the way git
+  intends unless `discardChanges: true` is confirmed.
+- `git_reset` — the reference's behaviour is the default (unstage everything,
+  safe); `soft` moves HEAD; `hard` is gated and refused on a protected branch.
+- `git_push` — `origin` + current branch by default, `setUpstream` for the first
+  push, a local bare remote in the tests; protected branches refused before git
+  runs.
+- `git_stash` — push (`-u` for untracked), list, pop, apply, and a gated
+  drop/clear: the tidy-up that is *not* a hard reset.
+
+**Pull requests — both backends the plan locked in (`src/ai/tools/git/pr-backend.ts`)**
+- `gh` first (probed with `gh --version`, `GH_PROMPT_DISABLED=1`, 30 s, 4 MB),
+  then the GitHub REST API with `GITHUB_TOKEN`/`GH_TOKEN`, else
+  `PR_UNAVAILABLE` with both fixes named. A non-GitHub remote is
+  `NOT_GITHUB_REMOTE`, a missing PR is `PR_NOT_FOUND`, an unauthenticated `gh`
+  is `PR_UNAVAILABLE` — not a stack trace.
+- Owner/name come from the remote URL git actually has (`https`, `git@host:`,
+  `ssh://`), so a PR always targets the repository the branch is connected to,
+  and GitHub Enterprise gets `https://<host>/api/v3`.
+- One shape from both backends (`normalizePr`), and the token is read per call,
+  used, and never echoed into a result — the phase-37 Journal check still
+  asserts it.
+
+**Wiring**: local catalog 34 → **45 tools**; the `git_operations` skill is
+v1.2.0 (17 tools, priority 55) with a "Making a change" workflow and the new
+error codes; personas coder 45 / architect 29 / reviewer 27 (the reviewers may
+read and comment on PRs, never push or commit).
+
+**Tests**: 1034 → **1078** (65 files; 44 new) against a real repository with a
+**bare remote in the same temp directory** — the SHA changes and the message
+lands, `reset --hard` without the flag is refused with *zero* disk change and
+with it succeeds, `--hard` on `main` is `PROTECTED_BRANCH`, the push reaches the
+bare repo and a rewritten history is rejected with no way to force it, the force
+option is asserted **absent from the schema**, `drop` keeps the stash until
+confirmed. The PR tools run against an injected `gh` runner and an injected
+`fetch` — so no test can reach GitHub — including the logged-out, no-gh-no-token
+and 404 paths, plus a stub `gh` **on `PATH`** for the real runner. e2e **140 → 153**: a new `gitwrite` scenario commits a real change
+on a branch, pushes it to a bare remote, and then proves both guards by their
+side effects (the remote's only ref is the feature branch; the refused hard
+reset leaves HEAD and the tree untouched).
+
 ## [27.14.0] — 2026-09-25 — git, read-only
 
 Five new tools and a new `git_status`, so an agent can understand a repository

@@ -1,0 +1,8 @@
+{
+  "id": "git_pr_create",
+  "name": "Git PR Create",
+  "description": "Opens a pull request via the gh CLI or the GitHub REST API",
+  "source": "local",
+  "modulePath": "./implementations/git-pr",
+  "category": "git"
+}

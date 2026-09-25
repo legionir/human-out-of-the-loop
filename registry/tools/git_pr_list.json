@@ -1,0 +1,8 @@
+{
+  "id": "git_pr_list",
+  "name": "Git PR List",
+  "description": "Lists pull requests for the repository's GitHub remote",
+  "source": "local",
+  "modulePath": "./implementations/git-pr",
+  "category": "git"
+}

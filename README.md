@@ -338,16 +338,17 @@ zone, so ordinary "what is today?" questions cost no tool call. A reasoning
 session is capped at 50 steps / 256 KB with a `THINKING_LIMIT` error that asks
 for a fresh id — "think forever" is what a stuck model does.
 
-### Reading a git repository
+### Reading and writing a git repository
 
-Six read-only tools, so an agent understands a repository before anything is
-allowed to change it. They share one core: `git` runs through `spawn` with an
-argument array (**no shell**), with `GIT_TERMINAL_PROMPT=0` / `GIT_ASKPASS=echo`
-/ `GIT_PAGER=cat` / `GIT_OPTIONAL_LOCKS=0` — a call can never hang on a password
-prompt or a pager, and a read never takes a lock out from under your editor.
-Any caller-supplied ref, path or filter that starts with `-` is refused outright
-(`BAD_ARGUMENT`), paths go after `--`, and output is capped at 256 KB by killing
-the child.
+Seventeen tools: six reads, seven writes and four pull-request calls — enough
+for an agent to understand a repository, do the work on a branch, and open the
+PR, with the irreversible half fenced off. They share one core: `git` runs
+through `spawn` with an argument array (**no shell**), with
+`GIT_TERMINAL_PROMPT=0` / `GIT_ASKPASS=echo` / `GIT_PAGER=cat` /
+`GIT_OPTIONAL_LOCKS=0` — a call can never hang on a password prompt or a pager,
+and a read never takes a lock out from under your editor. Any caller-supplied
+ref, path or filter that starts with `-` is refused outright (`BAD_ARGUMENT`),
+paths go after `--`, and output is capped at 256 KB by killing the child.
 
 | Tool | What it answers |
 |------|-----------------|
@@ -358,10 +359,54 @@ the child.
 | `git_branch_list` | branches as data: current flag, sha, upstream, ahead/behind, last commit — with `contains`/`notContains` ("which branches already have this fix?"). A detached HEAD is reported as detached, with its sha |
 | `git_remote_list` | where a push would go: name, fetch URL and push URL (they differ more often than you would think). Config only — no network |
 
+What an agent may change, and what it may not:
+
+- **Protected branches** — `main` and `master` (or your own list in
+  `HOTL_PROTECTED_BRANCHES`) cannot be pushed to, hard-reset or amended:
+  `PROTECTED_BRANCH`, with the alternative in the message. Branching *from*
+  `main` and standing on `main` are fine; the guards are on rewriting it.
+- **Nothing irreversible without `confirmDestructive: true`** — `reset --hard`,
+  a checkout with `discardChanges`, `stash drop`/`clear`, `commit --amend`. The
+  refusal **names every file that would be lost**, and the flag is the caller's
+  explicit acknowledgement, not a default.
+- **No force, anywhere** — `--force`, `--force-with-lease`, `--mirror`,
+  `--no-verify` do not exist in any schema, so no prompt or file can conjure
+  one. A rejected push is git's answer: fetch and merge, or ask.
+- **Every write answers with `before` and `after`** — HEAD, short sha, branch,
+  porcelain — plus `changed`/`headChanged`/`branchChanged`, so a "successful"
+  no-op is visible as one (and the Journal records the same result).
+
+| Write | What it does |
+|-------|--------------|
+| `git_create_branch` | a branch from `HEAD` or `base`, switched to by default. The name is validated by git itself (`check-ref-format --branch`); no confirmation, because starting a branch is the safe move |
+| `git_add` | stages paths (resolved inside the workspace, `["."]` for everything), with the before/after state |
+| `git_commit` | commits the staged index, or stages `paths` first. The message is required, an empty index is `NOTHING_TO_COMMIT`, and the author identity is **read** from `git config` and never written — no identity means `MISSING_IDENTITY`, not an invented author |
+| `git_checkout` | switches branch/ref (`create` for `-b`); uncommitted work makes it fail the way git intends unless `discardChanges: true` is confirmed |
+| `git_reset` | the reference's behaviour by default (unstage everything — safe); `soft` moves HEAD; `hard` is gated and refused on a protected branch |
+| `git_push` | `origin` and the current branch by default, `setUpstream` for the first push; protected branches refused before git runs |
+| `git_stash` | push (`-u` for untracked), list, pop, apply — and a gated `drop`/`clear`. The tidy-up that is *not* a hard reset |
+
+| Pull request | What it does |
+|--------------|--------------|
+| `git_pr_create` | opens a PR for the pushed branch (`base`, `head`, `draft`, Markdown body) |
+| `git_pr_list` | PRs as data: number, title, state, author, head/base, URL — filtered by `state`, `base`, `head` |
+| `git_pr_view` | one PR: state, author, branches, URL and body |
+| `git_pr_comment` | reports progress or a review finding on the PR |
+
+The backend is `gh` when it is installed (probed, `GH_PROMPT_DISABLED=1`, 30 s
+timeout), otherwise the GitHub REST API with `GITHUB_TOKEN`/`GH_TOKEN`, otherwise
+`PR_UNAVAILABLE` with both fixes named. Owner and name come from the remote URL
+git actually has (`https`, `git@host:owner/repo`, `ssh://`) — GitHub Enterprise
+gets `https://<host>/api/v3` — and both backends return one shape. The token is
+read per call and never appears in a result.
+
 Errors are structured and mean different things on purpose: `NOT_A_REPO` (this
 directory is not a work tree), `PATH_TRAVERSAL_BLOCKED` (outside the workspace),
 `BAD_ARGUMENT` (a value git would read as an option), `TIMEOUT`,
-`OUTPUT_TOO_LARGE`, `GIT_MISSING`, `GIT_FAILED`.
+`OUTPUT_TOO_LARGE`, `GIT_MISSING`, `GIT_FAILED` — plus `PROTECTED_BRANCH`,
+`CONFIRM_REQUIRED`, `NOTHING_TO_COMMIT`, `MISSING_IDENTITY`,
+`NOTHING_TO_STASH`, `PR_UNAVAILABLE`, `NOT_GITHUB_REMOTE`, `PR_NOT_FOUND` and
+`PR_FAILED` for the write half.
 
 ### Reading the web
 
@@ -666,11 +711,12 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 39 | Project memory — the nine reference `memory` tools, per project in `.ai-runtime/memory.json` (locked + atomic, cascading deletes, `ENTITY_NOT_FOUND`, paged reads) | 🟢 |
 | 40 | `fetch` — a URL as Markdown (in-tree HTML→Markdown, paging, `raw`), with robots.txt honoured and loopback/private addresses blocked by default | 🟢 |
 | 41 | Git, read-only — `git_status` extended (porcelain v1/v2, branch, counts) plus `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_remote_list`, on a no-shell/bounded-output core | 🟢 |
-| 42–43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): git write + PR, and exposing this runtime as an MCP server | 🔵 |
+| 42 | Git, writing — feature branches, commits (identity read, never written), pushes with no force option, stashes, and pull requests through `gh` or the GitHub REST API. `main`/`master` are protected; anything irreversible needs `confirmDestructive: true` | 🟢 |
+| 43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): exposing this runtime as an MCP server | 🔵 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**1034 tests green (64 files), 0 tsc errors — plus 140 committed end-to-end checks (`npm run e2e`)** (phases 18–41 complete — see `docs/history/`)
+**1078 tests green (65 files), 0 tsc errors — plus 153 committed end-to-end checks (`npm run e2e`)** (phases 18–42 complete — see `docs/history/`)
 
 ## Law Compliance
 

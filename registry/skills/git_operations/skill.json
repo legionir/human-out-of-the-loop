@@ -1,9 +1,27 @@
 {
   "id": "git_operations",
   "name": "Git Operations",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "instructions": "SKILL.md",
-  "tools": ["git_status", "git_diff", "git_log", "git_show", "git_branch_list", "git_remote_list"],
-  "priority": 30,
-  "description": "Reads the state, history and configuration of a repository before changing anything"
+  "tools": [
+    "git_status",
+    "git_diff",
+    "git_log",
+    "git_show",
+    "git_branch_list",
+    "git_remote_list",
+    "git_add",
+    "git_commit",
+    "git_create_branch",
+    "git_checkout",
+    "git_reset",
+    "git_push",
+    "git_stash",
+    "git_pr_create",
+    "git_pr_list",
+    "git_pr_view",
+    "git_pr_comment"
+  ],
+  "priority": 55,
+  "description": "Reads the state and history of a repository, then changes it safely: feature branches, guarded destructive operations, pull requests"
 }

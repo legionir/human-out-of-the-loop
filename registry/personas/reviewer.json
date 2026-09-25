@@ -27,7 +27,9 @@
     "git_log",
     "git_show",
     "git_branch_list",
-    "git_remote_list"
+    "git_remote_list",
+    "git_pr_list",
+    "git_pr_view"
   ],
   "description": "Detailed code review with actionable feedback"
 }

@@ -357,6 +357,7 @@ describe('phase 28 — registry layering', () => {
     expect(loaded.tools.map((t) => t.id).sort()).toEqual([
       // the original four + the phases 33-35 filesystem set + phase 38's trio
       // + phase 39's nine memory tools + phase 40's fetch + phase 41's git reads
+      // + phase 42's guarded git writes and PR tools
       'add_observations',
       'convert_time',
       'create_directory',
@@ -370,11 +371,22 @@ describe('phase 28 — registry layering', () => {
       'fetch',
       'get_current_time',
       'get_file_info',
+      'git_add',
       'git_branch_list',
+      'git_checkout',
+      'git_commit',
+      'git_create_branch',
       'git_diff',
       'git_log',
+      'git_pr_comment',
+      'git_pr_create',
+      'git_pr_list',
+      'git_pr_view',
+      'git_push',
       'git_remote_list',
+      'git_reset',
       'git_show',
+      'git_stash',
       'git_status',
       'list_allowed_directories',
       'list_directory',

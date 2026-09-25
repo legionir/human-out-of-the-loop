@@ -1,0 +1,8 @@
+{
+  "id": "git_stash",
+  "name": "Git Stash",
+  "description": "Stashes and restores uncommitted work; dropping a stash needs confirmDestructive",
+  "source": "local",
+  "modulePath": "./implementations/git-stash",
+  "category": "git"
+}

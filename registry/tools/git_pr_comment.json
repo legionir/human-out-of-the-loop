@@ -1,0 +1,8 @@
+{
+  "id": "git_pr_comment",
+  "name": "Git PR Comment",
+  "description": "Adds a comment to a pull request",
+  "source": "local",
+  "modulePath": "./implementations/git-pr",
+  "category": "git"
+}

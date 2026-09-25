@@ -152,7 +152,7 @@ registry/
 │   ├── web_research/        # خواندن وب و ارجاع به کد (فاز ۴۰)
 │   ├── task_decomposition/
 │   └── acceptance_check/
-├── tools/                   # ۳۴ ابزار محلی (فاز ۳۳–۴۱: پورت کامل سرورهای مرجع)
+├── tools/                   # ۴۵ ابزار محلی (فاز ۳۳–۴۲: پورت کامل سرورهای مرجع)
 │   ├── read_file.json       # id, name, description, source: local, modulePath, category
 │   ├── search_code.json     #   جستجوی VS Code-style: pattern محتوا + pathPattern مسیر
 │   ├── write_file.json
@@ -186,7 +186,18 @@ registry/
 │   ├── git_log.json           # تاریخچهٔ پارس‌شده با فیلتر path/author/since/until
 │   ├── git_show.json          # یک revision: متادیتا + patch (path و statOnly)
 │   ├── git_branch_list.json   # برنچ‌ها به‌صورت داده + contains/notContains
-│   └── git_remote_list.json   # fetch/push URL هر remote (بدون شبکه)
+│   ├── git_remote_list.json   # fetch/push URL هر remote (بدون شبکه)
+│   ├── git_add.json           # stage کردن مسیرها (داخل workspace، بعد از --) — فاز ۴۲
+│   ├── git_commit.json        # commit از index یا paths؛ پیام الزامی، هویت فقط خوانده می‌شود
+│   ├── git_create_branch.json # branch جدید با اعتبارسنجی خود git (بدون نیاز به تأیید)
+│   ├── git_checkout.json      # سوییچ branch/ref؛ discardChanges نیازمند confirmDestructive
+│   ├── git_reset.json         # پیش‌فرض unstage (امن)؛ hard فقط با تأیید و روی branch غیرمحافظت‌شده
+│   ├── git_push.json          # origin + branch جاری؛ بدون هیچ گزینهٔ force، برنچ محافظت‌شده رد می‌شود
+│   ├── git_stash.json         # push/list/pop/apply + drop/clear با تأیید
+│   ├── git_pr_create.json     # PR با gh یا REST (GITHUB_TOKEN/GH_TOKEN)
+│   ├── git_pr_list.json       # لیست PRها با فیلتر state/base/head
+│   ├── git_pr_view.json       # یک PR: وضعیت، نویسنده، branchها، URL، body
+│   └── git_pr_comment.json    # کامنت روی PR
 ├── models/
 │   ├── gpt-4o.json          # id, provider, model, config { baseURL?, maxContextTokens? }
 │   ├── claude-sonnet.json
@@ -273,8 +284,47 @@ temp+rename رد می‌شود (دو پروسه حافظه را خراب نمی�
 `branches` با `current`/`upstream`/`ahead`/`behind` (branch_list)، و `remotes` با
 `fetchUrl`/`pushUrl`. کدها: `NOT_A_REPO`، `PATH_TRAVERSAL_BLOCKED`، `BAD_ARGUMENT`،
 `TIMEOUT`، `OUTPUT_TOO_LARGE`، `GIT_MISSING`، `GIT_FAILED`. مخزن بدون commit →
-لاگ خالی (نه خطا). ابزارهای نوشتنی (add/commit/branch/checkout/reset/push/pr) فاز ۴۲
-هستند و مدل امنیتی §۶.۱ برایشان اعمال می‌شود.
+لاگ خالی (نه خطا).
+
+### نوشتن در مخزن Git و Pull Request (فاز ۴۲)
+
+یازده ابزار نوشتنی روی همان هسته، با مدل امنیتی §۶.۱:
+
+- **برنچ‌های محافظت‌شده** (`main`، `master`، قابل تغییر با `HOTL_PROTECTED_BRANCHES`):
+  نه push، نه `reset --hard`، نه `commit --amend` → کد `PROTECTED_BRANCH`. ساختن
+  برنچ *از* `main` و ایستادن روی آن آزاد است؛ محافظت روی بازنویسی است.
+- **هیچ کار برگشت‌ناپذیری بدون `confirmDestructive: true`**: `reset --hard`،
+  checkout با `discardChanges`، `stash drop/clear`، `commit --amend`. پیام رد شدن
+  **نام تمام فایل‌هایی که از دست می‌روند** را می‌آورد.
+- **هیچ گزینهٔ force در هیچ schema وجود ندارد** (`--force`, `--force-with-lease`,
+  `--mirror`, `--no-verify`)؛ push رد‌شده یعنی fetch/merge یا پرسیدن از کاربر.
+- **هر نوشتن `before`/`after` برمی‌گرداند** (HEAD، short sha، branch، porcelain) به
+  همراه `changed`/`headChanged`/`branchChanged`؛ نتیجهٔ همان اجرا هم در Journal است.
+
+```jsonc
+// branch و checkout
+{ "name": "feature/login", "base": "main", "checkout": true }
+{ "branch": "main", "discardChanges": true, "confirmDestructive": true }  // دور ریختن تغییرات
+// stage و commit
+{ "files": ["src/app.ts"] }                    // یا ["."] برای همه
+{ "message": "feat: …", "paths": ["src/app.ts"] }   // stage + commit در یک فراخوانی
+{ "message": "fixup", "amend": true, "confirmDestructive": true }
+// reset / push / stash
+{ "mode": "mixed" }                             // پیش‌فرض: فقط unstage (بی‌خطر)
+{ "mode": "hard", "confirmDestructive": true }  // دور ریختن تغییرات؛ روی main ممنوع
+{ "remote": "origin", "setUpstream": true }     // پیش‌فرض: origin و برنچ جاری
+{ "action": "push", "includeUntracked": true, "message": "wip" }
+{ "action": "pop" }                             { "action": "drop", "confirmDestructive": true }
+// pull request — بک‌اند: اول gh، بعد REST با GITHUB_TOKEN/GH_TOKEN، وگرنه PR_UNAVAILABLE
+{ "title": "feat: …", "body": "…", "base": "main", "draft": false }
+{ "state": "open", "limit": 10 }                { "number": 42 }        { "number": 42, "body": "…" }
+```
+
+مالک/نام مخزن از URL همان remote خوانده می‌شود (`https`، `git@host:owner/repo`،
+`ssh://`؛ برای GitHub Enterprise آدرس API می‌شود `https://<host>/api/v3`). توکن فقط
+در همان فراخوانی از محیط خوانده می‌شود و در نتیجه یا Journal نمی‌آید. کدهای تازه:
+`PROTECTED_BRANCH`، `CONFIRM_REQUIRED`، `NOTHING_TO_COMMIT`، `MISSING_IDENTITY`،
+`NOTHING_TO_STASH`، `PR_UNAVAILABLE`، `NOT_GITHUB_REMOTE`، `PR_NOT_FOUND`، `PR_FAILED`.
 
 ### خواندن وب (فاز ۴۰)
 

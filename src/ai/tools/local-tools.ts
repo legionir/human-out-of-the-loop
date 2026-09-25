@@ -29,6 +29,18 @@ import { createGitLogTool } from './implementations/git-log.js';
 import { createGitShowTool } from './implementations/git-show.js';
 import { createGitBranchListTool } from './implementations/git-branch-list.js';
 import { createGitRemoteListTool } from './implementations/git-remote-list.js';
+import { createGitAddTool } from './implementations/git-add.js';
+import { createGitCommitTool } from './implementations/git-commit.js';
+import { createGitCreateBranchTool, createGitCheckoutTool } from './implementations/git-branch-write.js';
+import { createGitResetTool } from './implementations/git-reset.js';
+import { createGitPushTool } from './implementations/git-push.js';
+import { createGitStashTool } from './implementations/git-stash.js';
+import {
+  createGitPrCommentTool,
+  createGitPrCreateTool,
+  createGitPrListTool,
+  createGitPrViewTool,
+} from './implementations/git-pr.js';
 import {
   createAddObservationsTool,
   createCreateEntitiesTool,
@@ -87,6 +99,20 @@ export const LOCAL_TOOL_FACTORIES: Readonly<Record<string, (projectRoot: string)
   git_show: createGitShowTool,
   git_branch_list: createGitBranchListTool,
   git_remote_list: createGitRemoteListTool,
+  // Phase 42 — git, writing (all guarded: protected branches, explicit
+  // confirmation for anything irreversible, no force anywhere).
+  git_add: createGitAddTool,
+  git_commit: createGitCommitTool,
+  git_create_branch: createGitCreateBranchTool,
+  git_checkout: createGitCheckoutTool,
+  git_reset: createGitResetTool,
+  git_push: createGitPushTool,
+  git_stash: createGitStashTool,
+  // Phase 42 — pull requests (gh CLI first, GitHub REST with a token second).
+  git_pr_create: createGitPrCreateTool,
+  git_pr_list: createGitPrListTool,
+  git_pr_view: createGitPrViewTool,
+  git_pr_comment: createGitPrCommentTool,
 };
 
 /** Ids of the local tools above — used by tests and by the bootstrap check. */

@@ -1,0 +1,8 @@
+{
+  "id": "git_add",
+  "name": "Git Add",
+  "description": "Stages files for the next commit, with every path resolved inside the workspace",
+  "source": "local",
+  "modulePath": "./implementations/git-add",
+  "category": "git"
+}
