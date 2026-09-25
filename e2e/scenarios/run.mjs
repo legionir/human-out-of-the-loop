@@ -411,6 +411,71 @@ scenarios.media = async () => {
   return root;
 };
 
+/**
+ * Phase 36 — the glob scan at editor level, and the environment block.
+ *
+ * One run: `search_files` twice (files only, then directories only) on a
+ * project with a `node_modules` full of look-alikes — so the assertions prove
+ * the base-name match *and* the default skip actually reached the model — plus
+ * the environment facts the agent was given.
+ */
+scenarios.search = async () => {
+  const root = makeProject('search', {
+    'src/lib/util.ts': 'export const util = 1;\n',
+    'src/lib/util.test.ts': 'test\n',
+    'node_modules/dep/index.ts': 'dependency\n',
+  });
+  fs.mkdirSync(path.join(root, 'src', 'features'), { recursive: true });
+
+  const goal = 'map the module layout SEARCHPROBE CHAIN FIND:*.ts FINDDIR:src';
+  const { code, stdout } = await run(runArgs(goal, root));
+  const { plans } = planStore(root);
+  const plan = plans[0];
+  const log = readLog(root);
+
+  check('search: exit code 0', code === 0, `exit=${code} ${(stdout || '').split('\n')[0]}`);
+  check(
+    'search: search_files was called twice',
+    log.filter((e) => e.eventType === 'task:tool-call' && e.payload?.toolName === 'search_files')
+      .length === 2
+  );
+
+  const probeRequests = stubRequests().filter((body) => JSON.stringify(body).includes('SEARCHPROBE'));
+  const dump = probeRequests.map((body) => JSON.stringify(body)).join('\n');
+
+  // `*.ts` as a NAME: the file two levels down matches although the pattern has
+  // no slash, and `node_modules` — which contains an identically-named file —
+  // was skipped, so the dependency path must not appear anywhere.
+  check(
+    'search: a bare name matched at depth, and node_modules stayed out',
+    dump.includes('src/lib/util.ts') &&
+      !dump.includes('node_modules/dep/index.ts')
+  );
+  check(
+    'search: the type filters and the counters travelled with the result',
+    dump.includes('matchMode') && dump.includes('ignoredDirectories') && dump.includes('counts')
+  );
+
+  const finalPrompt = probeRequests
+    .map((body) => JSON.stringify(body))
+    .filter((text) => text.includes('ENVIRONMENT (the machine this runtime runs on'))
+    .pop();
+  check(
+    'search: the agent system prompt carries the environment facts',
+    Boolean(finalPrompt) &&
+      finalPrompt.includes('default shell') &&
+      finalPrompt.includes('path separator')
+  );
+
+  check(
+    'search: every step completed without a tool error',
+    Boolean(plan) && plan.steps.every((s) => s.status === 'done') &&
+      !log.some((e) => e.eventType === 'task:tool-error'),
+    log.filter((e) => e.eventType === 'task:tool-error').map((e) => e.message).join(' | ')
+  );
+  return root;
+};
+
 scenarios.resume = async () => {
   const root = makeProject('resume');
   await run(runArgs('write the project notes WRITE:notes/first.txt', root));
@@ -711,6 +776,9 @@ scenarios.context = async () => {
     'context: ...told never to ask for it',
     /never ask the user/i.test(text),
   );
+  // Phase 36: the same prompt now names the machine — the planner writes the
+  // commands, so it must not have to guess the shell or the separator.
+  check('context: ...and which machine and shell it is on', text.includes('default shell') && text.includes('path separator'));
   return root;
 };
 

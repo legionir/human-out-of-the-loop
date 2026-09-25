@@ -1,7 +1,7 @@
 {
   "id": "search_files",
   "name": "Search Files",
-  "description": "Finds files and directories by glob pattern",
+  "description": "Finds files and directories by glob pattern — editor-style: a bare name matches at any depth, build/vendor directories are skipped by default, sizes and per-type counts come back",
   "source": "local",
   "modulePath": "./implementations/search-files",
   "category": "filesystem"

@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { environmentBullets } from '../environment-context.js';
 import { randomUUID } from 'node:crypto';
 import { generateObject } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from '../runtime/llm-timeout.js';
@@ -121,7 +122,10 @@ export function buildProjectContext(projectRoot: string | undefined): string {
   const lines = [
     'PROJECT CONTEXT (known — never ask the user for it):',
     `- project root: ${root}`,
-    `- platform: ${process.platform}`,
+    // Phase 36: the machine, not just its name — which shell a command will run
+    // in, which separator to build paths with, GNU vs BSD.  The planner writes
+    // the commands the agent will later run, so it needs this at plan time.
+    ...environmentBullets(),
     '- every path in the plan is relative to that root; read_file/write_file/search_code work inside it and nowhere else',
     '- the project already exists: questions like "which project?" or "what is the current directory?" are already answered by this block',
   ];

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { buildEnvironmentContext } from '../environment-context.js';
 import type { Tool, LanguageModel } from 'ai';
 import type { AgentRegistry, CrossRegistryRefs } from '../registries/agent-registry.js';
 import type { AgentDefinition } from '../schemas/agent-definition.js';
@@ -201,9 +202,16 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
     budgetChars,
   });
 
+  // Phase 36: the agent (not only the planner) is told which machine it is on.
+  // The planner writes plan text; the agent writes the actual commands and
+  // file contents, so it is the one that must not emit `sed -i` on macOS or
+  // `rm -rf` on Windows.  Appended after trimming on purpose: the persona and
+  // the skills stay within budget, and this block is small and never trimmed.
+  const systemPromptWithEnvironment = `${systemPrompt}\n\n${buildEnvironmentContext()}`;
+
   return {
     agentId: def.id,
-    systemPrompt,
+    systemPrompt: systemPromptWithEnvironment,
     tools,
     model,
     persona,

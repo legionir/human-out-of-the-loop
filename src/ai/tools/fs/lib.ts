@@ -74,6 +74,41 @@ export interface FileInfo {
 
 export interface SearchOptions {
   excludePatterns?: string[];
+  /**
+   * Phase 36 — treat a slash-free pattern as a *name* matched at any depth
+   * (`*.ts` finds `src/lib/util.ts`), which is what an editor's file finder and
+   * the `search_code` defaults already do.  Off by default here, because the
+   * MCP reference matched globs against the relative path only.
+   */
+  matchBaseName?: boolean;
+  /** Skip build/vendor directories (`node_modules`, `dist`, …) while walking. */
+  skipBuildDirs?: boolean;
+  includeFiles?: boolean;
+  includeDirectories?: boolean;
+  /** Called for every entry that matched, before the caller applies a limit. */
+  onMatch?: (entry: SearchMatch) => void;
+}
+
+/** One entry a glob scan matched. */
+export interface SearchMatch {
+  /** Absolute path. */
+  path: string;
+  /** Workspace-relative path, POSIX separators (the shape patterns match). */
+  relative: string;
+  type: 'file' | 'directory';
+  size: number;
+  modified: string;
+}
+
+/** What a scan walked, skipped and found. */
+export interface SearchScanOutcome {
+  matches: SearchMatch[];
+  filesScanned: number;
+  directoriesScanned: number;
+  skippedExcluded: number;
+  skippedSymlinks: number;
+  /** Names skipped because of `skipBuildDirs` (e.g. `node_modules`), deduped. */
+  ignoredDirectories: string[];
 }
 
 export interface SearchResult {
@@ -168,9 +203,7 @@ async function resolveUnicodeEquivalentPath(
 ): Promise<string> {
   const allowedDirectory = [...allowedDirectories]
     .sort((left, right) => right.length - left.length)
-    .find((directory) =>
-      isPathWithinAllowedDirectories(normalizePath(absolutePath), [directory])
-    );
+    .find((directory) => isPathWithinAllowedDirectories(normalizePath(absolutePath), [directory]));
 
   if (!allowedDirectory) return absolutePath;
 
@@ -297,7 +330,10 @@ export async function getFileStats(filePath: string): Promise<FileInfo> {
   };
 }
 
-export async function readFileContent(filePath: string, encoding: string = 'utf-8'): Promise<string> {
+export async function readFileContent(
+  filePath: string,
+  encoding: string = 'utf-8'
+): Promise<string> {
   return await fs.readFile(filePath, encoding as BufferEncoding);
 }
 
@@ -321,7 +357,9 @@ const MEDIA_TYPES_BY_EXTENSION: Readonly<Record<string, string>> = {
 
 /** The MIME type of a file, from its extension (the reference's mapping). */
 export function mediaTypeForFile(filePath: string): string {
-  return MEDIA_TYPES_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream';
+  return (
+    MEDIA_TYPES_BY_EXTENSION[path.extname(filePath).toLowerCase()] ?? 'application/octet-stream'
+  );
 }
 
 /**
@@ -637,21 +675,104 @@ export function isExcludedPath(
 }
 
 /**
- * Recursively find entries whose path (relative to `rootPath`) matches the
- * glob `pattern`, skipping `excludePatterns` and anything that fails path
- * validation.
- *
- * The validation call per entry is the security boundary: a symlink that leads
- * outside the allowed directories is skipped, not followed.
+ * Build/vendor directories skipped by default once `skipBuildDirs` is on —
+ * the same list `search_code` uses, so a glob scan and a content search agree
+ * on what "the project" means.
  */
-export async function searchFilesWithValidation(
+export const DEFAULT_EXCLUDE_DIRS: ReadonlySet<string> = new Set([
+  'node_modules',
+  '.git',
+  'dist',
+  'build',
+  'out',
+  'coverage',
+  '.next',
+  '.nuxt',
+  '.output',
+  '.turbo',
+  '.cache',
+  '.venv',
+  'venv',
+  '__pycache__',
+  '.pytest_cache',
+  '.ruff_cache',
+  'target',
+  'vendor',
+  // this runtime's own state (plans, logs, sessions)
+  '.ai-runtime',
+]);
+
+/**
+ * Is the path excluded, honouring `!` re-includes?
+ *
+ * A leading `!` turns a pattern into a re-include (`['**\/*.js', '!**\/keep.js']`
+ * reads the way a `.gitignore`/glob-list does), so one call can carve a hole in
+ * a broad exclusion instead of needing two calls.
+ */
+export function isExcludedWithNegation(
+  relativePath: string,
+  patterns: readonly string[] | undefined
+): boolean {
+  if (!patterns || patterns.length === 0) return false;
+  const positives = patterns.filter((pattern) => !pattern.startsWith('!'));
+  const negatives = patterns
+    .filter((pattern) => pattern.startsWith('!'))
+    .map((pattern) => pattern.slice(1));
+  if (positives.length === 0) return false;
+  if (negatives.length > 0 && isExcludedPath(relativePath, negatives)) return false;
+  return isExcludedPath(relativePath, positives);
+}
+
+/**
+ * Recursively find entries whose path (relative to `rootPath`) matches the
+ * glob `pattern` — the phase-33 port, extended in phase 36 so `search_files`
+ * can hold its own next to `search_code`.
+ *
+ * What the reference did, and is kept here:
+ *   - the path is matched as written (`*.ext` in the root, `**\/*.ext` anywhere),
+ *   - a refused or unreadable entry never fails the whole search,
+ *   - the validation call per entry is the security boundary: a symlink leading
+ *     outside the allowed directories is skipped, never followed.
+ *
+ * What phase 36 adds:
+ *   - **POSIX matching on every host**: the relative path is converted to `/`
+ *     before `minimatch` sees it, so a Windows `\` can no longer be read as a
+ *     glob escape (a pattern like `src/**\/*.ts` used to match nothing there),
+ *   - **`matchBaseName`**: a slash-free pattern is a name, matched at any depth,
+ *   - **`skipBuildDirs`** with the shared {@link DEFAULT_EXCLUDE_DIRS},
+ *   - **`!` re-includes** through {@link isExcludedWithNegation},
+ *   - **counters** (files/directories scanned, what was skipped) and the type
+ *     filter, so a caller can report *why* a scan was empty instead of guessing.
+ */
+export async function scanFilesWithValidation(
   rootPath: string,
   pattern: string,
   allowedDirectories: string[],
   options: SearchOptions = {}
-): Promise<string[]> {
-  const { excludePatterns = [] } = options;
-  const results: string[] = [];
+): Promise<SearchScanOutcome> {
+  const {
+    excludePatterns = [],
+    matchBaseName = false,
+    skipBuildDirs = false,
+    includeFiles = true,
+    includeDirectories = true,
+  } = options;
+
+  const outcome: SearchScanOutcome = {
+    matches: [],
+    filesScanned: 0,
+    directoriesScanned: 0,
+    skippedExcluded: 0,
+    skippedSymlinks: 0,
+    ignoredDirectories: [],
+  };
+
+  const ignored = new Set<string>();
+  const matchesByName = matchBaseName && !pattern.includes('/');
+  const matcher = (relative: string): boolean =>
+    matchesByName
+      ? minimatch(relative.split('/').pop() ?? relative, pattern, { dot: true })
+      : minimatch(relative, pattern, { dot: true });
 
   async function search(currentPath: string): Promise<void> {
     const entries = await fs.readdir(currentPath, { withFileTypes: true });
@@ -662,27 +783,65 @@ export async function searchFilesWithValidation(
       try {
         await validatePath(fullPath, allowedDirectories);
 
-        const relativePath = path.relative(rootPath, fullPath);
-        const shouldExclude = excludePatterns.some((excludePattern) =>
-          minimatch(relativePath, excludePattern, { dot: true })
-        );
-        if (shouldExclude) continue;
+        // POSIX shape for every pattern decision, on every host.
+        const relative = path.relative(rootPath, fullPath).split(path.sep).join('/');
 
-        if (minimatch(relativePath, pattern, { dot: true })) {
-          results.push(fullPath);
+        if (skipBuildDirs && entry.isDirectory() && DEFAULT_EXCLUDE_DIRS.has(entry.name)) {
+          ignored.add(entry.name);
+          continue;
         }
 
-        if (entry.isDirectory()) {
+        if (isExcludedWithNegation(relative, excludePatterns)) {
+          outcome.skippedExcluded++;
+          continue; // an excluded directory is not descended into either
+        }
+
+        const isDirectory = entry.isDirectory();
+        if (isDirectory) outcome.directoriesScanned++;
+        else outcome.filesScanned++;
+
+        const wanted = isDirectory ? includeDirectories : includeFiles;
+        if (wanted && matcher(relative)) {
+          // lstat, never stat: a symlink is reported as itself, not resolved.
+          const stats = await fs.lstat(fullPath).catch(() => undefined);
+          outcome.matches.push({
+            path: fullPath,
+            relative,
+            type: isDirectory ? 'directory' : 'file',
+            size: !isDirectory && stats ? stats.size : 0,
+            modified: (stats?.mtime ?? new Date(0)).toISOString(),
+          });
+        }
+
+        if (isDirectory) {
           await search(fullPath);
         }
       } catch {
         // Unreadable or refused entries are skipped, never fatal: one bad
         // symlink in a big tree must not fail the whole search.
+        if (entry.isSymbolicLink()) outcome.skippedSymlinks++;
         continue;
       }
     }
   }
 
   await search(rootPath);
-  return results;
+  outcome.ignoredDirectories = [...ignored].sort();
+  return outcome;
+}
+
+/**
+ * The phase-33 contract, unchanged: the absolute paths of everything the scan
+ * matched.  Kept as the thin form of {@link scanFilesWithValidation} so the
+ * existing callers and tests keep the reference behaviour (no base-name
+ * matching, no default excludes) while `search_files` opts into the richer set.
+ */
+export async function searchFilesWithValidation(
+  rootPath: string,
+  pattern: string,
+  allowedDirectories: string[],
+  options: SearchOptions = {}
+): Promise<string[]> {
+  const outcome = await scanFilesWithValidation(rootPath, pattern, allowedDirectories, options);
+  return outcome.matches.map((match) => match.path);
 }

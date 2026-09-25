@@ -5,6 +5,58 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.9.0] — 2026-09-25 — the glob scan at editor level, and the machine the model writes for
+
+Two answers to "the tool works, but the model still has to guess": `search_files`
+was thinner than `search_code`, and nothing told a model *which* machine its
+commands would run on.
+
+**`search_files` — level with `search_code`**
+- **A bare name matches at any depth**: `*.ts` finds `src/lib/util.ts` and
+  `top.test.ts`, the way an editor's file finder and `search_code`'s defaults do,
+  instead of matching only what sits directly under the search root (the
+  reference's rule, kept behind `matchBaseName: false`).
+- **Build/vendor directories are skipped by default** — the same list
+  `search_code` uses (`node_modules`, `.git`, `dist`, `build`, `out`, `coverage`,
+  `.next`, `target`, `vendor`, `.ai-runtime`, …), now shared from `fs/lib.ts`
+  instead of living in two places; `skipBuildDirs: false` searches them on
+  purpose, and `ignoredDirectories` says what was skipped.
+- **`!` re-includes in `excludePatterns`** (`['**/*.js', '!**/keep.js']`), read
+  the way a glob list is read; the first entry that governs a path wins.
+- **Type filters and real metadata**: `includeFiles` / `includeDirectories`,
+  per-entry `type`, `size` and `modified` (via `lstat` — a symlink is reported as
+  itself, never followed), and `counts`, `filesScanned`, `directoriesScanned`,
+  `skippedExcluded`, `skippedSymlinks` so an empty result can say *why* it is
+  empty.
+- **A Windows bug in the port is fixed**: the relative path was matched with
+  native separators, and `minimatch` treats `\` as an escape character, so a
+  path pattern like `src/**` + `/*.ts` matched nothing on Windows. Matching now
+  happens on POSIX separators on every host (asserted by a test that runs the
+  same patterns everywhere).
+
+**The environment block — the machine, not just its name**
+- New `src/ai/environment-context.ts` turns `node:os` and the process
+  environment into a short bullet list: operating system **and version**, arch,
+  node version, the shell a command will actually run in, the path separator,
+  the line ending, and whether the filesystem is case-sensitive.
+- `PROJECT CONTEXT` (planner assessment + plan prompts) now carries it — the
+  planner writes the commands, so it is the first place a wrong shell shows up —
+  and the **agent system prompt** does too (persona + skills stay budgeted; the
+  block is appended untrimmed and small).
+- Platform-specific guidance is generated per host, not hard-coded: POSIX
+  userland vs `dir`/`type`/`findstr`, **GNU vs BSD** (`sed -i ''`, no `grep -P`
+  on macOS), Windows reserved names, macOS NFD + case-insensitive lookups, WSL
+  (`/mnt/c`) — so "format the disk" style instruction sets stop being a coin
+  flip.
+- Facts are collected through an injectable `collectEnvironmentFacts(env,
+  platform)`, so the Windows/PowerShell/macOS/WSL branches are all tested from a
+  Linux CI runner.
+
+**Verification:** 21 new unit tests (glob semantics, excludes with re-include,
+type filters, truncation vs `totalMatches`, symlink refusal, POSIX matching, and
+the environment facts for every platform) and a new `search` end-to-end scenario
+plus an extended `context` one.
+
 ## [27.8.0] — 2026-09-25 — the filesystem set is complete
 
 The last two tools of the MCP reference filesystem server

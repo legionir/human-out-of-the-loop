@@ -164,7 +164,7 @@ registry/
 │   ├── move_file.json       # مقصد موجود → خطا (بدون overwrite)
 │   ├── get_file_info.json
 │   ├── create_directory.json
-│   ├── search_files.json    # گلوب (معادل name-based برای search_code)
+│   ├── search_files.json    # گلوب editor-style: نام در هر عمق + حذف خودکار node_modules/dist + ابعاد و شمارش‌ها
 │   └── list_allowed_directories.json
 ├── models/
 │   ├── gpt-4o.json          # id, provider, model, config { baseURL?, maxContextTokens? }
@@ -174,6 +174,26 @@ registry/
     ├── example.json         # id, name, transport http|sse|stdio, url, auth, toolPrefix, connectTimeoutMs
     └── README.md
 ```
+
+### بلوک ENVIRONMENT (فاز ۳۶)
+
+System prompt هر Agent و بلوک `PROJECT CONTEXT` پلنر با یک لیست کوتاه از واقعیت‌های
+ماشین پر می‌شود (`src/ai/environment-context.ts`) تا مدل دستور/مسیر را حدس نزند:
+
+```text
+ENVIRONMENT (the machine this runtime runs on — commands and paths must match it):
+- platform: linux — Debian GNU/Linux 12 (x64), node v22.22.3
+- default shell: /bin/bash (POSIX sh syntax)
+- path separator: "/" — build paths with node:path (path.join('src', 'index.ts') → 'src/index.ts'); a hard-coded "\" only works on Windows and a hard-coded "/" only on POSIX
+- line endings: LF is normal here; do not rewrite a file's endings just because they differ
+- POSIX commands (ls, cat, grep, sed, chmod, rm -rf) are available; Windows commands (dir, type, findstr, copy) are not
+- GNU userland (grep -P, sed -i, find -printf) is available; the filesystem is case-sensitive
+```
+
+روی macOS همین بلوک `BSD userland` و `sed -i ''` و NFD را یادآوری می‌کند و روی
+ویندوز `cmd/PowerShell`، `dir/type/findstr`، خط‌پایان CRLF و نام‌های رزرو
+(`CON`, `NUL`, …) را. `collectEnvironmentFacts(env, platform)` تزریق‌پذیر است، پس
+هر سه شاخه از یک CI لینوکسی تست می‌شوند.
 
 ### نمونه‌ها
 

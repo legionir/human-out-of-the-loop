@@ -166,6 +166,9 @@ const MARKERS = [
   { marker: 'MEDIA', tool: 'read_media_file' },
   { marker: 'MEDIABIN', tool: 'read_media_file' },
   { marker: 'SIZES', tool: 'list_directory_with_sizes' },
+  // Phase 36 — the glob scan at editor level.
+  { marker: 'FIND', tool: 'search_files' },
+  { marker: 'FINDDIR', tool: 'search_files' },
 ];
 
 function markersIn(text) {
@@ -244,6 +247,18 @@ function pickToolCall(promptText, offered, chained = false) {
         maxResults: 10,
       },
     };
+  }
+  // FIND:<glob> — the editor-grade glob scan: a bare name matched at any depth,
+  // directories filtered out, sizes reported.
+  if (marker.marker === 'FIND') {
+    return {
+      name: 'search_files',
+      args: { pattern: marker.arg, includeDirectories: false },
+    };
+  }
+  // FINDDIR:<glob> — the same tool, files filtered out.
+  if (marker.marker === 'FINDDIR') {
+    return { name: 'search_files', args: { pattern: marker.arg, includeFiles: false } };
   }
   // SIZES:<dir> — the reference's sized listing, ordered by size so the
   // scenario can see the ordering travel back to the model.

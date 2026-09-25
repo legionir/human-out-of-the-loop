@@ -10,7 +10,6 @@ export {
 export { isPathWithinAllowedDirectories } from './path-validation.js';
 export { parseRoot, resolveAllowedDirectories, type ResolvedRoots } from './roots.js';
 export {
-  DEFAULT_EXCLUDE_DIRS,
   DEFAULT_MAX_FILE_SIZE_BYTES,
   formatContentMatches,
   searchContentTree,
@@ -19,8 +18,11 @@ export {
   type ContentSearchOutcome,
 } from './content-search.js';
 export {
+  DEFAULT_EXCLUDE_DIRS,
   PathAccessError,
   isExcludedPath,
+  isExcludedWithNegation,
+  scanFilesWithValidation,
   applyFileEdits,
   createUnifiedDiff,
   formatSize,
@@ -33,6 +35,8 @@ export {
   readFileContent,
   searchFilesWithValidation,
   tailFile,
+  type SearchMatch,
+  type SearchScanOutcome,
   validatePath,
   writeFileContent,
   type FileEdit,

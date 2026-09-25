@@ -28,7 +28,7 @@
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { isExcludedPath } from './lib.js';
+import { DEFAULT_EXCLUDE_DIRS, isExcludedPath } from './lib.js';
 
 export interface ContentMatch {
   /** Path relative to the workspace root (native separators). */
@@ -89,29 +89,9 @@ export interface ContentSearchOutcome {
   truncated: boolean;
 }
 
-/** Directories that are never searched unless explicitly targeted. */
-export const DEFAULT_EXCLUDE_DIRS: ReadonlySet<string> = new Set([
-  'node_modules',
-  '.git',
-  'dist',
-  'build',
-  'out',
-  'coverage',
-  '.next',
-  '.nuxt',
-  '.output',
-  '.turbo',
-  '.cache',
-  '.venv',
-  'venv',
-  '__pycache__',
-  '.pytest_cache',
-  '.ruff_cache',
-  'target',
-  'vendor',
-  // this runtime's own state (plans, logs, sessions)
-  '.ai-runtime',
-]);
+/** Directories that are never searched unless explicitly targeted — re-exported
+ * from `lib.ts` (phase 36) so the content search and the glob scan share one list. */
+export { DEFAULT_EXCLUDE_DIRS };
 
 export const DEFAULT_MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024;
 /** Longest line reported in `text` (and each context line). */

@@ -338,7 +338,7 @@ tools, all bound to `--project-root` and refusing anything that escapes it
 | `read_media_file` (image/audio attached to the model call) | `write_multiple_files` (batch/scaffold, per-file status) | `list_directory_with_sizes` (`sortBy: name\|size`, totals) |
 | `read_multiple_files` | `edit_file` (line-based + diff, `dryRun`) | `directory_tree` (globs, `maxDepth`) |
 | `search_code` (VS Code style, see below) | `create_directory` | `get_file_info` |
-| `search_files` (glob) | `move_file` (never overwrites) | `list_allowed_directories` |
+| `search_files` (glob names/paths, sizes, counts) | `move_file` (never overwrites) | `list_allowed_directories` |
 | | | `git_status` |
 
 `read_media_file` is the one read that is not text: an image or audio file comes
@@ -351,6 +351,19 @@ is returned with its metadata but *not* attached (`attachedToModel: false`).
 bytes are: per-file sizes, `sortBy: 'size'`, and the `Total: N files, M
 directories` / `Combined size:` footer. It lists with `lstat`, so a symlink is
 reported as `[LINK]` (and never followed), and only regular files carry a size.
+
+`search_files` is the glob counterpart, at the same level: a **bare name matches
+at any depth** (`*.ts` finds `src/lib/util.ts`, like an editor's file finder —
+`matchBaseName: false` restores whole-path matching), `node_modules`, `dist`,
+`.git` and friends are **skipped by default** (the same list `search_code` uses,
+and `ignoredDirectories` reports what was skipped), `excludePatterns` accept a
+leading `!` re-include, `includeFiles`/`includeDirectories` pick the kind of
+entry, and every result carries `size` + `modified` (via `lstat` — a symlink is
+reported as itself, never followed) with `counts`, `filesScanned` and
+`skippedSymlinks`. Matching happens on POSIX separators on **every** host, which
+fixes a real Windows bug in the port: a relative path with `\` used to be handed
+to `minimatch`, where the backslash is an escape character, so `src/**` + `/*.ts`
+matched nothing there.
 
 `search_code` follows the VS Code "search in files" model: a **content** pattern
 (regex, or literal text with `literal: true`, case-insensitive unless
@@ -509,10 +522,11 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 33 | Native port of the MCP reference filesystem toolset (13 tools, symlink/Unicode-safe paths, atomic writes, line-based edits) | 🟢 |
 | 34 | Batch writing (`write_multiple_files`) and VS Code-style `search_code` (path pattern, toggles, columns, context) | 🟢 |
 | 35 | `read_media_file` (attached image/audio) and `list_directory_with_sizes` — the reference filesystem toolset is complete | 🟢 |
+| 36 | `search_files` at editor level (base-name matching, default excludes, type filters, sizes, counters) and the OS environment block given to the planner *and* the agent (shell, separator, GNU/BSD, line endings) | 🟢 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**845 tests green (58 files), 0 tsc errors — plus 80 committed end-to-end checks (`npm run e2e`)** (phases 18–35 complete — see `docs/history/`)
+**866 tests green (59 files), 0 tsc errors — plus 87 committed end-to-end checks (`npm run e2e`)** (phases 18–36 complete — see `docs/history/`)
 
 ## Law Compliance
 
