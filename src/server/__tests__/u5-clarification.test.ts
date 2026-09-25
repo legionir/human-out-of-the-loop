@@ -358,7 +358,11 @@ describe('U5 — interactive clarification', () => {
     await pollRun(runId, (s) => s.state === 'awaiting-confirmation');
   }, 30_000);
 
-  it('an unclear result with NO questions fails directly (no empty round)', async () => {
+  it('an unclear result with NO questions is given a fallback question, not an empty round', async () => {
+    // v27.16.1: the planner saying "unclear" without listing anything used to
+    // fail the run with a blank `⚠️ Clarification needed:`.  It now always
+    // carries at least one answerable question — so the round DOES open, with a
+    // question the user can answer (this is the fix, not a regression).
     unclearWithoutQuestions = true;
 
     const started = await request(app)
@@ -367,12 +371,63 @@ describe('U5 — interactive clarification', () => {
       .expect(202);
     const runId = started.body.runId as string;
 
-    const done = await pollRun(runId, (s) => s.state === 'done' || s.state === 'error');
+    const asking = await pollRun(runId, (s) => s.state === 'awaiting-clarification');
+    const questions = asking.clarificationQuestions as string[];
+    expect(questions.length).toBeGreaterThan(0);
+    expect(questions[0]).toMatch(/What exactly should I do/);
+    // …and the fallback names *a* project root the server is working in rather
+    // than asking the user for one.
+    expect(questions[0]).toMatch(/in (\/[^?]+|[A-Za-z]:\\[^?]+)/);
+    expect(questions[0]).not.toMatch(/which project|current directory/i);
+    expect(asking.clarificationRound).toBe(1);
+
+    // Answering it proceeds exactly like any other round.
+    await request(app)
+      .post(`/api/runs/${runId}/clarification`)
+      .send({ answers: Object.fromEntries(questions.map((q) => [q, 'the login page'])) })
+      .expect(200);
+
+    // The stub stays "unclear without questions" forever, so the fallback
+    // question is asked again in every round and the run ends at the round cap.
+    // Each round is answered exactly once (tracked by round number, because the
+    // state can still read `awaiting-clarification` for the round just answered).
+    const answeredRounds = new Set<number>([1]);
+    const deadline = Date.now() + 30_000;
+    let state = (await request(app).get(`/api/runs/${runId}`)).body as Record<string, unknown>;
+    while (
+      state.state !== 'done' &&
+      state.state !== 'error' &&
+      Date.now() < deadline
+    ) {
+      if (
+        state.state === 'awaiting-clarification' &&
+        !answeredRounds.has(state.clarificationRound as number)
+      ) {
+        const nextQuestions = state.clarificationQuestions as string[];
+        expect(nextQuestions.length).toBeGreaterThan(0);
+        expect(nextQuestions[0]).toMatch(/What exactly should I do/);
+        answeredRounds.add(state.clarificationRound as number);
+        await request(app)
+          .post(`/api/runs/${runId}/clarification`)
+          .send({ answers: Object.fromEntries(nextQuestions.map((q) => [q, 'the login page'])) })
+          .expect(200);
+      }
+      await new Promise((r) => setTimeout(r, 25));
+      state = (await request(app).get(`/api/runs/${runId}`)).body as Record<string, unknown>;
+    }
+    const done = state;
+    expect(answeredRounds.size).toBeGreaterThanOrEqual(2);
     expect(done.state).toBe('done');
     expect(done.outcome).toBe('failure');
     expect(done.report).toContain('Clarification needed');
-    // It never opened a round — there was nothing to answer.
-    expect(done.clarificationRound).toBeUndefined();
+    // Every question it printed was a real one: the heading is never blank.
+    const reportLines = (done.report as string).split('\n');
+    const headingAt = reportLines.findIndex((line) =>
+      line.trim().startsWith('⚠️ Clarification needed:')
+    );
+    expect(headingAt).toBeGreaterThanOrEqual(0);
+    expect(reportLines[headingAt + 1]?.trim()).not.toBe('');
+    expect(done.report).toContain('What exactly should I do');
   }, 30_000);
 
   it('after the round cap the run ends with a report naming the rounds', async () => {

@@ -5,6 +5,43 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.16.1] — 2026-09-25 — an unclear verdict can no longer arrive empty
+
+A real run (reported from a Windows machine, `I:\structured-ai\last\test-projects`)
+ended like this:
+
+```
+⚠️ Clarification needed:
+
+```
+
+Nothing under the heading — even though the model *had* answered with three
+questions. It had used the key `clarificationQuestions`; the response schema
+only declared `needsClarification`, and zod drops what a schema does not
+declare, so the questions were gone by the time the orchestrator looked at
+them. With an empty list the clarification loop breaks out immediately, so the
+refusal printed with no body (and nothing to answer). The end-to-end stub always
+answered `isClear: true`, which is why no test caught it.
+
+- **The schema now keeps the answers the model actually sends:** the
+  (`clarificationQuestions`, `questions`) spellings are optional, additive
+  fields, and the planner merges all three, trims them and drops duplicates
+  (case-insensitively) before anything else looks at them.
+- **"Unclear" always carries at least one question.** If a provider omits them
+  entirely, the planner asks a question built from what the runtime already
+  knows — the project root and the entries it can see — instead of asking for
+  the project location (`PROJECT CONTEXT` already supplies it). A clear verdict
+  is passed through untouched, so nothing extra is ever asked for a plan.
+- **The prompt names the field:** "put 1-5 specific, answerable questions in the
+  `needsClarification` array — never an empty list".
+- Verification: `src/ai/__tests__/clarification-fidelity.test.ts` (13 tests, the
+  aliased payload from the reported run included) and a new `clarify` e2e
+  scenario that answers the assessment the way the provider did and asserts the
+  questions reach the terminal, that the heading is never followed by a blank
+  line, that no plan is written, and that the session record keeps the
+  questions. The U5 server test now expects the fallback question to open a
+  round (previously it asserted the empty refusal) — 1125 tests, 166 e2e checks.
+
 ## [27.16.0] — 2026-09-25 — this runtime *as* an MCP server
 
 `hootl serve --mcp`: the reverse of `hootl mcp list`. Until now the runtime was

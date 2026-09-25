@@ -93,6 +93,21 @@ export const PlannerAssessmentSchema = z.object({
   isClear: z.boolean(),
   /** Clarification questions (only when isClear=false) */
   needsClarification: z.array(z.string()).default([]),
+  /**
+   * Tolerated aliases for `needsClarification` — the names models actually use.
+   *
+   * The response schema asks for `needsClarification`, but a provider that does
+   * not enforce it lets the model name the field itself.  zod then (correctly)
+   * strips the unknown key, so a real run showed the user
+   * `⚠️ Clarification needed:` with *nothing* under it: the model's three
+   * questions had been silently dropped during parsing.
+   *
+   * Declaring the aliases keeps those questions through the parse; the planner
+   * merges them (`normalizeAssessment`) and never returns "unclear" with an
+   * empty list.
+   */
+  clarificationQuestions: z.array(z.string()).optional(),
+  questions: z.array(z.string()).optional(),
   /** The plan (only when isClear=true) */
   plan: PlanSchema.optional(),
 });

@@ -271,8 +271,11 @@ layer exists at all.
 clarification unanswered, agent failure), **2** on usage errors (unknown model,
 bad flag values). With `--yes` or in a non-TTY environment the CLI never
 prompts: an unclear request fails with the planner's questions instead of
-hanging. In an interactive terminal the CLI asks clarification questions
-before planning and shows the plan summary before executing.
+hanging — and an unclear verdict always carries at least one question, so if a
+provider ever omits them the runtime asks one built from the project context
+rather than printing a blank `⚠️ Clarification needed:`. In an interactive
+terminal the CLI asks clarification questions before planning and shows the
+plan summary before executing.
 
 ### While it works: the terminal is never blank
 
@@ -770,7 +773,7 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**1112 tests green (66 files), 0 tsc errors — plus 161 committed end-to-end checks (`npm run e2e`)** (phases 18–43 complete — see `docs/history/`)
+**1125 tests green (67 files), 0 tsc errors — plus 166 committed end-to-end checks (`npm run e2e`)** (phases 18–43 complete — see `docs/history/`)
 
 ## Law Compliance
 

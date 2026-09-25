@@ -1333,6 +1333,60 @@ scenarios.mcpserve = async () => {
   return root;
 };
 
+/**
+ * Phase 44 — a clarification the runtime can actually act on.
+ *
+ * The stub answers the assessment exactly the way the provider did in the
+ * reported run: `isClear: false` with the questions under
+ * `clarificationQuestions` instead of the schema's `needsClarification`.  The
+ * terminal used to print `⚠️ Clarification needed:` with *nothing* under it —
+ * the questions were stripped during parsing.  Both the questions and the exit
+ * code are asserted here, and the session record too, so "the run told the user
+ * what to answer" is checked where the user sees it.
+ */
+scenarios.clarify = async () => {
+  const root = makeProject('clarify');
+  const { code, stdout } = await run(
+    runArgs('tidy up the evaluation fixtures NEEDSCLARIFY', root)
+  );
+
+  check('clarify: an unclear request fails the run (exit 1)', code === 1, `exit=${code}`);
+  check(
+    'clarify: the questions reached the user',
+    stdout.includes('multi-lang-eval or unreal-engine') &&
+      stdout.includes('What does "done" look like'),
+    (stdout || '').split('\n').slice(-6).join(' | ')
+  );
+  // The bug: a heading with an empty body.  The line after it must carry text.
+  const lines = stdout.split('\n').map((line) => line.trim());
+  const heading = lines.findIndex((line) => line.startsWith('⚠️ Clarification needed:'));
+  check(
+    'clarify: the refusal is never an empty heading',
+    heading >= 0 && lines[heading + 1] !== undefined && lines[heading + 1] !== '',
+    lines.slice(heading, heading + 3).join(' | ')
+  );
+  check(
+    'clarify: no plan was produced (nothing ran)',
+    !fs.existsSync(path.join(root, '.ai-runtime', 'plans')) ||
+      fs.readdirSync(path.join(root, '.ai-runtime', 'plans')).length === 0
+  );
+
+  // The session records what the user was asked, so `hootl sessions show` can
+  // explain a failed run after the terminal has scrolled away.
+  const sessionDir = path.join(root, '.ai-runtime', 'sessions');
+  const sessionText = fs.existsSync(sessionDir)
+    ? fs
+        .readdirSync(sessionDir)
+        .map((file) => fs.readFileSync(path.join(sessionDir, file), 'utf-8'))
+        .join('\n')
+    : '';
+  check(
+    'clarify: the session recorded the questions',
+    sessionText.includes('multi-lang-eval or unreal-engine') && sessionText.includes('outcome')
+  );
+  return root;
+};
+
 scenarios.resume = async () => {
   const root = makeProject('resume');
   await run(runArgs('write the project notes WRITE:notes/first.txt', root));

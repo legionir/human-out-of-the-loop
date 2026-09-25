@@ -492,6 +492,19 @@ function planPayload(promptText = '') {
 function structuredPayload(name, promptText) {
   switch (name) {
     case 'PlannerAssessment':
+      // NEEDSCLARIFY reproduces a real provider's answer verbatim: it says the
+      // request is unclear and puts the questions under a key the response
+      // schema did not declare (`clarificationQuestions`).  A run must show
+      // those questions, not an empty "Clarification needed:".
+      if (/\bNEEDSCLARIFY\b/.test(promptText)) {
+        return {
+          isClear: false,
+          clarificationQuestions: [
+            'Which sub-project should change: multi-lang-eval or unreal-engine?',
+            'What does "done" look like for it?',
+          ],
+        };
+      }
       return { isClear: true, needsClarification: [], plan: planPayload(promptText) };
     case 'ExecutionPlan':
       return planPayload(promptText);

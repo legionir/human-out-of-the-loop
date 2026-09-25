@@ -156,7 +156,8 @@ ${userRequest}
 """
 
 If the request is vague, ambiguous, or missing critical information,
-set isClear=false and list specific clarification questions.
+set isClear=false and put 1-5 specific, answerable questions in the
+\`needsClarification\` array — never an empty list.
 
 If the request is clear enough, set isClear=true and provide the full plan.
 `.trim();
@@ -188,6 +189,83 @@ ${userRequest}
     }
   }
   return prompt;
+}
+
+/**
+ * The names a model has used for "the questions I need answered before I can
+ * plan", when a provider did not enforce the response schema.  `needsClarification`
+ * is the real field; the rest are merged into it rather than dropped.
+ */
+export const CLARIFICATION_FIELD_ALIASES = ['clarificationQuestions', 'questions'] as const;
+
+/** Trim, drop blanks, and de-duplicate questions (a model often repeats one). */
+export function dedupeQuestions(questions: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of questions) {
+    const question = typeof raw === 'string' ? raw.trim() : '';
+    if (question === '') continue;
+    const key = question.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(question);
+  }
+  return out;
+}
+
+/**
+ * The question to ask when the model said "this is not clear enough" and then
+ * listed nothing.  It is built from what the runtime already knows (the project
+ * root and its top-level entries), so it never asks the user for the project or
+ * for context the run already has.
+ */
+export function fallbackClarificationQuestion(projectRoot?: string): string {
+  if (!projectRoot) {
+    return 'What exactly should I do? Name the deliverable — the files or directories to touch, and what "done" means.';
+  }
+  const root = path.resolve(projectRoot);
+  const entries = projectTopLevelEntries(root, 8);
+  const see = entries.length > 0 ? ` I can see: ${entries.join(', ')}.` : '';
+  return (
+    `What exactly should I do in ${root}?${see} ` +
+    'Name the deliverable — the files or directories to change, and what "done" means.'
+  );
+}
+
+/**
+ * Make an assessment usable, whatever shape the model answered in.
+ *
+ * Two guarantees, both of them lessons from a real run that showed the user
+ * `⚠️ Clarification needed:` with an empty list under it:
+ *
+ *   1. questions that arrived under an alias (`clarificationQuestions`,
+ *      `questions`) are merged into `needsClarification`;
+ *   2. `isClear: false` always comes back with at least one question — the
+ *      fallback names the project, so "what do you want me to do?" is
+ *      answerable instead of a dead end.
+ *
+ * A *clear* assessment is left exactly as it was: `needsClarification` is empty
+ * for a plan that is about to be executed.
+ */
+export function normalizeAssessment(
+  // `Partial` on purpose: a provider (or a test double) can hand back an object
+  // without the defaulted field, and that must not throw mid-plan.
+  assessment: PlannerAssessment | (Partial<PlannerAssessment> & { isClear: boolean }),
+  options: { projectRoot?: string } = {}
+): PlannerAssessment {
+  const merged = dedupeQuestions([
+    ...(assessment.needsClarification ?? []),
+    ...(assessment.clarificationQuestions ?? []),
+    ...(assessment.questions ?? []),
+  ]);
+  if (assessment.isClear) {
+    return { ...assessment, needsClarification: merged } as PlannerAssessment;
+  }
+  return {
+    ...assessment,
+    needsClarification:
+      merged.length > 0 ? merged : [fallbackClarificationQuestion(options.projectRoot)],
+  } as PlannerAssessment;
 }
 
 export class Planner {
@@ -234,17 +312,22 @@ export class Planner {
         )
       );
 
+      // The provider may not have enforced the response schema, so the answer is
+      // normalized before anything reads it: aliased question fields are merged,
+      // and "unclear" always carries at least one question (see the function).
+      const assessment = normalizeAssessment(object, { projectRoot: this.config.projectRoot });
+
       // Phase 30 (P10 follow-up): a plan that arrives inside the assessment
       // must be given the same shape `generatePlan` produces.  Without an id
       // it could not be cancelled/resumed via the CLI or the API, its log
       // entries carried no planId at all, and every id-less plan was written
       // to the SAME store file (`sha256("unknown")`).
-      if (object.plan) {
-        object.plan = finalizePlan(object.plan);
+      if (assessment.plan) {
+        assessment.plan = finalizePlan(assessment.plan);
       }
-      reportLlmUsage(this.config.onUsage, 'planning', usage, usagePlanId ?? object.plan?.id);
+      reportLlmUsage(this.config.onUsage, 'planning', usage, usagePlanId ?? assessment.plan?.id);
 
-      return object;
+      return assessment;
     } catch (err) {
       // Phase 30 (P5): say WHY (a deadline, a provider error, bad output).
       // It is a failure, not a question for the user — `plan()` reports it
