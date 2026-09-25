@@ -5,7 +5,7 @@
 **هدف:** بستن شکاف ابزارها با سرورهای مرجع (git / memory / time / sequentialthinking / fetch)، افزودن **Journal** به‌عنوان ثبت خودکار همه‌کارهای AI، و عرضهٔ خود runtime به‌عنوان یک **MCP server**
 **قانون اجرا:** مثل پلن‌های قبلی — هر فاز یک commit + push مستقل روی `arena/01a0d510-human-out-of-the-loop`، معیار پذیرش کامل پیش از فاز بعد، علامت 🟢 در همین فایل، و هر فاز در بدنهٔ PR #3 اضافه می‌شود.
 
-**وضعیت:** 🔵 در حال اجرا (هیچ فازی شروع نشده)
+**وضعیت:** 🔵 در حال اجرا — تصمیم‌های بخش ۶ قفل شد؛ فاز ۳۷ در جریان
 
 ---
 
@@ -200,16 +200,17 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 
 **ابزارها:** `git_add`, `git_commit`, `git_create_branch`, `git_checkout`, `git_reset`, `git_push`, `git_stash` (اختیاری), `git_pr_create`, `git_pr_list`, `git_pr_view`, `git_pr_comment`
 
-**مدل امنیتی (جایگزین محدودیت «هیچ نوشتنی»):**
-1. **allowlist زیرفرمان:** فقط زیرفرمان‌های همین ابزارها؛ هیچ ورودی آزادی برای پرچم‌ها (`--force`, `-f`, `--no-verify`, `--hard` بدون مجوز صریح) پذیرفته نمی‌شود.
-2. **برنچ‌های محافظت‌شده** (پیش‌فرض `main`, `master`) — push مستقیم و reset روی آن‌ها ممنوع (`PROTECTED_BRANCH`).
-3. **تأیید لازم** برای عملیات مخرب: `git_reset` (به‌خصوص `--hard`), `git_checkout` با working tree کثیف, `git_push` → با `confirmDestructive: true` **و** در CLI از مسیر approval موجود (`execution-denied` فاز ۳۰) عبور کند.
-4. `git_commit`: فقط آنچه staged است (یا `paths` صریح)، پیام اجباری و غیرخالی، هویت author از `git config` خوانده می‌شود و **هرگز** config نوشته نمی‌شود.
-5. `git_push`: پیش‌فرض `origin` + برنچ جاری + `--set-upstream` اختیاری؛ بدون force در هیچ حالتی.
+**مدل امنیتی (بر پایهٔ همان کاری که `servers-main/src/git` می‌کند — بخش ۶.۱):**
+1. **مرجع‌محور:** بدون shell (argv مستقیم)، `--` قبل از مسیرها، رد هر ورودی با `-` در ابتدا، `git_reset` پیش‌فرض = **unstage**.
+2. **برنچ‌های محافظت‌شده** (پیش‌فرض `main`, `master`, قابل تنظیم): push مستقیم و `reset --hard` روی آن‌ها ممنوع (`PROTECTED_BRANCH`).
+3. **مخرب‌ها پشت پرچم صریح:** `git_reset --hard` و `git_checkout` با `discardChanges: true` فقط با `confirmDestructive: true` — خطای `CONFIRM_REQUIRED` فهرست دقیق چیزی که از دست می‌رود را برمی‌گرداند.
+4. **`--force` ساخته نمی‌شود:** `git_push` هیچ گزینهٔ force/`--no-verify` ندارد.
+5. `git_commit`: فقط آنچه staged است (یا `paths` صریح)، پیام اجباری و غیرخالی، هویت author از `git config` خوانده می‌شود و **هرگز** config نوشته نمی‌شود.
+6. `git_push`: پیش‌فرض `origin` + برنچ جاری + `--set-upstream` اختیاری.
 6. **PR:** اول `gh` اگر در PATH بود (`gh pr create/list/view/comment --json`)، وگرنه GitHub REST با `GITHUB_TOKEN`/`GH_TOKEN`؛ نبودِ هر دو → `PR_UNAVAILABLE` با راهنمای نصب/توکن. هیچ توکنی در Journal نمی‌رود (فاز ۳۷ صریحاً assert می‌کند).
 7. هر عملیات: قبل/بعد `HEAD` + `status --porcelain` در نتیجه برگردانده می‌شود (و در Journal ثبت) — «چه چیزی عوض شد» همیشه قابل‌بازبینی است.
 
-**معیار پذیرش:** تست واحد روی مخزن واقعی: add/commit (SHA عوض شود، پیام درست)، ساخت و checkout برنچ (حالت کثیف → خطا بدون `confirmDestructive`)، reset soft/hard، push به یک remote محلی bare در `mkdtemp` (بدون شبکه)، رد شدن push به `main`، رد شدن `--force`. PR: تست با `gh` mock (stub در PATH) و مسیر REST با یک fetch mock؛ نبود gh+token → `PR_UNAVAILABLE`. e2e: سناریوی `gitwrite` — ساخت برنچ، commit، push به remote bare محلی، سپس assert روی لاگ/Journal.
+**معیار پذیرش:** تست واحد روی مخزن واقعی: add/commit (SHA عوض شود، پیام درست)، ساخت و checkout برنچ، `reset --hard` بدون پرچم → `CONFIRM_REQUIRED` و **بدون هیچ تغییری روی دیسک**، با پرچم → انجام شود، رد شدن `--hard` روی `main` (`PROTECTED_BRANCH`)، push به یک remote محلی bare در `mkdtemp` (بدون شبکه)، رد شدن push به `main`، و آزمون اینکه گزینهٔ force در شِمای ابزار **وجود ندارد**. PR: تست با `gh` mock (stub در PATH) و مسیر REST با یک fetch mock؛ نبود gh+token → `PR_UNAVAILABLE`. e2e: سناریوی `gitwrite` — ساخت برنچ، commit، push به remote bare محلی، سپس assert روی لاگ/Journal.
 
 ---
 
@@ -280,4 +281,32 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 2. **PR:** اجرا از طریق `gh` (اگر نصب باشد) کافی است، یا پشتیبانی REST با `GITHUB_TOKEN` هم لازم است؟ (پیش‌فرض پلن: هر دو)
 3. **fetch:** آدرس‌های private/loopback به‌صورت پیش‌فرض مسدود باشند؟ (پیش‌فرض پلن: بله، با override)
 4. **memory:** دامنهٔ پیش‌فرض project-scoped باشد یا global (مشترک بین پروژه‌ها) هم لازم است؟
-5. **MCP server:** فقط stdio یا HTTP + token هم؟ (پیش‌فرض پلن: هر دو)
+## ۶) تصمیم‌های قفل‌شده (۲۰۲۶-۰۹-۲۵، پاسخ کاربر)
+
+### ۶.۱ Git — امنیت ساختاری، نه تأیید تعاملی (منبع: خود `servers-main/src/git`)
+
+کاربر پرسید «آیا در `servers-main/src/git` وجود ندارد؟» — بررسی شد و جواب **منفی** است: مرجع هیچ مکانیزم تأییدی ندارد. کاری که می‌کند:
+
+| مکانیزم مرجع | جای آن در کد |
+|---|---|
+| بدون shell — GitPython، argv مستقیم | کل `server.py` |
+| `--` قبل از مسیرها (فایلی که با `-` شروع شود، پرچم تفسیر نشود) | `git_add` |
+| رد ref/برنچ/timestamp که با `-` شروع می‌شود (ضد flag-injection) | `git_log`, `git_create_branch`, `git_checkout`, `git_show` |
+| **`git_reset` فقط unstage است** (`repo.index.reset()`) — `--hard` در مرجع **وجود ندارد** | تابع `git_reset` |
+
+**تصمیم (بهترین کار = فلسفهٔ مرجع + آنچه مرجع ندارد):**
+
+1. **همان کاری که مرجع می‌کند عیناً:** بدون shell (argv مستقیم)، `--` قبل از مسیرها، رد هر ورودی با `-` در ابتدا، و `git_reset` با پیش‌فرض **unstage**.
+2. **`--hard` قابلیتی است که نباید پیش‌فرض باشد:** فقط با `confirmDestructive: true` صریح؛ در غیر این‌صورت خطای `CONFIRM_REQUIRED` که فهرست دقیق فایل‌های dirty (چیزی که از دست می‌رود) را برمی‌گرداند. پرچم، نه پرسش تعاملی — تا در CI و اجرای `--yes` هم قابل استفاده بماند و مدل نتواند تصادفی (یا از طریق prompt-injection) مخرب باشد.
+3. **دو چیزی که مرجع ندارد و ما اضافه می‌کنیم:**
+   - **برنچ‌های محافظت‌شده** (پیش‌فرض `main`, `master`، قابل تنظیم): `push` مستقیم و `reset --hard` روی آن‌ها ممنوع (`PROTECTED_BRANCH`).
+   - **`--force` ساخته نمی‌شود:** `git_push` هیچ گزینهٔ force/`--no-verify` ندارد — نه پنهان، نه با پرچم. کسی که force می‌خواهد، دستی می‌زند. (همان اصل مرجع: خطرناک را نساز.)
+4. **`checkout`:** جابه‌جایی برنچ با working tree کثیف را خود git مدیریت می‌کند (و در تعارض refuse)؛ حالت خطرناک، `checkout` برای **دورریختن تغییرات** است (`discardChanges: true`) که مثل `--hard` به `confirmDestructive` نیاز دارد.
+5. Journal (فاز ۳۷) هر عملیات نوشتنی را با argv کامل، `HEAD` قبل/بعد و `status --porcelain` ثبت می‌کند — audit trail همان چیزی است که تأیید را معنادار می‌کند.
+
+### ۶.۲ بقیهٔ تصمیم‌ها
+
+- **PR:** هر دو مسیر — اول `gh` (اگر در PATH و authenticated)، وگرنه GitHub REST با `GITHUB_TOKEN`/`GH_TOKEN`؛ نبود هر دو → `PR_UNAVAILABLE` با راهنمای نصب/توکن.
+- **fetch:** آدرس‌های private/loopback/link-local **پیش‌فرض مسدود**، با `allowPrivate: true` برای override (دفاع در برابر SSRF و prompt injection).
+- **memory:** فقط **project-scoped** (`<project>/.ai-runtime/memory.json`) — بدون scope جهانی.
+- **MCP server:** stdio پیش‌فرض + HTTP فقط روی `127.0.0.1` با bearer token.
