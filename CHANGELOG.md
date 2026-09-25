@@ -5,6 +5,56 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.0] — 2026-09-25 — it answers when talking, plans when working
+
+Until now *every* request became a plan — `hootl run "hello"` planned, confirmed
+and "executed" a greeting.  A run now decides what the request actually needs:
+
+    auto (default)   a question, a greeting or a conversation is ANSWERED
+                     (read-only tools, nothing executed, exit 0);
+                     real work becomes a plan, exactly as before;
+                     "this is too vague" still asks first.
+    chat             never plan — answer, even if the request sounds like work.
+    plan             never answer — plan, even a greeting.
+
+- **Choose it where you think of it:** `@chat <message>` / `@plan <task>`
+  inside the request (the prefix is stripped before anything else sees it), or
+  `--mode auto|chat|plan`, or `HOTL_MODE`, or `defaultMode` in the config.
+  Precedence: prefix > flag > env > config > auto.  A bad value is a usage
+  error (exit 2) naming its source, never a silent fallback.  `@aur/auto …`
+  and every other `@word` are left alone — only the three mode words followed
+  by a space count.  In the REPL: `/mode [auto|chat|plan]` and `/chat <msg>`.
+  The run says `Mode: chat (prefix)` when the choice did not come from the
+  default.
+- **Chat reads, but cannot write:** the answer runs through the same
+  AgentRuntime a plan step uses, with the `chat` persona and exactly the
+  read-only tool set `hootl serve --mcp --read-only` exposes — so "what does
+  this project do?" can actually look at the files.  A tool call in a chat
+  turn lands in the Journal like any other (`agentId: "chat-runtime"`), and a
+  chat run writes no plan id, no plan file, no step.
+- **The answer is in the user's language.**  A script detector names the
+  request's language; when it can (Persian, Russian, Greek, Hebrew, Hindi,
+  Bengali, Thai, Japanese, Korean, Chinese) the prompt says so in those words,
+  and when the Arabic script cannot distinguish Persian from Arabic the
+  instruction names the script and tells the model to match the request rather
+  than guessing.  Latin requests get the generic rule.  The rule travels with
+  the assessment prompt, the plan prompt, every agent's system prompt, the
+  acceptance judgment and the review — and the one question the runtime writes
+  itself (the fallback clarification) has a Persian template too.
+- **Over HTTP:** `POST /api/run { mode }` (validated, 400 on a bad value);
+  a chat run ends `done`, `outcome: "success"`, the answer as its report and
+  **no plan id**; `POST /api/preview` returns `{ ok, answer }` instead of a
+  plan, still touching nothing.
+- **`--dry-run` follows the mode:** in chat mode it prints the answer and
+  executes nothing (there is nothing to preview).
+- Verification: `src/ai/__tests__/chat-mode.test.ts` (25 tests: modes,
+  prefixes, precedence, prompt content, language detection, the read-only
+  catalog, and the orchestrator's chat/plan/clarify branches),
+  `src/server/__tests__/v2717-chat-mode.test.ts` (4 tests), the CLI suite
+  (+10 tests) and the e2e scenario `chat` (13 checks) — a chat turn that reads
+  the README, is journalled, answers in Persian, and the same request planned
+  again under `@plan`. 1165 tests, 182 e2e checks.
+
 ## [27.16.1] — 2026-09-25 — an unclear verdict can no longer arrive empty
 
 A real run (reported from a Windows machine, `I:\structured-ai\last\test-projects`)

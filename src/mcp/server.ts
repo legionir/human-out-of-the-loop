@@ -97,41 +97,17 @@ interface ExposedTool {
   tool: Tool;
 }
 
-/**
- * Tools that cannot change anything: reads, listings, searches, the clock,
- * conversion, the web reader, the git *reads*, and the memory reads.
- *
- * This is an allowlist, not a denylist by file-writing name: a new write tool
- * added to the catalog is therefore private under `--read-only` until someone
- * decides otherwise here, which is the direction the mistake should point.
- * (`sequentialthinking` is deliberately absent: it persists a session file.)
- */
-const READ_ONLY_PREFIXES = ['read_', 'list_', 'search_', 'get_'] as const;
+import { isReadOnlyTool, readOnlyToolIds } from '../ai/tools/read-only.js';
 
-const READ_ONLY_IDS = new Set([
-  'directory_tree',
-  'convert_time',
-  'fetch',
-  'git_status',
-  'git_diff',
-  'git_log',
-  'git_show',
-  'git_branch_list',
-  'git_remote_list',
-  'read_graph',
-  'search_nodes',
-  'open_nodes',
-]);
-
-export function isReadOnlyTool(id: string): boolean {
-  if (READ_ONLY_IDS.has(id)) return true;
-  return READ_ONLY_PREFIXES.some((prefix) => id.startsWith(prefix));
-}
-
-/** The ids `--read-only` would expose, out of the full catalog. */
-export function readOnlyToolIds(ids: readonly string[] = LOCAL_TOOL_IDS): string[] {
-  return ids.filter(isReadOnlyTool);
-}
+// The read-only rule itself lives with the tools (`src/ai/tools/read-only.ts`)
+// because chat mode uses it too; re-exported here so `--read-only` consumers and
+// the phase-43 tests keep importing it from the server module they know.
+export {
+  isReadOnlyTool,
+  readOnlyToolIds,
+  READ_ONLY_IDS,
+  READ_ONLY_PREFIXES,
+} from '../ai/tools/read-only.js';
 
 export class McpServer {
   readonly projectRoot: string;

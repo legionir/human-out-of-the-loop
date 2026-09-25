@@ -1,5 +1,6 @@
 import { generateObject } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from './llm-timeout.js';
+import { languageSection } from '../language.js';
 import { reportLlmUsage, type LlmUsageReporter } from './llm-usage.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
@@ -192,6 +193,8 @@ You are producing the final review of a plan execution.
 
 ## User's Goal
 ${plan.goal}
+
+${languageSection(plan.goal)}
 
 ## Execution Summary
 - Plan id: ${plan.id ?? 'unknown'}

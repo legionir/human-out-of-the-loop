@@ -11,7 +11,7 @@ Two things live here:
 
 ```bash
 npm run build          # the scenarios drive the real CLI
-npm run e2e            # all of them  (~25 s)
+npm run e2e            # all of them  (~60 s)
 npm run e2e -- resume  # one by them by name
 ```
 
@@ -40,6 +40,7 @@ Exit code is 0 only when every check passed. `E2E_SCENARIO_TIMEOUT_MS`
 | `gitwrite` | phase 42: the scratch project is a real repository with a **bare remote in `/tmp`**, so the scenario asserts what actually arrived — a feature branch created by `git_create_branch`, a commit from `git_add`/`git_commit`, and the push that put shas on the remote. Two guards are expected failures: a push to `main` (`PROTECTED_BRANCH` — the remote's only ref is the feature branch) and an unconfirmed `reset --hard` (`CONFIRM_REQUIRED` — HEAD and the tree are unchanged afterwards). The Journal must carry every write call, the commit message and the branch |
 | `mcpserve` | phase 43: our own client (`hootl tools --mcp`) connects to our own server (`hootl serve --mcp`) through a project registry entry and lists its 45 tools; then the scenario speaks raw stdio itself — `initialize` answers with the server identity, `tools/call` returns a file through the same sandbox the agent uses, a path outside the project is refused **in-band** (`PATH_TRAVERSAL_BLOCKED`, not a crash), stdout carried protocol only — and both the success and the refusal are asserted in the Journal (`agentId: "mcp"`, refusal with its code) |
 | `clarify` | v27.16.1: a request the planner calls unclear fails the run with the questions it asked — the stub answers the assessment the way the provider did in the reported run (`isClear: false`, questions under `clarificationQuestions` instead of the schema's `needsClarification`), and the scenario asserts the questions reached the terminal, that the `⚠️ Clarification needed:` heading is never followed by a blank line, that no plan was written, and that the session record carries the questions — then a second run where the planner lists nothing at all (`NEEDSCLARIFYNONE`), whose refusal must still have a body: the fallback question, naming the project it already knows. Both runs exit 1 |
+| `chat` | v27.17.0: the same request answered and planned. `@chat` exits 0 with a `💬 Answer` and **no plan** (nothing in `.ai-runtime/plans`, nothing executed, the session records a success); a chat turn that reads the README is **journalled** like any other tool call (`agentId: chat-runtime`) and was offered only the 22 read-only tools; the Persian request really carried `The user wrote in Persian` into the model, and the stub answers in Persian only because of it; `auto` recognises the conversation without a prefix; `@plan` on the very same request goes back to planning |
 | `resume` | `plans resume` dispatches only the unfinished steps and a second resume is a no-op |
 | `sandbox` | `read_file`/`write_file` cannot escape the project root |
 | `credential` | a hostile note makes the model echo an API key; it never reaches any artifact, and the redaction marker proves the trap fired |

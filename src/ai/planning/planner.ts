@@ -10,6 +10,8 @@ import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { ModelRegistry } from '../registries/model-registry.js';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
+import { DEFAULT_RUN_MODE, type RunMode } from '../modes.js';
+import { detectLanguage, languageSection, type DetectedLanguage } from '../language.js';
 import {
   PlanSchema,
   PlannerAssessmentSchema,
@@ -42,13 +44,28 @@ export interface PlannerConfig {
   onUsage?: LlmUsageReporter;
 }
 
+/**
+ * What came out of planning (v27.17.0).
+ *
+ * `isClear` stays for the callers that learned it first; the kind is what the
+ * orchestrator branches on, and it is the only place the three outcomes are
+ * named.
+ */
+export type AssessmentKind = 'plan' | 'answer' | 'clarify';
+
 export interface PlanningResult {
+  /** What the planner decided — see `AssessmentKind`. */
+  kind: AssessmentKind;
   /** Whether the request was clear enough to produce a plan */
   isClear: boolean;
   /** Clarification questions (when isClear=false) */
   needsClarification: string[];
-  /** The generated plan (when isClear=true) */
+  /** The generated plan (when kind="plan") */
   plan?: Plan;
+  /** The model's own reply (when kind="answer") — may be empty; the
+   *  orchestrator answers again with read-only tools and uses this as the
+   *  fallback. */
+  answer?: string;
   /** Errors encountered during planning */
   errors: string[];
 }
@@ -142,24 +159,43 @@ export function buildProjectContext(projectRoot: string | undefined): string {
  * The assessment prompt — exported so the PROJECT CONTEXT it carries can
  * be asserted without a model call.
  */
-export function buildAssessmentPrompt(userRequest: string, projectRoot?: string): string {
+export function buildAssessmentPrompt(
+  userRequest: string,
+  projectRoot?: string,
+  mode: RunMode = DEFAULT_RUN_MODE
+): string {
   const context = buildProjectContext(projectRoot);
   const note = context
     ? `${context}\n\nA request that only lacks the project, its location or its technology stack is CLEAR: the context above supplies them.\n`
     : '';
+  // The mode decides what the three kinds mean for this run; without this the
+  // model would happily answer a greeting even when the user typed `@plan`.
+  const modeRule =
+    mode === 'chat'
+      ? 'The user asked for a CONVERSATION: set kind="answer" and put your reply in the "answer" field. Do not plan.'
+      : mode === 'plan'
+        ? 'The user asked for a PLAN: real work is expected. Set kind="plan" and provide the full plan, even for a short request — use kind="clarify" only when the request cannot be planned without an answer you cannot infer.'
+        : 'Decide what the request needs:\n' +
+          '- a greeting, a question, an explanation, or anything you can answer yourself → kind="answer" with your reply in the "answer" field;\n' +
+          '- real work in this project (files to change, commands to run, several steps) → kind="plan" and provide the full plan;\n' +
+          '- too vague to do either → kind="clarify" and ask.';
   return `
-You are assessing whether the following user request is clear enough
-to produce a detailed execution plan.
-${note ? `\n${note}` : ''}USER REQUEST:
+You are deciding what to do with the following user request.
+${note ? `\n${note}` : ''}
+${modeRule}
+${'\n' + languageSection(userRequest)}
+
+USER REQUEST:
 """
 ${userRequest}
 """
 
-If the request is vague, ambiguous, or missing critical information,
-set isClear=false and put 1-5 specific, answerable questions in the
-\`needsClarification\` array — never an empty list.
+Set kind="plan" or kind="answer" or kind="clarify" and fill the matching field:
+- "plan": the complete execution plan (goal + steps with personas, skills, tools and acceptance criteria);
+- "answer": your reply to the user, written for them (not a summary of this decision);
+- "clarify": put 1-5 specific, answerable questions in the "needsClarification" array — never an empty list.
 
-If the request is clear enough, set isClear=true and provide the full plan.
+A request that is a question about the project, its files, or the runtime is kind="answer"; when it can only be answered by reading the project, say what you need in the answer — do not invent file contents.
 `.trim();
 }
 
@@ -176,6 +212,8 @@ export function buildPlanPrompt(
   let prompt = `
 Decompose the following user request into a detailed execution plan.
 ${context ? `\n${context}\n` : ''}
+${languageSection(userRequest)}
+
 USER REQUEST:
 """
 ${userRequest}
@@ -214,18 +252,60 @@ export function dedupeQuestions(questions: readonly string[]): string[] {
 }
 
 /**
+ * The words models use for the three kinds (v27.17.0).  Anything unknown is
+ * ignored, so `normalizeAssessment` falls back to the fields that were filled.
+ */
+export function normalizeKind(value: unknown): AssessmentKind | undefined {
+  if (typeof value !== 'string') return undefined;
+  const word = value.trim().toLowerCase();
+  if (!word) return undefined;
+  if (['answer', 'chat', 'reply', 'respond', 'response', 'conversation', 'question'].includes(word)) {
+    return 'answer';
+  }
+  if (['plan', 'task', 'execute', 'work', 'action'].includes(word)) return 'plan';
+  if (['clarify', 'clarification', 'ask', 'unclear', 'ambiguous'].includes(word)) return 'clarify';
+  return undefined;
+}
+
+/** The model's own prose, under any of the three names it uses for it. */
+export function firstAnswer(assessment: {
+  answer?: string;
+  response?: string;
+  reply?: string;
+}): string | undefined {
+  for (const candidate of [assessment.answer, assessment.response, assessment.reply]) {
+    if (typeof candidate === 'string' && candidate.trim().length > 0) return candidate.trim();
+  }
+  return undefined;
+}
+
+/**
  * The question to ask when the model said "this is not clear enough" and then
  * listed nothing.  It is built from what the runtime already knows (the project
  * root and its top-level entries), so it never asks the user for the project or
  * for context the run already has.
  */
-export function fallbackClarificationQuestion(projectRoot?: string): string {
-  if (!projectRoot) {
+export function fallbackClarificationQuestion(
+  projectRoot?: string,
+  language?: DetectedLanguage
+): string {
+  const root = projectRoot ? path.resolve(projectRoot) : undefined;
+  const entries = root ? projectTopLevelEntries(root, 8) : [];
+  const see = entries.length > 0 ? ` I can see: ${entries.join(', ')}.` : '';
+
+  // The one question the runtime writes itself must be in the user's language:
+  // a Persian speaker who gets an English fallback has been asked nothing.
+  if (language?.code === 'fa') {
+    const where = root ? ` در ${root}` : '';
+    const listing = entries.length > 0 ? ` اینها را می‌بینم: ${entries.join('، ')}.` : '';
+    if (language.code === 'fa') {
+      return `دقیقاً چه کاری باید${where} انجام دهم؟${listing} خروجی مورد نظر را مشخص کن — کدام فایل‌ها یا دایرکتوری‌ها باید تغییر کنند و «تمام‌شده» یعنی چه.`;
+    }
+  }
+
+  if (!root) {
     return 'What exactly should I do? Name the deliverable — the files or directories to touch, and what "done" means.';
   }
-  const root = path.resolve(projectRoot);
-  const entries = projectTopLevelEntries(root, 8);
-  const see = entries.length > 0 ? ` I can see: ${entries.join(', ')}.` : '';
   return (
     `What exactly should I do in ${root}?${see} ` +
     'Name the deliverable — the files or directories to change, and what "done" means.'
@@ -250,22 +330,66 @@ export function fallbackClarificationQuestion(projectRoot?: string): string {
 export function normalizeAssessment(
   // `Partial` on purpose: a provider (or a test double) can hand back an object
   // without the defaulted field, and that must not throw mid-plan.
-  assessment: PlannerAssessment | (Partial<PlannerAssessment> & { isClear: boolean }),
-  options: { projectRoot?: string } = {}
+  assessment: PlannerAssessment | (Partial<PlannerAssessment> & { isClear?: boolean }),
+  options: { projectRoot?: string; mode?: RunMode; language?: DetectedLanguage } = {}
 ): PlannerAssessment {
   const merged = dedupeQuestions([
     ...(assessment.needsClarification ?? []),
     ...(assessment.clarificationQuestions ?? []),
     ...(assessment.questions ?? []),
   ]);
-  if (assessment.isClear) {
-    return { ...assessment, needsClarification: merged } as PlannerAssessment;
+  const answer = firstAnswer(assessment);
+  const mode = options.mode ?? DEFAULT_RUN_MODE;
+
+  // The kind the model asked for, if it named one; otherwise derive it from the
+  // fields it filled.  The order matters: an explicit `isClear: false` is a
+  // refusal to proceed, and a plan is always a plan.
+  const declared =
+    normalizeKind(assessment.kind) ??
+    normalizeKind(assessment.intent) ??
+    (assessment.isClear === false
+      ? 'clarify'
+      : answer && !assessment.plan
+        ? 'answer'
+        : 'plan');
+
+  /**
+   * The mode the user chose wins over the model's own idea of the request —
+   * that is the whole point of `@plan` / `@chat` — but never over a refusal
+   * that only the user can resolve:
+   *   - a forced plan cannot become an answer;
+   *   - a forced answer cannot become a plan (the user asked to talk);
+   *   - "clarify" survives `plan` (real work that needs an answer is still
+   *     asked about) but not `chat` (chat replies in prose, it does not open
+   *     the clarification loop).
+   */
+  let kind = declared;
+  if (mode === 'chat') kind = 'answer';
+  else if (mode === 'plan' && kind === 'answer') kind = 'plan';
+
+  if (kind === 'answer') {
+    return {
+      ...assessment,
+      kind: 'answer',
+      isClear: true,
+      answer,
+      needsClarification: merged,
+    } as PlannerAssessment;
   }
-  return {
-    ...assessment,
-    needsClarification:
-      merged.length > 0 ? merged : [fallbackClarificationQuestion(options.projectRoot)],
-  } as PlannerAssessment;
+
+  if (kind === 'clarify') {
+    return {
+      ...assessment,
+      kind: 'clarify',
+      isClear: false,
+      needsClarification:
+        merged.length > 0
+          ? merged
+          : [fallbackClarificationQuestion(options.projectRoot, options.language)],
+    } as PlannerAssessment;
+  }
+
+  return { ...assessment, kind: 'plan', isClear: true, needsClarification: merged } as PlannerAssessment;
 }
 
 export class Planner {
@@ -286,11 +410,13 @@ export class Planner {
   async assess(
     userRequest: string,
     usagePlanId?: string,
-    modelId?: string
+    modelId?: string,
+    mode: RunMode = DEFAULT_RUN_MODE
   ): Promise<PlannerAssessment> {
     const agent = this.buildPlannerAgent(modelId);
 
-    const assessmentPrompt = buildAssessmentPrompt(userRequest, this.config.projectRoot);
+    const language = detectLanguage(userRequest);
+    const assessmentPrompt = buildAssessmentPrompt(userRequest, this.config.projectRoot, mode);
 
     try {
       const { object, usage } = await withStructuredRetry(() =>
@@ -315,7 +441,11 @@ export class Planner {
       // The provider may not have enforced the response schema, so the answer is
       // normalized before anything reads it: aliased question fields are merged,
       // and "unclear" always carries at least one question (see the function).
-      const assessment = normalizeAssessment(object, { projectRoot: this.config.projectRoot });
+      const assessment = normalizeAssessment(object, {
+        projectRoot: this.config.projectRoot,
+        mode,
+        ...(language ? { language } : {}),
+      });
 
       // Phase 30 (P10 follow-up): a plan that arrives inside the assessment
       // must be given the same shape `generatePlan` produces.  Without an id
@@ -380,12 +510,39 @@ export class Planner {
    * @param modelId model for this call (a per-run override); default: the
    *   planner's configured model.
    */
-  async plan(userRequest: string, usagePlanId?: string, modelId?: string): Promise<PlanningResult> {
+  /**
+   * Turn a request into ONE of three outcomes (v27.17.0):
+   *
+   *   plan     a plan, ready for confirmation (the pre-v27.17 behaviour);
+   *   answer   the model's own reply — the request was a conversation;
+   *   clarify  questions for the user (or the reason nothing could be asked).
+   *
+   * `mode` is the user's choice (`--mode`, `@chat`/`@plan`, `HOTL_MODE`,
+   * config); `auto` — the default — lets the model decide, which is why the
+   * classification costs one extra call that only planning ever paid for.
+   */
+  async plan(
+    userRequest: string,
+    usagePlanId?: string,
+    modelId?: string,
+    mode: RunMode = DEFAULT_RUN_MODE
+  ): Promise<PlanningResult> {
     try {
-      const assessment = await this.assess(userRequest, usagePlanId, modelId);
+      const assessment = await this.assess(userRequest, usagePlanId, modelId, mode);
 
-      if (!assessment.isClear) {
+      if (assessment.kind === 'answer') {
         return {
+          kind: 'answer',
+          isClear: true,
+          needsClarification: [],
+          ...(assessment.answer ? { answer: assessment.answer } : {}),
+          errors: [],
+        };
+      }
+
+      if (assessment.kind === 'clarify' || assessment.isClear !== true) {
+        return {
+          kind: 'clarify',
           isClear: false,
           needsClarification: assessment.needsClarification,
           errors: [],
@@ -394,6 +551,7 @@ export class Planner {
 
       if (assessment.plan) {
         return {
+          kind: 'plan',
           isClear: true,
           needsClarification: [],
           plan: assessment.plan,
@@ -403,6 +561,7 @@ export class Planner {
 
       const plan = await this.generatePlan(userRequest, undefined, usagePlanId, modelId);
       return {
+        kind: 'plan',
         isClear: true,
         needsClarification: [],
         plan,
@@ -411,11 +570,55 @@ export class Planner {
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       return {
+        kind: 'clarify',
         isClear: false,
         needsClarification: [],
         errors: [message],
       };
     }
+  }
+
+  /**
+   * The chat-mode answer prompt (v27.17.0): the user's request, the project
+   * context it may be about, and the language rule.  The system prompt comes
+   * from the `chat` persona (read-only tools, "never claim you did something").
+   */
+  buildAnswerPrompt(userRequest: string): string {
+    const context = buildProjectContext(this.config.projectRoot);
+    return `
+${context ? `${context}\n` : ''}${languageSection(userRequest)}
+
+USER REQUEST:
+"""
+${userRequest}
+"""
+
+Answer the request above directly, in the user's language. Use the read-only tools if you need to check something in the project — read, never guess. If the request needs files to change or several steps of work, say so in a sentence or two and point the user at \`@plan <request>\`; never pretend you did it.
+`.trim();
+  }
+
+  /**
+   * Build the `chat` agent: the chat persona with the read-only half of the
+   * catalog.  `toolIds: []` gives a pure text answer (used by previews, which
+   * must not touch the project).
+   */
+  buildChatAgent(modelId?: string, toolIds?: readonly string[]): ResolvedAgent {
+    return createAgent({
+      agentDefinition: {
+        id: 'chat-runtime',
+        name: 'Chat',
+        personaId: 'chat',
+        skillIds: [],
+        ...(toolIds ? { toolIds: [...toolIds] } : {}),
+        modelId: modelId ?? this.config.modelId ?? 'gpt-4o',
+      },
+      refs: {
+        personaRegistry: this.config.personaRegistry,
+        skillRegistry: this.config.skillRegistry,
+        toolRegistry: this.config.toolRegistry,
+        modelRegistry: this.config.modelRegistry,
+      },
+    });
   }
 
   // ── Private helpers ───────────────────────────────────────────

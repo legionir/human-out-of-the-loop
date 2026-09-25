@@ -89,6 +89,20 @@ export type Plan = z.infer<typeof PlanSchema>;
  * clarification questions are returned.
  */
 export const PlannerAssessmentSchema = z.object({
+  /**
+   * What the planner decided to do with the request (v27.17.0):
+   *
+   *   plan     real work — produce a plan (the pre-v27.17 behaviour);
+   *   answer   a greeting, a question, a conversation — reply, never plan;
+   *   clarify  the request is too vague to plan or answer — ask questions.
+   *
+   * Optional on purpose: a provider that does not enforce the schema may omit
+   * it (or name it `intent`), and `normalizeAssessment` then derives it from
+   * `isClear`/`answer`/`plan` so an older answer keeps working.
+   */
+  kind: z.enum(['plan', 'answer', 'clarify']).optional(),
+  /** Tolerated alias for `kind` — the other word models reach for. */
+  intent: z.string().optional(),
   /** True if the request is clear enough to produce a plan */
   isClear: z.boolean(),
   /** Clarification questions (only when isClear=false) */
@@ -108,6 +122,15 @@ export const PlannerAssessmentSchema = z.object({
    */
   clarificationQuestions: z.array(z.string()).optional(),
   questions: z.array(z.string()).optional(),
+  /**
+   * The reply itself when `kind` is "answer" (v27.17.0).  A draft is enough:
+   * the orchestrator can re-answer with read-only tools, and this text is used
+   * when the model classified the request as a conversation.
+   */
+  answer: z.string().optional(),
+  /** Tolerated aliases for `answer`. */
+  response: z.string().optional(),
+  reply: z.string().optional(),
   /** The plan (only when isClear=true) */
   plan: PlanSchema.optional(),
 });

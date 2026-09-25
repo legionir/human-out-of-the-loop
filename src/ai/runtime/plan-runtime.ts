@@ -4,6 +4,7 @@ import type { Planner } from '../planning/planner.js';
 import { runFeasibilityGate, type FeasibilityGateDeps } from '../planning/feasibility-gate.js';
 import { detectCycles } from '../planning/cycle-detector.js';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
+import { detectLanguage } from '../language.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
@@ -286,7 +287,7 @@ export class PlanRuntime {
       this.notify(plan, `step:${step.id}:running`);
 
       // Build a resolved agent for this step
-      const agent = this.buildAgentForStep(step);
+      const agent = this.buildAgentForStep(step, plan);
 
       // Create the task
       const taskId = this.config.taskRuntime.createTask({
@@ -319,7 +320,10 @@ export class PlanRuntime {
    * Build a ResolvedAgent for a plan step using the step's
    * persona, skills, tools, and the default model.
    */
-  private buildAgentForStep(step: PlanStep): ResolvedAgent {
+  private buildAgentForStep(step: PlanStep, plan?: Plan): ResolvedAgent {
+    // The plan's goal is written in the user's language; the step's summary and
+    // notes must come back in it.
+    const languageHint = plan ? detectLanguage(plan.goal) : undefined;
     return createAgent({
       agentDefinition: {
         id: `plan-step-${step.id}`,
@@ -330,6 +334,7 @@ export class PlanRuntime {
         modelId: this.defaultModelId,
       },
       refs: this.config.refs,
+      ...(languageHint ? { languageHint } : {}),
     });
   }
 
@@ -546,7 +551,14 @@ Produce a new plan that:
 3. Preserves the original goal.
 `.trim();
 
-      const result = await this.config.planner.plan(replanRequest, plan.id, this.defaultModelId);
+      // A re-plan is always a plan: never answer conversationally here, and
+      // never open a chat answer for a request built from a failed plan.
+      const result = await this.config.planner.plan(
+        replanRequest,
+        plan.id,
+        this.defaultModelId,
+        'plan'
+      );
 
       if (!result.isClear || !result.plan) {
         return false; // Planner couldn't produce a valid revision

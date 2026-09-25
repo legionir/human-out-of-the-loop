@@ -18,6 +18,7 @@ import fs from 'node:fs';
 import chalk from 'chalk';
 import { CommanderError } from 'commander';
 import { runCommand } from './commands/run.js';
+import { DEFAULT_RUN_MODE, RUN_MODES, parseRunMode, type RunMode } from '../ai/modes.js';
 import { envDefaultModelId, loadRegistries } from './utils/registries.js';
 import {
   globalConfigPath,
@@ -46,6 +47,11 @@ export interface ReplState {
   /** Auto-confirm plans (the `--yes` of every goal). */
   autoConfirm: boolean;
   verbose: boolean;
+  /**
+   * v27.17.0: mode for the goals typed here — `auto` (default) answers a
+   * question and plans real work.  `@chat`/`@plan` in the line still win.
+   */
+  mode: RunMode;
   /** Session the goals are recorded in (persistent mode only). */
   sessionId?: string;
 }
@@ -69,6 +75,8 @@ const BUILTINS: Record<string, string> = {
   model: 'list models  ·  /model <id> to switch for this session',
   persistent: '/persistent on|off — write plans, sessions and logs to .ai-runtime',
   yes: '/yes on|off — confirm plans automatically',
+  mode: `/mode [${RUN_MODES.join('|')}] — how goals are handled (auto: answer questions, plan work)`,
+  chat: '/chat <message> — answer without planning (same as @chat)',
   verbose: '/verbose on|off — stream tool calls and low-level status',
   cd: '/cd <dir> — change the active directory (project root)',
   pwd: 'print the active directory',
@@ -103,6 +111,7 @@ const CONFIG_KEYS: Record<string, (v: string) => GlobalCliConfig[keyof GlobalCli
   defaultModel: (v) => v,
   persistent: (v) => parseOnOff(v),
   projectRoot: (v) => v,
+  defaultMode: (v) => v,
 };
 
 export function parseOnOff(value: string | undefined): boolean {
@@ -223,6 +232,8 @@ export function initialState(cwd: string = process.cwd(), args: InteractiveArgs 
     persistent: args.persistent ?? config.persistent ?? false,
     autoConfirm: args.yes ?? false,
     verbose: false,
+    // The env var first (it is per-shell), then the saved config.
+    mode: parseRunMode(process.env.HOTL_MODE) ?? parseRunMode(config.defaultMode) ?? DEFAULT_RUN_MODE,
   };
 }
 
@@ -399,6 +410,8 @@ export class Repl {
       model: this.state.model,
       yes: this.state.autoConfirm,
       verbose: this.state.verbose,
+      // A `@chat`/`@plan` prefix inside the line still wins inside runCommand.
+      mode: this.state.mode,
       // A session only exists on disk in persistent mode; an in-memory
       // run cannot continue one that lived in an earlier orchestrator.
       ...(this.state.persistent && this.state.sessionId ? { session: this.state.sessionId } : {}),
@@ -437,6 +450,24 @@ export class Repl {
       case 'verbose':
         this.state.verbose = parseOnOff(args[0]);
         return out(`verbose: ${this.state.verbose ? 'on' : 'off'}`);
+      case 'mode': {
+        if (args[0] === undefined) return out(`mode: ${this.state.mode}`);
+        const mode = parseRunMode(args[0]);
+        if (!mode) {
+          return err(
+            color.failed(`Unknown mode "${args[0]}".`) +
+              color.dim(`  Use ${RUN_MODES.join(', ')}.`)
+          );
+        }
+        this.state.mode = mode;
+        return out(`mode: ${this.state.mode}`);
+      }
+      case 'chat':
+        // A shortcut for the mode prefix: `/chat what does this repo do?`
+        if (args.length === 0) {
+          return err(color.failed('Nothing to answer.') + color.dim('  Use /chat <message>.'));
+        }
+        return this.goal(`@chat ${args.join(' ')}`);
       case 'model':
         return this.model(args.join(' ') || undefined);
       case 'config':
@@ -579,7 +610,12 @@ export class Repl {
     out(color.dim(`╭${'─'.repeat(width)}╮`));
     for (const l of lines) out(`${color.dim('│')} ${l}${' '.repeat(width - 1 - stripAnsi(l).length)}${color.dim('│')}`);
     out(color.dim(`╰${'─'.repeat(width)}╯`));
-    out(color.dim('Type a goal to plan and run it, /help for commands, /exit to leave.'));
+    out(
+      color.dim(
+        'Type a goal — questions get answered, real work is planned and run ' +
+          `(mode: ${this.state.mode}).  /help for commands, /exit to leave.'`
+      )
+    );
     out('');
   }
 
@@ -595,6 +631,7 @@ export class Repl {
     out(`${color.dim('directory: ')} ${this.state.cwd}`);
     out(`${color.dim('model:     ')} ${this.modelLabel()}`);
     if (process.env.HOTL_BASE_URL) out(`${color.dim('endpoint:  ')} ${process.env.HOTL_BASE_URL}`);
+    out(`${color.dim('mode:      ')} ${this.state.mode}`);
     out(`${color.dim('persistent:')} ${this.state.persistent ? 'on' : 'off'}   ${color.dim('auto-confirm:')} ${this.state.autoConfirm ? 'on' : 'off'}   ${color.dim('verbose:')} ${this.state.verbose ? 'on' : 'off'}`);
     out(`${color.dim('session:   ')} ${this.state.sessionId ?? (this.state.persistent ? '(new on the next goal)' : '(in-memory)')}`);
     out(`${color.dim('api keys:  ')} ${keyStatus()}`);
@@ -602,8 +639,11 @@ export class Repl {
 
   private printHelp(): void {
     out(color.bold('Goals'));
-    out('  Type what you want done in plain language — it is planned, shown for');
-    out('  confirmation once, then executed in the active directory.');
+    out('  Type what you want done in plain language.  In auto mode (default) a');
+    out('  question or a greeting is answered directly (read-only tools, nothing');
+    out('  executed), and real work is planned, shown for confirmation once, then');
+    out('  executed in the active directory.  Say which you want with /mode, or');
+    out('  inside the line: @chat <question>  ·  @plan <task>.');
     out('');
     out(color.bold('Commands'));
     out(renderTable(['', ''], Object.entries(BUILTINS).map(([k, v]) => [`  /${k}`, v])).split('\n').slice(1).join('\n'));

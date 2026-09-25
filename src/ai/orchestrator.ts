@@ -58,7 +58,10 @@ import {
 
 import type { FeasibilityCheckResult, Plan } from './schemas/plan.js';
 import { emptyReviewUsage, type Review } from './schemas/review.js';
-import type { ResolvedAgent } from './agents/agent-factory.js';
+import { createAgent, type ResolvedAgent } from './agents/agent-factory.js';
+import { DEFAULT_RUN_MODE, type RunMode } from './modes.js';
+import { readOnlyToolIds } from './tools/read-only.js';
+import { detectLanguage, languageSection, type DetectedLanguage } from './language.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -150,6 +153,12 @@ export class InvalidModelError extends Error {
 
 export interface OrchestratorRunOptions {
   sessionId?: string;
+  /**
+   * v27.17.0: how to treat the request — `auto` (default) lets the planner
+   * decide between planning and answering, `chat` never plans, `plan` never
+   * answers.  See `src/ai/modes.ts`.
+   */
+  mode?: RunMode;
   /** U3: per-run overrides (model, timeout, maxSteps, replan budget). */
   runOverrides?: RunOverrides;
   /**
@@ -183,6 +192,12 @@ export interface OrchestratorRunOptions {
 }
 
 export interface OrchestratorResult {
+  /**
+   * What the run produced (v27.17.0): `plan` for a planned run (the only
+   * outcome before this), `answer` for a chat reply.  `planId` is `'none'`
+   * when the run answered instead of planning.
+   */
+  kind: 'plan' | 'answer';
   review: Review;
   report: string;
   planId: string;
@@ -742,7 +757,23 @@ export class Orchestrator {
     // the legacy failure-with-questions path below is unchanged.
     // The run's model (a per-run override wins) — for EVERY call of the run.
     const runModelId = ov?.modelId ?? this.config.defaultModelId;
-    let planningResult = await this.planner.plan(userRequest, undefined, runModelId);
+    const mode = options?.mode ?? DEFAULT_RUN_MODE;
+    let planningResult = await this.planner.plan(userRequest, undefined, runModelId, mode);
+
+    // v27.17.0: the request was a conversation, not work.  Answer it (with the
+    // read-only tools), record it as an answered interaction, and stop — no
+    // plan, no confirmation, no execution.
+    if (planningResult.kind === 'answer') {
+      return await this.answerRun({
+        userRequest,
+        sessionId,
+        ...(interaction ? { interactionId: interaction.id } : {}),
+        modelId: runModelId,
+        ...(planningResult.answer ? { draft: planningResult.answer } : {}),
+        mode,
+      });
+    }
+
     let clarifyRound = 0;
     let clarificationDeclined = false;
     while (!planningResult.isClear) {
@@ -786,6 +817,7 @@ export class Orchestrator {
         });
       }
       return {
+        kind: 'plan',
         review: {
           planId: 'none',
           goal: userRequest,
@@ -826,6 +858,7 @@ export class Orchestrator {
           });
         }
         return {
+          kind: 'plan',
           review: {
             planId: 'none',
             goal: userRequest,
@@ -864,6 +897,7 @@ export class Orchestrator {
           ? `\n(No plan could be produced after ${clarifyRound} clarification round(s).)`
           : '';
       return {
+        kind: 'plan',
         review: {
           planId: 'none',
           goal: userRequest,
@@ -923,6 +957,7 @@ export class Orchestrator {
       this.observabilityLogger.logPlanFailed(plan, `Feasibility gate failed:\n${errorMsg}`);
 
       return {
+        kind: 'plan',
         review: {
           planId: plan.id ?? 'unknown',
           goal: plan.goal,
@@ -958,6 +993,7 @@ export class Orchestrator {
       this.observabilityLogger.logPlanFailed(plan, cycleMsg);
 
       return {
+        kind: 'plan',
         review: {
           planId: plan.id ?? 'unknown',
           goal: plan.goal,
@@ -989,6 +1025,7 @@ export class Orchestrator {
     const confirmation = await options.confirmCallback(planText, plan);
     if (!confirmation.confirmed) {
       return {
+        kind: 'plan',
         review: {
           planId: plan.id ?? 'unknown',
           goal: plan.goal,
@@ -1123,6 +1160,7 @@ export class Orchestrator {
     }
 
     return {
+      kind: 'plan',
       review,
       report,
       planId: plan.id ?? 'unknown',
@@ -1140,10 +1178,116 @@ export class Orchestrator {
    * could not be planned).  Nothing is persisted, confirmed, or
    * executed; no session interaction is recorded.
    */
-  async previewPlan(userRequest: string, modelSpec?: string): Promise<{
+  /**
+   * v27.17.0: answer a request conversationally — the `chat` persona, the
+   * read-only half of the catalog, and the SAME AgentRuntime a plan step uses
+   * (so a chat that reads a file is journalled, counted, and streamed exactly
+   * like any other tool call).
+   *
+   * The answer is the model's own text, in the user's language.  Nothing is
+   * planned, confirmed or executed; `planId` stays `'none'` and the run's
+   * outcome is `success`, because the question was answered.
+   */
+  private async answerRun(params: {
+    userRequest: string;
+    sessionId: string;
+    interactionId?: string;
+    modelId?: string;
+    /** The model's draft from the assessment — used if the answer call fails. */
+    draft?: string;
+    mode: RunMode;
+  }): Promise<OrchestratorResult> {
+    const { userRequest, sessionId, interactionId, modelId, draft, mode } = params;
+    const language = detectLanguage(userRequest);
+    const toolIds = readOnlyToolIds();
+    let text: string | undefined;
+    let errors: string[] = [];
+
+    try {
+      const agent = this.planner.buildChatAgent(modelId, mode === 'chat' ? toolIds : undefined);
+      const run = await this.agentRuntime.run({
+        agent,
+        taskId: `chat:${sessionId}`,
+        prompt: this.planner.buildAnswerPrompt(userRequest),
+        eventBus: this.eventBus,
+        maxSteps: this.config.maxSteps,
+        timeoutMs: this.config.agentTimeoutMs,
+        ...(this.config.onThought ? { onThought: this.config.onThought } : {}),
+      });
+      if (run.success && run.result.trim().length > 0) {
+        text = run.result.trim();
+      } else {
+        errors = run.errors.length > 0 ? run.errors : ['The chat agent produced no answer.'];
+      }
+    } catch (err) {
+      errors = [err instanceof Error ? err.message : String(err)];
+    }
+
+    // A failed answer call is not a failed conversation when the assessment
+    // already wrote the reply (auto mode) — the user still gets an answer.
+    if (!text && draft) text = draft;
+
+    const body = text ?? `The request could not be answered: ${errors.join('; ')}`;
+    const report = `💬 Answer\n\n${body}`;
+
+    this.observabilityLogger.log({
+      eventType: 'system:info',
+      message: text
+        ? `Answered in ${mode === 'chat' ? 'chat' : 'auto'} mode (no plan).`
+        : `Chat answer failed: ${errors.join('; ')}`,
+      level: text ? 'info' : 'error',
+      ...(text ? {} : { payload: { errors } }),
+    });
+    if (interactionId) {
+      this.sessionStore.updateInteraction(sessionId, interactionId, {
+        outcome: text ? 'success' : 'failure',
+        reviewSummary: text ? body.slice(0, 500) : body,
+        completedAt: Date.now(),
+      });
+    }
+
+    return {
+      kind: 'answer',
+      review: {
+        planId: 'none',
+        goal: userRequest,
+        outcome: text ? 'success' : 'failure',
+        acceptedFindings: [],
+        rejectedFindings: [],
+        incompleteSteps: [],
+        finalSummary: body,
+        usage: emptyReviewUsage,
+      },
+      report,
+      planId: 'none',
+      sessionId,
+      executionResult: {
+        planId: 'none',
+        status: text ? 'completed' : 'failed-partial',
+        completedSteps: 0,
+        failedSteps: 0,
+        totalSteps: 0,
+        incompleteSteps: [],
+        replanningAttempts: 0,
+      },
+    };
+  }
+
+  async previewPlan(
+    userRequest: string,
+    modelSpec?: string,
+    mode: RunMode = DEFAULT_RUN_MODE
+  ): Promise<{
     ok: boolean;
     plan?: Plan;
     planText?: string;
+    /**
+     * v27.17.0: the chat reply, when the request was a conversation.  A
+     * preview answers WITHOUT tools and without touching the project — it is
+     * a preview — so the text comes from the model's own knowledge plus the
+     * project context.
+     */
+    answer?: string;
     error?: string;
     /**
      * U4: the planner's clarification questions when the request was
@@ -1161,7 +1305,17 @@ export class Orchestrator {
     }
 
     const modelId = modelSpec ? this.useModel(modelSpec) : undefined;
-    const planningResult = await this.planner.plan(userRequest, undefined, modelId);
+    const planningResult = await this.planner.plan(userRequest, undefined, modelId, mode);
+
+    // A conversation has no steps to preview: show the answer as it is.
+    if (planningResult.kind === 'answer') {
+      return {
+        ok: true,
+        answer:
+          planningResult.answer ??
+          'This request would be answered in chat mode (nothing to preview).',
+      };
+    }
 
     if (!planningResult.isClear) {
       const clarificationMsg =
@@ -1312,6 +1466,7 @@ export class Orchestrator {
     }
 
     return {
+      kind: 'plan',
       review,
       report,
       planId,

@@ -492,6 +492,12 @@ function planPayload(promptText = '') {
 function structuredPayload(name, promptText) {
   switch (name) {
     case 'PlannerAssessment':
+      // CHATREPLY: the request is a conversation, not work — the runtime must
+      // answer it and never plan.  (It also proves the assessment's `kind`
+      // survives the provider round trip.)
+      if (/\bCHATREPLY\b/.test(promptText)) {
+        return { kind: 'answer', isClear: true, needsClarification: [], answer: 'stub draft reply' };
+      }
       // NEEDSCLARIFY reproduces a real provider's answer verbatim: it says the
       // request is unclear and puts the questions under a key the response
       // schema did not declare (`clarificationQuestions`).  A run must show
@@ -576,6 +582,31 @@ async function handleChat(body, req, res) {
     message.content = schemaName && badJsonFor(schemaName, promptText)
       ? 'Sure! Here is the result: {not valid json'
       : JSON.stringify(structuredPayload(schemaName ?? guessSchema(promptText), promptText));
+  } else if (tools.length > 0 && /\bCHATREPLY\b/.test(promptText)) {
+    // The chat answer: text only (no tool call), and in the language the
+    // runtime asked for — if the LANGUAGE rule did not reach the model, this
+    // answers in English and the scenario fails.  With CHATREAD the chat turn
+    // reads the README first (a read-only tool; the journal must record it).
+    const offered = tools.map((t) => t.function?.name ?? t.name);
+    if (/\bCHATREAD\b/.test(promptText) && !sawToolTurn && offered.includes('read_file')) {
+      message = {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          {
+            id: `call_${++seq}`,
+            type: 'function',
+            function: { name: 'read_file', arguments: JSON.stringify({ filePath: 'README.md' }) },
+          },
+        ],
+      };
+      finish = 'tool_calls';
+    } else {
+      const base = /Persian \(فارسی\)|Arabic script/.test(promptText)
+        ? 'این پروژه یک رانتایم Human-Out-Of-The-Loop است: برنامه می‌ریزد، اجرا می‌کند و گزارش می‌دهد.'
+        : 'This is the stub chat answer.';
+      message.content = /\bCHATREAD\b/.test(promptText) ? `${base} (README خوانده شد)` : base;
+    }
   } else if (tools.length > 0) {
     const offered = tools.map((t) => t.function?.name ?? t.name);
     // `CHAIN` lets one agent turn call every marker in the prompt in order
@@ -905,6 +936,19 @@ const server = http.createServer((req, res) => {
       output = [messageItem('Sure! Here is the result: {not valid json')];
     } else if (format?.type === 'json_schema') {
       output = [messageItem(JSON.stringify(structuredPayload(format.name, promptText)))];
+    } else if (tools.length > 0 && /\bCHATREPLY\b/.test(promptText)) {
+      // Same chat behaviour as the Chat Completions path (see handleChat):
+      // text only, in the language the LANGUAGE rule names; with CHATREAD the
+      // chat turn reads the README first.
+      const offered = tools.map((t) => t.name ?? t.function?.name);
+      if (/\bCHATREAD\b/.test(promptText) && !sawToolTurn && offered.includes('read_file')) {
+        output = [functionCallItem('read_file', { filePath: 'README.md' })];
+      } else {
+        const base = /Persian \(فارسی\)|Arabic script/.test(promptText)
+          ? 'این پروژه یک رانتایم Human-Out-Of-The-Loop است: برنامه می‌ریزد، اجرا می‌کند و گزارش می‌دهد.'
+          : 'This is the stub chat answer.';
+        output = [messageItem(/\bCHATREAD\b/.test(promptText) ? `${base} (README خوانده شد)` : base)];
+      }
     } else if (tools.length > 0) {
       const offered = tools.map((t) => t.name ?? t.function?.name);
       const chained = /(^|\s)CHAIN(\s|$)/.test(promptText);
