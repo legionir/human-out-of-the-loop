@@ -175,6 +175,35 @@ registry/
     └── README.md
 ```
 
+### Journal (فاز ۳۷)
+
+هر اجرای ابزار و هر گذار plan/step به‌صورت خودکار در
+`<project-root>/.ai-runtime/journal/YYYY-MM-DD.jsonl` ثبت می‌شود — یک خط JSON به‌ازای
+هر کنش، با آرگومان‌ها، خلاصه، فایل‌های نوشته‌شده (path/bytes/sha256)، مدت، نتیجه و
+`taskId`/`agentId`/`planId`/`planStepId`. نقطهٔ اتصال یکی است: `AgentRuntime` ابزارها
+را پیش از تحویل به `generateText`/`streamText` می‌پیچد، پس ابزارهای local، MCP و
+`delegate_task` همه پوشش داده می‌شوند و ابزار جدید هیچ کدی برای Journal نیاز ندارد.
+
+```jsonc
+// config (OrchestratorConfigSchema)
+"journal": {
+  "enabled": true,            // HOTL_JOURNAL=0 برای خاموش‌کردن در یک پروسه
+  "includeResults": "summary",// none | summary | full  (HOTL_JOURNAL_RESULTS)
+  "maxEntryBytes": 8192,      // سقف هر خط؛ بزرگ‌تر → خلاصه + preview
+  "retentionDays": 30         // rotation روزانه + هرس فایل‌های قدیمی
+}
+```
+
+```bash
+human-out-of-the-loop journal --failed --since 24h
+human-out-of-the-loop journal --tool write_file --json
+human-out-of-the-loop journal --stats
+```
+
+redaction دوطرفه است: هم با نام کلید (`apiKey`, `token`, …) و هم با مقادیر واقعی
+رازهای همین پروسه. تفاوت با `observability.jsonl`: آن لاگ **آرگومان/نتیجهٔ ابزار را
+ذخیره نمی‌کند**؛ Journal همان ترنسکریپت است.
+
 ### بلوک ENVIRONMENT (فاز ۳۶)
 
 System prompt هر Agent و بلوک `PROJECT CONTEXT` پلنر با یک لیست کوتاه از واقعیت‌های

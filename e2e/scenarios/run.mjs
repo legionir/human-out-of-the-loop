@@ -476,6 +476,69 @@ scenarios.search = async () => {
   return root;
 };
 
+/**
+ * Phase 37 — the Journal: what the AI did, recorded automatically.
+ *
+ * One ordinary run, then the assertions read the file the *runtime* wrote:
+ * the tool call must be there with its arguments, the file it produced, and
+ * the step transition around it.  Nothing in the scenario (or in any tool)
+ * writes a journal line itself — that is the point of the hook.
+ */
+scenarios.journal = async () => {
+  const root = makeProject('journal');
+  const { code, stdout } = await run(runArgs('write the project notes JOURNALPROBE WRITE:notes/journaled.txt', root));
+  const { plans } = planStore(root);
+  const plan = plans[0];
+
+  check('journal: exit code 0', code === 0, `exit=${code} ${(stdout || '').split('\n')[0]}`);
+
+  const dir = path.join(root, '.ai-runtime', 'journal');
+  const files = fs.existsSync(dir)
+    ? fs.readdirSync(dir).filter((file) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(file))
+    : [];
+  check('journal: a day file was written', files.length === 1, files.join(','));
+
+  const records = files
+    .flatMap((file) =>
+      fs
+        .readFileSync(path.join(dir, file), 'utf-8')
+        .split('\n')
+        .filter((line) => line.trim() !== '')
+        .map((line) => JSON.parse(line))
+    );
+
+  const writeLine = records.find((record) => record.kind === 'tool' && record.tool === 'write_file');
+  check('journal: the write_file call is recorded with its arguments', Boolean(writeLine));
+  check(
+    'journal: ...the file it wrote (path + size) and its success',
+    writeLine?.ok === true &&
+      writeLine?.artifacts?.some((artifact) => artifact.path === path.join('notes', 'journaled.txt')) &&
+      writeLine?.summary?.includes('notes/journaled.txt'),
+    JSON.stringify(writeLine?.artifacts ?? [])
+  );
+  check(
+    'journal: ...and the plan/step context around it',
+    records.some((record) => record.kind === 'plan' && record.planId === plan?.id) &&
+      records.some((record) => record.kind === 'step' && record.planStepId) &&
+      Boolean(writeLine?.planStepId),
+    `planId=${writeLine?.planId} step=${writeLine?.planStepId}`
+  );
+
+  // The CLI reads the same file, and its machine-readable form parses.
+  const journalCli = await run(['journal', '--project-root', root, '--json', '--tool', 'write_file'], { cwd: root });
+  const cliLines = journalCli.stdout.split('\n').filter((line) => line.trim() !== '');
+  check(
+    'journal: `hootl journal --json --tool write_file` reads it back',
+    journalCli.code === 0 && cliLines.length === 1 && JSON.parse(cliLines[0]).tool === 'write_file',
+    journalCli.stdout.slice(0, 120)
+  );
+
+  const stats = await run(['journal', '--project-root', root, '--stats'], { cwd: root });
+  check('journal: `--stats` summarises per tool', stats.code === 0 && stats.stdout.includes('write_file'));
+
+  return root;
+};
+
 scenarios.resume = async () => {
   const root = makeProject('resume');
   await run(runArgs('write the project notes WRITE:notes/first.txt', root));
@@ -546,8 +609,14 @@ scenarios.credential = async () => {
   const runtimeDir = path.join(root, '.ai-runtime');
   if (fs.existsSync(runtimeDir)) walk(runtimeDir);
 
+  const mcpToken = 'demo-token-e2e-9911';
   const leaks = artifacts.filter((f) => fs.readFileSync(f, 'utf-8').includes(secret));
   check('credential: the key is not in any runtime artifact', leaks.length === 0, leaks.join(','));
+  // Phase 37: the Journal is one of those artifacts (`.ai-runtime/journal/`),
+  // and it is the one that records tool ARGUMENTS — so this asserts the
+  // key-name redaction too, with a second credential shape.
+  const tokenLeaks = artifacts.filter((f) => fs.readFileSync(f, 'utf-8').includes(mcpToken));
+  check('credential: the MCP token is not in any runtime artifact either', tokenLeaks.length === 0, tokenLeaks.join(','));
   check('credential: the key is not in the run output', !stdout.includes(secret));
   check('credential: the key is not in the log', !JSON.stringify(log).includes(secret));
   // The trap only proves something if the model really did try to echo the

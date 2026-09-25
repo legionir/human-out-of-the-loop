@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { generateText, streamText, stepCountIs } from 'ai';
+import { withJournal, type JournalWriter } from './journal.js';
 import { toTokenUsage } from './llm-usage.js';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { EventBus, type TokenUsage } from './event-bus.js';
@@ -219,6 +220,20 @@ function compactToolError(message: string): string {
  */
 export class AgentRuntime {
   /**
+   * Phase 37 — the Journal, when the process has one.
+   *
+   * Set through {@link setJournal} by the Orchestrator (which owns
+   * `runtimeDir`); left unset in unit tests that construct a bare runtime, in
+   * which case the tool set is passed through untouched.
+   */
+  private journal: JournalWriter | null = null;
+
+  /** Phase 37: wire (or clear) the journal this runtime writes tool actions to. */
+  setJournal(journal: JournalWriter | null): void {
+    this.journal = journal;
+  }
+
+  /**
    * Run a single agent execution.
    *
    * This method NEVER throws.  All errors are captured and
@@ -415,12 +430,20 @@ export class AgentRuntime {
 
     const hasTools = Object.keys(agent.tools).length > 0;
 
+    // Phase 37: journal every tool execution from ONE place — the tools the
+    // runtime is about to hand to the model.  Both branches below use this
+    // wrapped set, so `streamText` (the thinking path) is covered by the same
+    // wiring as `generateText`; a new tool needs no journal code of its own.
+    const tools = hasTools
+      ? withJournal(agent.tools, { taskId, agentId, ...planContext }, this.journal)
+      : undefined;
+
     const generateOptions: Parameters<typeof generateText>[0] = {
       model: agent.model,
       system: agent.systemPrompt,
       prompt,
       stopWhen: stepCountIs(maxSteps),
-      ...(hasTools ? { tools: agent.tools } : {}),
+      ...(tools ? { tools } : {}),
       // Phase 22: real cancellation — aborting rejects generateText
       ...(signal ? { abortSignal: signal } : {}),
     };
@@ -435,7 +458,7 @@ export class AgentRuntime {
           system: agent.systemPrompt,
           prompt,
           maxSteps,
-          tools: hasTools ? agent.tools : undefined,
+          tools,
           signal,
           onThought,
           context: { taskId, agentId, ...planContext },

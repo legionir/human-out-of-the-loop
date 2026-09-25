@@ -22,7 +22,8 @@ import { MemorySessionStore, FileSessionStore, type SessionStore } from './runti
 import { ObservabilityLogger } from './runtime/observability-logger.js';
 import { collectSecretValues } from './runtime/secret-scrub.js';
 import { ScrubbingPlanStore } from './runtime/secret-scrub.js';
-import { logStepEvent } from './runtime/step-events.js';
+import { logStepEvent, parseStepEvent } from './runtime/step-events.js';
+import { JournalWriter, journalOptionsFromEnv } from './runtime/journal.js';
 import { formatReviewForUser as formatFinalReview } from './runtime/review-formatter.js';
 import { RetryableAgentRuntime } from './runtime/agent-runtime-retry.js';
 
@@ -80,6 +81,17 @@ export const OrchestratorConfigSchema = z.object({
   maxBackoffMs: z.number().int().min(1000).default(30000),
   maxSteps: z.number().int().min(1).max(100).default(20),
   contextBudgetChars: z.number().int().min(1000).default(120000),
+  // Phase 37: the Journal — automatic, append-only record of what the AI did.
+  // Optional (defaults resolved in code) so existing callers stay valid;
+  // `HOTL_JOURNAL=0` / `HOTL_JOURNAL_RESULTS=full` override per process.
+  journal: z
+    .object({
+      enabled: z.boolean().optional(),
+      includeResults: z.enum(['none', 'summary', 'full']).optional(),
+      maxEntryBytes: z.number().int().min(512).max(1024 * 1024).optional(),
+      retentionDays: z.number().int().min(0).max(3650).optional(),
+    })
+    .optional(),
   connectTimeoutMs: z.number().int().min(1000).default(10000),
   defaultModelId: z.string().default('gpt-4o'),
   // U1 (config parity): extra observability redaction keys (defaults
@@ -238,6 +250,11 @@ export class Orchestrator {
   readonly agentRuntime: AgentRuntime;
   readonly retryableAgentRuntime: RetryableAgentRuntime;
   readonly taskRuntime: TaskRuntime;
+  /**
+   * Phase 37: the project's Journal.  Public so a CLI command or a test can
+   * read the path / close it; the runtime itself only ever appends to it.
+   */
+  readonly journal: JournalWriter;
   readonly planStore: PlanStore;
   /** Phase 30 (P10): literal credential values scrubbed from artifacts. */
   private readonly secretValues: string[];
@@ -296,6 +313,10 @@ export class Orchestrator {
       contextBudgetChars: data.contextBudgetChars,
       connectTimeoutMs: data.connectTimeoutMs,
       redactKeys: data.redactKeys,
+      journal: {
+        ...journalOptionsFromEnv(data.env ?? process.env),
+        ...(data.journal ?? {}),
+      },
       maxClarificationRounds: data.maxClarificationRounds,
       onProgress: config.onProgress ?? (() => {}),
       // Phase 32: thinking is optional by design — no sink, no streaming.
@@ -358,6 +379,25 @@ export class Orchestrator {
     this.sessionStore = this.config.persistent
       ? new FileSessionStore(path.join(runtimeDir, 'sessions'))
       : new MemorySessionStore();
+
+    // Phase 37: the Journal is created once per Orchestrator, next to the
+    // observability log, and handed to the AgentRuntime — that is the object
+    // the tool wrapper is attached to, so no tool implementation knows about it.
+    this.journal = new JournalWriter({
+      runtimeDir,
+      enabled: this.config.journal.enabled,
+      includeResults: this.config.journal.includeResults,
+      ...(this.config.journal.maxEntryBytes !== undefined
+        ? { maxEntryBytes: this.config.journal.maxEntryBytes }
+        : {}),
+      ...(this.config.journal.retentionDays !== undefined
+        ? { retentionDays: this.config.journal.retentionDays }
+        : {}),
+      redactKeys: this.config.redactKeys.length > 0 ? this.config.redactKeys : undefined,
+      redactValues: this.secretValues,
+    });
+    this.journal.prune();
+    this.agentRuntime.setJournal(this.journal);
 
     this.streamingManager = new StreamingManager({ eventBus: this.eventBus });
     this.cancellationManager = new CancellationManager(this.planStore, this.taskRuntime);
@@ -981,6 +1021,13 @@ export class Orchestrator {
       message: 'Plan confirmed by user. Starting execution.',
       level: 'info',
     });
+    this.journal.log({
+      ts: new Date().toISOString(),
+      kind: 'plan',
+      planId: plan.id,
+      ok: true,
+      summary: `plan ${plan.id} started (${plan.steps.length} steps)`,
+    });
 
     const planRuntime = new PlanRuntime({
       taskRuntime: this.taskRuntime,
@@ -1015,6 +1062,31 @@ export class Orchestrator {
         // Phase 30 (P10 follow-up): step:started/completed/failed were
         // emitted by the runtime but never translated into the log.
         logStepEvent(this.observabilityLogger, p, event);
+
+        // Phase 37: plan/step transitions belong in the Journal too — the
+        // Journal answers "what did the AI do", and a run's structure is part
+        // of that answer.  Tool calls carry the plan/step ids already, so
+        // these records are what makes a journal line traceable to its step.
+        const stepEvent = parseStepEvent(event);
+        if (stepEvent) {
+          const step = p.steps.find((candidate) => candidate.id === stepEvent.stepId);
+          this.journal.log({
+            ts: new Date().toISOString(),
+            kind: 'step',
+            planId: p.id,
+            planStepId: stepEvent.stepId,
+            ok: stepEvent.phase !== 'failed',
+            summary:
+              stepEvent.phase === 'running'
+                ? `step ${stepEvent.stepId} started: ${step?.description ?? ''}`.slice(0, 300)
+                : stepEvent.phase === 'done'
+                  ? `step ${stepEvent.stepId} completed`
+                  : `step ${stepEvent.stepId} failed${step?.failureType ? ` (${step.failureType})` : ''}`,
+            ...(stepEvent.phase === 'failed' && step?.resultSummary
+              ? { error: step.resultSummary }
+              : {}),
+          });
+        }
         this.streamingManager.handlePlanStatusChange(p, event);
       },
       // Phase 20 (CORR-04): explicit acceptance hook instead of the old

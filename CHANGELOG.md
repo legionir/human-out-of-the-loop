@@ -5,6 +5,55 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.10.0] — 2026-09-25 — the Journal: what the AI did, recorded automatically
+
+`<project>/.ai-runtime/journal/YYYY-MM-DD.jsonl` — one append-only line per
+action, written where the runtime hands its tools to the model.
+
+**The hook** (`AgentRuntime`)
+- `withJournal(tools, context, writer)` wraps every tool's `execute` **once**,
+  just before the tool set is passed to `generateText`/`streamText`: local
+  tools, MCP tools, `delegate_task` and anything added later are covered with
+  no change to their implementations, and the live-thinking (`streamText`)
+  branch is covered by the same wiring as `generateText` — not by a second
+  code path that can quietly drift.
+- The wrapper is transparent: return values and thrown errors pass through
+  untouched (the SDK and `describeToolFailure` see exactly what they saw
+  before), and `callId` comes from the SDK's own `toolCallId`, so a journal
+  line and the `agent:tool_call` event can be joined.
+
+**What a line carries**
+- tool name, input, summary, duration, `ok`, error + code, and the
+  `taskId`/`agentId`/`planId`/`planStepId` of the run;
+- `artifacts` for written files: path, byte count and a **sha256 of the content
+  the model asked to write** — the line proves *what* was written, not merely
+  that something was;
+- plan and step transitions (`kind: 'plan' | 'step'`), so a tool call is
+  traceable to the step that caused it.
+
+**Safety and hygiene**
+- credentials are redacted twice: by key name (`apiKey`, `token`, …) and by the
+  literal secret **values** this process holds (`secret-scrub`);
+- `maxEntryBytes` (8 KB) keeps metadata and a preview instead of flooding the
+  file; `includeResults: 'none' | 'summary' | 'full'`;
+- daily rotation, `retentionDays` pruning (30 days), descriptor reuse with
+  inode detection (the phase-21 lesson: `rm -rf .ai-runtime` under a running
+  process must not lose the journal), and a write failure is a warning, never a
+  broken run;
+- `HOTL_JOURNAL=0` / `HOTL_JOURNAL_RESULTS=…` override per process.
+
+**Reading it**
+- `hootl journal [--day] [--tool] [--plan] [--failed] [--since 24h] [--limit]`
+  `[--stats] [--json] [--paths]` — filters, a per-tool summary, and raw JSONL
+  for machines.
+
+**Verification:** 27 new unit tests (writer semantics, redaction of keys and
+values, size capping, retention, re-creation after deletion, the wrapper for
+success/failure/throw/artifacts/batch, and both SDK branches of the runtime
+hook: `generateText` and `streamText`), a new `journal` e2e scenario, and the
+`credential` scenario now also asserts that a second credential shape never
+reaches any runtime artifact — the Journal included.
+
 ## [27.9.0] — 2026-09-25 — the glob scan at editor level, and the machine the model writes for
 
 Two answers to "the tool works, but the model still has to guess": `search_files`

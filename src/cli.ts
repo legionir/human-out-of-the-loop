@@ -38,6 +38,7 @@ import {
 } from './cli/commands/plans.js';
 import { mcpListCommand, mcpTestCommand } from './cli/commands/mcp.js';
 import { logsCommand } from './cli/commands/logs.js';
+import { journalCommand } from './cli/commands/journal.js';
 import {
   modelsCommand,
   personasCommand,
@@ -619,6 +620,34 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     });
 
   program
+    .command('journal')
+    .description('Read the Journal — what the AI actually did (.ai-runtime/journal/)')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .option('--day <YYYY-MM-DD>', 'only this day (default: every day on disk)')
+    .option('--tool <name>', 'only entries for this tool')
+    .option('--plan <planId>', 'only entries for this plan')
+    .option('--failed', 'only entries that failed')
+    .option('--since <when>', 'only entries newer than this (30m, 12h, 7d or a timestamp)')
+    .option('--limit <n>', 'trailing entries (0 = all)', (v: string) => Number(v), 50)
+    .option('--stats', 'per-tool call/failure/time summary')
+    .option('--json', 'one JSON object per line (no decoration)')
+    .option('--paths', 'print the journal directory and files, then exit')
+    .action(async (opts: Record<string, string | number | boolean | undefined>) => {
+      process.exitCode = await journalCommand({
+        projectRoot: opts.projectRoot as string | undefined,
+        day: opts.day as string | undefined,
+        tool: opts.tool as string | undefined,
+        plan: opts.plan as string | undefined,
+        failed: opts.failed === true,
+        since: opts.since as string | undefined,
+        limit: opts.limit as number | undefined,
+        stats: opts.stats === true,
+        json: opts.json === true,
+        paths: opts.paths === true,
+      });
+    });
+
+    program
     .command('logs')
     .description('Read the observability log (.ai-runtime/observability.jsonl)')
     .option('--project-root <dir>', 'project root (default: current directory)')

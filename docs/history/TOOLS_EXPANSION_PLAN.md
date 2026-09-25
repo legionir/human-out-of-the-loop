@@ -5,7 +5,7 @@
 **هدف:** بستن شکاف ابزارها با سرورهای مرجع (git / memory / time / sequentialthinking / fetch)، افزودن **Journal** به‌عنوان ثبت خودکار همه‌کارهای AI، و عرضهٔ خود runtime به‌عنوان یک **MCP server**
 **قانون اجرا:** مثل پلن‌های قبلی — هر فاز یک commit + push مستقل روی `arena/01a0d510-human-out-of-the-loop`، معیار پذیرش کامل پیش از فاز بعد، علامت 🟢 در همین فایل، و هر فاز در بدنهٔ PR #3 اضافه می‌شود.
 
-**وضعیت:** 🔵 در حال اجرا — تصمیم‌های بخش ۶ قفل شد؛ فاز ۳۷ در جریان
+**وضعیت (2026-09-25):** 🔵 در حال اجرا — فاز ۳۷ (Journal) 🟢 کامل و پوش‌شده (`7a5a…`+commit فاز ۳۷)؛ فازهای ۳۸–۴۳ در نوبت. ۸۹۳ تست سبز (۶۰ فایل)، e2e ۹۵/۹۵، نسخه ۲۷.۱۰.۰
 
 ---
 
@@ -79,7 +79,7 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 
 ---
 
-## فاز ۳۷ — Journal (ثبت خودکار کنش‌های AI)
+## فاز ۳۷ — Journal (ثبت خودکار کنش‌های AI) 🟢
 
 **هدف:** هر فراخوانی ابزارِ AI — موفق یا ناموفق — به‌صورت خودکار، اتمیک و redact‌شده ثبت شود؛ به‌علاوهٔ رخدادهای سطح پلن/استپ.
 
@@ -117,6 +117,8 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 - مستندات: README (بخش Journal)، CHANGELOG، `docs/CONFIGURATION.md`، `docs/history` (همین فایل).
 
 **ریسک:** حجم/حریم‌خصوصی. پاسخ: `retentionDays`، سقف اندازه، redaction، `.ai-runtime/` که از قبل gitignore است و از جست‌وجوی `search_code`/`search_files` هم حذف می‌شود (فاز ۳۴/۳۶).
+
+**تحویل‌شده (۲۰۲۶-۰۹-۲۵):** `src/ai/runtime/journal.ts` (نویسنده + `withJournal` + `artifactsOf` + `outcomeStatus`)، اتصال در `AgentRuntime.executeTurn` (هر دو شعبه) از طریق `setJournal`، ساخت writer و ثبت رخدادهای plan/step در `orchestrator.ts`، دستور `hootl journal`، ۲۷ تست واحد، سناریوی e2e جدید `journal` و گسترش سناریوی `credential` (توکن دوم هم نباید در هیچ artifact — از جمله Journal — باشد). نسخه ۲۷.۱۰.۰.
 
 ---
 

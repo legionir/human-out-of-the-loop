@@ -323,6 +323,33 @@ human-out-of-the-loop logs --follow --project-root ./app
 human-out-of-the-loop sessions label session_5c1d… "Login page v2"
 ```
 
+### Journal — what the AI actually did
+
+Every tool execution and every plan/step transition is appended, automatically,
+to `<project-root>/.ai-runtime/journal/YYYY-MM-DD.jsonl` — one line per action,
+with the arguments, a summary, the files it touched (path, size, sha256), the
+duration, the outcome, and the `taskId`/`agentId`/`planId`/`planStepId` that
+connect it to the run. It is written at the one place the runtime hands its
+tools to the model (`AgentRuntime`), so local tools, MCP tools and
+`delegate_task` are all covered without any tool knowing about it, and the
+`streamText` (live-thinking) path is covered by the same wiring.
+
+It is deliberately *not* the observability log: `observability.jsonl` records
+what happened to the run and never stores tool arguments or results; the Journal
+is the transcript. Credentials are redacted by key **and** by the actual secret
+values of the process, entries are capped, files rotate daily and old ones are
+pruned (`journal.retentionDays`, default 30).
+
+```bash
+human-out-of-the-loop journal --failed --since 24h       # what went wrong today
+human-out-of-the-loop journal --tool write_file --json   # machine-readable
+human-out-of-the-loop journal --stats                    # per-tool call/failure/time
+```
+
+Disable per process with `HOTL_JOURNAL=0`; `HOTL_JOURNAL_RESULTS=full` keeps
+complete results instead of summaries. Config:
+`journal: { enabled, includeResults, maxEntryBytes, retentionDays }`.
+
 ### Filesystem tools
 
 The workspace tools are a native port of the MCP reference *filesystem* server
@@ -523,11 +550,12 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 34 | Batch writing (`write_multiple_files`) and VS Code-style `search_code` (path pattern, toggles, columns, context) | 🟢 |
 | 35 | `read_media_file` (attached image/audio) and `list_directory_with_sizes` — the reference filesystem toolset is complete | 🟢 |
 | 36 | `search_files` at editor level (base-name matching, default excludes, type filters, sizes, counters) and the OS environment block given to the planner *and* the agent (shell, separator, GNU/BSD, line endings) | 🟢 |
-| 37–43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): Journal (auto-log of every AI action), time, sequentialthinking, memory, fetch, git read+write+PR, and exposing this runtime as an MCP server | 🔵 |
+| 37 | **Journal** — every tool execution and plan/step transition recorded automatically at the runtime's tool hook, redacted and rotated (`hootl journal`) | 🟢 |
+| 38–43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): time + sequentialthinking, memory, fetch, git read, git write + PR, and exposing this runtime as an MCP server | 🔵 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**866 tests green (59 files), 0 tsc errors — plus 87 committed end-to-end checks (`npm run e2e`)** (phases 18–36 complete — see `docs/history/`)
+**893 tests green (60 files), 0 tsc errors — plus 95 committed end-to-end checks (`npm run e2e`)** (phases 18–37 complete — see `docs/history/`)
 
 ## Law Compliance
 
