@@ -495,24 +495,43 @@ export class Planner {
     const assessmentPrompt = buildAssessmentPrompt(userRequest, this.config.projectRoot, mode);
 
     try {
-      const { object, usage } = await withStructuredRetry(() =>
-        withLlmTimeout(
-          'Planner assessment',
-          this.config.timeoutMs,
-          (abortSignal) =>
-            generateObject({
-              model: agent.model,
-              system: agent.systemPrompt,
-              prompt: assessmentPrompt,
-              schema: PlannerAssessmentSchema,
-              schemaName: 'PlannerAssessment',
-              schemaDescription:
-                'Assessment of whether a user request is clear enough to plan, ' +
-                'with optional clarification questions or a full plan.',
-              abortSignal,
-            })
-        )
-      );
+      const { object, usage } = await withStructuredRetry<{
+        object: Partial<PlannerAssessment>;
+        usage: unknown;
+      }>(async () => {
+        try {
+          return await withLlmTimeout(
+            'Planner assessment',
+            this.config.timeoutMs,
+            (abortSignal) =>
+              generateObject({
+                model: agent.model,
+                system: agent.systemPrompt,
+                prompt: assessmentPrompt,
+                schema: PlannerAssessmentSchema,
+                schemaName: 'PlannerAssessment',
+                schemaDescription:
+                  'Assessment of whether a user request is clear enough to plan, ' +
+                  'with optional clarification questions or a full plan.',
+                abortSignal,
+              })
+          );
+        } catch (err) {
+          // v27.17.2: a recoverable answer is used as it is — the retry is for
+          // answers that CANNOT be read, not for providers that merely skip a
+          // schema field.  (The reporter's gateway skipped `isClear` on every
+          // call, and every planning turn cost two requests: the same prompt
+          // twice, the second one just as unusable as the first.)
+          const recovered = recoverAssessment(err);
+          if (recovered) {
+            return {
+              object: recovered.assessment,
+              usage: NoObjectGeneratedError.isInstance(err) ? err.usage : undefined,
+            };
+          }
+          throw err;
+        }
+      });
 
       return this.finishAssessment(object, usage, mode, language, usagePlanId);
     } catch (err) {
@@ -583,35 +602,37 @@ export class Planner {
 
     const prompt = buildPlanPrompt(userRequest, clarifications, this.config.projectRoot);
 
-    let object: Plan;
-    let usage: unknown;
-    try {
-      const generated = await withStructuredRetry(() =>
-        withLlmTimeout(
-          'Plan generation',
-          this.config.timeoutMs,
-          (abortSignal) =>
-            generateObject({
-              model: agent.model,
-              system: agent.systemPrompt,
-              prompt,
-              schema: PlanSchema,
-              schemaName: 'ExecutionPlan',
-              schemaDescription: 'A dependency-aware execution plan with atomic steps.',
-              abortSignal,
-            })
-        )
-      );
-      object = generated.object;
-      usage = generated.usage;
-    } catch (err) {
-      // v27.17.1: same recovery as the assessment — the provider can return a
-      // usable plan that only its own (unenforced) schema complained about.
-      const recovered = recoverPlan(err);
-      if (!recovered) throw err;
-      object = recovered;
-      usage = NoObjectGeneratedError.isInstance(err) ? err.usage : undefined;
-    }
+    const { object, usage } = await withStructuredRetry<{ object: Plan; usage: unknown }>(
+      async () => {
+        try {
+          return await withLlmTimeout(
+            'Plan generation',
+            this.config.timeoutMs,
+            (abortSignal) =>
+              generateObject({
+                model: agent.model,
+                system: agent.systemPrompt,
+                prompt,
+                schema: PlanSchema,
+                schemaName: 'ExecutionPlan',
+                schemaDescription: 'A dependency-aware execution plan with atomic steps.',
+                abortSignal,
+              })
+          );
+        } catch (err) {
+          // v27.17.2: same recovery as the assessment — the provider can
+          // return a usable plan that only its own (unenforced) schema
+          // complained about, and that plan is used instead of paying for a
+          // second identical call.
+          const recovered = recoverPlan(err);
+          if (!recovered) throw err;
+          return {
+            object: recovered,
+            usage: NoObjectGeneratedError.isInstance(err) ? err.usage : undefined,
+          };
+        }
+      }
+    );
     const plan = finalizePlan(object);
     reportLlmUsage(this.config.onUsage, 'planning', usage, usagePlanId ?? plan.id);
     return plan;

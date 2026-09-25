@@ -49,7 +49,7 @@ Exit code is 0 only when every check passed. `E2E_SCENARIO_TIMEOUT_MS`
 | `faults` | provider faults: retried 5xx, a clear 401, a retried and a persistently unparsable planner answer, an empty answer, and usage that includes the structured calls. v27.17.1: an answer the schema refuses because one field is missing (`DROPISCLEAR` — the reported `@chat سلام` run, `kind` and questions present, `isClear` left out) is read from the raw JSON instead of ending the run — the chat run answers and exits 0, and in auto mode the recovered Persian questions reach the terminal. |
 | `envendpoint` | `HOTL_BASE_URL`/`HOTL_API_KEY`/`HOTL_MODEL` alone (no registry edit, no `OPENAI_API_KEY`) drive a full run over Chat Completions, the acceptance judge included |
 | `context` | the planner request really carries the `PROJECT CONTEXT` block (absolute root, top-level entries, "never ask the user") — the prompt is read from the stub's request dump |
-| `thinking` | `--thinking on` streams the model's reasoning (SSE, both wire formats) in italic, the run still completes, the text is never persisted, a cut stream still ends the run, and thinking stays off outside a terminal |
+| `thinking` | `--thinking on` streams the model's reasoning (SSE, both wire formats) in italic, the run still completes, the text is never persisted, a cut stream still ends the run, and thinking stays off outside a terminal | v27.17.2: `RAWTEXTWIRE` streams the reasoning the way the reported gateway did (`response.reasoning_text.delta` + the reasoning item, none of which the SDK maps) — a block that opened as `💭` and stayed empty must now carry its text.
 | `ctrlc` | one Ctrl-C cancels gracefully (skipped on Windows — no POSIX signals) |
 
 ## The provider stub

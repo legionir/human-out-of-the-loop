@@ -333,7 +333,12 @@ rate-limited provider. `run` says so while it waits:
   is printed as it arrives — italic, violet, prefixed with 💭 — instead of
   showing up only once the answer is complete. Agent turns switch to a
   streaming call to make that possible. Thinking text is display-only: it is
-  never persisted to a plan, the observability log or a report.
+  never persisted to a plan, the observability log or a report. Which wire the
+  provider uses does not matter (`delta.reasoning_content` for
+  OpenAI-compatible gateways, reasoning parts, or the Responses API's
+  `reasoning_text`/item shapes the SDK does not map), and a gateway that cannot
+  stream at all is asked once more without streaming rather than answering with
+  nothing.
 - **The planner is told where it works.** Planning prompts carry a
   `PROJECT CONTEXT` block (absolute project root, platform, top-level
   entries), so "which project should be scanned?" is answered before the model
@@ -814,7 +819,7 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**1178 tests green (70 files), 0 tsc errors — plus 186 committed end-to-end checks (`npm run e2e`)** (phases 18–43 complete — see `docs/history/`)
+**1187 tests green (71 files), 0 tsc errors — plus 189 committed end-to-end checks (`npm run e2e`)** (phases 18–43 complete — see `docs/history/`)
 
 ## Law Compliance
 

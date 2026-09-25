@@ -88,6 +88,87 @@ function textOfReasoningDetails(value: unknown): string {
   return text;
 }
 
+/** One piece of thinking text read from a raw RESPONSES-API chunk. */
+export interface ResponsesReasoningChunk {
+  text: string;
+  /**
+   * `true` when `text` is an item's COMPLETE reasoning (an
+   * `output_item.done`/`reasoning_text.done`) rather than one delta — the
+   * caller then shows only the part that was not streamed already.
+   */
+  full: boolean;
+}
+
+/** Read the `summary[]`/`content[]` text of a Responses API reasoning item. */
+function reasoningItemText(item: { summary?: unknown; content?: unknown }): string {
+  let text = '';
+  for (const field of [item.summary, item.content]) {
+    if (!Array.isArray(field)) continue;
+    for (const entry of field) {
+      if (!entry || typeof entry !== 'object') continue;
+      const part = entry as { type?: unknown; text?: unknown };
+      if (typeof part.text !== 'string') continue;
+      if (
+        part.type !== undefined &&
+        part.type !== 'summary_text' &&
+        part.type !== 'reasoning_text'
+      ) {
+        continue;
+      }
+      text += part.text;
+    }
+  }
+  return text;
+}
+
+/**
+ * Pull thinking text out of a raw RESPONSES-API chunk (v27.17.2).
+ *
+ * The AI SDK maps exactly ONE reasoning event to its own stream —
+ * `response.reasoning_summary_text.delta`.  Everything else a provider may use
+ * is dropped before any callback sees it, and the reporter's gateway used the
+ * other ones:
+ *
+ *   - `response.reasoning_text.delta` / `.done` — the raw reasoning text
+ *     (what OpenAI streams when summaries are not in play);
+ *   - `response.output_item.added` / `.done` with `item.type: "reasoning"` —
+ *     the item as a whole, its text under `content[]` (`reasoning_text`) or
+ *     `summary[]` (`summary_text`).  A gateway that only fills the item at the
+ *     end produced the reported symptom: the CLI opened a thinking block (from
+ *     the SDK's reasoning-start) and then showed nothing at all.
+ *
+ * Returns `undefined` when the chunk carries no reasoning.
+ */
+export function responsesReasoningFromRawChunk(raw: unknown): ResponsesReasoningChunk | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const event = raw as { type?: unknown; delta?: unknown; text?: unknown; item?: unknown };
+  const type = typeof event.type === 'string' ? event.type : '';
+
+  // `reasoning_summary_text.*` is deliberately NOT handled here: the SDK maps
+  // it to a reasoning part of its own, and the provider sends the raw chunk
+  // BEFORE that part — reading both would print every summary delta twice.
+  if (type === 'response.reasoning_text.delta') {
+    const text = typeof event.delta === 'string' ? event.delta : '';
+    return text.length > 0 ? { text, full: false } : undefined;
+  }
+
+  if (type === 'response.reasoning_text.done') {
+    const text = typeof event.text === 'string' ? event.text : '';
+    return text.length > 0 ? { text, full: true } : undefined;
+  }
+
+  if (type === 'response.output_item.added' || type === 'response.output_item.done') {
+    const item = event.item;
+    if (!item || typeof item !== 'object') return undefined;
+    const reasoning = item as { type?: unknown; summary?: unknown; content?: unknown };
+    if (reasoning.type !== 'reasoning') return undefined;
+    const text = reasoningItemText(reasoning);
+    return text.length > 0 ? { text, full: true } : undefined;
+  }
+
+  return undefined;
+}
+
 /**
  * Pull thinking text out of one RAW provider chunk.
  *

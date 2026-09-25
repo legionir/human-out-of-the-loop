@@ -7,6 +7,7 @@ import { EventBus, type TokenUsage } from './event-bus.js';
 import {
   emitThought,
   reasoningFromRawChunk,
+  responsesReasoningFromRawChunk,
   type ThoughtSink,
 } from './thought-stream.js';
 
@@ -46,6 +47,17 @@ interface SdkRunOutcome {
   steps?: ReadonlyArray<SdkStepLike>;
   /** Raw SDK usage — normalized with `toTokenUsage` by the caller. */
   usage?: unknown;
+  /**
+   * v27.17.2: the streamed turn came back empty, so the same prompt was asked
+   * again without streaming.  The run's summary says so.
+   */
+  reaskedWithoutStreaming?: boolean;
+}
+
+/** Did any step call a tool?  A turn with tool calls is not "empty". */
+function stepsHaveToolCalls(steps: ReadonlyArray<SdkStepLike> | undefined): boolean {
+  if (!Array.isArray(steps)) return false;
+  return steps.some((step) => Array.isArray(step.toolCalls) && step.toolCalls.length > 0);
 }
 
 export interface AgentRunOptions {
@@ -331,7 +343,12 @@ export class AgentRuntime {
       }
 
       // ── Build compact summary ─────────────────────────────
-      const summary = this.buildSummary(sdkResult.text, toolsUsed, toolErrors);
+      const summary = this.buildSummary(
+        sdkResult.text,
+        toolsUsed,
+        toolErrors,
+        sdkResult.reaskedWithoutStreaming === true
+      );
       const toolErrorMessages = toolErrors.map(
         (failure) => `${failure.toolName}: ${failure.error}`
       );
@@ -413,7 +430,7 @@ export class AgentRuntime {
     signal?: AbortSignal;
     /** Phase 32: live thinking text (switches the turn to `streamText`) */
     onThought?: ThoughtSink;
-  }): Promise<{ text: string; usage?: TokenUsage }> {
+  }): Promise<{ text: string; usage?: TokenUsage; reaskedWithoutStreaming?: boolean }> {
     const {
       agent,
       prompt,
@@ -452,8 +469,26 @@ export class AgentRuntime {
     // `streamText`, so reasoning deltas can be forwarded while the model
     // is still answering.  Without one the call — and therefore the
     // token stream, the retries and the result — is exactly what it was.
-    const result: SdkRunOutcome = onThought
-      ? await this.streamWithThoughts({
+    //
+    // v27.17.2: providers that cannot stream.  A gateway may answer a
+    // `stream: true` Responses request with a non-streamed Chat Completions
+    // body — the reporter's returned `{"choices":[{"message":{"role":
+    // "assistant","content":""}}]}`, which the SDK turns into an empty turn (and
+    // which the official provider refuses with "Received a Chat Completions
+    // stream while using the OpenAI Responses API" for other gateways).  When
+    // the streaming attempt gives nothing to show, the same prompt is asked
+    // once more WITHOUT streaming: that is the difference between the real
+    // answer and the assessment's draft.  Cancellation and timeouts are never
+    // re-asked — the run is over by then.
+    let reaskedWithoutStreaming = false;
+    const stillWanted = (): boolean => signal?.aborted !== true;
+
+    let result: SdkRunOutcome;
+    if (!onThought) {
+      result = await generateText(generateOptions);
+    } else {
+      try {
+        result = await this.streamWithThoughts({
           model: agent.model,
           system: agent.systemPrompt,
           prompt,
@@ -462,8 +497,23 @@ export class AgentRuntime {
           signal,
           onThought,
           context: { taskId, agentId, ...planContext },
-        })
-      : await generateText(generateOptions);
+        });
+      } catch (err) {
+        if (!stillWanted()) throw err;
+        reaskedWithoutStreaming = true;
+        result = await generateText(generateOptions);
+      }
+
+      if (!reaskedWithoutStreaming && result.text.trim() === '' && !stepsHaveToolCalls(result.steps)) {
+        if (!stillWanted()) {
+          throw new EmptyResponseError(
+            'The model returned an empty response (no text and no tool calls).'
+          );
+        }
+        reaskedWithoutStreaming = true;
+        result = await generateText(generateOptions);
+      }
+    }
 
     // Phase 22: `step.toolCalls` is fully typed (Array<TypedToolCall>)
     // in AI SDK v7 — no unsafe cast needed.  The Array.isArray guard
@@ -523,6 +573,7 @@ export class AgentRuntime {
     return {
       text: result.text ?? '',
       usage,
+      ...(reaskedWithoutStreaming ? { reaskedWithoutStreaming: true } : {}),
     };
   }
 
@@ -550,7 +601,11 @@ export class AgentRuntime {
   }): Promise<SdkRunOutcome> {
     const { model, system, prompt, maxSteps, tools, signal, onThought, context } = params;
 
-    const streamed = streamText({
+    // `await` on purpose: the SDK returns the result object synchronously, and
+    // awaiting a non-promise is a no-op — but a provider shim (a test double,
+    // a gateway adapter) may hand back a promise, and then every field below
+    // would read `undefined`.
+    const streamed = await streamText({
       model,
       system,
       prompt,
@@ -563,13 +618,30 @@ export class AgentRuntime {
       includeRawChunks: true,
     });
 
-    await this.pipeThoughts(streamed.fullStream, onThought, context);
+    const emittedChars = await this.pipeThoughts(streamed.fullStream, onThought, context);
 
-    const [text, steps, usage] = await Promise.all([
+    const [text, steps, usage, reasoningText] = await Promise.all([
       streamed.text,
       streamed.steps,
       streamed.usage,
+      streamed.reasoningText,
     ]);
+
+    // v27.17.2 — the reporter's gateway put the thinking in an item the SDK
+    // only parses at the END of the stream (and mapped none of it to a
+    // reasoning delta), so the CLI opened a `💭` block and never filled it.
+    // Showing the collected text late is worse than streaming it, and far
+    // better than losing it.
+    if (reasoningText && emittedChars === 0) {
+      emitThought(onThought, { kind: 'start', source: 'provider-field', ...context });
+      emitThought(onThought, {
+        kind: 'delta',
+        text: reasoningText,
+        source: 'provider-field',
+        ...context,
+      });
+      emitThought(onThought, { kind: 'end', ...context });
+    }
 
     return { text, steps: steps as ReadonlyArray<SdkStepLike>, usage };
   }
@@ -591,9 +663,15 @@ export class AgentRuntime {
     stream: AsyncIterable<unknown>,
     onThought: ThoughtSink,
     context: { taskId?: string; agentId?: string; planId?: string; planStepId?: string },
-  ): Promise<void> {
+  ): Promise<number> {
     let blockOpen = false;
+    // The SDK relayed reasoning of its own (a `reasoning-start`/`-delta` part).
     let nativeReasoning = false;
+    // …and that reasoning carried text (so raw chunks would only duplicate it).
+    let nativeText = false;
+    // Everything shown this turn, whatever the source — used to show only the
+    // part of a late full item that was not streamed already.
+    let emitted = '';
 
     const openBlock = (source: 'reasoning' | 'provider-field'): void => {
       if (blockOpen) return;
@@ -604,6 +682,11 @@ export class AgentRuntime {
       if (!blockOpen) return;
       blockOpen = false;
       emitThought(onThought, { kind: 'end', ...context });
+    };
+    const show = (text: string, source: 'reasoning' | 'provider-field'): void => {
+      openBlock(source);
+      emitted += text;
+      emitThought(onThought, { kind: 'delta', text, source, ...context });
     };
 
     for await (const chunk of stream) {
@@ -629,8 +712,8 @@ export class AgentRuntime {
                 : '';
           if (text.length === 0) break;
           nativeReasoning = true;
-          openBlock('reasoning');
-          emitThought(onThought, { kind: 'delta', text, source: 'reasoning', ...context });
+          nativeText = true;
+          show(text, 'reasoning');
           break;
         }
         case 'reasoning-end':
@@ -638,11 +721,29 @@ export class AgentRuntime {
           closeBlock();
           break;
         case 'raw': {
+          // Responses API shapes the SDK drops (v27.17.2) — see
+          // `responsesReasoningFromRawChunk`.  A delta is skipped when the SDK
+          // is already relaying text; a full item is shown minus what was
+          // streamed, so the block is filled instead of left empty.
+          const responses = responsesReasoningFromRawChunk(part.rawValue);
+          if (responses) {
+            if (responses.full) {
+              if (emitted.includes(responses.text)) break;
+              const rest = emitted.length > 0 && responses.text.startsWith(emitted)
+                ? responses.text.slice(emitted.length)
+                : responses.text;
+              if (rest.length > 0) show(rest, 'provider-field');
+              break;
+            }
+            if (nativeText) break;
+            show(responses.text, 'provider-field');
+            break;
+          }
+
           if (nativeReasoning) break;
           const text = reasoningFromRawChunk(part.rawValue);
           if (!text) break;
-          openBlock('provider-field');
-          emitThought(onThought, { kind: 'delta', text, source: 'provider-field', ...context });
+          show(text, 'provider-field');
           break;
         }
         case 'text-start':
@@ -658,6 +759,7 @@ export class AgentRuntime {
     }
 
     closeBlock();
+    return emitted.length;
   }
 
   // ── Private: helpers ────────────────────────────────────────
@@ -669,8 +771,15 @@ export class AgentRuntime {
   private buildSummary(
     fullText: string,
     toolsUsed: string[],
-    toolErrors: ToolFailure[] = []
+    toolErrors: ToolFailure[] = [],
+    reaskedWithoutStreaming = false
   ): string {
+    // v27.17.2: the streamed turn was empty and the same prompt was asked
+    // again without streaming — say so, so a "why did it answer twice?" is
+    // answerable from the log instead of being a mystery.
+    const streamInfo = reaskedWithoutStreaming
+      ? ' The provider streamed no answer; the turn was repeated without streaming.'
+      : '';
     const uniqueTools = [...new Set(toolsUsed)];
     const toolInfo =
       uniqueTools.length > 0
@@ -694,7 +803,7 @@ export class AgentRuntime {
         ? fullText.slice(0, 400) + '…'
         : fullText;
 
-    return `${textPreview}${toolInfo}${errorInfo}`;
+    return `${textPreview}${toolInfo}${errorInfo}${streamInfo}`;
   }
 
   /**
