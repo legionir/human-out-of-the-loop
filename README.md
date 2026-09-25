@@ -255,6 +255,7 @@ human-out-of-the-loop run "Build a login page" --dry-run
 | `plans resume <id>` | Re-execute a plan that is not in a terminal state | `--project-root`, `--model`, `--timeout-ms` |
 | `mcp list` | MCP servers from `registry/mcp-servers` | `--json` |
 | `mcp test <serverId>` | Connect to one MCP server (`stdio` child process, `http` or `sse`), list its tools | `--json` |
+| `serve --mcp` | Expose *these* tools to an MCP client (stdio by default; `--http` on 127.0.0.1 with a required `--token`; `--read-only`, `--allow-tools`, `--prefix`) | `--project-root` |
 | `models` / `personas` / `skills` / `tools` | List registry entries | `--json` |
 | `usage` | Token usage per plan (prompt/completion/total + task count) | `--plan <planId>`, `--json` |
 | `tasks list` | Tasks from the observability log (derived status, tokens) | `--plan <planId>`, `--json` |
@@ -447,6 +448,59 @@ welcome" is not permission — and the rule is reported so the model can say why
 `INVALID_URL`, `BLOCKED_PROTOCOL`, `BLOCKED_PRIVATE_ADDRESS`, `DNS_FAILED`,
 `ROBOTS_FORBIDDEN`, `ROBOTS_UNAVAILABLE`, `TIMEOUT`, `TOO_MANY_REDIRECTS`,
 `TOO_LARGE`, `HTTP_ERROR`.
+
+### Serving this runtime as an MCP server
+
+`hootl mcp list` / `mcp test` make this project an MCP *client*. `hootl serve
+--mcp` is the mirror image: any MCP client — Claude Desktop, Cursor, an IDE
+agent — can list and call the same 45 local tools the agent uses.
+
+```bash
+hootl serve --mcp --project-root /path/to/project            # stdio (what clients spawn)
+hootl serve --mcp --read-only                                # reads, listings, searches, git reads only
+hootl serve --mcp --http --port 3300 --token "$(openssl rand -hex 16)"
+```
+
+```jsonc
+// claude_desktop_config.json / any MCP client config
+{ "mcpServers": { "human-out-of-the-loop": {
+    "command": "hootl",
+    "args": ["serve", "--mcp", "--project-root", "/path/to/project", "--read-only"] } } }
+```
+
+Three properties are the whole design:
+
+- **One execution path.** A `tools/call` reaches the same tool object the agent
+  runtime uses — the same workspace sandbox, the same zod validation (a bad
+  argument is `-32602`, exactly the shape the runtime would reject), the same
+  structured `{ success: false, code }` results. There is no second, looser
+  implementation for external callers, and a tool refusal comes back *in-band*
+  as `isError` with its code rather than as a broken connection.
+- **Audited from outside too.** Calls are wrapped by the Journal, so a client's
+  edit lands in `<project>/.ai-runtime/journal/` like the agent's own, marked
+  `agentId: "mcp"` — successes *and* refusals, with their codes.
+- **Least privilege is a flag, not a hope.** `--read-only` exposes only tools
+  that cannot change anything (`read_*`, `list_*`, `search_*`, `get_*`, the git
+  reads, `fetch`, `convert_time`, the memory reads); `--allow-tools a,b` narrows
+  further; `--prefix m` renames tools to `m_<id>` for clients that merge several
+  servers. Both filters apply to `tools/list` **and** `tools/call`: a client that
+  ignored the listing cannot call what it never saw.
+
+Transports: **stdio** is the default, and stdout carries protocol only (the
+banner goes to stderr — a stray `console.log` would corrupt the stream). `--http`
+binds **127.0.0.1** and *requires* a bearer token (`--token` or
+`HOTL_MCP_TOKEN`); the endpoint can read and write files in the project, so an
+unauthenticated port is not a configuration this command offers.
+
+Protocol: JSON-RPC 2.0 with `initialize` (2025-06-18, falling back to
+2025-03-26 / 2024-11-05), `ping`, `tools/list`, `tools/call`, `resources/list`,
+`resources/read` and `prompts/list` (empty). Tool schemas are converted from the
+tools' own zod definitions (`z.toJSONSchema`) — one source of truth, so adding a
+parameter cannot forget a hand-written copy. Read-only tools are annotated
+`readOnlyHint`, which is what lets a client auto-approve them safely.
+Resources are read-only: `plan://{id}`, `journal://{YYYY-MM-DD}` and
+`memory://graph` — every uri is validated against a shape before it is looked up,
+so a resource read cannot become a file read outside the project.
 
 ### Project memory
 
@@ -712,11 +766,11 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 40 | `fetch` — a URL as Markdown (in-tree HTML→Markdown, paging, `raw`), with robots.txt honoured and loopback/private addresses blocked by default | 🟢 |
 | 41 | Git, read-only — `git_status` extended (porcelain v1/v2, branch, counts) plus `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_remote_list`, on a no-shell/bounded-output core | 🟢 |
 | 42 | Git, writing — feature branches, commits (identity read, never written), pushes with no force option, stashes, and pull requests through `gh` or the GitHub REST API. `main`/`master` are protected; anything irreversible needs `confirmDestructive: true` | 🟢 |
-| 43 | Tools expansion plan (`docs/history/TOOLS_EXPANSION_PLAN.md`): exposing this runtime as an MCP server | 🔵 |
+| 43 | Exposing this runtime as an MCP server — `hootl serve --mcp` (stdio + loopback HTTP with a bearer token, read-only and allow-tools filters, `plan://`/`journal://`/`memory://` resources), sharing one execution path with the agent | 🟢 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**1078 tests green (65 files), 0 tsc errors — plus 153 committed end-to-end checks (`npm run e2e`)** (phases 18–42 complete — see `docs/history/`)
+**1112 tests green (66 files), 0 tsc errors — plus 161 committed end-to-end checks (`npm run e2e`)** (phases 18–43 complete — see `docs/history/`)
 
 ## Law Compliance
 

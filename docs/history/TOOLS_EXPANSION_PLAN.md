@@ -5,7 +5,7 @@
 **هدف:** بستن شکاف ابزارها با سرورهای مرجع (git / memory / time / sequentialthinking / fetch)، افزودن **Journal** به‌عنوان ثبت خودکار همه‌کارهای AI، و عرضهٔ خود runtime به‌عنوان یک **MCP server**
 **قانون اجرا:** مثل پلن‌های قبلی — هر فاز یک commit + push مستقل روی `arena/01a0d510-human-out-of-the-loop`، معیار پذیرش کامل پیش از فاز بعد، علامت 🟢 در همین فایل، و هر فاز در بدنهٔ PR #3 اضافه می‌شود.
 
-**وضعیت (2026-09-25):** 🔵 در حال اجرا — فازهای ۳۷ (Journal)، ۳۸ (time + sequentialthinking)، ۳۹ (memory)، ۴۰ (fetch)، ۴۱ (Git خواندن) و ۴۲ (Git نوشتن + PR) 🟢 کامل و پوش‌شده؛ فقط فاز ۴۳ (MCP server) در نوبت. ۱۰۷۸ تست سبز (۶۵ فایل)، e2e ۱۵۳/۱۵۳، نسخه ۲۷.۱۵.۰
+**وضعیت (2026-09-25):** ✅ **تمام — همهٔ هفت فاز 🟢 و پوش‌شده.** ۳۷ (Journal)، ۳۸ (time + sequentialthinking)، ۳۹ (memory)، ۴۰ (fetch)، ۴۱ (Git خواندن)، ۴۲ (Git نوشتن + PR) و ۴۳ (عرضه به‌عنوان MCP server). ۱۱۱۲ تست سبز (۶۶ فایل)، e2e ۱۶۱/۱۶۱ (۲۲ سناریو)، نسخه ۲۷.۱۶.۰
 
 ---
 
@@ -232,7 +232,7 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 
 ---
 
-## فاز ۴۳ — عرضهٔ خود سیستم به‌عنوان MCP server
+## فاز ۴۳ — عرضهٔ خود سیستم به‌عنوان MCP server 🟢
 
 **هدف:** Claude/Cursor/هر کلاینت MCP بتواند ابزارهای همین runtime را استفاده کند (عکس مسیر فعلی که ما کلاینتیم).
 
@@ -249,6 +249,8 @@ const tools   = hasTools ? withJournal(agent.tools, context) : undefined;
 - تست واحد: `initialize`/`tools/list` (شمار ابزار = `LOCAL_TOOL_IDS`)، `tools/call` موفق و ناموفق، نسخهٔ پروتکل ناشناس، JSON-RPC بدشکل، ابزار ناشناس (`-32601`)، فیلتر `--allow-tools` و `--read-only`، توکن نامعتبر روی HTTP.
 - تست interop واقعی: سرور ما با **کلاینت** `@ai-sdk/mcp` (وابستگی موجود) وصل شود و ابزارها را ببیند/صدا بزند.
 - e2e: سناریوی `mcpserve` — `hootl serve --mcp` بالا بیاید، `hootl tools --mcp` (کلاینت خودمان) به آن وصل شود و ابزار فهرست/صدا زده شود؛ و assert شود که آن call در Journal ثبت شده.
+
+**تحویل‌شده (۲۰۲۶-۰۹-۲۵):** `src/mcp/protocol.ts` (JSON-RPC 2.0: `parseMessage` با `-32700`/`-32600`، `negotiateProtocolVersion` روی ۲۰۲۵-۰۶-۱۸ با عقب‌گرد به ۲۰۲۵-۰۳-۲۶/۲۰۲۴-۱۱-۰۵، `toolInputJsonSchema` از همان zod (`z.toJSONSchema`، draft 2020-12، `io: input`) با `x-schema-error` در صورت شکست — یک schema خراب کل `tools/list` را نمی‌خواباند)، `src/mcp/server.ts` (کلاس `McpServer`: متدهای `initialize`/`ping`/`tools/list`/`tools/call`/`resources/*`/`prompts/list`، بی‌پاسخ ماندن notificationها، `withJournal` دور همان ابزارها با `agentId: "mcp"`، فیلتر `--read-only` به‌صورت **لیست سفید** (`read_*`/`list_*`/`search_*`/`get_*` + پنج git read + `fetch`/ابزارهای زمان/خواندن‌های memory؛ `sequentialthinking` عمداً نیست چون فایل می‌نویسد) و `--allow-tools`/`--prefix` که روی `tools/list` **و** `tools/call` اعمال می‌شوند؛ منابع `plan://{id}` با همان `FilePlanStore`، `journal://{YYYY-MM-DD}` و `memory://graph` — همه با اعتبارسنجی شکل URI پیش از جست‌وجو) و `src/mcp/transports.ts` (stdio خط‌جداشده با صف ترتیبی و بنر روی stderr؛ HTTP با express روی `127.0.0.1`، bearer اجباری، `GET /health` تنها مسیر آزاد، `202` برای notification و بدنهٔ خراب JSON → `-32700` به‌جای صفحهٔ HTML). CLI: `hootl serve --mcp [--http --port --token] [--read-only] [--allow-tools] [--prefix]` به‌همراه بلوک راهنما و سطر در COMMAND GROUPS. خروجی ابزار `content` + `structuredContent` + `isError` است و رد شدن ابزار **درون‌باند** برمی‌گردد (کلاینت پیام را به مدل نشان می‌دهد، اتصال نمی‌میرد). schema ابزارها از همان تعریف zod ساخته می‌شود و متن `describe()` هم به کلاینت می‌رسد؛ ابزارهای فقط‌خواندنی `readOnlyHint` می‌گیرند. ۳۴ تست واحد (فاز ۴۳) شامل شش تلاش path-traversal روی URI منابع و **تست interop واقعی** با کلاینت `@ai-sdk/mcp` روی `src/cli.ts` (tsx): اتصال، فهرست ۴۵ ابزار، فراخوانی موفق و فراخوانی رد‌شده. سناریوی e2e `mcpserve` (۸ چک، دو نیمه: کلاینت خودمان → سرور خودمان، و یک نشست stdio خام که call و Journal را اثبات می‌کند). کل: ۱۱۱۲ تست (۶۶ فایل)، e2e ۱۶۱/۱۶۱ (۲۲ سناریو). نسخه ۲۷.۱۶.۰.
 
 ---
 

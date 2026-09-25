@@ -286,6 +286,45 @@ temp+rename رد می‌شود (دو پروسه حافظه را خراب نمی�
 `TIMEOUT`، `OUTPUT_TOO_LARGE`، `GIT_MISSING`، `GIT_FAILED`. مخزن بدون commit →
 لاگ خالی (نه خطا).
 
+### عرضهٔ خود سیستم به‌عنوان MCP server (فاز ۴۳)
+
+`hootl serve --mcp` همان ۴۵ ابزار محلی را به هر کلاینت MCP می‌دهد — با **همان**
+مسیر اجرا: sandbox پروژه، اعتبارسنجی zod، نتیجهٔ ساخت‌یافته (`{success:false,code}`)
+و ثبت خودکار در Journal با `agentId: "mcp"`.
+
+```bash
+hootl serve --mcp --project-root /path/to/project        # stdio (پیش‌فرض؛ همان چیزی که کلاینت‌ها spawn می‌کنند)
+hootl serve --mcp --read-only                            # فقط ابزارهای غیرنوشتنی
+hootl serve --mcp --allow-tools read_file,git_status     # باریک‌تر
+hootl serve --mcp --http --port 3300 --token <t>         # HTTP فقط روی 127.0.0.1
+```
+
+```jsonc
+// config یک کلاینت MCP
+{ "mcpServers": { "human-out-of-the-loop": {
+    "command": "hootl",
+    "args": ["serve", "--mcp", "--project-root", "/path/to/project", "--read-only"] } } }
+```
+
+- **stdio**: فقط stdout حامل پروتکل است؛ بنر روی stderr می‌رود و پیام‌ها به ترتیب
+  پاسخ داده می‌شوند. **HTTP**: فقط `127.0.0.1` و bearer token اجباری
+  (`--token` یا `HOTL_MCP_TOKEN`) — بدون توکن بالا نمی‌آید؛ `GET /health` تنها مسیر
+  بدون توکن است و فقط «بالا هستم» می‌گوید.
+- **متدها**: `initialize` (نسخهٔ 2025-06-18، با عقب‌گرد به 2025-03-26/2024-11-05)،
+  `ping`، `tools/list`، `tools/call`، `resources/list`، `resources/read`،
+  `prompts/list` (خالی) و `notifications/initialized` (بی‌پاسخ، چون notification است).
+  کدها: `-32700`، `-32600`، `-32601` (متد یا ابزار ناشناس)، `-32602`، `-32002`.
+- **JSON Schema ابزارها** از همان `inputSchema` زد ساخته می‌شود (`z.toJSONSchema`) —
+  یک منبع حقیقت؛ متن `describe()` هم به کلاینت می‌رسد. ابزارهای فقط‌خواندنی
+  `readOnlyHint` می‌گیرند.
+- **فیلترها**: `--read-only` (لیست سفید: `read_*`، `list_*`، `search_*`، `get_*`،
+  پنج git read، `fetch`، زمان، خواندن‌های memory — `sequentialthinking` نیست چون
+  فایل می‌نویسد)، `--allow-tools a,b`، `--prefix m` (نام‌ها `m_<id>`). فیلترها هم روی
+  `tools/list` و هم روی `tools/call` اعمال می‌شوند.
+- **منابع فقط‌خواندنی**: `plan://{id}`، `journal://{YYYY-MM-DD}`، `memory://graph` —
+  هر URI قبل از جست‌وجو اعتبارسنجی می‌شود، پس خواندن منبع به خواندن فایل بیرون از
+  `.ai-runtime` تبدیل نمی‌شود.
+
 ### نوشتن در مخزن Git و Pull Request (فاز ۴۲)
 
 یازده ابزار نوشتنی روی همان هسته، با مدل امنیتی §۶.۱:

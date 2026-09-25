@@ -1187,6 +1187,152 @@ scenarios.gitwrite = async () => {
   }
 };
 
+/**
+ * Phase 43 — this runtime *as* an MCP server, exercised the way a client does.
+ *
+ * Two halves:
+ *   1. our own client (`hootl tools --mcp`) is pointed at `hootl serve --mcp`
+ *      through a project registry entry, so the listing proves the client and
+ *      the server agree on the protocol;
+ *   2. a raw stdio session sends `initialize` + `tools/call` itself, which is
+ *      the only way to prove what a *call* does: the tool runs, the answer
+ *      comes back in-band, and the call lands in the project's Journal.
+ */
+scenarios.mcpserve = async () => {
+  const root = makeProject('mcpserve', { 'notes/hello.txt': 'mcpserve line\n' });
+  fs.mkdirSync(path.join(root, 'registry', 'mcp-servers'), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, 'registry', 'mcp-servers', 'self.json'),
+    JSON.stringify(
+      {
+        id: 'self',
+        name: 'This runtime (self)',
+        transport: 'stdio',
+        command: process.execPath,
+        args: [CLI, 'serve', '--mcp', '--project-root', root],
+        toolPrefix: 'self_',
+        connectTimeoutMs: 8000,
+      },
+      null,
+      2
+    )
+  );
+
+  // (1) Our own MCP client connects to our own MCP server.
+  const listing = await run(['tools', '--mcp', '--json', '--project-root', root]);
+  let tools = [];
+  try {
+    tools = JSON.parse(listing.stdout);
+  } catch {
+    tools = [];
+  }
+  const selfTools = tools.filter((tool) => String(tool.id).startsWith('self_'));
+  check(
+    'mcpserve: our client listed our server\'s tools',
+    selfTools.length >= 40 && selfTools.some((tool) => tool.id === 'self_read_file'),
+    `${selfTools.length} tools`
+  );
+
+  const pretty = await run(['tools', '--mcp', '--project-root', root]);
+  check(
+    'mcpserve: the server is reported as live',
+    pretty.stdout.includes('self') && pretty.stdout.includes('self_read_file'),
+    (pretty.stdout || pretty.stderr).split('\n')[0]
+  );
+
+  // (2) A raw stdio session: initialize, then call a tool.
+  const child = spawn(process.execPath, [CLI, 'serve', '--mcp', '--project-root', root], {
+    cwd: root,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const lines = [];
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (chunk) => {
+    stdout += chunk.toString();
+    let index = stdout.indexOf('\n');
+    while (index >= 0) {
+      const line = stdout.slice(0, index);
+      stdout = stdout.slice(index + 1);
+      if (line.trim() !== '') lines.push(JSON.parse(line));
+      index = stdout.indexOf('\n');
+    }
+  });
+  child.stderr.on('data', (chunk) => (stderr += chunk.toString()));
+
+  const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
+  send({
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'e2e', version: '1' } },
+  });
+  send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+  send({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'read_file', arguments: { filePath: 'notes/hello.txt' } } });
+  send({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'read_file', arguments: { filePath: '../../etc/passwd' } } });
+
+  await new Promise((resolve) => {
+    const deadline = Date.now() + 30_000;
+    const poll = setInterval(() => {
+      if (lines.length >= 3 || Date.now() > deadline) {
+        clearInterval(poll);
+        resolve();
+      }
+    }, 100);
+  });
+  child.stdin.end();
+  child.kill('SIGTERM');
+
+  const byId = new Map(lines.map((line) => [line.id, line]));
+  check(
+    'mcpserve: the handshake answered with the server identity',
+    byId.get(1)?.result?.serverInfo?.name === 'human-out-of-the-loop' &&
+      byId.get(1)?.result?.protocolVersion === '2025-06-18',
+    JSON.stringify(byId.get(1)?.result?.protocolVersion ?? null)
+  );
+  check(
+    'mcpserve: the tool call returned the file through the runtime\'s own sandbox',
+    String(byId.get(2)?.result?.structuredContent?.content ?? '').includes('mcpserve line'),
+    JSON.stringify(byId.get(2) ?? null).slice(0, 120)
+  );
+  check(
+    'mcpserve: a path outside the project is refused in-band, not as a crash',
+    byId.get(3)?.result?.isError === true &&
+      String(byId.get(3)?.result?.structuredContent?.code) === 'PATH_TRAVERSAL_BLOCKED',
+    JSON.stringify(byId.get(3)?.result?.structuredContent ?? null).slice(0, 120)
+  );
+  check(
+    'mcpserve: stdout carried protocol only (the banner went to stderr)',
+    stderr.includes('MCP server on') && !stdout.includes('MCP server on')
+  );
+
+  // The call is audited exactly like the agent's own calls.
+  const day = new Date().toISOString().slice(0, 10);
+  const journalFile = path.join(root, '.ai-runtime', 'journal', `${day}.jsonl`);
+  const journalText = fs.existsSync(journalFile) ? fs.readFileSync(journalFile, 'utf-8') : '';
+  const entries = journalText
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  check(
+    'mcpserve: the external call was recorded in the Journal',
+    entries.some(
+      (entry) => entry.tool === 'read_file' && entry.agentId === 'mcp' && entry.ok === true
+    ),
+    `${entries.length} entries`
+  );
+  const reads = entries.filter((entry) => entry.tool === 'read_file');
+  check(
+    'mcpserve: the Journal kept both the success and the refusal, with their codes',
+    reads.length === 2 &&
+      reads.filter((entry) => entry.ok === true).length === 1 &&
+      reads.some((entry) => entry.ok === false && entry.code === 'PATH_TRAVERSAL_BLOCKED'),
+    reads.map((entry) => `${entry.ok}:${entry.code ?? '-'}`).join(',')
+  );
+  return root;
+};
+
 scenarios.resume = async () => {
   const root = makeProject('resume');
   await run(runArgs('write the project notes WRITE:notes/first.txt', root));

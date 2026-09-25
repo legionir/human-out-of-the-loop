@@ -5,6 +5,79 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.16.0] — 2026-09-25 — this runtime *as* an MCP server
+
+`hootl serve --mcp`: the reverse of `hootl mcp list`. Until now the runtime was
+always an MCP *client* — `McpConnector` pulls other servers' tools in; now any
+MCP client (Claude Desktop, Cursor, an IDE agent) can list and call the same 45
+local tools the agent uses. That closes the tools-expansion plan
+(`docs/history/TOOLS_EXPANSION_PLAN.md`, phases 37–43).
+
+**One execution path, not a second API** (`src/mcp/server.ts`)
+- A `tools/call` reaches the *same* tool object the runtime uses: the workspace
+  sandbox, the zod `inputSchema` (so a bad argument is `-32602` with the field
+  named), the same structured `{ success: false, code }` results. A tool refusal
+  is returned **in-band** as `isError` with its code — a client shows it to the
+  model instead of losing the connection.
+- **Audited from outside.** Calls are wrapped by phase 37's `withJournal`, so an
+  MCP client's edit lands in `.ai-runtime/journal/` exactly like the agent's own
+  (`agentId: "mcp"`) — successes *and* refusals, codes included.
+
+**Least privilege is a flag, not a hope**
+- `--read-only` exposes only tools that cannot change anything: `read_*`,
+  `list_*`, `search_*`, `get_*`, the five git reads, `fetch`, the time tools and
+  the memory reads — an **allowlist**, so a future write tool is private until
+  someone decides otherwise. (`sequentialthinking` is deliberately out: it
+  persists a session file.)
+- `--allow-tools a,b` narrows further, `--prefix m` renames tools to `m_<id>`
+  for clients that merge servers. Both filters apply to `tools/list` **and**
+  `tools/call`.
+- Read-only tools carry `readOnlyHint` in their annotations, which is what lets
+  a client auto-approve them without trusting the rest.
+
+**Protocol and transports** (`src/mcp/protocol.ts`, `src/mcp/transports.ts`)
+- JSON-RPC 2.0: `initialize` (2025-06-18, falling back to 2025-03-26 /
+  2024-11-05 — an unknown version is answered with ours and said once, as the
+  spec requires), `ping`, `tools/list`, `tools/call`, `resources/list`,
+  `resources/read`, `prompts/list` (empty), plus `notifications/initialized`
+  (which, being a notification, is answered with silence).
+- Codes that mean something: `-32700` (unparseable frame — even for a malformed
+  HTTP body), `-32600`, `-32601` (unknown method *or* tool, listing what is
+  visible), `-32602` (invalid params), `-32002` (unknown resource).
+- **stdio** is the default and the transport clients spawn; stdout carries
+  protocol only, the banner goes to stderr, frames are answered in order, and a
+  parse failure is answered in-band rather than dropped.
+- **HTTP** binds 127.0.0.1, requires a bearer token (`--token`/`HOTL_MCP_TOKEN`)
+  and refuses to start without one; `GET /health` is the only unauthenticated
+  route and says nothing but "alive". A notification gets `202`.
+- Tool schemas come from the tools' own zod definitions (`z.toJSONSchema`,
+  draft 2020-12, `io: input`) — one source of truth; `describe()` text survives
+  the conversion, so a client's model sees the same help the agent does.
+- Resources are read-only and shape-validated before lookup: `plan://{id}` (via
+  the real plan store — ids, not filenames), `journal://{YYYY-MM-DD}` and
+  `memory://graph`.
+
+**CLI**: `hootl serve --mcp [--project-root DIR] [--http [--port 3300] --token
+<t>] [--read-only] [--allow-tools a,b] [--prefix m]`, listed in `--help` next to
+`mcp`, and warned about where the client is configured
+(`registry/mcp-servers/README.md`): this endpoint reads and writes project files,
+so `--read-only` is the recommendation for a client you do not fully trust.
+
+**Tests**: 1078 → **1112** (66 files; 34 new). Framing (`-32700`/`-32600`),
+negotiation (supported, unsupported, missing), `tools/list` equal to
+`LOCAL_TOOL_IDS` with real JSON Schemas and annotations, `tools/call` success /
+`-32602` / `-32601` / in-band sandbox refusal, both filters (including that a
+filtered tool cannot be *called*), the Journal line for an external call, the
+three resources plus six path-traversal attempts on resource uris, stdio framing
+(order, silence on notifications, banner on stderr) and HTTP (401 without a
+token, 202 for a notification, `-32700` for a malformed body, refusal to start
+tokenless) — and, the acceptance's real interop test: **`@ai-sdk/mcp`'s own
+client** connecting to the real CLI over stdio, listing 45 tools and calling one.
+e2e **153 → 161**: the new `mcpserve` scenario points our own client at our own
+server through a project registry entry, then speaks raw stdio to prove what a
+call does — the file comes back through the sandbox, a path outside the project
+is refused in-band, and both outcomes are in the Journal.
+
 ## [27.15.0] — 2026-09-25 — git, writing (and pull requests)
 
 Eleven new tools, so the same agent that could *read* a repository can now do

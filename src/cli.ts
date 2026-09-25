@@ -37,6 +37,7 @@ import {
   plansResumeCommand,
 } from './cli/commands/plans.js';
 import { mcpListCommand, mcpTestCommand } from './cli/commands/mcp.js';
+import { serveCommand } from './cli/commands/serve.js';
 import { logsCommand } from './cli/commands/logs.js';
 import { journalCommand } from './cli/commands/journal.js';
 import {
@@ -224,6 +225,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '  models / personas / skills / tools',
         '               list what the runtime can use (registry introspection)',
         '  mcp          list configured MCP servers and test a connection',
+        '  serve        expose THESE tools to an MCP client (--mcp; --read-only for untrusted clients)',
         '',
         'CONFIGURATION PRECEDENCE (highest first)',
         '  1. CLI flags                e.g. --model, --project-root, --persistent',
@@ -463,6 +465,52 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .option('--project-root <dir>', 'project root (default: current directory)')
     .action(async (id: string, opts: Record<string, string | undefined>) => {
       process.exitCode = await mcpTestCommand(id, { projectRoot: opts.projectRoot });
+    });
+
+  // ── serve (phase 43: this runtime AS an MCP server) ───────────
+  program
+    .command('serve')
+    .description('Expose these tools to an MCP client (Claude, Cursor, an IDE)')
+    .option('--mcp', 'serve the Model Context Protocol (required — the only mode)')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .option('--http', 'serve over HTTP on 127.0.0.1 instead of stdio (requires --token)')
+    .option('--port <n>', 'HTTP port (default 3300; 0 = pick a free one)', (v: string) => Number(v))
+    .option('--token <t>', 'bearer token for HTTP mode (or HOTL_MCP_TOKEN)')
+    .option('--read-only', 'expose only tools that cannot change anything')
+    .option('--allow-tools <ids>', 'expose only these tool ids (comma-separated)')
+    .option('--prefix <p>', 'name tools "<p>_<id>" (for clients that merge servers)')
+    .addHelpText(
+      'after',
+      helpBlock(
+        'EXPOSING THIS RUNTIME AS AN MCP SERVER',
+        '  Point any MCP client at:',
+        `    ${binName} serve --mcp --project-root /path/to/project`,
+        '  stdio is the default and the transport clients expect; stdout carries the',
+        '  protocol only, so every message from this command goes to stderr.',
+        '',
+        '  HTTP mode binds 127.0.0.1 and REQUIRES a bearer token — this endpoint can',
+        '  read and write files inside the project:',
+        `    ${binName} serve --mcp --http --port 3300 --token "$(openssl rand -hex 16)"`,
+        '',
+        '  Least privilege (recommended for a client you do not fully trust):',
+        `    ${binName} serve --mcp --read-only                    # reads, listings, searches, git reads`,
+        `    ${binName} serve --mcp --allow-tools read_file,git_status`,
+        '',
+        '  Every call is sandboxed to the project and recorded in its Journal',
+        '  (.ai-runtime/journal) exactly like the agent\'s own calls.'
+      ),
+    )
+    .action(async (opts: Record<string, string | boolean | number | undefined>) => {
+      process.exitCode = await serveCommand({
+        mcp: opts.mcp === true,
+        projectRoot: opts.projectRoot as string | undefined,
+        http: opts.http === true,
+        port: opts.port as number | undefined,
+        token: opts.token as string | undefined,
+        readOnly: opts.readOnly === true,
+        allowTools: opts.allowTools as string | undefined,
+        prefix: opts.prefix as string | undefined,
+      });
     });
 
   // ── logs ─────────────────────────────────────────────────────
