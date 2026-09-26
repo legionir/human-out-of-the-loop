@@ -100,8 +100,11 @@ describe('Phase 30 / P7 — replaying a revised plan keeps the record', () => {
     const merged = mergeReplannedSteps(current, revised, 2);
 
     // The failed step stays (with its reason) and its replacement is visible.
+    // R1-05: it is now `superseded`, not `failed` — a plan whose only issue
+    // was this step, and whose replacement succeeds, must be able to report
+    // `completed` rather than being stuck at `failed-partial` forever.
     expect(merged.map((s) => s.id)).toEqual(['step-1', 'step-2', 'step-2~replan2', 'step-3']);
-    expect(merged.find((s) => s.id === 'step-2')?.status).toBe('failed');
+    expect(merged.find((s) => s.id === 'step-2')?.status).toBe('superseded');
     expect(merged.find((s) => s.id === 'step-2~replan2')?.status).toBe('pending');
     expect(merged.find((s) => s.id === 'step-2~replan2')?.description).toBe('different approach');
     // …and step-3 now waits for the REPLACEMENT, not the dead step.

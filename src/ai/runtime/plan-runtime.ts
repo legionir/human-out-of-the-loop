@@ -122,7 +122,7 @@ export class PlanRuntime {
     this.notify(plan, 'plan:started');
 
     // 2. Main execution loop
-    while (!this.shouldExit(plan)) {
+    while (!(await this.shouldExitOrReplan(plan))) {
       // Phase 29: cross-process cancellation.  `hootl plans cancel <id>`
       // runs in ANOTHER process and can only persist the new status, so
       // the loop has to re-read the store to notice it — without this the
@@ -202,7 +202,9 @@ export class PlanRuntime {
       plan.status = 'cancelled';
     }
     if (plan.status === 'running') {
-      const allDone = plan.steps.every((s) => s.status === 'done');
+      // R1-05: a `superseded` step (a failed attempt a successful re-plan
+      // replaced) must not keep the plan at `failed-partial`.
+      const allDone = plan.steps.every((s) => s.status === 'done' || s.status === 'superseded');
       plan.status = allDone ? 'completed' : 'failed-partial';
     }
     if (plan.status === 'cancelled') {
@@ -611,6 +613,41 @@ Produce a new plan that:
   }
 
   /**
+   * R1-02 — `shouldExit()` alone never gives a failed LAST (or only) step a
+   * chance at re-planning: once every step is `done` or `failed`,
+   * `isPlanTerminal()` is already true, so the loop's `while` guard exits
+   * BEFORE the body's `isStuck()` check ever runs (that check only fires
+   * for a step blocked on a still-`pending` dependency). Re-planning was
+   * therefore unreachable for a single-step plan, or any plan whose last
+   * remaining step failed.
+   *
+   * This wraps `shouldExit()`: when it says "terminal" ONLY because of a
+   * failed step (not cancellation, not an externally-set terminal status),
+   * and re-planning budget remains, it attempts one re-plan first and only
+   * reports "exit" if that attempt could not produce a workable revision.
+   */
+  private async shouldExitOrReplan(plan: Plan): Promise<boolean> {
+    if (this.cancelled) return true;
+    if (
+      plan.status === 'completed' ||
+      plan.status === 'failed-partial' ||
+      plan.status === 'cancelled'
+    ) {
+      return true;
+    }
+
+    const hasFailed = plan.steps.some((s) => s.status === 'failed');
+    const hasUnresolved = plan.steps.some((s) => s.status === 'pending' || s.status === 'running');
+    if (isPlanTerminal(plan) && hasFailed && !hasUnresolved) {
+      if (this.replanningCount >= this.maxReplanning) return true;
+      const replanned = await this.attemptReplanning(plan);
+      return !replanned; // replanned → new pending steps exist, keep looping
+    }
+
+    return this.shouldExit(plan);
+  }
+
+  /**
    * Check if the plan is stuck: no steps are running, no steps
    * are ready, and there are still non-terminal steps.
    */
@@ -663,8 +700,11 @@ Produce a new plan that:
   private buildResult(plan: Plan): PlanExecutionResult {
     const doneSteps = plan.steps.filter((s) => s.status === 'done');
     const failedSteps = plan.steps.filter((s) => s.status === 'failed');
+    // R1-05: a `superseded` step is a resolved attempt, not an incomplete
+    // one — it stays visible in `plan.steps` (the review can list it) but
+    // must not count as something the plan left unfinished.
     const incompleteSteps = plan.steps
-      .filter((s) => s.status !== 'done')
+      .filter((s) => s.status !== 'done' && s.status !== 'superseded')
       .map((s) => ({
         stepId: s.id,
         description: s.description,

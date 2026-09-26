@@ -347,7 +347,10 @@ Be honest and specific. Do not invent findings that aren't in the results.
 
   private buildStepSummaries(plan: Plan): StepSummary[] {
     return plan.steps
-      .filter((s) => s.status === 'done' || s.status === 'failed')
+      // R1-05: a superseded step stays in the model-facing review too, so
+      // the record of what was replaced during re-planning is not silently
+      // dropped from the summary the reviewer/model sees.
+      .filter((s) => s.status === 'done' || s.status === 'failed' || s.status === 'superseded')
       .map((s) => ({
         id: s.id,
         description: s.description,

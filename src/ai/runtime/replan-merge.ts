@@ -39,16 +39,36 @@ export function mergeReplannedSteps(
       replacementSteps.push(step);
       continue;
     }
-    // A completed step is never re-done; a FAILED one may be replaced.
-    if (keptById.get(step.id)?.status !== 'failed') continue;
+    const kept = keptById.get(step.id);
+    // A completed step is never re-done in place. If the model merely
+    // resubmitted the same step (identical description — a harmless no-op,
+    // e.g. an unmodified plan echoed back), drop it as before. If it is
+    // actually DIFFERENT new work under a done step's id, giving it a fresh
+    // id keeps that work instead of silently discarding it (R1-04).
+    if (kept?.status !== 'failed') {
+      if (kept === undefined || kept.description === step.description) continue;
+      const newId = `${step.id}-r${attempt}`;
+      takenIds.add(newId);
+      replacementSteps.push({ ...step, id: newId });
+      continue;
+    }
     const replacementId = `${step.id}~replan${attempt}`;
     renames.set(step.id, replacementId);
     takenIds.add(replacementId);
     replacementSteps.push({ ...step, id: replacementId });
   }
 
+  // R1-05: a kept FAILED step that got an actual replacement (the `renames`
+  // branch above) is no longer just "abandoned" — it was superseded by a
+  // step that IS going to run. Marking it `superseded` (not `failed`) keeps
+  // it out of `isPlanTerminal`'s and the final status's failure count, so a
+  // plan whose replacement succeeds reports `completed`, not
+  // `failed-partial`, while the record of what was replaced stays in the
+  // plan (R1-04's "never delete a terminal step").
+  const supersededIds = new Set(renames.keys());
+
   return [
-    ...keptSteps,
+    ...keptSteps.map((s) => (supersededIds.has(s.id) ? { ...s, status: 'superseded' as const } : s)),
     ...replacementSteps.map((s) => ({
       ...s,
       dependsOn: s.dependsOn

@@ -896,6 +896,25 @@ export class Orchestrator {
       );
     }
 
+    // R1-01: a re-plan INSIDE the clarification loop can come back as
+    // `kind:'answer'` (isClear:true, but `plan` is never set) — e.g. the
+    // user's answers turned "do X" into a question that is better answered
+    // directly. The initial call above already routes 'answer' to
+    // `answerRun`; a later one, from inside the loop, did not, so
+    // `const plan = planningResult.plan!` crashed with "Cannot set
+    // properties of undefined (setting 'sessionId')" and the interaction
+    // was left 'pending' forever.
+    if (planningResult.kind === 'answer') {
+      return await this.answerRun({
+        userRequest,
+        sessionId,
+        ...(interaction ? { interactionId: interaction.id } : {}),
+        modelId: runModelId,
+        ...(planningResult.answer ? { draft: planningResult.answer } : {}),
+        mode,
+      });
+    }
+
     if (clarificationDeclined) {
       const clarMsg = planningResult.needsClarification.join('\n');
       if (interaction) {

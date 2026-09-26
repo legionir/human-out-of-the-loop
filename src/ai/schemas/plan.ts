@@ -9,6 +9,13 @@ export const PlanStepStatusSchema = z.enum([
   'running',
   'done',
   'failed',
+  // R1-05: a `failed` step that a successful re-plan replaced with a new
+  // step. Kept (never deleted — R1-04) so the abandoned attempt stays
+  // visible in the final report, but excluded from both "is the plan
+  // stuck/terminal" checks and the done/failed counts that decide
+  // success — a superseded step must never keep a plan whose replacement
+  // succeeded stuck at `failed-partial`.
+  'superseded',
 ]);
 export type PlanStepStatus = z.infer<typeof PlanStepStatusSchema>;
 
@@ -201,7 +208,9 @@ export function isPlanTerminal(plan: Plan): boolean {
   ) {
     return true;
   }
-  return plan.steps.every((s) => s.status === 'done' || s.status === 'failed');
+  return plan.steps.every(
+    (s) => s.status === 'done' || s.status === 'failed' || s.status === 'superseded'
+  );
 }
 
 /**
