@@ -1,0 +1,50 @@
+id	kind	name	defined_at	producers	consumers	status	notes
+SYM-0001	config-key	HOTL_ACTIVITY	env	1 files		TODO	src/cli/utils/activity.ts
+SYM-0002	config-key	HOTL_ACTIVITY_INTERVAL_MS	env	1 files		TODO	src/cli/utils/activity.ts
+SYM-0003	config-key	HOTL_API_KEY	env	6 files		TODO	src/cli/repl.ts,src/cli/commands/registry.ts,src/cli.ts,src/ai/models/providers/openai-provider.ts
+SYM-0004	config-key	HOTL_API_STYLE	env	1 files		TODO	src/ai/models/env-endpoint.ts
+SYM-0005	config-key	HOTL_BASE_URL	env	7 files		TODO	src/cli/utils/registries.ts,src/cli/repl.ts,src/cli/commands/registry.ts,src/cli.ts
+SYM-0006	config-key	HOTL_FETCH_ALLOW_PRIVATE	env	1 files		TODO	src/ai/tools/implementations/fetch.ts
+SYM-0007	config-key	HOTL_JOURNAL	env	2 files		TODO	src/ai/runtime/journal.ts,src/ai/orchestrator.ts
+SYM-0008	config-key	HOTL_JOURNAL_RESULTS	env	2 files		TODO	src/ai/runtime/journal.ts,src/ai/orchestrator.ts
+SYM-0009	config-key	HOTL_MCP_TOKEN	env	3 files		TODO	src/cli/commands/serve.ts,src/cli.ts,src/mcp/transports.ts
+SYM-0010	config-key	HOTL_MODE	env	10 files		TODO	src/cli/utils/registries.ts,src/cli/utils/mode-prefix.ts,src/cli/repl.ts,src/cli/commands/run.ts
+SYM-0011	config-key	HOTL_MODEL	env	6 files		TODO	src/cli/utils/registries.ts,src/cli/repl.ts,src/cli.ts,src/ai/orchestrator.ts
+SYM-0012	config-key	HOTL_NO_ACTIVITY	env	2 files		TODO	src/cli/utils/activity.ts,src/cli.ts
+SYM-0013	config-key	HOTL_NO_PACKAGE_REGISTRY	env	3 files		TODO	src/cli.ts,src/ai/orchestrator.ts,src/ai/registries/layout.ts
+SYM-0014	config-key	HOTL_NO_SPLASH	env	2 files		TODO	src/cli/repl.ts,src/cli.ts
+SYM-0015	config-key	HOTL_PORT	env	1 files		TODO	src/server.ts
+SYM-0016	config-key	HOTL_PROJECT_ROOT	env	1 files		TODO	src/server.ts
+SYM-0017	config-key	HOTL_PROTECTED_BRANCHES	env	1 files		TODO	src/ai/tools/git/git-safe.ts
+SYM-0018	config-key	HOTL_REDACT_KEYS	env	1 files		TODO	src/server.ts
+SYM-0019	config-key	HOTL_SHOW_THINKING	env	1 files		TODO	src/cli/utils/reasoning.ts
+SYM-0020	config-key	HOTL_THINKING	env	2 files		TODO	src/cli/utils/reasoning.ts,src/cli.ts
+SYM-0021	config-key	HOTL_TOOL_LOG	env	3 files		TODO	src/cli/utils/tool-log.ts,src/cli/commands/run.ts,src/cli.ts
+SYM-0022	config-key	OPENAI_API_KEY	env	5 files		TODO	src/cli/repl.ts,src/cli/commands/registry.ts,src/ai/models/providers/openai-provider.ts,src/ai/models/env-endpoint.ts
+SYM-0023	config-key	ANTHROPIC_API_KEY	env	4 files		TODO	src/cli/repl.ts,src/cli/commands/registry.ts,src/ai/models/providers/anthropic-provider.ts,src/ai/models/list-models.ts
+SYM-0024	config-key	LOCAL_MODEL_BASE_URL	env	2 files		TODO	src/ai/orchestrator.ts,src/ai/models/providers/local-provider.ts
+SYM-0025	event	llm:usage	src/ai/runtime/event-bus.ts		3 files	TODO	
+SYM-0026	event	plan:clarified	src/ai/runtime/event-bus.ts		2 files	TODO	
+SYM-0027	event	plan:confirmed	src/ai/runtime/event-bus.ts		2 files	TODO	
+SYM-0028	event	plan:created	src/ai/runtime/event-bus.ts		1 files	TODO	
+SYM-0029	event	plan:failed	src/ai/runtime/event-bus.ts		3 files	TODO	
+SYM-0030	event	plan:replanned	src/ai/runtime/event-bus.ts		5 files	TODO	
+SYM-0031	event	plan:replanning	src/ai/runtime/event-bus.ts		3 files	TODO	
+SYM-0032	event	plan:started	src/ai/runtime/event-bus.ts		4 files	TODO	
+SYM-0033	event	session:created	src/ai/runtime/event-bus.ts		1 files	TODO	
+SYM-0034	event	step:completed	src/ai/runtime/event-bus.ts		1 files	TODO	
+SYM-0035	event	step:failed	src/ai/runtime/event-bus.ts		1 files	TODO	
+SYM-0036	event	step:started	src/ai/runtime/event-bus.ts		1 files	TODO	
+SYM-0037	event	system:error	src/ai/runtime/event-bus.ts		1 files	TODO	
+SYM-0038	event	system:info	src/ai/runtime/event-bus.ts		2 files	TODO	
+SYM-0039	event	task:completed	src/ai/runtime/event-bus.ts		4 files	TODO	
+SYM-0040	event	task:created	src/ai/runtime/event-bus.ts		1 files	TODO	
+SYM-0041	event	task:failed	src/ai/runtime/event-bus.ts		2 files	TODO	
+SYM-0042	event	task:interrupted	src/ai/runtime/event-bus.ts		3 files	TODO	
+SYM-0043	event	task:tool-call	src/ai/runtime/event-bus.ts		5 files	TODO	
+SYM-0044	event	task:tool-error	src/ai/runtime/event-bus.ts		3 files	TODO	
+SYM-0045	entity	Plan	.ai-runtime/plans			TODO	32 files
+SYM-0046	entity	Session	.ai-runtime/sessions			TODO	9 files
+SYM-0047	entity	JournalEntry	.ai-runtime/journal			TODO	1 files
+SYM-0048	entity	TaskTaskRuntime	in-memory			TODO	0 files
+SYM-0049	entity	ObservabilityLogEntry	.ai-runtime/observability.jsonl			TODO	0 files

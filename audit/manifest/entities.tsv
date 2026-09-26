@@ -1,0 +1,6 @@
+id	name	state_field	defined_at	states	writers_count	status	card
+ENT-0001	Plan	status	src/ai/schemas/plan.ts	draft|planning|confirmed|running|completed|failed-partial|cancelled	0	TODO	
+ENT-0002	PlanStep	status	src/ai/schemas/plan.ts	pending|running|done|failed	0	TODO	
+ENT-0003	SessionInteraction	outcome	src/ai/schemas/session.ts	success|failure|pending	0	TODO	
+ENT-0004	Task(TaskRuntime)	status	src/ai/runtime/task-runtime.ts	pending|running|completed|failed|cancelled	0	TODO	
+ENT-0005	JournalEntry	kind/ok	src/ai/runtime/journal.ts	tool|plan|step|agent	0	TODO	

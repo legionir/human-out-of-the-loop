@@ -1,0 +1,11 @@
+id	kind	location	a_side	b_side	contract_evidence	status
+BND-0001	HTTP request↔handler	src/server/routes/*.ts	web client	express handlers	400/404/409/202 JSON contracts per route (verified in WF cards)	DONE
+BND-0002	caller↔callee	routes↔Orchestrator web/CLI	orchestrator public API	RunOptions/RunOverrides/OrchestratorResult types (orchestrator.ts:814+; run.ts:407-414)	DONE
+BND-0003	producer↔consumer	streamingManager→SSE hub	src/server.ts:121-135	ProgressEvent→compact payload (tool NAMES only, Law 14)	DONE
+BND-0004	JSON-RPC transport↔server	src/mcp/transports.ts:199-280	HTTP/stdio client	McpServer.handle; bearer token required; notifications→202 (R0-05)	DONE
+BND-0005	tool schema boundary	src/mcp/server.ts:289-315	external MCP caller	zod schema.safeParse identical to runtime path	DONE
+BND-0006	config↔consumer	env/config→components	HOTL_* keys	loadDotEnv/loadGlobalConfig (cli/utils/config.ts) + env-endpoint (R0-07 key isolation)	DONE
+BND-0007	store↔disk	plan/session stores	atomic write + file lock (prior audit verified)	—	DONE
+BND-0008	client↔external API	src/ai/models/list-models.ts:45-139	providers (openai/anthropic/HOTL)	keys sent only to own provider; 10s timeout; errors scrubbed	DONE
+BND-0009	child process↔parent	mcp-stdio-transport	spawned MCP servers	newline JSON-RPC; closeAll releases children (Phase 30 P6)	DONE
+BND-0010	UI↔backend	public/app.js	→ /api/*	fetch/SSE per endpoint contracts (static frontend)	DONE
