@@ -277,6 +277,41 @@ describe('Phase 30 / P6 — stdio transport', () => {
     expect(stdioSpawnOptions('linux', { P6_MARKER: 'x' }).env?.P6_MARKER).toBe('x');
   });
 
+  it('R0-04: does not leak the parent process env to a stdio child by default', () => {
+    const previous = process.env.HOTL_R0_04_SECRET;
+    process.env.HOTL_R0_04_SECRET = 'must-not-be-inherited';
+    try {
+      const options = stdioSpawnOptions('linux');
+      expect(options.env?.HOTL_R0_04_SECRET).toBeUndefined();
+      // The base allowlist still carries what a child needs to run at all.
+      expect(options.env?.PATH).toBe(process.env.PATH);
+    } finally {
+      if (previous === undefined) delete process.env.HOTL_R0_04_SECRET;
+      else process.env.HOTL_R0_04_SECRET = previous;
+    }
+  });
+
+  it('R0-04: config.env is added on top of the base allowlist, not process.env', () => {
+    process.env.HOTL_R0_04_OTHER_SECRET = 'still-must-not-leak';
+    try {
+      const options = stdioSpawnOptions('linux', { EXPLICIT: 'yes' });
+      expect(options.env?.EXPLICIT).toBe('yes');
+      expect(options.env?.HOTL_R0_04_OTHER_SECRET).toBeUndefined();
+    } finally {
+      delete process.env.HOTL_R0_04_OTHER_SECRET;
+    }
+  });
+
+  // A real-spawn version of this test (writing a marker file from the child)
+  // would additionally exercise `createStdioTransport`, but on this platform
+  // `shell: true` + a `process.execPath` containing a space (e.g. "C:\Program
+  // Files\nodejs\node.exe") already breaks argument passing regardless of
+  // R0-04 — a pre-existing, unrelated issue also hit by the two failing
+  // baseline tests above (`splits several protocol messages…`, `registers the
+  // server tools…`). `stdioSpawnOptions` is what `createStdioTransport` feeds
+  // to `spawn`, so the two tests above already cover R0-04 end to end for the
+  // part that does not depend on that separate bug.
+
   it('refuses to send after close instead of writing to a dead pipe', async () => {
     const marker = path.join(tmpRoot, 'closed');
     const server = writeTestServer(tmpRoot, marker);
