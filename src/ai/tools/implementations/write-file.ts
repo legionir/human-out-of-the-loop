@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { resolvePathInWorkspace } from './path-security.js';
+import { resolvePathInWorkspace, checkProtectedPath } from './path-security.js';
 import { writeFileContent } from '../fs/lib.js';
 
 const inputSchema = z.object({
@@ -46,6 +46,14 @@ export function createWriteFileTool(projectRoot: string) {
         }
 
         const resolved = validation.resolvedPath;
+        const protectedCheck = checkProtectedPath(resolved, allowed);
+        if (protectedCheck.protected) {
+          return {
+            success: false as const,
+            error: protectedCheck.reason!,
+            code: 'PROTECTED_PATH',
+          };
+        }
         const relative = path.relative(projectRoot, resolved) || '.';
 
         if (!replaceExisting) {

@@ -24,6 +24,8 @@ export interface GlobalCliConfig {
    * answer).  `--mode` and an `@chat`/`@plan` prefix win over it.
    */
   defaultMode?: string;
+  /** R0-08: project roots the operator has explicitly trusted to run their own registry/mcp-servers. */
+  trustedProjects?: string[];
 }
 
 export function globalConfigPath(): string {

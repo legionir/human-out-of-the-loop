@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { resolvePathInWorkspace } from './path-security.js';
+import { resolvePathInWorkspace, checkProtectedPath } from './path-security.js';
 import { moveFile } from '../fs/lib.js';
 
 const inputSchema = z.object({
@@ -44,6 +44,23 @@ export function createMoveFileTool(projectRoot: string) {
             success: false as const,
             error: destinationCheck.reason!,
             code: 'PATH_TRAVERSAL_BLOCKED',
+          };
+        }
+
+        const sourceProtected = checkProtectedPath(sourceCheck.resolvedPath, allowed);
+        if (sourceProtected.protected) {
+          return {
+            success: false as const,
+            error: sourceProtected.reason!,
+            code: 'PROTECTED_PATH',
+          };
+        }
+        const destProtected = checkProtectedPath(destinationCheck.resolvedPath, allowed);
+        if (destProtected.protected) {
+          return {
+            success: false as const,
+            error: destProtected.reason!,
+            code: 'PROTECTED_PATH',
           };
         }
 

@@ -22,6 +22,7 @@ import { prepareCliEnvironment } from '../utils/config.js';
 import { color, err, out } from '../utils/output.js';
 import { McpServer } from '../../mcp/server.js';
 import { serveHttp, serveStdio } from '../../mcp/transports.js';
+import { LOCAL_TOOL_IDS } from '../../ai/tools/local-tools.js';
 
 export interface ServeCommandOptions {
   projectRoot?: string;
@@ -36,14 +37,33 @@ export interface ServeCommandOptions {
   prefix?: string;
 }
 
-/** Split `a,b , c` into trimmed ids, ignoring empties. */
-export function parseAllowTools(value: string | undefined): string[] | undefined {
-  if (value === undefined) return undefined;
-  const ids = value
+/**
+ * Split `a,b , c` into trimmed ids. `--allow-tools` with no value, an empty
+ * string, or only commas is a usage error (R0-06) — it must never be
+ * silently treated as "no restriction" and open every tool.
+ */
+export function parseAllowTools(value: string | undefined): string[] {
+  const ids = (value ?? '')
     .split(',')
     .map((id) => id.trim())
     .filter((id) => id !== '');
-  return ids.length > 0 ? ids : undefined;
+  if (ids.length === 0) {
+    throw new Error(
+      '--allow-tools requires at least one tool id (got an empty value); omit the flag entirely to allow every tool.'
+    );
+  }
+  return ids;
+}
+
+/** Throws with the full list of valid ids if any of `ids` is unknown. */
+export function validateAllowTools(ids: string[], validIds: readonly string[] = LOCAL_TOOL_IDS): void {
+  const valid = new Set(validIds);
+  const unknown = ids.filter((id) => !valid.has(id));
+  if (unknown.length > 0) {
+    throw new Error(
+      `--allow-tools has unknown tool id(s): ${unknown.join(', ')}. Valid ids: ${[...valid].sort().join(', ')}.`
+    );
+  }
 }
 
 /**
@@ -89,7 +109,16 @@ export async function serveCommand(options: ServeCommandOptions): Promise<number
     return 2;
   }
 
-  const allowTools = parseAllowTools(options.allowTools);
+  let allowTools: string[] | undefined;
+  if (options.allowTools !== undefined) {
+    try {
+      allowTools = parseAllowTools(options.allowTools);
+      validateAllowTools(allowTools);
+    } catch (error) {
+      err(error instanceof Error ? error.message : String(error));
+      return 2;
+    }
+  }
   let server: McpServer;
   try {
     server = new McpServer({

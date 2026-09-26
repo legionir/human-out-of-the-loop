@@ -1,7 +1,7 @@
 import { tool } from 'ai';
 import { z } from 'zod';
 import path from 'node:path';
-import { resolvePathInWorkspace } from './path-security.js';
+import { resolvePathInWorkspace, checkProtectedPath } from './path-security.js';
 import { applyFileEdits } from '../fs/lib.js';
 
 const inputSchema = z.object({
@@ -52,6 +52,15 @@ export function createEditFileTool(projectRoot: string) {
             success: false as const,
             error: validation.reason!,
             code: 'PATH_TRAVERSAL_BLOCKED',
+          };
+        }
+
+        const protectedCheck = checkProtectedPath(validation.resolvedPath, allowed);
+        if (protectedCheck.protected) {
+          return {
+            success: false as const,
+            error: protectedCheck.reason!,
+            code: 'PROTECTED_PATH',
           };
         }
 

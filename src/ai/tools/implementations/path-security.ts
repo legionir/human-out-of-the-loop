@@ -165,3 +165,47 @@ export async function resolvePathInWorkspace(
     throw error;
   }
 }
+
+/**
+ * R0-09 — directories no writing tool may ever touch, relative to any
+ * workspace root: `.git` (a write there — e.g. `.git/config` or
+ * `.git/hooks/pre-commit` — turns a later `git_status`/`git_commit` call
+ * into arbitrary command execution) and `.ai-runtime` (the audit trail
+ * itself: journal, memory, plans, sessions — writable means an agent, or
+ * content it read via `fetch` under prompt injection, can forge its own
+ * audit history).
+ */
+const PROTECTED_PATH_SEGMENTS = ['.git', '.ai-runtime'] as const;
+
+export interface ProtectedPathResult {
+  protected: boolean;
+  reason?: string;
+}
+
+/**
+ * Checks whether `resolvedPath` (an ABSOLUTE, already-resolved path — the
+ * output of `resolvePathInWorkspace`) falls under a protected directory of
+ * any of `allowedDirectories`. Every writing tool (write_file, edit_file,
+ * move_file, write_multiple_files — both source and destination) must call
+ * this in addition to the workspace-boundary check.
+ */
+export function checkProtectedPath(
+  resolvedPath: string,
+  allowedDirectories: readonly string[]
+): ProtectedPathResult {
+  const target = norm(path.resolve(resolvedPath));
+  for (const root of allowedDirectories) {
+    if (typeof root !== 'string' || root.length === 0) continue;
+    const rootAbs = norm(path.resolve(root));
+    for (const segment of PROTECTED_PATH_SEGMENTS) {
+      const protectedDir = norm(path.join(rootAbs, segment));
+      if (target === protectedDir || target.startsWith(withSep(protectedDir))) {
+        return {
+          protected: true,
+          reason: `Refusing to write inside "${segment}" (protected path): ${path.relative(rootAbs, target) || '.'}`,
+        };
+      }
+    }
+  }
+  return { protected: false };
+}

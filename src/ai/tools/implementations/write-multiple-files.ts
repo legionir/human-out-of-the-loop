@@ -2,7 +2,7 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { resolvePathInWorkspace } from './path-security.js';
+import { resolvePathInWorkspace, checkProtectedPath } from './path-security.js';
 import { writeFileContent } from '../fs/lib.js';
 
 const inputSchema = z.object({
@@ -134,6 +134,16 @@ export function createWriteMultipleFilesTool(projectRoot: string) {
               path: file.path,
               error: validation.reason!,
               code: 'PATH_TRAVERSAL_BLOCKED',
+            });
+            continue;
+          }
+
+          const protectedCheck = checkProtectedPath(validation.resolvedPath, allowed);
+          if (protectedCheck.protected) {
+            errors.push({
+              path: file.path,
+              error: protectedCheck.reason!,
+              code: 'PROTECTED_PATH',
             });
             continue;
           }

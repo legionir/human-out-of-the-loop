@@ -52,7 +52,9 @@ export function modelSources(env: EnvLike): ModelSource[] {
       kind: 'openai-compatible',
       url: `${hotlBase.replace(/\/+$/, '')}/models`,
       specPrefix: '',
-      apiKey: nonEmpty(env.HOTL_API_KEY) ?? nonEmpty(env.OPENAI_API_KEY),
+      // R0-07: OPENAI_API_KEY is the real OpenAI credential and must never
+      // be sent to a custom HOTL_BASE_URL — only the generic HOTL_API_KEY is.
+      apiKey: nonEmpty(env.HOTL_API_KEY),
     });
   }
   const openaiKey = nonEmpty(env.OPENAI_API_KEY);

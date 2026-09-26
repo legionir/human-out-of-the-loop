@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { z } from 'zod';
-import { registryLayersFor } from './registries/layout.js';
+import { registryLayersFor, type RegistryScope } from './registries/layout.js';
 import { EventBus } from './runtime/event-bus.js';
 import type { EnvSource } from './env.js';
 import { resolveEnv } from './env.js';
@@ -130,6 +130,16 @@ export type OrchestratorConfig = z.input<typeof OrchestratorConfigSchema> & {
    * the tool set is handed to the model exactly as it was.
    */
   onToolCall?: ToolCallSink;
+  /**
+   * R0-08: whether the operator has explicitly trusted `projectRoot`'s own
+   * `registry/mcp-servers/*.json`.  Untrusted (the default) means the
+   * PROJECT layer of mcp-servers is not bootstrapped at all — no stdio
+   * child is spawned and no `tokenEnvVar`/`keyEnvVar` is read for it — so a
+   * freshly cloned, unreviewed repository cannot get code execution or
+   * exfiltrate env vars just from `initialize()`.  The packaged (global)
+   * layer is unaffected.
+   */
+  trustedProject?: boolean;
 };
 
 /**
@@ -356,6 +366,9 @@ export class Orchestrator {
       onThought: config.onThought,
       // v27.17.3: tool-call records are optional the same way.
       onToolCall: config.onToolCall,
+      // R0-08: untrusted by default — a project's own mcp-servers layer is
+      // not bootstrapped unless the caller explicitly says it is trusted.
+      trustedProject: config.trustedProject === true,
     };
 
     // Phase 27 (CFG-08): resolve the env once, before any registry or
@@ -597,9 +610,12 @@ export class Orchestrator {
     // disables the packaged layer entirely.
     const layers = registryLayersFor(root, { env: this.env });
     /** Low→high precedence; the last layer overrides the earlier ones. */
-    const forEachLayer = (baseDir: string): Array<{ dir: string; override: boolean; required: boolean }> =>
+    const forEachLayer = (
+      baseDir: string
+    ): Array<{ dir: string; override: boolean; required: boolean; scope: RegistryScope }> =>
       layers.map((layer, index) => ({
         dir: path.join(layer.dir, baseDir),
+        scope: layer.scope,
         override: index > 0,
         required: layer.scope === 'project',
       }));
@@ -648,8 +664,25 @@ export class Orchestrator {
     // server, an HTTP session) must be closed on shutdown, otherwise the
     // child process/socket keeps the Node event loop alive and the CLI
     // never exits after a successful run.
+    //
+    // R0-08: the PROJECT layer's mcp-servers is skipped unless the caller
+    // marked this project trusted — it can spawn arbitrary stdio processes
+    // and send named env vars to arbitrary URLs, so a freshly cloned,
+    // unreviewed repository must not get that on the first `initialize()`.
+    // The packaged (global) layer always loads.
+    const allMcpServerLayers = forEachLayer('mcp-servers');
+    const mcpServerLayers = allMcpServerLayers.filter(
+      (l) => l.scope === 'package' || this.config.trustedProject
+    );
+    if (mcpServerLayers.length < allMcpServerLayers.length) {
+      this.observabilityLogger.logSystemError(
+        'mcp-trust',
+        `Skipped this project's registry/mcp-servers (untrusted project). ` +
+          'Pass trustedProject:true (CLI: --trust-project) to enable it.'
+      );
+    }
     const mcp = await bootstrapMcpServers(
-      forEachLayer('mcp-servers').map((l) => l.dir),
+      mcpServerLayers.map((l) => l.dir),
       this.toolRegistry,
       undefined,
       this.env
