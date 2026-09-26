@@ -90,9 +90,12 @@ export function finalizePlan(plan: Plan): Plan {
   }
   return {
     ...plan,
-    id: plan.id ?? `plan_${randomUUID()}`,
+    // R1-09: `id`/`createdAt` are runtime-assigned identity, never trusted
+    // from the model. A model that always answers `id: "plan-1"` must not
+    // be able to make two separate runs collide on the same plan file.
+    id: `plan_${randomUUID()}`,
     status: 'draft',
-    createdAt: plan.createdAt ?? Date.now(),
+    createdAt: Date.now(),
   };
 }
 

@@ -227,10 +227,10 @@ describe('Phase 30 / P10 — a plan always has an identity', () => {
     expect(plan.steps.map((s) => s.status)).toEqual(['pending', 'pending']);
   });
 
-  it('finalizePlan keeps an id and createdAt the model already provided', async () => {
+  it('R1-09: finalizePlan ignores an id/createdAt the model provided (never trusted)', async () => {
     const { finalizePlan } = await import('../planning/planner.js');
     const raw = {
-      id: 'plan_model_made',
+      id: 'plan-1', // e.g. a model that always answers the same id
       goal: 'g',
       steps: [step('step-1')],
       clarifications: [],
@@ -238,10 +238,15 @@ describe('Phase 30 / P10 — a plan always has an identity', () => {
       createdAt: 1234,
     } as never;
 
-    const plan = finalizePlan(raw);
-    expect(plan.id).toBe('plan_model_made');
-    expect(plan.createdAt).toBe(1234);
-    expect(plan.status).toBe('draft');
+    const planA = finalizePlan(raw);
+    const planB = finalizePlan(raw);
+
+    expect(planA.id).toMatch(/^plan_[0-9a-f-]{36}$/);
+    expect(planA.id).not.toBe('plan-1');
+    expect(planA.createdAt).not.toBe(1234);
+    expect(planA.status).toBe('draft');
+    // Two separate runs of the same (id-echoing) model must never collide.
+    expect(planA.id).not.toBe(planB.id);
   });
 
   it('the file store refuses an id-less plan instead of overwriting another one', async () => {
