@@ -20,11 +20,11 @@
 
 ---
 
-## فاز R0 — ایمنی ابزارها و سطح حمله 🔴
+## فاز R0 — ایمنی ابزارها و سطح حمله 🔴 🟢
 
 **هدف:** هیچ ابزاری نتواند محافظت‌های اعلام‌شده را دور بزند.
 
-### R0-01 🔴 [V] `git_push` برنچ محافظت‌شده را force-push یا حذف می‌کند
+### R0-01 🔴 [V] 🟢 `git_push` برنچ محافظت‌شده را force-push یا حذف می‌کند
 - **محل:** `src/ai/tools/implementations/git-push.ts:118,146`
 - **مشکل:** `protectedMatch` رشته خام `branch` را مقایسه می‌کند ولی همان رشته به‌عنوان refspec به git می‌رود. `{branch:"+feat:main"}` → force-push به main؛ `{branch:":main"}` → حذف main. کامنت خط 127 («refspec قابل بیان نیست») نادرست است.
 - **رفع:** رد کردن `:`، `+` ابتدایی، `^`، `~`، `..` در `branch`؛ اعتبارسنجی با `git check-ref-format --branch`؛ push صریح `refs/heads/X:refs/heads/X`.
@@ -33,64 +33,66 @@
   - push عادی برنچ غیرمحافظت‌شده همچنان موفق باشد.
   - کامنت خط 127 اصلاح شود.
 
-### R0-02 🔴 [V] مدل می‌تواند محافظت SSRF را خاموش کند
+### R0-02 🔴 [V] 🟢 مدل می‌تواند محافظت SSRF را خاموش کند
 - **محل:** `src/ai/tools/implementations/fetch.ts:98`، `src/ai/tools/read-only.ts:24`
 - **مشکل:** `allowPrivate` در schema ورودی مدل است؛ یک صفحه با prompt injection می‌تواند مدل را به خواندن `169.254.169.254` وادارد. `fetch` در لیست read-only است، پس در chat و `serve --mcp --read-only` هم در دسترس است.
 - **رفع:** حذف `allowPrivate` از schema مدل؛ فقط از config اپراتور (`HOTL_FETCH_ALLOW_PRIVATE` یا گزینه factory).
 - **معیار پذیرش:** schema ابزار `fetch` فیلد `allowPrivate` ندارد؛ فراخوانی با `allowPrivate:true` به آدرس خصوصی رد شود؛ با فعال‌سازی اپراتور مجاز شود؛ تست هر دو حالت.
 
-### R0-03 🔴 [V-کد] DNS rebinding در `fetch`
+### R0-03 🔴 [V-کد] 🟢 DNS rebinding در `fetch`
 - **محل:** `src/ai/tools/net/url-safety.ts:242`، `fetch.ts:404`
 - **مشکل:** آدرس یک بار resolve و بررسی می‌شود و undici هنگام اتصال دوباره resolve می‌کند (TOCTOU).
 - **رفع:** `connect.lookup` در `Agent` که همان آدرس‌های بررسی‌شده را برگرداند یا آدرس را در lookup دوباره بررسی کند.
 - **معیار پذیرش:** تست با lookup ساختگی که بار اول IP عمومی و بار دوم `127.0.0.1` می‌دهد → درخواست رد شود.
 
-### R0-04 🟡 [V] پروسه‌های فرزند MCP کل `process.env` را به ارث می‌برند
+### R0-04 🟡 [V] 🟢 پروسه‌های فرزند MCP کل `process.env` را به ارث می‌برند
 - **محل:** `src/ai/tools/mcp-stdio-transport.ts:55`
 - **رفع:** env پایه allowlist (`PATH`, `HOME`, `USERPROFILE`, `SystemRoot`, `TEMP`, `LANG`, …) + `config.env` صریح سرور.
 - **معیار پذیرش:** تست: فرزند stdio متغیر `OPENAI_API_KEY` والد را نبیند مگر در `config.env` تعریف شده باشد؛ سرورهای موجود registry همچنان اجرا شوند (Windows و POSIX).
 
-### R0-05 🟡 [V] سرور MCP به notification پاسخ می‌دهد و `tools/call` بدون id را اجرا می‌کند
+### R0-05 🟡 [V] 🟢 سرور MCP به notification پاسخ می‌دهد و `tools/call` بدون id را اجرا می‌کند
 - **محل:** `src/mcp/server.ts:357-436`
 - **رفع:** برای همه متدها: اگر `id` ندارد، اثر جانبی مجاز (در صورت نیاز) اجرا شود ولی پاسخی ارسال نشود؛ `tools/call` بدون id رد و اجرا نشود.
 - **معیار پذیرش:** تست stdio و HTTP: `{"method":"ping"}` بدون id → بدون خروجی؛ HTTP → `202` بدون body؛ `tools/call` بدون id → هیچ فایلی نوشته نشود.
 
-### R0-06 🟡 [V] `--allow-tools` خالی همه ابزارها را باز می‌کند
+### R0-06 🟡 [V] 🟢 `--allow-tools` خالی همه ابزارها را باز می‌کند
 - **محل:** `src/cli/commands/serve.ts:40-46`
 - **رفع:** مقدار خالی یا فقط `,` → خطا (exit 2)؛ id ناشناخته → خطا با لیست idهای معتبر.
 - **معیار پذیرش:** `--allow-tools ""` و `--allow-tools readfile` هر دو با exit 2 و پیام روشن خارج شوند.
 
-### R0-07 🔴 [V] کلید واقعی `OPENAI_API_KEY` به هر `baseURL` سفارشی ارسال می‌شود
+### R0-07 🔴 [V] 🟢 کلید واقعی `OPENAI_API_KEY` به هر `baseURL` سفارشی ارسال می‌شود
 - **محل:** `src/ai/models/providers/openai-provider.ts:24`، `src/ai/models/list-models.ts:54` (سربرگ این فایل ادعای خلاف دارد)
 - **مشکل:** `apiKey = source[keyVar] || OPENAI_API_KEY || HOTL_API_KEY`. یک `.env` یا `registry/models/gpt-4o.json` در مخزنِ clone‌شده که `baseURL` را عوض کند، کلید واقعی را به سرور مهاجم می‌فرستد (با سرور محلی بازتولید شد: `Bearer sk-REAL-OPENAI`).
 - **رفع:** fallback به `OPENAI_API_KEY` فقط وقتی `baseURL` ندارد یا `api.openai.com` است؛ `baseURL` سفارشی فقط `HOTL_API_KEY` یا `apiKeyEnv` صریح.
 - **معیار پذیرش:** سرور آزمایشی روی `baseURL` سفارشی بدون `HOTL_API_KEY` هیچ header `Authorization` دریافت نکند؛ همین برای `list-models`.
 
-### R0-08 🔴 [V-کد] registry پروژه کد مورد اعتماد فرض می‌شود
+### R0-08 🔴 [V-کد] 🟢 registry پروژه کد مورد اعتماد فرض می‌شود
 - **محل:** `src/ai/orchestrator.ts:651`، `registry/mcp-servers` لایهٔ پروژه
 - **مشکل:** هر سرور stdio تعریف‌شده در `<project>/registry/mcp-servers` در هر `initialize()` (حتی برای یک سؤال chat) spawn می‌شود؛ `tokenEnvVar`/`keyEnvVar` می‌تواند هر متغیر env را به هر URL بفرستد. یک مخزن مخرب با اولین `hootl run` اجرای دستور می‌گیرد.
 - **رفع:** مرحلهٔ اعتماد صریح (لیست پروژه‌های مورد اعتماد در global config یا `--trust-project`) پیش از استفاده از mcp-servers و override‌های `baseURL` لایهٔ پروژه.
 - **معیار پذیرش:** در پروژهٔ نامطمئن سرور stdio اجرا نشود و هشدار روشن نمایش داده شود؛ پس از اعتماد، اجرا شود.
+- **یادداشت اجرا:** `Orchestrator` اکنون به‌طور پیش‌فرض لایهٔ پروژهٔ `mcp-servers` را بوت‌استرپ نمی‌کند مگر `trustedProject:true` (این ضمانت امنیتی برای هر فراخوان — CLI، سرور، تست — به‌صورت خودکار اعمال می‌شود). `src/ai/registries/trust.ts` و `GlobalCliConfig.trustedProjects` زیرساخت persist اعتماد را فراهم می‌کنند؛ سیم‌کشی `--trust-project` در `run`/`repl`/`serve` (برای خواندن/نوشتن این لیست خودکار) هنوز انجام نشده — فعلاً فراخوان باید `trustedProject:true` را صریحاً به `OrchestratorConfig` بدهد.
 
-### R0-09 🔴 [V] ابزارهای فایل می‌توانند در `.git/` و `.ai-runtime/` بنویسند
+### R0-09 🔴 [V] 🟢 ابزارهای فایل می‌توانند در `.git/` و `.ai-runtime/` بنویسند
 - **محل:** `src/ai/tools/implementations/path-security.ts:136`، `write-file.ts`، `edit_file`، `move_file`
 - **مشکل:** `write_file('.git/config', core.fsmonitor=…)` و سپس `git_status` (read-only) دستور دلخواه اجرا می‌کند (بازتولید شد)؛ `.git/hooks/pre-commit` همین اثر را در `git_commit` دارد؛ بازنویسی `.ai-runtime/journal/*.jsonl` ردپای audit را جعل می‌کند. از طریق fetch آلوده به prompt injection و `serve --mcp` هم قابل دسترس است.
 - **رفع:** رد هر نوشتن، ویرایش یا جابه‌جایی که مسیرش جزء `.git` یا `.ai-runtime` دارد (کد `PROTECTED_PATH`).
 - **معیار پذیرش:** `write_file` به `.git/config` و `.ai-runtime/journal/x` هر دو رد شوند و بایت‌های فایل تغییر نکنند؛ همین برای `edit_file`، `move_file` و `copy`.
 
-### R0-10 🔴 [V] ابزارهای git در مخزن بزرگ‌تر از workspace فایل‌های بیرون workspace را تغییر می‌دهند
+### R0-10 🔴 [V] 🟢 ابزارهای git در مخزن بزرگ‌تر از workspace فایل‌های بیرون workspace را تغییر می‌دهند
 - **محل:** `src/ai/tools/git/git-runner.ts:310-313` (ریشهٔ مخزن بالاتر از projectRoot مجاز است)، `git-stash.ts:140`، `git-reset.ts:167`، `git-branch-write.ts:247`، `git-commit.ts`
 - **مشکل:** `git_stash` تغییر کاربر در `../outside.txt` را برداشت و `git_commit` آن را commit کرد (بازتولید شد).
 - **رفع:** وقتی ریشهٔ مخزن ≠ projectRoot: pathspec workspace به هر فرمان نوشتنی؛ یا رد عملیات اگر بیرون workspace تغییر نشده وجود دارد.
 - **معیار پذیرش:** همان سناریو `outside.txt` را دست‌نخورده بگذارد.
+- **یادداشت اجرا:** `git_stash push` اکنون با pathspec `-- .` به workspace محدود می‌شود؛ `git_reset --hard` وقتی تغییر بیرون workspace وجود دارد رد می‌شود (`OUTSIDE_WORKSPACE`) چون `--hard` را نمی‌توان با pathspec محدود کرد. `git-branch-write.ts` (checkout مسیرهای بیرون از طریق تغییر برنچ) هنوز پوشش داده نشده — ریسک پایین‌تر است چون عملیات branch مستقیماً محتوای دلخواه فایل بیرون workspace را نمی‌نویسد مگر با checkout که به‌طور طبیعی کل تری را جابه‌جا می‌کند؛ به فاز بعد موکول شد.
 
-### R0-11 🔴 [V] `git_commit` با `paths` کل index را commit می‌کند
+### R0-11 🔴 [V] 🟢 `git_commit` با `paths` کل index را commit می‌کند
 - **محل:** `src/ai/tools/implementations/git-commit.ts:193-236`
 - **مشکل:** `git add -- paths` و سپس `git commit -m` بدون pathspec → فایل‌های stage‌شدهٔ خود کاربر هم commit می‌شوند (بازتولید شد). پیام `NOTHING_TO_COMMIT` هم فایل‌های unstaged کاربر را فهرست می‌کند و مدل را به stage کردن آن‌ها تشویق می‌کند.
 - **رفع:** `git commit --only -- <paths>`؛ بدون `paths`، گزارش یا رد ورودی‌های index که ایجنت stage نکرده است.
 - **معیار پذیرش:** HEAD فقط فایل ایجنت را داشته باشد و فایل stage‌شدهٔ کاربر همچنان staged بماند.
 
-### R0-12 🟡 [V] `.ai-runtime/` در پروژه‌های کاربر git-ignore نمی‌شود
+### R0-12 🟡 [V] 🟢 `.ai-runtime/` در پروژه‌های کاربر git-ignore نمی‌شود
 - **مشکل:** `git_add ["."]` فایل‌های `.ai-runtime/thinking/*.json` را stage کرد؛ journal، memory، plans و sessions هم commit و push می‌شوند.
 - **رفع:** ساخت `.ai-runtime/.gitignore` با محتوای `*` هنگام ایجاد دایرکتوری.
 - **معیار پذیرش:** پس از یک اجرا در مخزن تازه، `git add .` هیچ فایلی زیر `.ai-runtime` stage نکند.

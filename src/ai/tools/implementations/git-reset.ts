@@ -1,4 +1,5 @@
 import { tool, type Tool } from 'ai';
+import path from 'node:path';
 import { z } from 'zod';
 import {
   ensureRepo,
@@ -143,6 +144,30 @@ export function createGitResetTool(projectRoot: string, options: { env?: NodeJS.
           };
         }
         const dirty = await readDirty(repo);
+        // R0-10: the repo root may sit above the workspace. `git reset --hard`
+        // cannot be scoped to a pathspec (git refuses `--hard` with paths), so
+        // when it would also discard uncommitted changes OUTSIDE the
+        // workspace — porcelain status paths are always REPO-ROOT-relative,
+        // regardless of cwd — refuse outright rather than destroying work the
+        // caller never asked to touch (verified: a hard reset discarded a
+        // change to a file outside the workspace).
+        const outside = dirty.paths.filter((p) => {
+          const bare = p.includes(' → ') ? p.split(' → ').pop()! : p;
+          const rel = path.relative(repo.directory, path.resolve(repo.root, bare));
+          return rel === '..' || rel.startsWith(`..${path.sep}`);
+        });
+        if (outside.length > 0) {
+          return {
+            success: false,
+            code: 'OUTSIDE_WORKSPACE',
+            directory: repo.display,
+            repository: repo.root,
+            error:
+              `Refusing to hard-reset: the repository root is above the workspace and this would also ` +
+              `discard uncommitted changes outside it:\n${outside.map((p) => `  - ${p}`).join('\n')}\n` +
+              `A hard reset cannot be limited to a pathspec — run it directly in the repository if that is intended.`,
+          };
+        }
         if (!confirmed) {
           return {
             success: false,

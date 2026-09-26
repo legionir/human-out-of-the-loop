@@ -1,4 +1,5 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { z } from 'zod';
 import { registryLayersFor, type RegistryScope } from './registries/layout.js';
 import { EventBus } from './runtime/event-bus.js';
@@ -438,6 +439,20 @@ export class Orchestrator {
     });
 
     const runtimeDir = this.config.runtimeDir;
+    // R0-12: `.ai-runtime` (journal, memory, plans, sessions) must never be
+    // picked up by `git add .` in the user's own project — a plain
+    // `.gitignore` next to it is enough, and this is the one place every
+    // Orchestrator creates the directory, so it is written once, here,
+    // best-effort (a read-only filesystem must not fail construction).
+    try {
+      fs.mkdirSync(runtimeDir, { recursive: true });
+      const gitignorePath = path.join(runtimeDir, '.gitignore');
+      if (!fs.existsSync(gitignorePath)) {
+        fs.writeFileSync(gitignorePath, '*\n');
+      }
+    } catch {
+      // best-effort — a failure here must not block the runtime from starting
+    }
     // Phase 30 (P10): the persisted plan must not carry a credential the
     // model echoed into its summary.
     const planStore = this.config.persistent

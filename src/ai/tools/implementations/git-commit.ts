@@ -235,6 +235,16 @@ export function createGitCommitTool(
 
       const args = ['commit', '-m', message, '--cleanup=strip'];
       if (amend) args.push('--amend');
+      // R0-11: when the caller named specific `paths`, commit ONLY those —
+      // `git add -- paths` followed by a plain `git commit` would also
+      // commit anything the USER had already staged before this call
+      // (verified: a user's staged file landed in the agent's commit).
+      // `--only -- <paths>` restricts the commit's tree to exactly the
+      // named paths regardless of what else is in the index, and leaves
+      // the user's own staged entries staged afterwards.
+      if (!amend && paths && paths.length > 0) {
+        args.push('--only', '--', ...paths);
+      }
       const snapshot = await withSnapshot(repo, () => runGit(repo.directory, args));
       const { result, before, after } = snapshot;
       if (!result.ok) {

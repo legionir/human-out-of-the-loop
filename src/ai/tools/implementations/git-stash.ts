@@ -141,6 +141,13 @@ export function createGitStashTool(projectRoot: string) {
       if (action === 'push') {
         if (input.includeUntracked) args.push('-u');
         if (message !== '') args.push('-m', message);
+        // R0-10: the repository root may sit above the workspace (a project
+        // directory inside a bigger checkout) — a plain `git stash push`
+        // stashes changes repo-wide, including files outside the workspace
+        // (verified: a change in `../outside.txt` was picked up). A `--`
+        // pathspec of `.` (cwd = repo.directory, the workspace) scopes the
+        // stash to exactly the workspace regardless of where the repo root is.
+        args.push('--', '.');
       } else if (action === 'drop' || action === 'pop' || action === 'apply') {
         args.push('--end-of-options', `stash@{${entry}}`);
       }
