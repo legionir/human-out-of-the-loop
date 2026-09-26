@@ -404,13 +404,20 @@ export class PlanRuntime {
 
       const judgment = await checker.checkStep(step, task, this.defaultModelId);
 
-      if (judgment.accepted) {
+      if (judgment.checkerError) {
+        // R1-07: the judge itself failed (timeout/error), not the step's
+        // work — keep the step `done` and its own output, just note that
+        // no verdict could be reached.
+        step.resultSummary = `${step.resultSummary ?? ''}\n[Acceptance: UNVERIFIED — ${judgment.reason}]`.trim();
+        this.persist(plan);
+      } else if (judgment.accepted) {
         step.resultSummary = `${step.resultSummary ?? ''}\n[Acceptance: PASSED — ${judgment.reason}]`.trim();
         this.persist(plan);
       } else {
         step.status = 'failed';
         step.failureType = 'quality';
-        step.resultSummary = `[Acceptance: FAILED — ${judgment.reason}]`;
+        // R1-07: append the verdict, never overwrite the step's own output.
+        step.resultSummary = `${step.resultSummary ?? ''}\n[Acceptance: FAILED — ${judgment.reason}]`.trim();
         this.notify(plan, `step:${step.id}:failed`);
         checker.reportQualityFailure(plan.id ?? 'unknown', step.id, judgment.reason);
         this.persist(plan);
@@ -568,20 +575,25 @@ Produce a new plan that:
 
       const newPlan = result.plan;
 
-      // Validate the new plan
-      const feasibility = runFeasibilityGate(newPlan, this.config.feasibilityDeps);
-      if (!feasibility.feasible) {
-        return false; // New plan is also infeasible
-      }
-
-      const cycleCheck = detectCycles(newPlan);
-      if (cycleCheck.hasCycle) {
-        return false; // New plan has cycles
-      }
-
       // Phase 30 (P7): keep terminal steps (done AND failed) so an abandoned
       // sub-goal never disappears from the plan; see `replan-merge.ts`.
-      plan.steps = mergeReplannedSteps(plan.steps, newPlan.steps, this.replanningCount);
+      const mergedSteps = mergeReplannedSteps(plan.steps, newPlan.steps, this.replanningCount);
+      const mergedPlan: Plan = { ...plan, steps: mergedSteps };
+
+      // R1-06: validate the MERGED plan, not the raw model output — a
+      // revision that only lists new/changed steps must still see kept
+      // done/failed/pending steps when checking dependsOn and cycles.
+      const feasibility = runFeasibilityGate(mergedPlan, this.config.feasibilityDeps);
+      if (!feasibility.feasible) {
+        return false; // Merged plan is infeasible
+      }
+
+      const cycleCheck = detectCycles(mergedPlan);
+      if (cycleCheck.hasCycle) {
+        return false; // Merged plan has cycles
+      }
+
+      plan.steps = mergedSteps;
 
       this.persist(plan);
       this.notify(plan, 'plan:replanned');

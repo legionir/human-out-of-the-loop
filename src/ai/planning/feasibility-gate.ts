@@ -35,6 +35,20 @@ export function runFeasibilityGate(
   const errors: FeasibilityCheckResult['errors'] = [];
   const stepIds = new Set(plan.steps.map((s) => s.id));
 
+  // 0. Duplicate step ids (R1-08): a plan with two steps sharing an id makes
+  // dependsOn/lookup ambiguous, so reject before any per-step check.
+  const seenIds = new Set<string>();
+  for (const step of plan.steps) {
+    if (seenIds.has(step.id)) {
+      errors.push({
+        stepId: step.id,
+        field: 'id',
+        message: `Duplicate step id "${step.id}" in plan.`,
+      });
+    }
+    seenIds.add(step.id);
+  }
+
   for (const step of plan.steps) {
     // 1. Persona exists
     const persona = deps.personaRegistry.get(step.assignedPersona);

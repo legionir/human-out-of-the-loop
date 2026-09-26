@@ -16,7 +16,15 @@ export const AcceptanceResultSchema = z.object({
   reason: z.string().min(1),
 });
 
-export type AcceptanceResult = z.infer<typeof AcceptanceResultSchema>;
+export type AcceptanceResult = z.infer<typeof AcceptanceResultSchema> & {
+  /**
+   * R1-07: set when the judgment itself could not be obtained (timeout or
+   * reviewer error), as opposed to a real quality verdict. The caller must
+   * NOT fail the step for this — the step's own output is still good; the
+   * judgment is simply unknown.
+   */
+  checkerError?: boolean;
+};
 
 export interface AcceptanceCheckerConfig {
   personaRegistry: PersonaRegistry;
@@ -100,8 +108,8 @@ Evaluate the output against the acceptance criteria and respond with
 a JSON object containing "accepted" (boolean) and "reason" (string).
 `.trim();
 
-    try {
-      const { object, usage } = await withStructuredRetry(() =>
+    const attempt = () =>
+      withStructuredRetry(() =>
         withLlmTimeout(
           'Acceptance check',
           this.config.timeoutMs,
@@ -118,15 +126,27 @@ a JSON object containing "accepted" (boolean) and "reason" (string).
             })
         )
       );
-      reportLlmUsage(this.config.onUsage, 'acceptance', usage, taskResult.planId);
 
-      return object;
-    } catch (err) {
-      return {
-        accepted: false,
-        reason: `Acceptance check itself failed: ${err instanceof Error ? err.message : String(err)}`,
-      };
+    // R1-07: a timeout or reviewer error is an infrastructure failure, not
+    // a quality verdict — it gets one extra retry (on top of
+    // `withStructuredRetry`'s own schema-parse retry) before being reported
+    // as `checkerError` so the caller leaves the step's own result alone.
+    let lastErr: unknown;
+    for (let i = 0; i < 2; i++) {
+      try {
+        const { object, usage } = await attempt();
+        reportLlmUsage(this.config.onUsage, 'acceptance', usage, taskResult.planId);
+        return object;
+      } catch (err) {
+        lastErr = err;
+      }
     }
+
+    return {
+      accepted: false,
+      reason: `Acceptance check itself failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
+      checkerError: true,
+    };
   }
 
   /**

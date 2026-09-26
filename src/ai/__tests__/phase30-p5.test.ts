@@ -225,5 +225,8 @@ describe('Phase 30 P5 — structured calls are bounded too', () => {
     expect(Date.now() - started).toBeLessThan(3000);
     expect(judgment.accepted).toBe(false);
     expect(judgment.reason).toContain('timed out after 60ms');
+    // R1-07: a timeout is a checker failure, not a real quality verdict —
+    // callers must not fail the step for this.
+    expect(judgment.checkerError).toBe(true);
   });
 });

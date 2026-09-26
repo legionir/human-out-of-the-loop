@@ -29,6 +29,14 @@ export function mergeReplannedSteps(
   const keptSteps = currentSteps.filter((s) => s.status === 'done' || s.status === 'failed');
   const keptById = new Map(keptSteps.map((s) => [s.id, s]));
 
+  // R1-06: a pending step the model forgot to re-list is still live work,
+  // not something the re-plan implicitly cancelled. Keep it unless the
+  // revised plan explicitly replaces it (same id present in revisedSteps).
+  const revisedIds = new Set(revisedSteps.map((s) => s.id));
+  const forgottenPending = currentSteps.filter(
+    (s) => s.status === 'pending' && !revisedIds.has(s.id)
+  );
+
   const renames = new Map<string, string>();
   const takenIds = new Set(keptById.keys());
   const replacementSteps: PlanStep[] = [];
@@ -69,6 +77,7 @@ export function mergeReplannedSteps(
 
   return [
     ...keptSteps.map((s) => (supersededIds.has(s.id) ? { ...s, status: 'superseded' as const } : s)),
+    ...forgottenPending,
     ...replacementSteps.map((s) => ({
       ...s,
       dependsOn: s.dependsOn

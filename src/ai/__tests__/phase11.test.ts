@@ -421,6 +421,39 @@ describe('AcceptanceChecker — PlanRuntime hook (Phase 20)', () => {
     expect(mockGenerateObject).toHaveBeenCalledTimes(1);
   });
 
+  it('R1-07: a checker error keeps the step done and appends UNVERIFIED, not FAILED', async () => {
+    const { runtime } = makeHookHarness(env);
+
+    const plan = createPlan('Hook checker-error test', [
+      {
+        id: 'step-1',
+        description: 'Create a user model',
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: ['file_management'],
+        assignedTools: ['read_file'],
+        claimedResources: [],
+        acceptanceCriteria: 'User type with name and email.',
+        status: 'pending',
+      },
+    ]);
+
+    mockGenerateText.mockResolvedValue({
+      text: 'Created user model with name and email fields.',
+      usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 },
+      steps: [],
+    } as any);
+    // The reviewer itself errors out on every attempt (not a real verdict).
+    mockGenerateObject.mockRejectedValue(new Error('reviewer provider down'));
+
+    const result = await runtime.execute(plan);
+
+    expect(plan.steps[0].status).toBe('done');
+    expect(plan.steps[0].failureType).toBeUndefined();
+    expect(plan.steps[0].resultSummary).toContain('Acceptance: UNVERIFIED');
+    expect(result.status).toBe('completed');
+  });
+
   it('does NOT check steps that failed technically', async () => {
     const { runtime } = makeHookHarness(env);
 
