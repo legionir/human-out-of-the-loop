@@ -149,14 +149,13 @@ async function startFixture(robotsMode: RobotsMode = 'allow'): Promise<Fixture> 
 }
 
 /**
- * Every fetch in this file goes to the fixture, which is loopback by design —
- * so the helper passes `allowPrivate: true` per call (a tool *input*), while
- * `options` are the factory's own knobs (timeouts, caps, UA).
+ * Every fetch in this file goes to the fixture, which is loopback by design.
+ * R0-02: `allowPrivate` is an operator-only factory option, not a model
+ * input, so it is set here on `options`, never smuggled into `execute()`.
  */
 function fetchTool(options: Record<string, unknown> = {}) {
-  const execute = executeOf(createFetchTool(REPO_ROOT, options as never));
-  return (input: { url: string } & Record<string, unknown>) =>
-    execute({ allowPrivate: true, ...input });
+  const execute = executeOf(createFetchTool(REPO_ROOT, { allowPrivate: true, ...options } as never));
+  return (input: { url: string } & Record<string, unknown>) => execute(input);
 }
 
 describe('Phase 40 — url safety (the SSRF gate)', () => {
@@ -624,6 +623,34 @@ describe('Phase 40 — the fetch tool against a local server', () => {
     expect(result.code).toBe('BLOCKED_PRIVATE_ADDRESS');
   });
 
+  it('R0-02: the model schema has no allowPrivate field at all', () => {
+    const t = createFetchTool(REPO_ROOT) as unknown as { inputSchema: { shape: Record<string, unknown> } };
+    expect(Object.keys(t.inputSchema.shape)).not.toContain('allowPrivate');
+  });
+
+  it('R0-02: passing allowPrivate as a tool argument cannot bypass the SSRF block', async () => {
+    const guarded = executeOf(createFetchTool(REPO_ROOT, { timeoutMs: 500 } as never));
+    const result = await guarded({
+      url: `${fixture.origin}/page`,
+      // A model influenced by prompt injection tries the old escape hatch.
+      allowPrivate: true,
+    } as never);
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('BLOCKED_PRIVATE_ADDRESS');
+  });
+
+  it('R0-02: only the operator env var enables private addresses, never the call', async () => {
+    process.env.HOTL_FETCH_ALLOW_PRIVATE = '1';
+    try {
+      const enabled = executeOf(createFetchTool(REPO_ROOT, { timeoutMs: 500 } as never));
+      const result = await enabled({ url: `${fixture.origin}/plain.txt` });
+      expect(result.success).toBe(true);
+      expect(result.privateAllowed).toBe(true);
+    } finally {
+      delete process.env.HOTL_FETCH_ALLOW_PRIVATE;
+    }
+  });
+
   it('flags that a private target was allowed on purpose', async () => {
     const result = await fetchTool()({ url: `${fixture.origin}/plain.txt` });
     expect(result.privateAllowed).toBe(true);
@@ -639,8 +666,8 @@ describe('Phase 40 — the fetch tool against a local server', () => {
     const port = (server.address() as { port: number }).port;
     process.env.SECRET_TOKEN = 'must-not-be-sent';
 
-    const tool = executeOf(createFetchTool(REPO_ROOT, { timeoutMs: 2000 } as never));
-    await tool({ url: `http://127.0.0.1:${port}/x`, respectRobots: false, allowPrivate: true });
+    const tool = executeOf(createFetchTool(REPO_ROOT, { timeoutMs: 2000, allowPrivate: true } as never));
+    await tool({ url: `http://127.0.0.1:${port}/x`, respectRobots: false });
     await new Promise<void>((resolve) => server.close(() => resolve()));
 
     const headers = captured[0]!;

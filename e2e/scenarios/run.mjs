@@ -785,11 +785,14 @@ scenarios.memory = async () => {
 /**
  * Phase 40 — `fetch`, against a throwaway server on loopback.
  *
- * Four calls in one run: the page as Markdown (script/nav gone, links
- * absolute, tables and code kept), the same page raw, a path the site's
- * robots.txt disallows, and — with `allowPrivate` left off — the same loopback
- * address the SSRF gate must refuse.  The server is the e2e runner's own, so
- * this scenario needs no network at all.
+ * Two runs against a throwaway server on loopback: the first, with the
+ * operator-only `HOTL_FETCH_ALLOW_PRIVATE` override on, does the page as
+ * Markdown (script/nav gone, links absolute, tables and code kept), the same
+ * page raw, and a path the site's robots.txt disallows. The second run, with
+ * the override off, proves the SSRF gate still refuses the same loopback
+ * address even though the fake model still sends `allowPrivate: true` — that
+ * field is not part of the tool's schema any more (R0-02). The server is the
+ * e2e runner's own, so this scenario needs no network at all.
  */
 scenarios.fetch = async () => {
   const page = `<!doctype html><html><head><title>Widget API &mdash; Docs</title>
@@ -826,11 +829,16 @@ scenarios.fetch = async () => {
 
   try {
     const root = makeProject('fetch');
+    // R0-02: `allowPrivate` is no longer a per-call model argument, only an
+    // operator setting — so the three loopback fetches that must succeed run
+    // with it enabled at the process level, and the SSRF-refusal fetch below
+    // runs as a second, separate process with it left off.
     const goal =
       'read the widget docs and the private page FETCHPROBE CHAIN ' +
-      `FETCH:${origin}/docs FETCHRAW:${origin}/raw ` +
-      `FETCHFORBID:${origin}/private FETCHGUARD:${origin}/docs`;
-    const { code, stdout } = await run(runArgs(goal, root));
+      `FETCH:${origin}/docs FETCHRAW:${origin}/raw FETCHFORBID:${origin}/private`;
+    const { code, stdout } = await run(runArgs(goal, root), {
+      env: { HOTL_FETCH_ALLOW_PRIVATE: '1' },
+    });
     const log = readLog(root);
 
     check('fetch: exit code 0', code === 0, `exit=${code} ${(stdout || '').split('\n')[0]}`);
@@ -839,8 +847,8 @@ scenarios.fetch = async () => {
       .filter((e) => e.eventType === 'task:tool-call')
       .map((e) => e.payload?.toolName);
     check(
-      'fetch: all four fetches ran',
-      called.filter((tool) => tool === 'fetch').length === 4,
+      'fetch: all three fetches ran',
+      called.filter((tool) => tool === 'fetch').length === 3,
       called.join(',')
     );
 
@@ -873,24 +881,20 @@ scenarios.fetch = async () => {
       'fetch: robots.txt refusal came back with the rule',
       dump.includes('ROBOTS_FORBIDDEN') && dump.includes('Disallow: /private')
     );
-    check(
-      'fetch: the loopback page was refused without allowPrivate',
-      dump.includes('BLOCKED_PRIVATE_ADDRESS') && dump.includes('loopback')
-    );
 
-    // A refusal is an *answer*: the step still finishes, and the only failures
-    // in the whole run are the two this scenario asked for.  Anything else
-    // failing here is a real bug, so the assertion counts them.
+    // A refusal is an *answer*: the step still finishes, and the only failure
+    // in this run is the robots.txt one this scenario asked for.  Anything
+    // else failing here is a real bug, so the assertion counts them.
     const { plans } = planStore(root);
     const toolErrors = log
       .filter((e) => e.eventType === 'task:tool-error')
       .map((e) => e.message ?? '');
     check(
-      'fetch: the two refusals are the only tool failures, and every step finished',
+      'fetch: the robots refusal is the only tool failure, and every step finished',
       Boolean(plans[0]) &&
         plans[0].steps.every((step) => step.status === 'done') &&
-        toolErrors.length === 2 &&
-        toolErrors.every((message) => /ROBOTS_FORBIDDEN|disallows this page|Refusing to fetch/.test(message)),
+        toolErrors.length === 1 &&
+        toolErrors.every((message) => /ROBOTS_FORBIDDEN|disallows this page/.test(message)),
       toolErrors.length ? `${toolErrors.length}: ${toolErrors[0]?.slice(0, 90)}` : '(none)'
     );
 
@@ -903,13 +907,43 @@ scenarios.fetch = async () => {
       : '';
     check(
       'fetch: the Journal recorded the fetches automatically',
-      (journalText.match(/"tool":"fetch"/g) ?? []).length === 4
+      (journalText.match(/"tool":"fetch"/g) ?? []).length === 3
     );
     check(
       'fetch: the fetched page was not written into the project',
       !fs.readdirSync(root).includes('docs') &&
         !fs.existsSync(path.join(root, '.ai-runtime', 'fetch'))
     );
+
+    // R0-02: without the operator env var, the same loopback origin is
+    // refused by the SSRF gate — a plain model-supplied `allowPrivate: true`
+    // (still sent by the fake LLM below) must not reach the schema at all.
+    const guardRoot = makeProject('fetch-guard');
+    const guardGoal = `read the docs FETCHPROBE CHAIN FETCHGUARD:${origin}/docs`;
+    const guardRun = await run(runArgs(guardGoal, guardRoot));
+    check(
+      'fetch: guarded run exits 0',
+      guardRun.code === 0,
+      `exit=${guardRun.code} ${(guardRun.stdout || '').split('\n')[0]}`
+    );
+    const guardDump = stubRequests()
+      .filter((body) => JSON.stringify(body).includes('FETCHPROBE'))
+      .map((body) => JSON.stringify(body))
+      .join('\n');
+    check(
+      'fetch: the loopback page was refused without the operator override',
+      guardDump.includes('BLOCKED_PRIVATE_ADDRESS') && guardDump.includes('loopback')
+    );
+    const guardLog = readLog(guardRoot);
+    const guardToolErrors = guardLog
+      .filter((e) => e.eventType === 'task:tool-error')
+      .map((e) => e.message ?? '');
+    check(
+      'fetch: the SSRF refusal is the only failure in the guarded run',
+      guardToolErrors.length === 1 &&
+        guardToolErrors.every((message) => /BLOCKED_PRIVATE_ADDRESS|loopback/.test(message))
+    );
+
     return root;
   } finally {
     server.closeAllConnections?.();
