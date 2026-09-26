@@ -287,6 +287,12 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
       '--thinking <mode>',
       "show the model's live thinking text: auto|on|off (default: auto = on in a terminal)",
     )
+    // v27.17.3: the tool-call log — one line per call, with its type, name,
+    // input and status.
+    .option(
+      '--tool-log <mode>',
+      'log every AI tool call with type, name, input and status: auto|on|off (default: auto — on unless HOTL_TOOL_LOG says otherwise)',
+    )
     .action(async (goal: string, opts: Record<string, string | boolean | undefined>) => {
       // `persistent` stays undefined when the flag is absent so
       // runCommand can fall back to the global config default.
@@ -305,6 +311,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         maxDelegationDepth: opts.maxDelegationDepth as number | undefined,
         label: opts.label as string | undefined,
         thinking: opts.thinking as string | undefined,
+        toolLog: opts.toolLog as string | undefined,
       });
       process.exitCode = result.exitCode;
     })

@@ -217,6 +217,30 @@ scenarios.success = async () => {
     log.filter((e) => e.eventType.startsWith('step:')).map((e) => e.eventType).join(',')
   );
 
+  // v27.17.3: every tool call is logged — type, name, input, status — and the
+  // log can be turned off for a scripted run.
+  const line = stdout.split('\n').find((l) => l.includes('tool: write_file')) ?? '';
+  check(
+    'success: the tool call is logged with type, name, input and status',
+    /tool: write_file\s+type: filesystem\s+input: .*notes\/done\.txt.*\s+status: ✅ success/.test(
+      stdout
+    ),
+    line.trim() || '(no tool line)'
+  );
+
+  const silent = await run(runArgs('write the project notes WRITE:notes/silent.txt', root), {
+    env: { HOTL_TOOL_LOG: '0' },
+  });
+  check(
+    'success: HOTL_TOOL_LOG=0 turns the tool log off',
+    silent.code === 0 && !silent.stdout.includes('🔧 tool:'),
+    `exit=${silent.code}`
+  );
+  check(
+    'success: ...and the run still happened',
+    fs.existsSync(path.join(root, 'notes', 'silent.txt'))
+  );
+
   const usage = await run(['usage', '--project-root', root, '--json']);
   const totals = JSON.parse(usage.stdout).totals;
   check('success: tokens are attributed to the plan', totals.totalTokens > 0, JSON.stringify(totals));
@@ -1180,6 +1204,31 @@ scenarios.gitwrite = async () => {
     check(
       'gitwrite: the Journal kept the commit message and the pushed branch',
       journalText.includes('add feature.txt from e2e') && journalText.includes('feature/e2e-write')
+    );
+
+    // v27.17.3: the same calls on the human-facing log, including the two
+    // refusals — a failed tool call is exactly what a reader must be able to see.
+    const toolLines = stdout.split('\n').filter((line) => line.includes('🔧 tool:'));
+    const shaped = toolLines.filter((line) =>
+      /type: \S+\s+input: \{.*\}\s+status: (✅ success|❌ failed)/.test(line)
+    );
+    check(
+      'gitwrite: every call is logged as type+name+input+status',
+      toolLines.length >= 5 && shaped.length === toolLines.length,
+      `${shaped.length}/${toolLines.length} ok :: ` +
+        toolLines
+          .filter((line) => !shaped.includes(line))
+          .map((line) => line.slice(0, 100))
+          .join(' || ')
+    );
+    check(
+      'gitwrite: the refusals are logged as failures with their reason',
+      toolLines.some(
+        (line) =>
+          line.includes('tool: git_push') &&
+          /status: ❌ failed — PROTECTED_BRANCH: .*main/.test(line)
+      ) && toolLines.some((line) => line.includes('tool: git_reset') && line.includes('❌ failed')),
+      (toolLines.find((line) => line.includes('git_reset')) ?? '(no git_reset line)').slice(0, 160)
     );
     return root;
   } finally {

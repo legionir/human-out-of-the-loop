@@ -161,6 +161,26 @@ describe('C4 — clarification loop in Orchestrator.run', () => {
     await orchestrator.shutdown();
   });
 
+  it('the re-plan after clarification keeps the run mode', async () => {
+    const orchestrator = makeOrchestrator();
+    mockGenerateObject
+      .mockResolvedValueOnce(unclearAssessment(['Which framework?']))
+      .mockResolvedValueOnce(clearAssessment())
+      .mockResolvedValueOnce(reviewResult());
+
+    const result = await orchestrator.run('Build a login page', {
+      mode: 'plan',
+      confirmCallback: async () => ({ confirmed: true }),
+      clarificationCallback: async () => ({ 'Which framework?': 'React 18' }),
+    });
+
+    const secondPrompt = String((mockGenerateObject.mock.calls[1][0] as any).prompt);
+    expect(secondPrompt).toContain('The user asked for a PLAN');
+    expect(result.kind).toBe('plan');
+
+    await orchestrator.shutdown();
+  });
+
   it('callback returns null → clean run CANCELLATION', async () => {
     const orchestrator = makeOrchestrator();
     mockGenerateObject.mockResolvedValueOnce(

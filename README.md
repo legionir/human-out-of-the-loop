@@ -244,7 +244,7 @@ human-out-of-the-loop run "Build a login page" --dry-run
 
 | Command | Purpose | Key options |
 |---|---|---|
-| `run <goal>` | Plan, confirm (once), execute to completion | `--project-root`, `--persistent`, `--model <id>`, `--session <id>`, `--yes`, `--verbose`, `--dry-run`, `--thinking <auto\|on\|off>`, `--timeout-ms <ms>`, `--max-steps <n>`, `--max-replans <0-10>`, `--max-delegation-depth <0-5>`, `--label <text>` |
+| `run <goal>` | Plan, confirm (once), execute to completion | `--project-root`, `--persistent`, `--model <id>`, `--session <id>`, `--yes`, `--verbose`, `--dry-run`, `--thinking <auto\|on\|off>`, `--tool-log <auto\|on\|off>`, `--timeout-ms <ms>`, `--max-steps <n>`, `--max-replans <0-10>`, `--max-delegation-depth <0-5>`, `--label <text>` |
 | `sessions list` | List persisted sessions | `--project-root` |
 | `sessions show <id>` | Session detail (interactions, plan ids, summaries) | `--project-root` |
 | `sessions label <id> <label>` | Rename a session (empty string clears the label) | `--project-root` |
@@ -352,6 +352,7 @@ hootl run "list every TypeScript file" --thinking off  # plain, non-streaming pa
 | Variable | Default | Meaning |
 |---|---|---|
 | `HOTL_THINKING` / `HOTL_SHOW_THINKING` | `auto` | `on`/`off`/`1`/`0`; `--thinking <mode>` wins over the environment, and `auto` shows thinking only when stdout is a terminal |
+| `HOTL_TOOL_LOG` | `on` | `on`/`off`/`1`/`0`; `--tool-log <mode>` wins, and `auto` leaves the decision to this variable |
 | `HOTL_NO_ACTIVITY=1` / `HOTL_ACTIVITY=off` | — | turn the status line off in a terminal |
 | `HOTL_ACTIVITY_INTERVAL_MS` | `3000` | how often the status message changes (minimum 250) |
 
@@ -608,6 +609,37 @@ Disable per process with `HOTL_JOURNAL=0`; `HOTL_JOURNAL_RESULTS=full` keeps
 complete results instead of summaries. Config:
 `journal: { enabled, includeResults, maxEntryBytes, retentionDays }`.
 
+### Tool-call log — every call, in four fields
+
+While a run works, the terminal shows each AI tool call on one line: the type of
+tool, its name, the input it was given, and whether it succeeded.
+
+```
+🔧 tool: write_file  type: filesystem  input: {"filePath":"notes/a.txt","content":"…"}  status: ✅ success
+🔧 tool: git_push  type: git  input: {"directory":".","branch":"main"}  status: ❌ failed — PROTECTED_BRANCH: Refusing to push "main" …
+```
+
+The records come from the runtime, not from the CLI: `src/ai/runtime/`
+`tool-call-log.ts` exposes a `ToolCallSink` that receives
+`{ phase, status, toolType, toolName, input, taskId, agentId, planId,
+planStepId, callId, durationMs, error, code }` for every call — the same hook
+point the Journal uses, one layer outside it. A UI, an editor extension or a
+test can register its own sink and consume the identical objects; when no sink
+is registered the tools are passed through untouched.
+
+The type is the tool's registry category (`filesystem`, `git`, `memory`,
+`time`, `web`, `reasoning`, `mcp`, else `other`); the input is the real
+arguments with credential keys redacted and the process's secret values
+scrubbed, capped at 400 characters; the status is the runtime's own verdict
+(`success: false`, an SDK error output, an MCP `isError`), and a thrown error is
+logged and still re-thrown. Failures carry the message and its code.
+
+```bash
+hootl run "rename the notes" --tool-log on     # the default: one line per call
+hootl run "rename the notes" --tool-log off    # quiet, e.g. for a scripted run
+HOTL_TOOL_LOG=0 hootl run "rename the notes"   # the same, via the environment
+```
+
 ### Filesystem tools
 
 The workspace tools are a native port of the MCP reference *filesystem* server
@@ -819,7 +851,7 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**1187 tests green (71 files), 0 tsc errors — plus 189 committed end-to-end checks (`npm run e2e`)** (phases 18–43 complete — see `docs/history/`)
+**1218 tests green (73 files), 0 tsc errors — plus 194 committed end-to-end checks (`npm run e2e`)** (phases 18–43 complete — see `docs/history/`)
 
 ## Law Compliance
 

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { EventBus, type AgentEvent } from './event-bus.js';
 import { AgentRuntime, type AgentRunResult } from './agent-runtime.js';
 import type { ThoughtSink } from './thought-stream.js';
+import type { ToolCallLogOptions, ToolCallSink } from './tool-call-log.js';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { createTaskRecord, type Task, type TaskStatus } from '../schemas/task.js';
 
@@ -40,6 +41,13 @@ export interface TaskRuntimeConfig {
    * is absent, agent turns use the non-streaming call exactly as before.
    */
   onThought?: ThoughtSink;
+  /**
+   * v27.17.3: default sink for structured tool-call records, forwarded to
+   * every `AgentRuntime.run()` call that does not carry its own.
+   */
+  onToolCall?: ToolCallSink;
+  /** v27.17.3: category resolver + secrets for those records. */
+  toolCallOptions?: ToolCallLogOptions;
 }
 
 export interface CreateTaskOptions {
@@ -63,6 +71,8 @@ export interface CreateTaskOptions {
    * Phase 32: per-task thinking sink (wins over `TaskRuntimeConfig.onThought`).
    */
   onThought?: ThoughtSink;
+  /** v27.17.3: per-task tool-call sink (wins over the runtime default). */
+  onToolCall?: ToolCallSink;
 }
 
 // ─── Resource Lock Manager ───────────────────────────────────────
@@ -166,11 +176,15 @@ export class TaskRuntime {
   private readonly maxSteps?: number;
   /** Phase 32: default thinking sink for every task of this runtime. */
   private readonly onThought?: ThoughtSink;
+  /** v27.17.3: default sink for structured tool-call records. */
+  private readonly onToolCall?: ToolCallSink;
+  /** v27.17.3: how those records resolve a tool's type, and what to redact. */
+  private readonly toolCallOptions?: ToolCallLogOptions;
   private readonly eventBus: EventBus;
   /** U3: per-task execution overrides (runOverrides from Orchestrator.run). */
   private readonly taskOverrides = new Map<
     string,
-    Pick<CreateTaskOptions, 'agentTimeoutMs' | 'maxSteps' | 'onThought'>
+    Pick<CreateTaskOptions, 'agentTimeoutMs' | 'maxSteps' | 'onThought' | 'onToolCall'>
   >();
   private readonly runtime: AgentRuntime;
   private readonly runningPromises = new Map<string, Promise<AgentRunResult>>();
@@ -188,6 +202,8 @@ export class TaskRuntime {
     this.agentTimeoutMs = config.agentTimeoutMs;
     this.maxSteps = config.maxSteps;
     this.onThought = config.onThought;
+    this.onToolCall = config.onToolCall;
+    this.toolCallOptions = config.toolCallOptions;
     this.eventBus = config.eventBus;
     this.runtime = config.agentRuntime ?? new AgentRuntime();
 
@@ -222,12 +238,14 @@ export class TaskRuntime {
     if (
       options.agentTimeoutMs !== undefined ||
       options.maxSteps !== undefined ||
-      options.onThought !== undefined
+      options.onThought !== undefined ||
+      options.onToolCall !== undefined
     ) {
       this.taskOverrides.set(taskId, {
         agentTimeoutMs: options.agentTimeoutMs,
         maxSteps: options.maxSteps,
         ...(options.onThought !== undefined ? { onThought: options.onThought } : {}),
+        ...(options.onToolCall !== undefined ? { onToolCall: options.onToolCall } : {}),
       });
     }
 
@@ -324,6 +342,7 @@ export class TaskRuntime {
         const maxSteps = overrides.maxSteps ?? this.maxSteps;
         // Phase 32: live thinking text (per-task sink wins over the default).
         const onThought = overrides.onThought ?? this.onThought;
+        const onToolCall = overrides.onToolCall ?? this.onToolCall;
         this.taskOverrides.delete(task.id);
         const promise = this.runtime
           .run({
@@ -341,6 +360,9 @@ export class TaskRuntime {
             ...(task.planStepId !== undefined ? { planStepId: task.planStepId } : {}),
             // Phase 32: none/undefined keeps the turn non-streaming
             ...(onThought ? { onThought } : {}),
+            // v27.17.3: structured tool-call records for this step
+            ...(onToolCall ? { onToolCall } : {}),
+            ...(this.toolCallOptions ? { toolCallOptions: this.toolCallOptions } : {}),
           })
           .then((result) => {
             this.handleRunResult(task.id, result);

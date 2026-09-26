@@ -107,7 +107,8 @@ const MIN_REDACT_VALUE_LENGTH = 8;
 const PREVIEW_CHARS = 2000;
 const MAX_HASH_BYTES = 256 * 1024;
 
-const DEFAULT_REDACT_KEYS = [
+/** Key names whose VALUE is never written to a journal entry or shown in a tool log. */
+export const DEFAULT_REDACT_KEYS = [
   'api_key',
   'apikey',
   'authorization',
