@@ -77,6 +77,12 @@ export const PlanSchema = z.object({
    * so a plan can be traced back to the conversation that produced it.
    */
   sessionId: z.string().optional(),
+  /**
+   * R1-10: the model this run's execution (task/reviewer/acceptance) used,
+   * so `resumePlan` calls the reviewer with the SAME model instead of
+   * silently falling back to the server default.
+   */
+  modelId: z.string().optional(),
   /** Clarification questions (populated during ambiguity resolution) */
   clarifications: z.array(z.string()).default([]),
   /** Overall plan status */

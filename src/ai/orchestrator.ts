@@ -1037,6 +1037,9 @@ export class Orchestrator {
     // an interaction that is 'pending' forever with no plan id, and nothing
     // (user or `plans resume`) can tell how to finish the run.
     plan.sessionId = sessionId;
+    // R1-10: remember this run's model so a later `resumePlan` reviews
+    // with the same model instead of the server default.
+    plan.modelId = runModelId;
     this.observabilityLogger.logPlanCreated(plan);
     // Phase 24 (UI): persist at creation so the plan is visible to the
     // user WHILE the confirmation is pending (UI modal / plans list).
@@ -1539,7 +1542,11 @@ export class Orchestrator {
       .map((step) => ({ stepId: step.id, taskId: step.taskId! }));
 
     const executionResult = await planRuntime.resume(planId);
-    const review = await this.finalReviewer.review(plan, executionResult);
+    // R1-10: `resume()` persists its own freshly-loaded plan object, which
+    // is NOT the same reference as `plan` above — reload so the review sees
+    // the post-resume step statuses instead of the pre-resume snapshot.
+    const resumedPlan = this.planStore.load(planId) ?? plan;
+    const review = await this.finalReviewer.review(resumedPlan, executionResult, resumedPlan.modelId);
     review.usage = this.planUsage(plan.id);
     const report = formatFinalReview(review);
 
