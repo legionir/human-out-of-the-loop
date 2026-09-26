@@ -5,7 +5,9 @@ import {
   failureResult,
   gitExitOk,
   isFailure,
+  isValidBranchName,
   rejectFlagLike,
+  rejectRefspecLike,
   runGit,
 } from '../git/git-runner.js';
 import {
@@ -114,6 +116,17 @@ export function createGitPushTool(projectRoot: string, options: { env?: NodeJS.P
         };
       }
 
+      const badRefspec = rejectRefspecLike(branch, 'branch');
+      if (badRefspec) return { ...(failureResult(badRefspec) as GitPushOutcome), directory: repo.display };
+      if (!(await isValidBranchName(branch))) {
+        return {
+          success: false,
+          code: 'BAD_ARGUMENT',
+          directory: repo.display,
+          error: `Invalid branch "${branch}": not a valid git ref name.`,
+        };
+      }
+
       const protectedList = protectedBranches(options.env);
       if (protectedMatch(branch, protectedList)) {
         return {
@@ -127,7 +140,8 @@ export function createGitPushTool(projectRoot: string, options: { env?: NodeJS.P
 
       // Pushing to a protected *remote* branch from a differently-named local
       // branch is the same mistake wearing a hat: `branch: main` is caught
-      // above, and a refspec-style destination is not expressible here.
+      // above, and `rejectRefspecLike` + the explicit `refs/heads/X:refs/heads/X`
+      // below mean a refspec-style destination cannot be expressed at all.
       const remoteExists = await runGit(repo.directory, ['remote', 'get-url', '--', remote], {
         allowFailure: true,
       });
@@ -143,7 +157,9 @@ export function createGitPushTool(projectRoot: string, options: { env?: NodeJS.P
 
       const args = ['push'];
       if (setUpstream) args.push('--set-upstream');
-      args.push('--end-of-options', remote, branch);
+      // Explicit source:destination (both `refs/heads/…`) so the branch name
+      // is always a literal ref, never a refspec parsed by git.
+      args.push('--end-of-options', remote, `refs/heads/${branch}:refs/heads/${branch}`);
 
       const snapshot = await withSnapshot(repo, () =>
         runGit(repo.directory, args, { timeoutMs: 120_000 })

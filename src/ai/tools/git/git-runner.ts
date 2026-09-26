@@ -299,6 +299,49 @@ export function isCleanGitName(value: string): boolean {
   return !/[\0\n\r]/.test(value);
 }
 
+/**
+ * Refuse a branch name that could be read as a refspec rather than a plain
+ * branch (R0-01).
+ *
+ * `git push <remote> <branch>` treats `branch` as a refspec, not a literal
+ * name: a leading `+` forces the push, and a `:` separates a source from a
+ * destination (`feat:main` pushes local `feat` onto remote `main`; `:main`
+ * with no source deletes remote `main`). `^`, `~` and `..` are revision
+ * syntax that has no place in a branch name either. None of this is caught
+ * by `rejectFlagLike`, since none of these values start with `-`.
+ */
+export function rejectRefspecLike(value: string, label: string): GitFailure | undefined {
+  if (
+    value.startsWith('+') ||
+    value.includes(':') ||
+    value.includes('^') ||
+    value.includes('~') ||
+    value.includes('..')
+  ) {
+    return {
+      ok: false,
+      code: 'BAD_ARGUMENT',
+      error:
+        `Invalid ${label} "${value}": branch names may not contain "+" (as a prefix), ":", "^", "~" or ` +
+        `".." — those are refspec/revision syntax, not a literal branch name.`,
+    };
+  }
+  return undefined;
+}
+
+/**
+ * Validate a ref name the way git itself would (`git check-ref-format
+ * --branch`), so anything git's own parser would refuse is caught before it
+ * reaches a command line.
+ */
+export async function isValidBranchName(value: string): Promise<boolean> {
+  const result = await runGit('.', ['check-ref-format', '--branch', value], {
+    allowFailure: true,
+    timeoutMs: 5_000,
+  });
+  return gitExitOk(result);
+}
+
 // ─── workspace + repository resolution ───────────────────────────
 
 export interface ResolvedRepo {

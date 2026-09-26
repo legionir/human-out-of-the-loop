@@ -417,6 +417,17 @@ suite('Phase 42 — git_push (to a local bare remote)', () => {
     expect((await push({ directory: '.', branch: '--force' })).code).toBe('BAD_ARGUMENT');
   });
 
+  it('rejects R0-01 refspec-smuggling branch names before running git', async () => {
+    const push = executeOf(createGitPushTool(root));
+    for (const branch of ['+feat:main', ':main', 'feat:main', 'main^', 'main~1', 'a..b']) {
+      const result = await push({ directory: '.', remote: 'origin', branch });
+      expect(result.success, `branch "${branch}" must be rejected`).toBe(false);
+      expect(result.code, `branch "${branch}" must be rejected`).toBe('BAD_ARGUMENT');
+    }
+    // main was never created on the remote via a smuggled refspec.
+    expect(git(bare, ['branch', '--list', 'main']).trim()).toBe('');
+  });
+
   it('a rejected push stays rejected: there is no force to reach for', async () => {
     // Rewriting the pushed commit makes the local branch diverge from the
     // remote, which is exactly the case a force flag would "solve".
