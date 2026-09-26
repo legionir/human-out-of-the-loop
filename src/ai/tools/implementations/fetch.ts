@@ -1,6 +1,7 @@
 import { tool, type Tool } from 'ai';
 import { z } from 'zod';
 import fs from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import { Agent, fetch as undiciFetch } from 'undici';
 import { packageRoot } from '../../registries/layout.js';
@@ -211,10 +212,69 @@ function decodeBody(buffer: Buffer, contentType: string): string {
 interface RequestOptions {
   timeoutMs: number;
   maxBytes: number;
-  agent: Agent;
+  agent?: Agent;
   /** User-Agent for this request (never read from the environment). */
   userAgent: string;
   signal?: AbortSignal;
+  /**
+   * R0-03: the exact addresses `checkUrlSafety` already vetted for this URL's
+   * host. When set, the connection is pinned to these addresses instead of
+   * letting undici resolve the hostname again — closing the DNS-rebinding gap
+   * where a second lookup (at connect time) answers with a private address
+   * after the first lookup (at the safety check) answered with a public one.
+   */
+  pinnedAddresses?: string[];
+}
+
+type DnsLookupCallback = (
+  err: NodeJS.ErrnoException | null,
+  address: string | { address: string; family: number }[],
+  family?: number
+) => void;
+
+/**
+ * A `dns.lookup`-compatible function that always answers with the addresses
+ * `checkUrlSafety` already resolved and vetted — never a fresh DNS query.
+ */
+function pinnedLookup(
+  addresses: readonly string[]
+): (hostname: string, options: unknown, callback: DnsLookupCallback) => void {
+  return (_hostname, options, callback) => {
+    const cb = typeof options === 'function' ? (options as DnsLookupCallback) : callback;
+    const opts = typeof options === 'object' && options !== null ? (options as { all?: boolean; family?: number }) : {};
+    const family = opts.family;
+    const matching = addresses.filter((address) => {
+      if (!family) return true;
+      return family === 4 ? net.isIPv4(address) : net.isIPv6(address);
+    });
+    if (matching.length === 0) {
+      cb(Object.assign(new Error('EAI_NODATA'), { code: 'EAI_NODATA' }), []);
+      return;
+    }
+    const records = matching.map((address) => ({
+      address,
+      family: net.isIPv4(address) ? 4 : 6,
+    }));
+    if (opts.all) {
+      cb(null, records);
+    } else {
+      cb(null, records[0]!.address, records[0]!.family);
+    }
+  };
+}
+
+/** One short-lived dispatcher per request, pinned to already-vetted addresses. */
+function agentFor(timeoutMs: number, pinnedAddresses?: string[]): Agent {
+  return new Agent({
+    connect: {
+      timeout: timeoutMs,
+      ...(pinnedAddresses && pinnedAddresses.length > 0
+        ? { lookup: pinnedLookup(pinnedAddresses) }
+        : {}),
+    },
+    headersTimeout: timeoutMs,
+    bodyTimeout: timeoutMs,
+  });
 }
 
 /**
@@ -232,6 +292,12 @@ async function requestOnce(
   const onOuterAbort = (): void => controller.abort();
   options.signal?.addEventListener('abort', onOuterAbort, { once: true });
 
+  // R0-03: when the caller already vetted addresses for this host, connect
+  // pinned to exactly those — never let undici re-resolve and possibly land
+  // on a different (private) address than the one that was checked.
+  const pinnedAgent = options.pinnedAddresses ? agentFor(options.timeoutMs, options.pinnedAddresses) : undefined;
+  const dispatcher = pinnedAgent ?? options.agent;
+
   try {
     const response = await undiciFetch(url, {
       method: 'GET',
@@ -243,7 +309,7 @@ async function requestOnce(
         'accept-language': 'en',
       },
       signal: controller.signal,
-      dispatcher: options.agent,
+      dispatcher,
     });
 
     const headers = headerMap(response.headers);
@@ -302,6 +368,7 @@ async function requestOnce(
   } finally {
     clearTimeout(timer);
     options.signal?.removeEventListener('abort', onOuterAbort);
+    if (pinnedAgent) void pinnedAgent.close().catch(() => undefined);
   }
 }
 
@@ -345,7 +412,7 @@ async function followRedirects(
     }
     if (options.allowPrivate === false) privateAllowed = false;
 
-    const response = await requestOnce(safety.url.href, options);
+    const response = await requestOnce(safety.url.href, { ...options, pinnedAddresses: safety.addresses });
     if (isFailure(response)) return response;
 
     const location = headerValue(response.headers, 'location');
@@ -467,6 +534,8 @@ export function createFetchTool(projectRoot: string, toolOptions: FetchToolOptio
             maxBytes: MAX_ROBOTS_BYTES,
             agent,
             userAgent: agentHeader,
+            // robots.txt lives on the same host as `safety.url`, already vetted.
+            pinnedAddresses: safety.addresses,
           });
           if (isFailure(fetched)) {
             entry = {

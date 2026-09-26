@@ -99,7 +99,7 @@ async function startFixture(robotsMode: RobotsMode = 'allow'): Promise<Fixture> 
       return;
     }
     if (url === '/redirect-private') {
-      res.writeHead(307, { location: 'http://10.0.0.5/inside' }).end();
+      res.writeHead(307, { location: 'ftp://10.0.0.5/inside' }).end();
       return;
     }
     if (url === '/loop') {
@@ -486,23 +486,16 @@ describe('Phase 40 — the fetch tool against a local server', () => {
     expect(result.content).toContain('# Widget API');
   });
 
-  it('vets every redirect hop: a public page may not bounce into a private one', async () => {
-    // `localhost` reaches the fixture (real DNS) while the safety gate sees a
-    // public address (the injected lookup) — exactly the shape of a public URL
-    // that 307s into the private network. The *second* hop is a literal
-    // 10.0.0.5, so there is nothing ambiguous about it.
-    const port = new URL(fixture.origin).port;
-    const tool = executeOf(
-      createFetchTool(REPO_ROOT, {
-        lookup: async () => ['93.184.216.34'],
-        timeoutMs: 2000,
-      } as never)
-    );
-    const result = await tool({ url: `http://localhost:${port}/redirect-private` });
+  it('vets every redirect hop, not just the first URL', async () => {
+    // R0-03 pins each hop's connection to the address its own safety check
+    // vetted, so a hop can no longer look public to the check and privately
+    // connect elsewhere (that gap is what R0-03 closes) — this test instead
+    // proves the *second* hop is independently checked at all: the first hop
+    // is honestly loopback (allowPrivate: true), and the redirect target uses
+    // a scheme (`ftp:`) that is always refused, regardless of address.
+    const result = await fetchTool()({ url: `${fixture.origin}/redirect-private` });
     expect(result.success).toBe(false);
-    expect(result.code).toBe('BLOCKED_PRIVATE_ADDRESS');
-    expect(result.error).toContain('10.0.0.5');
-    expect(result.error).toMatch(/allowPrivate: true/);
+    expect(result.code).toBe('BLOCKED_PROTOCOL');
   });
 
   it('stops after the redirect budget', async () => {
@@ -654,6 +647,39 @@ describe('Phase 40 — the fetch tool against a local server', () => {
   it('flags that a private target was allowed on purpose', async () => {
     const result = await fetchTool()({ url: `${fixture.origin}/plain.txt` });
     expect(result.privateAllowed).toBe(true);
+  });
+
+  it('R0-03: the connection is pinned to the address checkUrlSafety vetted, not re-resolved', async () => {
+    // A hostname with no real DNS record at all. If the fetch performed a
+    // second, independent lookup at connect time (the pre-fix behaviour),
+    // it would get ENOTFOUND/DNS_FAILED from the real resolver — exactly the
+    // gap a DNS-rebinding attacker relies on to answer differently on the
+    // second lookup. After the fix, the connection is pinned to the address
+    // the safety check already approved, so the request must still succeed.
+    const port = new URL(fixture.origin).port;
+    let lookupCalls = 0;
+    const tool = executeOf(
+      createFetchTool(REPO_ROOT, {
+        timeoutMs: 2000,
+        allowPrivate: true,
+        lookup: async () => {
+          lookupCalls += 1;
+          return ['127.0.0.1'];
+        },
+      } as never)
+    );
+    const result = await tool({
+      url: `http://this-host-does-not-exist-anywhere.invalid:${port}/plain.txt`,
+      respectRobots: false,
+    });
+    expect(result.success, JSON.stringify(result)).toBe(true);
+    // Two safety checks run for a non-redirected request (the initial one and
+    // the one inside followRedirects's loop) — both go through the injected
+    // lookup. What must NOT happen is a third, independent resolution at
+    // connect time: if undici performed its own DNS lookup for a hostname
+    // with no real record, the request would fail outright instead of
+    // succeeding via the pinned address.
+    expect(lookupCalls).toBe(2);
   });
 
   it('never sends credentials: only our User-Agent and Accept', async () => {
