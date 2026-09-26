@@ -178,6 +178,36 @@ describe('Phase 43 — the handshake', () => {
     expect(response.error?.code).toBe(JSON_RPC_ERRORS.methodNotFound);
     expect(String(response.error?.message)).toContain('tools/explode');
   });
+
+  it('R0-05: tools/call without an id is refused and never executed', async () => {
+    const before = fs.existsSync(path.join(root, 'r0-05.txt'));
+    expect(before).toBe(false);
+    const frames = await server.handleFrame(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        method: 'tools/call',
+        params: { name: 'write_file', arguments: { path: 'r0-05.txt', content: 'nope' } },
+      })
+    );
+    // No reply, per the spec — and, unlike every other method here, no side
+    // effect either: an id-less tools/call is a malformed request, not a
+    // fire-and-forget one.
+    expect(frames).toEqual([]);
+    expect(fs.existsSync(path.join(root, 'r0-05.txt'))).toBe(false);
+  });
+
+  it('R0-05: any id-less request is silent, not just declared notifications', async () => {
+    // A client sending `{"method":"ping"}` with no id has made a mistake, not
+    // sent a `notifications/*` message — but the wire shape looks the same
+    // (isRequest is false), so the server must stay silent rather than
+    // answer a message that, per JSON-RPC, does not expect a reply.
+    const pingFrames = await server.handleFrame(JSON.stringify({ jsonrpc: '2.0', method: 'ping' }));
+    expect(pingFrames).toEqual([]);
+    const listFrames = await server.handleFrame(
+      JSON.stringify({ jsonrpc: '2.0', method: 'tools/list' })
+    );
+    expect(listFrames).toEqual([]);
+  });
 });
 
 describe('Phase 43 — tools/list', () => {
@@ -570,6 +600,21 @@ describe('Phase 43 — the HTTP transport', () => {
       .set('authorization', `Bearer ${TOKEN}`)
       .send({ jsonrpc: '2.0', method: 'notifications/initialized' });
     expect(notification.status).toBe(202);
+    // R0-05: 202 must carry no body — a body here would itself be an
+    // unsolicited reply to a message the spec says gets none.
+    expect(notification.text).toBe('');
+
+    const idLessCall = await request(http.app)
+      .post('/mcp')
+      .set('authorization', `Bearer ${TOKEN}`)
+      .send({
+        jsonrpc: '2.0',
+        method: 'tools/call',
+        params: { name: 'write_file', arguments: { path: 'r0-05-http.txt', content: 'nope' } },
+      });
+    expect(idLessCall.status).toBe(202);
+    expect(idLessCall.text).toBe('');
+    expect(fs.existsSync(path.join(root, 'r0-05-http.txt'))).toBe(false);
 
     const malformed = await request(http.app)
       .post('/mcp')

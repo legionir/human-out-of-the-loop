@@ -230,9 +230,11 @@ export async function serveHttp(
 
     try {
       const response: JsonRpcResponse | null = await server.handle(message);
-      // A notification has no response: 202 Accepted is the honest answer.
+      // A notification has no response: 202 Accepted with no body is the
+      // honest answer — a JSON-RPC body here would itself be an unsolicited
+      // reply to a message that, by the spec, gets none (R0-05).
       if (response === null) {
-        res.status(202).json(jsonRpcResult(null, {}));
+        res.status(202).end();
         return;
       }
       res.json(response);

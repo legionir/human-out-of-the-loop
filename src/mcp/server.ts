@@ -369,26 +369,13 @@ export class McpServer {
       case 'initialized':
         return null;
 
-      case 'initialize': {
-        const { version, supported } = negotiateProtocolVersion(params.protocolVersion);
-        return jsonRpcResult(id, {
-          protocolVersion: version,
-          capabilities: {
-            tools: { listChanged: false },
-            resources: { subscribe: false, listChanged: false },
-          },
-          serverInfo: { name: this.serverName, version: this.serverVersion },
-          instructions: this.instructions(supported),
-        });
-      }
-
-      case 'ping':
-        return jsonRpcResult(id, {});
-
-      case 'tools/list':
-        return jsonRpcResult(id, { tools: this.listTools() });
-
+      // R0-05: `tools/call` without an `id` is a malformed request, not a
+      // notification the spec has a shape for — it is refused *and never
+      // executed*, rather than run silently for a caller that will never see
+      // whether it worked (or worse, that never meant to run it as a
+      // fire-and-forget call at all).
       case 'tools/call': {
+        if (!wantsReply) return null;
         const name = typeof params.name === 'string' ? params.name : '';
         if (name === '') {
           return jsonRpcError(id, JSON_RPC_ERRORS.invalidParams, '`tools/call` needs a tool name.');
@@ -406,11 +393,32 @@ export class McpServer {
         }
       }
 
+      case 'initialize': {
+        const { version, supported } = negotiateProtocolVersion(params.protocolVersion);
+        if (!wantsReply) return null;
+        return jsonRpcResult(id, {
+          protocolVersion: version,
+          capabilities: {
+            tools: { listChanged: false },
+            resources: { subscribe: false, listChanged: false },
+          },
+          serverInfo: { name: this.serverName, version: this.serverVersion },
+          instructions: this.instructions(supported),
+        });
+      }
+
+      case 'ping':
+        return wantsReply ? jsonRpcResult(id, {}) : null;
+
+      case 'tools/list':
+        return wantsReply ? jsonRpcResult(id, { tools: this.listTools() }) : null;
+
       case 'resources/list':
-        return jsonRpcResult(id, { resources: this.listResources() });
+        return wantsReply ? jsonRpcResult(id, { resources: this.listResources() }) : null;
 
       case 'resources/read': {
         const uri = typeof params.uri === 'string' ? params.uri : '';
+        if (!wantsReply) return null;
         if (uri === '') {
           return jsonRpcError(id, JSON_RPC_ERRORS.invalidParams, '`resources/read` needs a uri.');
         }
@@ -432,7 +440,7 @@ export class McpServer {
       case 'prompts/list':
         // We expose no prompts; answering with an empty list is friendlier than
         // an error, and it is what the spec allows.
-        return jsonRpcResult(id, { prompts: [] });
+        return wantsReply ? jsonRpcResult(id, { prompts: [] }) : null;
 
       default:
         if (!wantsReply) return null;
