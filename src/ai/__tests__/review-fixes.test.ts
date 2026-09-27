@@ -119,3 +119,52 @@ describe('R-10 — session history is per run, not shared planner state', () => 
     expect(seen.B).not.toContain('secret alpha project');
   });
 });
+
+describe('R-11 — reconcile never closes a live interaction', () => {
+  let root: string;
+  let orch: Orchestrator;
+  beforeEach(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-review-'));
+    orch = new Orchestrator({ projectRoot: root, persistent: true });
+    await orch.initialize();
+  });
+  afterEach(async () => {
+    await orch.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('a run waiting at its confirmation keeps its draft plan and open interaction', async () => {
+    const planner = (orch as unknown as { planner: { plan: (...a: unknown[]) => unknown } }).planner;
+    vi.spyOn(planner, 'plan').mockResolvedValue(planResult('waiting goal') as never);
+    let release!: (v: { confirmed: boolean; cancelled?: boolean }) => void;
+    let reachedPrompt!: () => void;
+    const atPrompt = new Promise<void>((r) => (reachedPrompt = r));
+    const running = orch.run('waiting goal', {
+      confirmCallback: () =>
+        new Promise((resolve) => {
+          release = resolve;
+          reachedPrompt();
+        }),
+    });
+    await atPrompt;
+    orch.reconcileAbandonedInteractions();
+    const sid = orch.sessionStore.listSessions()[0]!;
+    const interaction = orch.sessionStore.getSession(sid)!.interactions[0]!;
+    expect(interaction.completedAt).toBeUndefined();
+    const planId = interaction.planIds[0]!;
+    expect(orch.planStore.load(planId)?.status).toBe('draft');
+    release({ confirmed: false, cancelled: true });
+    await running;
+  });
+
+  it('an interaction owned by another live process is left alone', () => {
+    const sid = orch.sessionStore.createSession();
+    orch.sessionStore.addInteraction(sid, 'elsewhere');
+    // process.ppid is alive and is not this process.
+    const session = orch.sessionStore.getSession(sid)!;
+    session.interactions[0]!.ownerPid = process.ppid;
+    orch.sessionStore.saveSession(session);
+    orch.reconcileAbandonedInteractions();
+    expect(orch.sessionStore.getSession(sid)!.interactions[0]!.completedAt).toBeUndefined();
+  });
+});

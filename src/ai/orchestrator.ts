@@ -47,6 +47,7 @@ import {
   PlanLiveOwnerError,
   tryAcquirePlanOwner,
   isPlanOwnerAlive,
+  isPidAlive,
   type PlanOwnerHandle,
 } from './runtime/plan-owner.js';
 import { runFeasibilityGate } from './planning/feasibility-gate.js';
@@ -369,6 +370,8 @@ export class Orchestrator {
   private initialized = false;
   /** B-01: in-process live plans + on-disk owner handles. */
   private readonly livePlans = new Set<string>();
+  /** B-06: interactions a run() in this process is still working on. */
+  private readonly liveInteractions = new Set<string>();
   private readonly planOwnerHandles = new Map<string, PlanOwnerHandle>();
 
   constructor(config: OrchestratorConfig) {
@@ -997,11 +1000,16 @@ export class Orchestrator {
     const historyBlock = sessionForHistory
       ? formatSessionHistory(sessionForHistory.interactions)
       : undefined;
-    return this.runContext.run({ budget }, () =>
-      this.planner.withSessionHistory(historyBlock, () =>
-        this.runInSession(userRequest, options, ov, sessionId, interaction),
-      ),
-    );
+    if (interaction) this.liveInteractions.add(interaction.id);
+    try {
+      return await this.runContext.run({ budget }, () =>
+        this.planner.withSessionHistory(historyBlock, () =>
+          this.runInSession(userRequest, options, ov, sessionId, interaction),
+        ),
+      );
+    } finally {
+      if (interaction) this.liveInteractions.delete(interaction.id);
+    }
   }
 
   private async runInSession(
@@ -1930,6 +1938,12 @@ export class Orchestrator {
       if (!session) continue;
       for (const interaction of session.interactions) {
         if (interaction.completedAt) continue;
+        // B-06: only an interaction whose process is gone is abandoned.  One
+        // this process is running, or another live process owns (a CLI at
+        // its confirmation prompt, a server run still planning), is not.
+        if (this.liveInteractions.has(interaction.id)) continue;
+        const owner = interaction.ownerPid;
+        if (owner !== undefined && owner !== process.pid && isPidAlive(owner)) continue;
         const ids = interaction.planIds ?? [];
         if (ids.length === 0) {
           // C-13: chat/answer turns never get a planId; a killed process
@@ -1972,7 +1986,6 @@ export class Orchestrator {
     if (this.hasLiveOwner(planId)) {
       throw new PlanLiveOwnerError(planId, process.pid);
     }
-    this.reconcileAbandonedInteractions();
     this.claimPlan(planId);
 
     const planRuntime = new PlanRuntime({

@@ -23,6 +23,12 @@ export const SessionInteractionSchema = z.object({
   /** Timestamps */
   createdAt: z.number(),
   completedAt: z.number().optional(),
+  /**
+   * B-06: pid of the process that runs this interaction.  Start-up
+   * reconciliation closes a pending interaction only when that process is
+   * gone — never one another live CLI/server is still planning or waiting on.
+   */
+  ownerPid: z.number().int().optional(),
 });
 
 export type SessionInteraction = z.infer<typeof SessionInteractionSchema>;
@@ -66,5 +72,6 @@ export function createInteraction(userRequest: string): SessionInteraction {
     planIds: [],
     outcome: 'pending',
     createdAt: Date.now(),
+    ownerPid: process.pid,
   };
 }
