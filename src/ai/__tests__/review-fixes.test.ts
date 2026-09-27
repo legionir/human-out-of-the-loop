@@ -592,3 +592,33 @@ describe('validatePath with a root reached through a symlink (macOS /var, Window
     fs.rmSync(base, { recursive: true, force: true });
   });
 });
+
+describe('an unreadable provider response (HTTP 200, body not a valid response)', () => {
+  it('is retried once and described with its status and body', async () => {
+    const { APICallError } = await import('ai');
+    const { withStructuredRetry, describeLlmError } = await import('../runtime/llm-timeout.js');
+    const garbled = () =>
+      new APICallError({
+        message: 'Invalid JSON response',
+        url: 'https://gateway.example/v1/chat/completions',
+        requestBodyValues: {},
+        statusCode: 200,
+        responseBody: '<html>upstream timeout</html>',
+      });
+    let calls = 0;
+    await expect(
+      withStructuredRetry(async () => {
+        calls += 1;
+        if (calls === 1) throw garbled();
+        return 'ok';
+      }),
+    ).resolves.toBe('ok');
+    expect(calls).toBe(2);
+    expect(describeLlmError(garbled())).toBe('Invalid JSON response (HTTP 200, body: "<html>upstream timeout</html>")');
+    // A real API error (401) is still not retried here.
+    calls = 0;
+    const unauthorized = new APICallError({ message: 'Unauthorized', url: 'x', requestBodyValues: {}, statusCode: 401 });
+    await expect(withStructuredRetry(async () => { calls += 1; throw unauthorized; })).rejects.toBe(unauthorized);
+    expect(calls).toBe(1);
+  });
+});

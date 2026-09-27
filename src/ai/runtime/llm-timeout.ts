@@ -1,5 +1,6 @@
-import { NoObjectGeneratedError } from 'ai';
+import { APICallError, NoObjectGeneratedError } from 'ai';
 import { abortReason } from './abort.js';
+import { collectSecretValues, scrubSecretValues } from './secret-scrub.js';
 /**
  * Phase 30 (P5): bounded LLM calls.
  *
@@ -90,8 +91,34 @@ export async function withLlmTimeout<T>(
  * this occasionally; without a retry a single malformed answer ended the
  * whole run at planning, or failed a finished step and forced a re-plan.
  * Transport errors are NOT retried here — the provider SDK already retries
- * those (429/5xx) with backoff.
+ * those (429/5xx) with backoff — except an unreadable 200 body, which it
+ * does not retry.
  */
+/**
+ * A 200 whose body the provider SDK could not read as its response
+ * ("Invalid JSON response"): a gateway glitch, not a bad request.  The SDK
+ * retries only 429/5xx, so without this one garbled body ended the run.
+ */
+export function isUnreadableResponse(err: unknown): boolean {
+  return APICallError.isInstance(err) && err.message === 'Invalid JSON response';
+}
+
+/**
+ * The error's message, plus — for an unreadable response — what the
+ * provider actually sent (status and the start of the body, secrets
+ * scrubbed), so "Invalid JSON response" is diagnosable from the log.
+ */
+export function describeLlmError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (!isUnreadableResponse(err)) return message;
+  const body = String((err as { responseBody?: unknown }).responseBody ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const shown = scrubSecretValues(body.slice(0, 200), collectSecretValues(process.env));
+  const status = (err as { statusCode?: number }).statusCode;
+  return `${message} (HTTP ${status ?? '?'}, body: ${shown ? `"${shown}${body.length > 200 ? '…' : ''}"` : 'empty'})`;
+}
+
 export async function withStructuredRetry<T>(
   call: () => Promise<T>,
   attempts = 2,
@@ -101,7 +128,8 @@ export async function withStructuredRetry<T>(
     try {
       return await call();
     } catch (err) {
-      if (attempt >= attempts || !NoObjectGeneratedError.isInstance(err)) throw err;
+      const retryable = NoObjectGeneratedError.isInstance(err) || isUnreadableResponse(err);
+      if (attempt >= attempts || !retryable) throw err;
       onAttemptError?.(err);
     }
   }

@@ -4,7 +4,7 @@ import { environmentBullets } from '../environment-context.js';
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { NoObjectGeneratedError, generateObject } from 'ai';
-import { withLlmTimeout, withStructuredRetry } from '../runtime/llm-timeout.js';
+import { describeLlmError, withLlmTimeout, withStructuredRetry } from '../runtime/llm-timeout.js';
 import { isAbortError, throwIfAborted } from '../runtime/abort.js';
 import { reportLlmUsage, type LlmUsageReporter } from '../runtime/llm-usage.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
@@ -632,7 +632,7 @@ export class Planner {
       // It is a failure, not a question for the user — `plan()` reports it
       // as an error, so the run ends with "Planning failed: <reason>"
       // instead of asking the user to "provide more details".
-      const reason = err instanceof Error ? err.message : String(err);
+      const reason = describeLlmError(err);
       throw new Error(`The planner was unable to process the request: ${reason}`);
     }
   }
@@ -811,7 +811,7 @@ export class Planner {
       };
     } catch (err) {
       if (isAbortError(err) || abortSignal?.aborted) throw err;
-      const message = err instanceof Error ? err.message : String(err);
+      const message = describeLlmError(err);
       // v27.17.1: in chat mode the user asked for a conversation, so a broken
       // classifier must not turn a greeting into "Planning failed".  Answer
       // without a draft — the answer call does the work, and if THAT fails too
