@@ -8,16 +8,16 @@
  * so per-plan totals work after the fact, in a different process.
  * The plan store supplies goal/status context for persisted plans.
  */
-import path from 'node:path';
-import { FilePlanStore } from '../../ai/runtime/plan-store.js';
-import { prepareCliEnvironment } from '../utils/config.js';
+import path from "node:path";
+import { FilePlanStore } from "../../ai/runtime/plan-store.js";
+import { prepareCliEnvironment } from "../utils/config.js";
 import {
   filterEntries,
   readLogEntries,
   sumUsageFromEntries,
   type RawLogEntry,
-} from '../utils/log-reader.js';
-import { color, err, out, renderTable } from '../utils/output.js';
+} from "../utils/log-reader.js";
+import { color, err, out, renderTable } from "../utils/output.js";
 
 export interface UsageCommandOptions {
   projectRoot?: string;
@@ -50,17 +50,25 @@ export function collectProjectUsage(projectRoot: string): {
   runtimeDir: string;
 } {
   const root = path.resolve(projectRoot);
-  const runtimeDir = path.join(root, '.ai-runtime');
-  const { entries } = readLogEntries(path.join(runtimeDir, 'observability.jsonl'));
-  const completed = filterEntries(entries, { eventTypes: ['task:completed', 'llm:usage'] });
+  const runtimeDir = path.join(root, ".ai-runtime");
+  const { entries } = readLogEntries(
+    path.join(runtimeDir, "observability.jsonl"),
+  );
+  const completed = filterEntries(entries, {
+    eventTypes: ["task:completed", "llm:usage"],
+  });
 
   // Context from the plan store (may be empty for non-persistent runs).
   let planContext: Map<string, { goal: string; status: string }> = new Map();
   try {
-    const store = new FilePlanStore(path.join(runtimeDir, 'plans'));
+    const store = new FilePlanStore(path.join(runtimeDir, "plans"));
     for (const id of store.list()) {
       const plan = store.load(id);
-      if (plan) planContext.set(plan.id ?? id, { goal: plan.goal, status: plan.status });
+      if (plan)
+        planContext.set(plan.id ?? id, {
+          goal: plan.goal,
+          status: plan.status,
+        });
     }
   } catch {
     // no store dir → log-only mode
@@ -89,8 +97,8 @@ export function collectProjectUsage(projectRoot: string): {
       const ctx = planContext.get(id);
       return {
         planId: id,
-        goal: ctx?.goal ?? '(not persisted)',
-        status: ctx?.status ?? '—',
+        goal: ctx?.goal ?? "(not persisted)",
+        status: ctx?.status ?? "—",
         promptTokens: usage.promptTokens,
         completionTokens: usage.completionTokens,
         totalTokens: usage.totalTokens,
@@ -127,10 +135,32 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
   prepareCliEnvironment(root);
   const { rows, totals, runtimeDir } = collectProjectUsage(root);
 
+  if (rows.length === 0 && opts.json && !opts.plan) {
+    // Scripts parse --json: an empty project is zero usage, not prose.
+    out(
+      JSON.stringify(
+        {
+          plans: [],
+          totals: {
+            promptTokens: 0,
+            completionTokens: 0,
+            totalTokens: 0,
+            cacheReadTokens: 0,
+            cacheWriteTokens: 0,
+            taskCount: 0,
+          },
+        },
+        null,
+        2,
+      ),
+    );
+    return 0;
+  }
+
   if (rows.length === 0) {
     out(
       color.dim(
-        'No usage recorded yet — run a goal with --persistent, then `usage` ' +
+        "No usage recorded yet — run a goal with --persistent, then `usage` " +
           `(or look in ${runtimeDir}/observability.jsonl).`,
       ),
     );
@@ -146,15 +176,31 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
     if (opts.json) {
       out(JSON.stringify(row, null, 2));
     } else {
-      out(`Plan ${row.planId}  ${color.dim(`(${row.status})`)}  ${color.dim(row.goal)}`);
-      out(renderTable(['PROMPT', 'COMPLETION', 'TOTAL', 'CACHE_READ', 'CACHE_WRITE', 'TASKS'], [[
-        row.promptTokens,
-        row.completionTokens,
-        row.totalTokens,
-        row.cacheReadTokens,
-        row.cacheWriteTokens,
-        row.taskCount,
-      ]]));
+      out(
+        `Plan ${row.planId}  ${color.dim(`(${row.status})`)}  ${color.dim(row.goal)}`,
+      );
+      out(
+        renderTable(
+          [
+            "PROMPT",
+            "COMPLETION",
+            "TOTAL",
+            "CACHE_READ",
+            "CACHE_WRITE",
+            "TASKS",
+          ],
+          [
+            [
+              row.promptTokens,
+              row.completionTokens,
+              row.totalTokens,
+              row.cacheReadTokens,
+              row.cacheWriteTokens,
+              row.taskCount,
+            ],
+          ],
+        ),
+      );
     }
     return 0;
   }
@@ -184,7 +230,17 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
 
   out(
     renderTable(
-      ['PLAN', 'STATUS', 'GOAL', 'PROMPT', 'COMPLETION', 'TOTAL', 'CACHE_READ', 'CACHE_WRITE', 'TASKS'],
+      [
+        "PLAN",
+        "STATUS",
+        "GOAL",
+        "PROMPT",
+        "COMPLETION",
+        "TOTAL",
+        "CACHE_READ",
+        "CACHE_WRITE",
+        "TASKS",
+      ],
       rows.map((r) => [
         shortId(r.planId),
         r.status,
@@ -207,7 +263,14 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
       cacheWrite: acc.cacheWrite + r.cacheWriteTokens,
       tasks: acc.tasks + r.taskCount,
     }),
-    { prompt: 0, completion: 0, total: 0, cacheRead: 0, cacheWrite: 0, tasks: 0 },
+    {
+      prompt: 0,
+      completion: 0,
+      total: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+      tasks: 0,
+    },
   );
   out(
     color.dim(
@@ -221,7 +284,7 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
 function groupByPlan(entries: RawLogEntry[]): Map<string, RawLogEntry[]> {
   const map = new Map<string, RawLogEntry[]>();
   for (const e of entries) {
-    const key = e.planId ?? '(unattributed)';
+    const key = e.planId ?? "(unattributed)";
     const list = map.get(key) ?? [];
     list.push(e);
     map.set(key, list);
