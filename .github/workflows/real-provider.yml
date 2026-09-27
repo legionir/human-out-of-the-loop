@@ -101,6 +101,9 @@ jobs:
           {
             if [ -n "${OPENAI_API_KEY:-}" ]; then
               printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
+              # R0-07: OPENAI_API_KEY only ever goes to api.openai.com; a
+              # custom HOTL_BASE_URL (gateway) authenticates with HOTL_API_KEY.
+              printf 'HOTL_API_KEY=%s\n' "$OPENAI_API_KEY"
             fi
             if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
               printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
