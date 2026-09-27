@@ -35,8 +35,8 @@
 | H | رابط وب ↔ سرور (UI) | ۰ 🟢 | ۰ |
 | I | تست، CI و مستندات | ۰ 🟢 | ۰ |
 | J | قابلیت‌های جدید | ۰ 🟢 | ۰ |
-| K | راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) | ۹ | ۱ |
-| | **جمع ردیف‌های باز** | **۹** | **۱** |
+| K | راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) | ۵ 🟡 | ۱ |
+| | **جمع ردیف‌های باز** | **۵** | **۱** |
 
 ---
 
@@ -234,19 +234,19 @@
 | **J-08** 🟢 | P3 | نمونه‌های پلن موفق برای پلن‌ساز | `.ai-runtime/plan-examples.jsonl`؛ `HOTL_PLAN_EXAMPLES=0`؛ سقف ۲۰؛ انتخاب همپوشانی. تست: `phase-j-plan-examples.test.ts` | S1:R8-08 |
 | **J-09** 🟢 | P3 | ابزارهای تکمیلی | `delete_file` (sandbox+journal)؛ `read_graph` offset؛ `GET /api/runs`. تست: `phase-j-extras.test.ts` | S1:R8-09 |
 
-### فاز K — راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) ⛔/🟡
+### فاز K — راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) 🟡 (۲۰۲۶-۰۹-۲۷، v27.17.15 — جزئی)
 
-| ID | Pri | مورد | چه چیزی لازم است | منبع |
+| ID | Pri | مورد | رفع / تست | منبع |
 |---|---|---|---|---|
-| **K-01** | P0 | اجرا با provider واقعی (OpenAI/Anthropic) | secretهای GitHub (`HOTL_API_KEY`...) و اجرای `real-provider.yml`، یا یک run واقعی دستی. معیار: run کامل + usage درست + 401/429/500 غیرکرش + بدون نشت | S4:P1 ⛔؛ S5:UNKNOWN-0003؛ S2:POT-002 |
-| **K-02** | P1 | windows-leg ماتریس CI پس از v27.2.12/13 | اجرای دوباره `ci.yml` (اعتبار Actions). انتظار: سبز | S4:P8 🟡 |
-| **K-03** | P1 | baseline typecheck/test در workspace تمیز | `npm ci && npx tsc --noEmit && npx vitest run && npm run e2e` روی ماشین/CI. معیار: سبز؛ خروجی در `audit/baseline/` | S5:UNKNOWN-0004؛ S3:P2 |
-| **K-04** | P2 | اندازهٔ واقعی log/کلاینت SSE برای F-09/F-10 | telemetry یا load test. تصمیم: رفع یا پذیرش مکتوب | S5:UNKNOWN-0001؛ S3:F-0007/0011 |
-| **K-05** | P2 | تعمدی بودن bind غیر-loopback در دیپلوی | تصمیم مالک پروژه (deployment config خارج repo). پس از A-01: bind غیر-loopback فقط با توکن | S5:UNKNOWN-0002؛ S2:POT-003 |
-| **K-06** | P2 | رفتار داخلی @ai-sdk/mcp و ai@7 با SSE کند | تست با سرور SSE کند واقعی. معیار: بدون UND_ERR_BODY_TIMEOUT | S2:POT-005 |
-| **K-07** | P3 | اثر SIGKILL واقعی روی waitForAll در shutdown | تست زنده kill. معیار: ترتیب shutdown حفظ | S2:REL-004 |
-| **K-08** | P3 | discipline XSS در frontend (escapeHtml تک‌نقطه‌ای) | بازبینی هر PR DOM جدید + تست فرار رشته. تا آن زمان POTENTIAL می‌ماند | S2:POT-001؛ S2:ARCH-004 |
-| **K-09** | P3 | re-verification زندهٔ R0-07/R0-09/R0-10 (رفع‌های ادعاشده) | اجرای سناریوهای بازتولید پس از فاز D. معیار: تست‌های موجود سبز + یک اجرای دستی | S2:§۹ نکته |
+| **K-01** | P0 | اجرا با provider واقعی (OpenAI/Anthropic) | ⛔ مالک: secret + `real-provider.yml` یا run دستی. چک‌لیست: `audit/baseline/K01_OWNER_CHECKLIST.md`. این sandbox کلید ندارد و API واقعی صدا زده نشد. | S4:P1 ⛔؛ S5:UNKNOWN-0003؛ S2:POT-002 |
+| **K-02** | P1 | windows-leg ماتریس CI | 🟡 مالک: `ci.yml` از قبل windows/mac/ubuntu دارد؛ سبز بودن Actions اینجا دیده نمی‌شود. `audit/baseline/K02_CI_WINDOWS.md` | S4:P8 🟡 |
+| **K-03** | P1 | baseline typecheck/test | 🟡 اجرا شد: tsc 0، vitest 1607/19، e2e 144/194. خروجی: `audit/baseline/k03-SUMMARY.md`. سبز کامل نیست. | S5:UNKNOWN-0004؛ S3:P2 |
+| **K-04** 🟢 | P2 | اندازهٔ SSE / log | سقف اتصال ۳۲ + بافر ۲۰۰؛ تست synthetic `phase-k-sse-scale.test.ts`. telemetry پروداکشن نیست — پذیرش مکتوب همین سقف‌ها به‌عنوان کنترل F-10. | S5:UNKNOWN-0001؛ S3:F-0007/0011 |
+| **K-05** | P2 | bind غیر-loopback در دیپلوی | 🟡 تصمیم مالک. پس از A-01 غیر-loopback فقط با توکن. `audit/baseline/K05_BIND_OWNER.md` | S5:UNKNOWN-0002؛ S2:POT-003 |
+| **K-06** 🟢 | P2 | MCP SSE کند / UND_ERR_BODY_TIMEOUT | `bodyTimeout: 0` + تست زندهٔ استریم ساکت در `phase30-p10-fetch.test.ts` و قفل در `phase-k-sse-scale.test.ts` | S2:POT-005 |
+| **K-07** | P3 | SIGKILL روی waitForAll | 🟡 نیمه: cancel مسیر shutdown را باز می‌کند (`phase-k-shutdown.test.ts`). SIGKILL واقعی قابل catch نیست — تست زنده با مالک. | S2:REL-004 |
+| **K-08** 🟢 | P3 | XSS / escapeHtml تک‌نقطه‌ای | `escapeHtml`/`renderMarkdown` فقط در `public/ui-logic.js`؛ اسکن innerHTML + payload. تست: `phase-k-xss.test.ts` | S2:POT-001؛ S2:ARCH-004 |
+| **K-09** 🟢 | P3 | re-verify R0-07/09/10 | تست‌های اصلی + `phase-k-r0-reverify.test.ts` سبز | S2:§۹ نکته |
 
 ---
 

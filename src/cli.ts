@@ -35,6 +35,7 @@ import {
   plansShowCommand,
   plansCancelCommand,
   plansResumeCommand,
+  plansRollbackCommand,
 } from './cli/commands/plans.js';
 import { mcpListCommand, mcpTestCommand } from './cli/commands/mcp.js';
 import { serveCommand } from './cli/commands/serve.js';
@@ -276,6 +277,8 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .option('--yes', 'auto-confirm the plan without prompting (CI mode)')
     .option('--verbose', 'show tool calls and low-level status')
     .option('--dry-run', 'show the plan without executing anything')
+    .option('--estimate', 'plan only and print step count, token and cost estimates')
+    .option('--budget <limit>', 'cancel the plan if tokens or USD exceed this (e.g. 10000 or $1.50)')
     .option(
       '--mode <mode>',
       'auto|chat|plan — auto (default) answers a question and plans real work; chat never plans; plan never answers. An @chat/@plan prefix in the goal wins',
@@ -312,6 +315,8 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         yes: opts.yes === true,
         verbose: opts.verbose === true,
         dryRun: opts.dryRun === true,
+        estimate: opts.estimate === true,
+        budget: opts.budget as string | undefined,
         mode: opts.mode as string | undefined,
         timeoutMs: opts.timeoutMs as number | undefined,
         maxSteps: opts.maxSteps as number | undefined,
@@ -460,6 +465,14 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .option('--project-root <dir>', 'project root (default: current directory)')
     .action(async (id: string, opts: Record<string, string | undefined>) => {
       process.exitCode = await plansCancelCommand(id, { projectRoot: opts.projectRoot });
+    });
+  plans
+    .command('rollback')
+    .description('Restore the working tree from the last writable-step checkpoint')
+    .argument('<planId>')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .action(async (id: string, opts: Record<string, string | undefined>) => {
+      process.exitCode = await plansRollbackCommand(id, { projectRoot: opts.projectRoot });
     });
   plans
     .command('resume')

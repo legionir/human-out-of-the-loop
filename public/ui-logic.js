@@ -73,3 +73,53 @@ export function formatReviewSummary(summary, liveText) {
 export function errorBubbleText(message) {
   return `error: ${message}`;
 }
+
+/**
+ * Single HTML-escape for every untrusted string that lands in a template.
+ * Keep this the only encoder — K-08 / POT-001.
+ */
+export function escapeHtml(text) {
+  return String(text)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+/**
+ * Minimal markdown: escape FIRST, then a small subset of markers.
+ */
+export function renderMarkdown(text) {
+  const escaped = escapeHtml(text);
+  const parts = escaped.split(/```/);
+  let html = '';
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 1) {
+      html += `<pre class="code-block"><code>${parts[i].replace(/^\n/, '').replace(/\n$/, '')}</code></pre>`;
+      continue;
+    }
+    const lines = parts[i].split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed === '') continue;
+      const inline = (s) =>
+        s
+          .replaceAll(/`([^`]+)`/g, '<code>$1</code>')
+          .replaceAll(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+          .replaceAll(/\*([^*]+)\*/g, '<em>$1</em>');
+      const h = /^(#{1,4})\s+(.*)$/.exec(trimmed);
+      if (h) {
+        const level = Math.min(h[1].length + 2, 6);
+        html += `<h${level}>${inline(h[2])}</h${level}>`;
+      } else if (/^[-*]\s+/.test(trimmed)) {
+        html += `<li>${inline(trimmed.replace(/^[-*]\s+/, ''))}</li>`;
+      } else if (/^─+\s*$/.test(trimmed) || /^═+\s*$/.test(trimmed)) {
+        html += '<hr />';
+      } else {
+        html += `<p>${inline(line)}</p>`;
+      }
+    }
+  }
+  return html;
+}

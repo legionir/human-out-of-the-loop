@@ -12,6 +12,8 @@ import {
   nextSessionId,
   formatReviewSummary,
   errorBubbleText,
+  escapeHtml,
+  renderMarkdown,
 } from './ui-logic.js';
 
 // ─── Tiny API helper ─────────────────────────────────────────────
@@ -102,54 +104,7 @@ const state = {
 };
 
 // ─── Utilities ───────────────────────────────────────────────────
-
-function escapeHtml(text) {
-  return String(text)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-/**
- * Minimal, safe markdown rendering (HTML is escaped FIRST, then a
- * small subset is applied): fenced code, inline code, bold, italic,
- * headings, lists, paragraphs.
- */
-function renderMarkdown(text) {
-  const escaped = escapeHtml(text);
-  const parts = escaped.split(/```/);
-  let html = '';
-  for (let i = 0; i < parts.length; i++) {
-    if (i % 2 === 1) {
-      html += `<pre class="code-block"><code>${parts[i].replace(/^\n/, '').replace(/\n$/, '')}</code></pre>`;
-      continue;
-    }
-    const lines = parts[i].split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed === '') continue;
-      const inline = (s) =>
-        s
-          .replaceAll(/`([^`]+)`/g, '<code>$1</code>')
-          .replaceAll(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-          .replaceAll(/\*([^*]+)\*/g, '<em>$1</em>');
-      const h = /^(#{1,4})\s+(.*)$/.exec(trimmed);
-      if (h) {
-        const level = Math.min(h[1].length + 2, 6); // # → h3 in this context
-        html += `<h${level}>${inline(h[2])}</h${level}>`;
-      } else if (/^[-*]\s+/.test(trimmed)) {
-        html += `<li>${inline(trimmed.replace(/^[-*]\s+/, ''))}</li>`;
-      } else if (/^─+\s*$/.test(trimmed) || /^═+\s*$/.test(trimmed)) {
-        html += '<hr />';
-      } else {
-        html += `<p>${inline(line)}</p>`;
-      }
-    }
-  }
-  return html;
-}
+// escapeHtml / renderMarkdown live in ui-logic.js (K-08: one encoder).
 
 function showToast(message, isError = true) {
   toastEl.textContent = message;
@@ -285,7 +240,7 @@ function appendAssistantBubble(kind) {
   div.className = 'msg assistant';
   div.innerHTML = `
     <div class="bubble">
-      <div class="bubble-meta">${kind || 'working…'}</div>
+      <div class="bubble-meta">${escapeHtml(kind || 'working…')}</div>
       <div class="bubble-body"></div>
       <div class="timeline"></div>
     </div>`;

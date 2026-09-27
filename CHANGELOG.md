@@ -5,6 +5,17 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.15] — 2026-09-27 — Phase K (partial): XSS encoder, R0 re-verify, baseline
+
+Does **not** close K-01 (real provider), K-02 (Windows Actions), K-03 (full-green suite), K-05 (deploy bind), or K-07 (live SIGKILL).
+
+- **K-08 — XSS.** `escapeHtml` / `renderMarkdown` live only in `public/ui-logic.js`; `app.js` interpolations must go through them. Tests in `phase-k-xss.test.ts`.
+- **K-09 — R0-07/09/10.** Re-run via `phase-k-r0-reverify.test.ts` plus the original hardening files.
+- **K-04 / K-06.** SSE connection/ring-buffer caps and MCP `bodyTimeout: 0` locked in `phase-k-sse-scale.test.ts` (idle-stream crash still covered by `phase30-p10-fetch.test.ts`).
+- **K-07 (partial).** Cancel unblocks `waitForAll` (`phase-k-shutdown.test.ts`).
+- **K-03.** Baseline recorded in `audit/baseline/k03-SUMMARY.md` (tsc clean; vitest 1607/19; e2e 144/194).
+- Owner checklists: `audit/baseline/K01_OWNER_CHECKLIST.md`, `K02_CI_WINDOWS.md`, `K05_BIND_OWNER.md`.
+
 ## [27.17.14] — 2026-09-27 — Phase J: new capabilities
 
 Closes every open row of **Phase J** in `docs/UNIFIED_EXECUTION_PLAN.md` (J-01…J-09). Independent tests live in `src/ai/__tests__/phase-j-*.test.ts`.
