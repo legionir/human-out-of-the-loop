@@ -48,6 +48,8 @@ export interface TaskRuntimeConfig {
   onToolCall?: ToolCallSink;
   /** v27.17.3: category resolver + secrets for those records. */
   toolCallOptions?: ToolCallLogOptions;
+  /** C-09: max retained task records (default 500). */
+  maxTaskRecords?: number;
 }
 
 export interface CreateTaskOptions {
@@ -73,6 +75,8 @@ export interface CreateTaskOptions {
   onThought?: ThoughtSink;
   /** v27.17.3: per-task tool-call sink (wins over the runtime default). */
   onToolCall?: ToolCallSink;
+  /** C-03/C-07: parent task that spawned this one (delegate_task). */
+  parentTaskId?: string;
 }
 
 // ─── Resource Lock Manager ───────────────────────────────────────
@@ -195,10 +199,14 @@ export class TaskRuntime {
   // Phase 22: per-task abort controllers — cancelTask on a RUNNING task
   // now truly aborts the in-flight generateText (not just bookkeeping).
   private readonly abortControllers = new Map<string, AbortController>();
+  private readonly children = new Map<string, Set<string>>();
+  private readonly completedOrder: string[] = [];
+  private readonly maxTaskRecords: number;
   private unsubscribeFn?: () => void;
 
   constructor(config: Pick<TaskRuntimeConfig, 'eventBus'> & Partial<TaskRuntimeConfig>) {
     this.maxConcurrentTasks = config.maxConcurrentTasks ?? 5;
+    this.maxTaskRecords = config.maxTaskRecords ?? 500;
     this.agentTimeoutMs = config.agentTimeoutMs;
     this.maxSteps = config.maxSteps;
     this.onThought = config.onThought;
@@ -228,11 +236,17 @@ export class TaskRuntime {
       claimedResources: options.claimedResources,
       planStepId: options.planStepId,
       planId: options.planId,
+      parentTaskId: options.parentTaskId,
     });
 
     this.tasks.set(taskId, task);
     this.agents.set(taskId, options.agent);
     this.pendingIds.add(taskId);
+    if (options.parentTaskId) {
+      const set = this.children.get(options.parentTaskId) ?? new Set<string>();
+      set.add(taskId);
+      this.children.set(options.parentTaskId, set);
+    }
 
     // U3: remember per-run execution overrides for this task
     if (
@@ -367,6 +381,21 @@ export class TaskRuntime {
           .then((result) => {
             this.handleRunResult(task.id, result);
             return result;
+          })
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            const failed: AgentRunResult = {
+              taskId: task.id,
+              agentId: agent.agentId,
+              success: false,
+              summary: `Agent execution failed: ${message}`,
+              result: '',
+              toolsUsed: [],
+              errors: [message],
+              failureType: 'technical',
+            };
+            this.handleRunResult(task.id, failed);
+            return failed;
           });
         this.runningPromises.set(task.id, promise);
       }
@@ -422,12 +451,45 @@ export class TaskRuntime {
         task.summary = result.summary;
         task.errors = result.errors;
         task.failureType = result.failureType ?? 'technical';
+        if (result.usage) task.usage = result.usage;
       }
+    } else if (result.usage && !task.usage) {
+      task.usage = result.usage;
     }
     task.completedAt = Date.now();
 
+    this.pruneTaskMaps(taskId);
+
     // Try to start queued tasks now that a slot is free
     this.scheduleNext();
+  }
+
+  private pruneTaskMaps(taskId: string): void {
+    this.agents.delete(taskId);
+    this.taskOverrides.delete(taskId);
+    this.abortControllers.delete(taskId);
+    this.runningPromises.delete(taskId);
+    this.completedOrder.push(taskId);
+    while (this.completedOrder.length > this.maxTaskRecords) {
+      const old = this.completedOrder.shift();
+      if (!old) break;
+      if (this.runningIds.has(old) || this.pendingIds.has(old)) continue;
+      this.tasks.delete(old);
+      this.children.delete(old);
+    }
+  }
+
+  /** Test/diagnostics: sizes of internal maps. */
+  debugMapSizes(): { tasks: number; agents: number; taskOverrides: number } {
+    return {
+      tasks: this.tasks.size,
+      agents: this.agents.size,
+      taskOverrides: this.taskOverrides.size,
+    };
+  }
+
+  isResourceHeld(resource: string): boolean {
+    return this.lockManager.getLockedResources().has(resource);
   }
 
   // ── Cleanup ───────────────────────────────────────────────────
@@ -487,6 +549,46 @@ export class TaskRuntime {
     }
   }
 
+  /** C-08: wait only for tasks belonging to one plan. */
+  async waitFor(planId: string): Promise<void> {
+    const terminal = new Set(['completed', 'failed', 'cancelled']);
+    for (;;) {
+      const inflight: Promise<AgentRunResult>[] = [];
+      let pending = false;
+      for (const [id, task] of this.tasks) {
+        if (task.planId !== planId) continue;
+        if (terminal.has(task.status)) continue;
+        const p = this.runningPromises.get(id);
+        if (p) inflight.push(p);
+        else if (task.status === 'pending' || task.status === 'running') pending = true;
+      }
+      if (inflight.length === 0 && !pending) return;
+      if (inflight.length === 0) {
+        await new Promise((r) => setTimeout(r, 10));
+        continue;
+      }
+      await Promise.allSettled(inflight);
+    }
+  }
+
+  async waitForTask(taskId: string): Promise<Task | undefined> {
+    const terminal = new Set(['completed', 'failed', 'cancelled']);
+    for (;;) {
+      const task = this.tasks.get(taskId);
+      if (!task) return undefined;
+      if (terminal.has(task.status)) return task;
+      const p = this.runningPromises.get(taskId);
+      if (p) {
+        await p.then(
+          () => undefined,
+          () => undefined
+        );
+        continue;
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+
   /**
    * Cancel a pending or running task.
    * Phase 13 extends this with full cancellation support.
@@ -499,23 +601,28 @@ export class TaskRuntime {
       task.status = 'cancelled';
       task.completedAt = Date.now();
       this.pendingIds.delete(taskId);
+      for (const child of this.children.get(taskId) ?? []) {
+        this.cancelTask(child);
+      }
       return true;
     }
 
     if (task.status === 'running') {
-      // Phase 22: REAL cancellation — abort the in-flight model call
-      // (AgentRuntime forwards the signal to generateText as
-      // abortSignal).  The run rejects with an AbortError; since the
-      // task is already "cancelled", handleRunResult keeps that status.
+      // Phase 22: REAL cancellation — abort the in-flight model call.
+      // C-01: do NOT release the resource lock or the concurrency slot
+      // here — handleRunResult does that when executionPromise settles.
       task.status = 'cancelled';
       task.completedAt = Date.now();
-      this.lockManager.release(taskId);
-      this.runningIds.delete(taskId);
       this.abortControllers.get(taskId)?.abort();
-      this.scheduleNext();
+      for (const child of this.children.get(taskId) ?? []) {
+        this.cancelTask(child);
+      }
       return true;
     }
 
+    for (const child of this.children.get(taskId) ?? []) {
+      this.cancelTask(child);
+    }
     return false; // Already completed/failed/cancelled
   }
 

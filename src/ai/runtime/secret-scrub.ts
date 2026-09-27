@@ -77,6 +77,10 @@ export class ScrubbingPlanStore implements PlanStore {
   update(planId: string, fn: (plan: Plan) => Plan): Plan | undefined {
     return this.inner.update(planId, (plan) => this.clean(fn(plan)));
   }
+
+  pruneOlderThan(days: number): number {
+    return this.inner.pruneOlderThan?.(days) ?? 0;
+  }
 }
 
 /** Env var NAMES that mark their value as a credential. */

@@ -79,6 +79,8 @@ export interface ObservabilityLoggerConfig {
    * summary is written to the log — so values must be scrubbed too.
    */
   redactValues?: string[];
+  /** C-11: rotate the JSONL file when it exceeds this many bytes (default 10 MiB). */
+  maxLogBytes?: number;
 }
 
 // ─── Default redaction keys ──────────────────────────────────────
@@ -112,6 +114,7 @@ export class ObservabilityLogger {
   /** Phase 30 (P10): literal secret values scrubbed from entries. */
   private readonly redactValues: string[];
   private unsubscribeFn?: () => void;
+  private readonly maxLogBytes: number;
   /**
    * Phase 21 (PERF-04): the log file descriptor, opened ONCE and
    * reused for every entry.  `fs.appendFileSync` does open+write+close
@@ -131,6 +134,7 @@ export class ObservabilityLogger {
     this.redactValues = (config.redactValues ?? [])
       .filter((v) => typeof v === 'string' && v.length >= MIN_REDACT_VALUE_LENGTH)
       .sort((a, b) => b.length - a.length);
+    this.maxLogBytes = config.maxLogBytes ?? 10 * 1024 * 1024;
 
     // Ensure the log directory exists
     fs.mkdirSync(path.dirname(this.logFilePath), { recursive: true });
@@ -164,6 +168,29 @@ export class ObservabilityLogger {
    * Close the underlying file descriptor (flush + release the fd).
    * Safe to call multiple times; call during Orchestrator shutdown.
    */
+  get isOpen(): boolean {
+    return this.logFd !== null;
+  }
+
+  private rotateIfNeeded(): void {
+    if (this.maxLogBytes <= 0) return;
+    let size = 0;
+    try {
+      size = fs.existsSync(this.logFilePath) ? fs.statSync(this.logFilePath).size : 0;
+    } catch {
+      return;
+    }
+    if (size < this.maxLogBytes) return;
+    this.close();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const rotated = `${this.logFilePath}.${stamp}`;
+    try {
+      fs.renameSync(this.logFilePath, rotated);
+    } catch {
+      // if rename fails, keep appending
+    }
+  }
+
   close(): void {
     if (this.logFd !== null) {
       try {
@@ -196,6 +223,7 @@ export class ObservabilityLogger {
     const line = JSON.stringify(fullEntry) + '\n';
 
     try {
+      this.rotateIfNeeded();
       // Phase 21 (PERF-04): single write syscall on a reused fd
       fs.writeSync(this.ensureFd(), line, null, 'utf-8');
     } catch {

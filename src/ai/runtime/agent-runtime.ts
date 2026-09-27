@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
-import { generateText, streamText, stepCountIs } from 'ai';
+import { generateText, streamText, stepCountIs, type Tool } from 'ai';
 import { withJournal, type JournalWriter } from './journal.js';
 import { withToolCallLog, type ToolCallLogOptions, type ToolCallSink } from './tool-call-log.js';
-import { toTokenUsage } from './llm-usage.js';
+import { addTokenUsage, toTokenUsage } from './llm-usage.js';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { EventBus, type TokenUsage } from './event-bus.js';
+import { runWithAgentContext } from './agent-run-context.js';
+import { wrapModelForRetry } from './model-call-retry.js';
+import type { RateLimiter } from './rate-limiter.js';
 import {
   emitThought,
   reasoningFromRawChunk,
@@ -48,11 +51,19 @@ interface SdkRunOutcome {
   steps?: ReadonlyArray<SdkStepLike>;
   /** Raw SDK usage — normalized with `toTokenUsage` by the caller. */
   usage?: unknown;
+  finishReason?: string;
   /**
    * v27.17.2: the streamed turn came back empty, so the same prompt was asked
    * again without streaming.  The run's summary says so.
    */
   reaskedWithoutStreaming?: boolean;
+}
+
+export class ProviderStreamError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProviderStreamError';
+  }
 }
 
 /** Did any step call a tool?  A turn with tool calls is not "empty". */
@@ -219,6 +230,54 @@ function errorMessage(value: unknown): string {
   }
 }
 
+function withRuntimeToolHooks<T extends Record<string, unknown>>(
+  tools: T,
+  ctx: {
+    signal?: AbortSignal;
+    eventBus: EventBus;
+    taskId: string;
+    agentId: string;
+    planContext: { planId?: string; planStepId?: string };
+    toolsUsed: string[];
+    emittedCallIds: Set<string>;
+  }
+): T {
+  const wrapped: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(tools)) {
+    const tool = value as Tool;
+    if (typeof tool.execute !== 'function') {
+      wrapped[name] = value;
+      continue;
+    }
+    const originalExecute = tool.execute.bind(tool);
+    wrapped[name] = {
+      ...tool,
+      execute: async (input: unknown, options?: { abortSignal?: AbortSignal; toolCallId?: string }) => {
+        const signal = options?.abortSignal ?? ctx.signal;
+        if (signal?.aborted) {
+          const reason = signal.reason;
+          throw reason instanceof Error ? reason : new Error('Aborted');
+        }
+        ctx.toolsUsed.push(name);
+        const callId = options?.toolCallId ?? `call-${randomUUID()}`;
+        ctx.emittedCallIds.add(callId);
+        ctx.eventBus.emit({
+          type: 'agent:tool_call',
+          taskId: ctx.taskId,
+          agentId: ctx.agentId,
+          timestamp: Date.now(),
+          status: 'running',
+          toolName: name,
+          callId,
+          ...ctx.planContext,
+        });
+        return originalExecute(input, { ...options, abortSignal: signal } as never);
+      },
+    };
+  }
+  return wrapped as T;
+}
+
 function compactToolError(message: string): string {
   const oneLine = message.replace(/\s+/g, ' ').trim();
   return oneLine.length > TOOL_ERROR_MAX_CHARS
@@ -253,6 +312,11 @@ export class AgentRuntime {
    * which case the tool set is passed through untouched.
    */
   private journal: JournalWriter | null = null;
+  private readonly rateLimiter?: RateLimiter;
+
+  constructor(options: { rateLimiter?: RateLimiter } = {}) {
+    this.rateLimiter = options.rateLimiter;
+  }
 
   /** Phase 37: wire (or clear) the journal this runtime writes tool actions to. */
   setJournal(journal: JournalWriter | null): void {
@@ -309,19 +373,20 @@ export class AgentRuntime {
     // Phase 20 (LEAK-02): the timeout timer MUST be cleared when the
     // race settles, or it keeps the event loop alive after every run.
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
+    const usageAcc: { value?: TokenUsage } = {};
+    const runController = new AbortController();
+    const abortSignal =
+      signal && typeof AbortSignal.any === 'function'
+        ? AbortSignal.any([signal, runController.signal])
+        : runController.signal;
 
-    try {
+    const invoke = async (): Promise<AgentRunResult> => {
       // ── Race execution against timeout ────────────────────
       // Phase 30 (P5): the run's own deadline.  When it fires the in-flight
       // request must be aborted — an abandoned request keeps the Node event
       // loop (and therefore the CLI process) alive until the provider
       // eventually answers, which is exactly the "hang after the report"
       // that the P5 e2e caught.
-      const runController = new AbortController();
-      const abortSignal =
-        signal && typeof AbortSignal.any === 'function'
-          ? AbortSignal.any([signal, runController.signal])
-          : runController.signal;
 
       const executionPromise = this.executeWithSdk({
         agent,
@@ -333,14 +398,12 @@ export class AgentRuntime {
         toolsUsed,
         toolErrors,
         planContext,
+        usageAcc,
         signal: abortSignal,
         ...(onThought ? { onThought } : {}),
         ...(onToolCall ? { onToolCall } : {}),
         ...(toolCallOptions ? { toolCallOptions } : {}),
       });
-      // The loser of the race must not surface as an unhandled rejection
-      // when the aborted request settles.
-      executionPromise.catch(() => {});
 
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutTimer = setTimeout(() => {
@@ -350,7 +413,18 @@ export class AgentRuntime {
         }, timeoutMs);
       });
 
-      const sdkResult = await Promise.race([executionPromise, timeoutPromise]);
+      let sdkResult: SdkRunOutcome;
+      try {
+        sdkResult = await Promise.race([executionPromise, timeoutPromise]);
+      } catch (err) {
+        // C-01: hold the caller (and therefore resource locks) until the
+        // in-flight generateText/tool work actually settles.
+        await executionPromise.then(
+          () => undefined,
+          () => undefined
+        );
+        throw err;
+      }
 
       // A turn with no text and no tool call did nothing; counting it as a
       // completed task let an empty answer pass as a finished step.
@@ -380,7 +454,7 @@ export class AgentRuntime {
         status: 'completed',
         summary,
         toolsUsed: [...new Set(toolsUsed)],
-        usage: sdkResult.usage,
+        usage: sdkResult.usage as TokenUsage | undefined,
         ...planContext,
       });
 
@@ -395,15 +469,29 @@ export class AgentRuntime {
         // result (and therefore into the acceptance check) even though
         // the agent run as a whole completed.
         errors: toolErrorMessages,
-        usage: sdkResult.usage,
+        usage: sdkResult.usage as TokenUsage | undefined,
         failureType: null,
       };
+    };
+
+    try {
+      return await runWithAgentContext(
+        {
+          taskId,
+          agentId,
+          personaId: agent.persona?.id ?? agent.agentId,
+          delegationDepth: agent.delegationDepth ?? 0,
+          abortSignal,
+          ...planContext,
+        },
+        invoke
+      );
     } catch (err) {
       // ── Handle all error types uniformly ──────────────────
       const { message, code } = this.classifyError(err);
       errors.push(message);
 
-      // Emit error event
+      // Emit error event (C-06: include partial usage so aggregators see it)
       eventBus.emit({
         type: 'agent:error',
         taskId,
@@ -412,6 +500,7 @@ export class AgentRuntime {
         status: 'error',
         error: message,
         code,
+        ...(usageAcc.value ? { usage: usageAcc.value } : {}),
         ...planContext,
       });
 
@@ -423,7 +512,7 @@ export class AgentRuntime {
         result: '',
         toolsUsed: [...new Set(toolsUsed)],
         errors,
-        usage: undefined,
+        usage: usageAcc.value,
         failureType: 'technical',
       };
     } finally {
@@ -444,6 +533,7 @@ export class AgentRuntime {
     /** Phase 30 (P3): filled with every tool-level failure observed */
     toolErrors: ToolFailure[];
     planContext: { planId?: string; planStepId?: string };
+    usageAcc: { value?: TokenUsage };
     /** Phase 22: cancellation signal, forwarded to generateText */
     signal?: AbortSignal;
     /** Phase 32: live thinking text (switches the turn to `streamText`) */
@@ -463,6 +553,7 @@ export class AgentRuntime {
       toolsUsed,
       toolErrors,
       planContext,
+      usageAcc,
       signal,
       onThought,
       onToolCall,
@@ -475,7 +566,7 @@ export class AgentRuntime {
     // runtime is about to hand to the model.  Both branches below use this
     // wrapped set, so `streamText` (the thinking path) is covered by the same
     // wiring as `generateText`; a new tool needs no journal code of its own.
-    const tools = hasTools
+    const journalled = hasTools
       ? withToolCallLog(
           withJournal(agent.tools, { taskId, agentId, ...planContext }, this.journal),
           { taskId, agentId, ...planContext },
@@ -483,15 +574,42 @@ export class AgentRuntime {
           toolCallOptions ?? {}
         )
       : undefined;
+    const emittedCallIds = new Set<string>();
+    const tools = journalled
+      ? withRuntimeToolHooks(journalled, {
+          signal,
+          eventBus,
+          taskId,
+          agentId,
+          planContext,
+          toolsUsed,
+          emittedCallIds,
+        })
+      : undefined;
+
+    const model = wrapModelForRetry(
+      agent.model,
+      this.rateLimiter,
+      agent.providerId ?? 'default'
+    );
+
+    const onStepFinish = (event: { usage?: unknown; finishReason?: string }): void => {
+      const stepUsage = toTokenUsage(event.usage);
+      if (stepUsage) usageAcc.value = addTokenUsage(usageAcc.value, stepUsage);
+      if (event.finishReason === 'error') {
+        throw new ProviderStreamError('Provider finished the step with finishReason=error');
+      }
+    };
 
     const generateOptions: Parameters<typeof generateText>[0] = {
-      model: agent.model,
+      model,
       system: agent.systemPrompt,
       prompt,
       stopWhen: stepCountIs(maxSteps),
       ...(tools ? { tools } : {}),
       // Phase 22: real cancellation — aborting rejects generateText
       ...(signal ? { abortSignal: signal } : {}),
+      onStepFinish,
     };
 
     // Phase 32: with a thinking sink the same turn is executed by
@@ -518,7 +636,7 @@ export class AgentRuntime {
     } else {
       try {
         result = await this.streamWithThoughts({
-          model: agent.model,
+          model,
           system: agent.systemPrompt,
           prompt,
           maxSteps,
@@ -529,6 +647,7 @@ export class AgentRuntime {
         });
       } catch (err) {
         if (!stillWanted()) throw err;
+        if (err instanceof ProviderStreamError) throw err;
         reaskedWithoutStreaming = true;
         result = await generateText(generateOptions);
       }
@@ -544,27 +663,37 @@ export class AgentRuntime {
       }
     }
 
+    if (result.finishReason === 'error') {
+      throw new ProviderStreamError('Provider stream finished with finishReason=error');
+    }
+
     // Phase 22: `step.toolCalls` is fully typed (Array<TypedToolCall>)
     // in AI SDK v7 — no unsafe cast needed.  The Array.isArray guard
     // stays as a runtime safety net for partial test mocks.
+    // C-12: `agent:tool_call` is emitted when the tool *starts* (see
+    // withRuntimeToolHooks).  Here we only backfill toolsUsed for mocks
+    // that never invoke execute, and collect tool-level failures.
     if (result.steps && Array.isArray(result.steps)) {
       for (const step of result.steps) {
         const toolCalls = step.toolCalls;
         if (Array.isArray(toolCalls)) {
           for (const call of toolCalls) {
             const toolName = call.toolName ?? 'unknown';
-            toolsUsed.push(toolName);
-
-            eventBus.emit({
-              type: 'agent:tool_call',
-              taskId,
-              agentId,
-              timestamp: Date.now(),
-              status: 'running',
-              toolName,
-              callId: call.toolCallId ?? `call-${randomUUID()}`,
-              ...planContext,
-            });
+            if (!toolsUsed.includes(toolName)) toolsUsed.push(toolName);
+            const callId = call.toolCallId ?? `call-${randomUUID()}`;
+            if (!emittedCallIds.has(callId)) {
+              emittedCallIds.add(callId);
+              eventBus.emit({
+                type: 'agent:tool_call',
+                taskId,
+                agentId,
+                timestamp: Date.now(),
+                status: 'running',
+                toolName,
+                callId,
+                ...planContext,
+              });
+            }
           }
         }
 
@@ -598,10 +727,11 @@ export class AgentRuntime {
 
     // Phase 22: typed usage extraction (SDK v7 shape, legacy-mock fallback).
     const usage: TokenUsage | undefined = toTokenUsage(result.usage);
+    if (usage) usageAcc.value = usage;
 
     return {
       text: result.text ?? '',
-      usage,
+      usage: usageAcc.value ?? usage,
       ...(reaskedWithoutStreaming ? { reaskedWithoutStreaming: true } : {}),
     };
   }
@@ -649,12 +779,17 @@ export class AgentRuntime {
 
     const emittedChars = await this.pipeThoughts(streamed.fullStream, onThought, context);
 
-    const [text, steps, usage, reasoningText] = await Promise.all([
+    const [text, steps, usage, reasoningText, finishReason] = await Promise.all([
       streamed.text,
       streamed.steps,
       streamed.usage,
       streamed.reasoningText,
+      streamed.finishReason ?? Promise.resolve(undefined),
     ]);
+
+    if (finishReason === 'error') {
+      throw new ProviderStreamError('Provider stream finished with finishReason=error');
+    }
 
     // v27.17.2 — the reporter's gateway put the thinking in an item the SDK
     // only parses at the END of the stream (and mapped none of it to a
@@ -672,7 +807,12 @@ export class AgentRuntime {
       emitThought(onThought, { kind: 'end', ...context });
     }
 
-    return { text, steps: steps as ReadonlyArray<SdkStepLike>, usage };
+    return {
+      text,
+      steps: steps as ReadonlyArray<SdkStepLike>,
+      usage,
+      ...(typeof finishReason === 'string' ? { finishReason } : {}),
+    };
   }
 
   /**
@@ -724,8 +864,20 @@ export class AgentRuntime {
         text?: unknown;
         delta?: unknown;
         rawValue?: unknown;
+        error?: unknown;
       };
       switch (part.type) {
+        case 'error': {
+          const message =
+            typeof part.error === 'string'
+              ? part.error
+              : part.error instanceof Error
+                ? part.error.message
+                : typeof part.text === 'string'
+                  ? part.text
+                  : 'Provider stream error';
+          throw new ProviderStreamError(message);
+        }
         case 'reasoning-start':
           nativeReasoning = true;
           openBlock('reasoning');
@@ -864,6 +1016,9 @@ export class AgentRuntime {
       }
       if (msg.includes('timeout') || msg.includes('ETIMEDOUT')) {
         return { message: msg, code: 'TIMEOUT' };
+      }
+      if (err instanceof ProviderStreamError || err.name === 'ProviderStreamError') {
+        return { message: msg, code: 'PROVIDER_ERROR' };
       }
       return { message: msg, code: 'PROVIDER_ERROR' };
     }

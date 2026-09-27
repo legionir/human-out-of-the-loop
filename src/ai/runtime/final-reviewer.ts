@@ -1,4 +1,4 @@
-import { generateObject } from 'ai';
+import { generateObject, NoObjectGeneratedError } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from './llm-timeout.js';
 import { languageSection } from '../language.js';
 import { reportLlmUsage, type LlmUsageReporter } from './llm-usage.js';
@@ -143,7 +143,13 @@ export class FinalReviewer {
               'a human-readable summary.',
             abortSignal,
           })
-      )
+      ),
+      2,
+      (err) => {
+        if (NoObjectGeneratedError.isInstance(err)) {
+          reportLlmUsage(this.config.onUsage, 'review', err.usage, plan.id);
+        }
+      }
     );
     reportLlmUsage(this.config.onUsage, 'review', usage, plan.id);
 

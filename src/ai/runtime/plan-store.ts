@@ -28,6 +28,8 @@ export interface PlanStore {
    * `fn` receives a clone; the returned plan is what is persisted.
    */
   update(planId: string, fn: (plan: Plan) => Plan): Plan | undefined;
+  /** C-11: drop files older than `days`. Optional on memory stores. */
+  pruneOlderThan?(days: number): number;
 }
 
 export function hashedStoreFileName(id: string): string {
@@ -252,6 +254,25 @@ export class FilePlanStore implements PlanStore {
 
   exists(planId: string): boolean {
     return this.load(planId) !== undefined;
+  }
+
+  pruneOlderThan(days: number): number {
+    if (days <= 0 || !fs.existsSync(this.dir)) return 0;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    let removed = 0;
+    for (const f of fs.readdirSync(this.dir)) {
+      if (!f.endsWith('.json') || OWNER_JSON.test(f)) continue;
+      const fp = path.join(this.dir, f);
+      try {
+        if (fs.statSync(fp).mtimeMs >= cutoff) continue;
+        fs.unlinkSync(fp);
+        this.idByFile.delete(f);
+        removed++;
+      } catch {
+        // ignore
+      }
+    }
+    return removed;
   }
 }
 

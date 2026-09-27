@@ -1,5 +1,11 @@
 import fs from 'node:fs';
+import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
+
+/** Nesting of async `withFileLock` on the same path (same async chain only). */
+const asyncLockNest = new AsyncLocalStorage<Set<string>>();
 
 /**
  * Phase 27 (PERS-04): cross-process advisory locking for file stores.
@@ -109,21 +115,49 @@ function isStaleLock(lockPath: string, staleMs: number): boolean {
     // Vanished between EEXIST and stat → the holder just released it.
     return true;
   }
-  if (Date.now() - mtimeMs > staleMs) return true;
 
   const info = readLockInfo(lockPath);
+  // A live holder is never stale — mtime is not heartbeaten during a long write.
+  if (info && isProcessAlive(info.pid)) return false;
   if (info && !isProcessAlive(info.pid)) return true;
+  if (Date.now() - mtimeMs > staleMs) return true;
 
   return false;
 }
 
-/** Remove a stale lock file; a concurrent remover losing the race is fine. */
-function breakStaleLock(lockPath: string): void {
+/**
+ * Break a stale lock with an atomic rename so two waiters cannot both
+ * unlink and then both believe they own the path.
+ * Returns true when this caller won the race to take over.
+ */
+function breakStaleLock(lockPath: string): boolean {
+  const tomb = `${lockPath}.${randomUUID()}.stale`;
   try {
-    fs.unlinkSync(lockPath);
+    fs.renameSync(lockPath, tomb);
   } catch {
-    // ignore — someone else released it first
+    return false;
   }
+  try {
+    fs.unlinkSync(tomb);
+  } catch {
+    // tombstone leftover is harmless
+  }
+  return true;
+}
+
+async function breakStaleLockAsync(lockPath: string): Promise<boolean> {
+  const tomb = `${lockPath}.${randomUUID()}.stale`;
+  try {
+    await fsp.rename(lockPath, tomb);
+  } catch {
+    return false;
+  }
+  try {
+    await fsp.unlink(tomb);
+  } catch {
+    // ignore
+  }
+  return true;
 }
 
 /**
@@ -188,8 +222,13 @@ export function withFileLockSync<T>(
       if (code !== 'EEXIST') throw err;
 
       if (isStaleLock(lockPath, staleMs)) {
-        breakStaleLock(lockPath);
-        continue; // retry immediately
+        if (!breakStaleLock(lockPath)) {
+          if (Date.now() - startedAt >= timeoutMs) {
+            throw new FileLockTimeoutError(lockPath, timeoutMs, readLockInfo(lockPath));
+          }
+          sleepSync(Math.min(pollMs, timeoutMs));
+        }
+        continue;
       }
 
       if (Date.now() - startedAt >= timeoutMs) {
@@ -219,6 +258,88 @@ export function withFileLockSync<T>(
       fs.unlinkSync(lockPath);
     } catch {
       // ignore — already gone
+    }
+  }
+}
+
+function sleepAsync(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Async counterpart of `withFileLockSync` for the server event loop.
+ * Waiters sleep with `setTimeout` instead of `Atomics.wait`.
+ */
+export async function withFileLock<T>(
+  lockPath: string,
+  fn: () => Promise<T> | T,
+  options: FileLockOptions = {}
+): Promise<T> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
+  const staleMs = options.staleMs ?? DEFAULT_LOCK_STALE_MS;
+  const pollMs = options.pollMs ?? DEFAULT_LOCK_POLL_MS;
+
+  const nest = asyncLockNest.getStore();
+  if (nest?.has(lockPath)) {
+    return await fn();
+  }
+
+  const startedAt = Date.now();
+  let handle: fs.promises.FileHandle | undefined;
+  let healedDir = false;
+
+  for (;;) {
+    try {
+      handle = await fsp.open(lockPath, 'wx');
+      break;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code;
+      if (code === 'ENOENT' && !healedDir) {
+        healedDir = true;
+        try {
+          await fsp.mkdir(path.dirname(lockPath), { recursive: true });
+        } catch {
+          throw err;
+        }
+        continue;
+      }
+      if (code !== 'EEXIST') throw err;
+      if (isStaleLock(lockPath, staleMs)) {
+        if (!(await breakStaleLockAsync(lockPath))) {
+          if (Date.now() - startedAt >= timeoutMs) {
+            throw new FileLockTimeoutError(lockPath, timeoutMs, readLockInfo(lockPath));
+          }
+          await sleepAsync(Math.min(pollMs, timeoutMs));
+        }
+        continue;
+      }
+      if (Date.now() - startedAt >= timeoutMs) {
+        throw new FileLockTimeoutError(lockPath, timeoutMs, readLockInfo(lockPath));
+      }
+      await sleepAsync(Math.min(pollMs, timeoutMs));
+    }
+  }
+
+  try {
+    await handle.write(JSON.stringify({ pid: process.pid, acquiredAt: Date.now() }));
+  } catch {
+    // metadata is best-effort
+  }
+
+  const next = new Set(nest);
+  next.add(lockPath);
+  try {
+    return await asyncLockNest.run(next, () => fn());
+  } finally {
+    try {
+      await handle.close();
+    } catch {
+      // ignore
+    }
+    try {
+      await fsp.unlink(lockPath);
+    } catch {
+      // ignore
     }
   }
 }

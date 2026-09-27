@@ -94,13 +94,15 @@ export async function withLlmTimeout<T>(
  */
 export async function withStructuredRetry<T>(
   call: () => Promise<T>,
-  attempts = 2
+  attempts = 2,
+  onAttemptError?: (err: unknown) => void
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await call();
     } catch (err) {
       if (attempt >= attempts || !NoObjectGeneratedError.isInstance(err)) throw err;
+      onAttemptError?.(err);
     }
   }
 }

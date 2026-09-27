@@ -392,6 +392,11 @@ export class JournalWriter {
     }
   }
 
+  /** True while a descriptor is held. */
+  get isOpen(): boolean {
+    return this.fd !== null;
+  }
+
   close(): void {
     if (this.fd === null) return;
     try {

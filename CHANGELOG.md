@@ -5,6 +5,25 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.6] — 2026-09-27 — Phase C: runtime, task, agent
+
+Closes every open row of **Phase C** in `docs/UNIFIED_EXECUTION_PLAN.md` (C-01…C-14).
+
+- **C-01 — lock until settle.** Timeout/cancel abort the run but hold resource locks until `executionPromise` finishes; `abortSignal` is forwarded to fs/git/fetch tools.
+- **C-02 — stream errors fail.** `pipeThoughts` treats `error` parts as failure; `finishReason === 'error'` fails the run.
+- **C-03 — cancel running work.** `cancelPlan` aborts running tasks and children; acceptance is skipped after cancel.
+- **C-04 — model-call retry.** `wrapModelForRetry` + status-code 429/5xx/network retry with per-provider concurrency; backoff releases the slot. Whole-agent `RetryableAgentRuntime` is no longer on the TaskRuntime path.
+- **C-05 — delegation depth.** Child agents are created at `depth+1`; `delegate_task` checks the **caller** persona via async run context.
+- **C-06 — partial usage.** `onStepFinish` accumulates tokens; failed/timed-out runs still report usage.
+- **C-07 — delegated results.** Children inherit `planId`/`parentTaskId`; `delegate_task` waits and returns status/result/usage.
+- **C-08 — waitFor.** `waitFor(planId)` is plan-scoped; a throwing `run()` cannot hot-loop `waitForAll`.
+- **C-09 — map pruning.** Agents/overrides are dropped on completion; task records cap at `maxTaskRecords`.
+- **C-10 — file-lock CAS.** Stale locks are renamed atomically; a live pid is never stolen; `withFileLock` is the async server path.
+- **C-11 — journal/log hygiene.** `journal.close()` on shutdown; size-based observability rotation; stale temp/lock cleanup and store retention on initialize.
+- **C-12 — live `agent:tool_call`.** Events fire when a tool starts (with a post-run fallback for mocks).
+- **C-13 — chat task ids.** Answer turns use `chat:${interactionId}`; abandoned chat interactions reconcile on initialize.
+- **C-14 — review.usage.** Clarification/answer paths use aggregator totals; `withStructuredRetry` reports the failed first attempt.
+
 ## [27.17.5] — 2026-09-27 — Phase B: orchestration, stores, registry
 
 Closes every open row of **Phase B** in `docs/UNIFIED_EXECUTION_PLAN.md` (B-01…B-22).

@@ -395,6 +395,7 @@ export class PlanRuntime {
   private async runAcceptanceChecks(plan: Plan): Promise<void> {
     const checker = this.config.acceptanceChecker;
     if (!checker) return;
+    if (this.cancelled) return;
 
     for (const step of plan.steps) {
       if (step.status !== 'done') continue;
@@ -404,9 +405,11 @@ export class PlanRuntime {
         continue;
       }
       if (!step.taskId) continue;
+      const live = this.config.taskRuntime.getResult(step.taskId);
+      if (live?.status === 'cancelled') continue;
 
       const task =
-        this.config.taskRuntime.getResult(step.taskId) ??
+        live ??
         ({
           id: step.taskId,
           status: 'completed',

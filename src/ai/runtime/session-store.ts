@@ -14,6 +14,8 @@ import { lockPathFor, withFileLockSync } from './file-lock.js';
 // ─── Interface ────────────────────────────────────────────────────
 
 export interface SessionStore {
+  /** C-11: drop files older than `days`. Optional on memory stores. */
+  pruneOlderThan?(days: number): number;
   /** Create a new session and return its id */
   createSession(label?: string): string;
   /**
@@ -216,6 +218,25 @@ export class FileSessionStore implements SessionStore {
     });
     // Phase 27 (PERF-06): a deleted session must leave the index at once.
     this.idByFile.delete(path.basename(fp));
+  }
+
+  pruneOlderThan(days: number): number {
+    if (days <= 0 || !fs.existsSync(this.dir)) return 0;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+    let removed = 0;
+    for (const f of fs.readdirSync(this.dir)) {
+      if (!f.endsWith('.json')) continue;
+      const fp = path.join(this.dir, f);
+      try {
+        if (fs.statSync(fp).mtimeMs >= cutoff) continue;
+        fs.unlinkSync(fp);
+        this.idByFile.delete(f);
+        removed++;
+      } catch {
+        // ignore
+      }
+    }
+    return removed;
   }
 
   addInteraction(sessionId: string, userRequest: string): SessionInteraction | undefined {

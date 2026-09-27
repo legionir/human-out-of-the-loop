@@ -102,13 +102,17 @@ export class CancellationManager {
       runtime.cancel();
     }
 
-    // Cancel pending tasks
+    // C-03: cancel pending AND running tasks (and their children).
     let cancelledCount = 0;
     for (const step of plan.steps) {
-      if (step.status === 'pending' && step.taskId) {
+      if ((step.status === 'pending' || step.status === 'running') && step.taskId) {
         this.taskRuntime.cancelTask(step.taskId);
-        step.status = 'failed';
-        step.resultSummary = 'Cancelled by user';
+        if (step.status === 'pending') {
+          step.status = 'failed';
+          step.resultSummary = 'Cancelled by user';
+        } else {
+          step.resultSummary = step.resultSummary ?? 'Cancelled by user';
+        }
         cancelledCount++;
       }
     }

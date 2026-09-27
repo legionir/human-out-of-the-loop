@@ -45,6 +45,10 @@ export interface ResolvedAgent {
   trimmingLog: TrimmingRecord[];
   /** Whether the system prompt was trimmed due to context budget */
   contextBudgetExceeded: boolean;
+  /** C-05: depth of this agent in the delegation tree (0 = root). */
+  delegationDepth?: number;
+  /** Provider id of the resolved model (rate limiter / retry). */
+  providerId?: string;
 }
 
 export interface CreateAgentOptions {
@@ -234,6 +238,8 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
     toolWarnings,
     trimmingLog,
     contextBudgetExceeded,
+    delegationDepth,
+    providerId: refs.modelRegistry.getConfig(def.modelId)?.provider,
   };
 }
 

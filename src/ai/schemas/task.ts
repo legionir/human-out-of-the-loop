@@ -53,6 +53,8 @@ export const TaskSchema = z.object({
    * UsageAggregator for correct per-plan token breakdowns.
    */
   planId: z.string().optional(),
+  /** C-03: parent task that spawned this one. */
+  parentTaskId: z.string().optional(),
 });
 
 export type Task = z.infer<typeof TaskSchema>;
@@ -67,6 +69,7 @@ export function createTaskRecord(params: {
   claimedResources?: string[];
   planStepId?: string;
   planId?: string;
+  parentTaskId?: string;
 }): Task {
   return {
     id: params.id,
@@ -78,5 +81,6 @@ export function createTaskRecord(params: {
     createdAt: Date.now(),
     planStepId: params.planStepId,
     planId: params.planId,
+    parentTaskId: params.parentTaskId,
   };
 }

@@ -26,6 +26,8 @@ import type { ToolCallLogOptions, ToolCallSink } from './runtime/tool-call-log.j
 import { ScrubbingPlanStore } from './runtime/secret-scrub.js';
 import { logStepEvent, parseStepEvent } from './runtime/step-events.js';
 import { JournalWriter, journalOptionsFromEnv } from './runtime/journal.js';
+import { cleanupStaleTempFiles } from './runtime/atomic-write.js';
+import { cleanupStaleLockFiles } from './runtime/file-lock.js';
 import { isAbortError, throwIfAborted } from './runtime/abort.js';
 import { formatReviewForUser as formatFinalReview } from './runtime/review-formatter.js';
 import { RetryableAgentRuntime } from './runtime/agent-runtime-retry.js';
@@ -403,7 +405,6 @@ export class Orchestrator {
     // Phase 19 (SING-01/02): each Orchestrator owns its bus/runtime —
     // no shared singletons, full isolation between instances.
     this.eventBus = new EventBus();
-    this.agentRuntime = new AgentRuntime();
     // Phase 30 (P10): the persisted plan must not carry a credential the model
     // echoed into its summary — and v27.17.3 scrubs the tool-call records with
     // the same list, so a shown argument never prints a key.
@@ -428,6 +429,7 @@ export class Orchestrator {
       baseBackoffMs: this.config.baseBackoffMs,
       maxBackoffMs: this.config.maxBackoffMs,
     });
+    this.agentRuntime = new AgentRuntime({ rateLimiter: this.rateLimiter });
     this.retryableAgentRuntime = new RetryableAgentRuntime(
       this.agentRuntime,
       this.rateLimiter
@@ -625,7 +627,7 @@ export class Orchestrator {
 
   /** Usage of one plan only — the aggregator lives as long as the orchestrator. */
   private planUsage(planId: string | undefined): Review['usage'] {
-    if (!planId) return emptyReviewUsage;
+    if (!planId) return this.totalReviewUsage();
     const u = this.usageAggregator.getPlanUsage(planId);
     return {
       totalPromptTokens: u.promptTokens,
@@ -634,10 +636,33 @@ export class Orchestrator {
     };
   }
 
+  private totalReviewUsage(): Review['usage'] {
+    const u = this.usageAggregator.getSummary();
+    return {
+      totalPromptTokens: u.totalPromptTokens,
+      totalCompletionTokens: u.totalCompletionTokens,
+      totalTokens: u.totalTokens,
+    };
+  }
+
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
     const root = this.config.projectRoot;
+    const runtimeDir = this.config.runtimeDir;
+    try {
+      cleanupStaleTempFiles(runtimeDir);
+      cleanupStaleLockFiles(runtimeDir);
+      cleanupStaleTempFiles(path.join(runtimeDir, 'plans'));
+      cleanupStaleLockFiles(path.join(runtimeDir, 'plans'));
+      cleanupStaleTempFiles(path.join(runtimeDir, 'sessions'));
+      cleanupStaleLockFiles(path.join(runtimeDir, 'sessions'));
+      this.journal.prune();
+      this.planStore.pruneOlderThan?.(365);
+      this.sessionStore.pruneOlderThan?.(365);
+    } catch {
+      // housekeeping must never block startup
+    }
 
     // Phase 28 (registry layering): the packaged registry (global) loads
     // first and the project registry (local) second with override, so a
@@ -815,12 +840,15 @@ export class Orchestrator {
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
       // Phase 22: typed (was `any`)
-      onTaskCreated: async (resolved: ResolvedAgent, prompt: string) => {
+      onTaskCreated: async (resolved: ResolvedAgent, prompt: string, meta) => {
         return this.taskRuntime.createTask({
           agent: resolved,
           prompt,
+          ...(meta?.planId ? { planId: meta.planId } : {}),
+          ...(meta?.parentTaskId ? { parentTaskId: meta.parentTaskId } : {}),
         });
       },
+      waitForTask: (taskId) => this.taskRuntime.waitForTask(taskId),
       resolveAgentId: (id: string) => this.agentRegistry.get(id),
       // Phase 19 (CFG-04): the guard is actually enforced now
       delegationGuard: this.delegationGuard,
@@ -1083,7 +1111,7 @@ export class Orchestrator {
           rejectedFindings: [],
           incompleteSteps: [],
           finalSummary: `The planner asked for clarification, but the user chose not to answer (round ${clarifyRound}).\nQuestions:\n${clarMsg}`,
-          usage: emptyReviewUsage,
+          usage: this.totalReviewUsage(),
         },
         report: `🛑 Run cancelled — clarification questions were not answered.\nQuestions that were asked:\n${clarMsg}`,
         planId: 'none',
@@ -1163,7 +1191,7 @@ export class Orchestrator {
           rejectedFindings: [],
           incompleteSteps: [],
           finalSummary: `The request needs clarification before a plan can be produced:\n${clarificationMsg}${roundNote}`,
-          usage: emptyReviewUsage,
+          usage: this.totalReviewUsage(),
         },
         report: `⚠️ Clarification needed:\n${clarificationMsg}${roundNote}`,
         planId: 'none',
@@ -1541,12 +1569,13 @@ export class Orchestrator {
     const toolIds = readOnlyToolIds();
     let text: string | undefined;
     let errors: string[] = [];
+    let answerUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
 
     try {
       const agent = this.planner.buildChatAgent(modelId, mode === 'chat' ? toolIds : undefined);
       const run = await this.agentRuntime.run({
         agent,
-        taskId: `chat:${sessionId}`,
+        taskId: `chat:${interactionId ?? sessionId}`,
         prompt: this.planner.buildAnswerPrompt(userRequest),
         eventBus: this.eventBus,
         maxSteps: this.config.maxSteps,
@@ -1555,6 +1584,15 @@ export class Orchestrator {
         ...(this.config.onToolCall ? { onToolCall: this.config.onToolCall } : {}),
         ...(this.toolCallOptions ? { toolCallOptions: this.toolCallOptions } : {}),
       });
+      answerUsage = run.usage;
+      if (run.usage) {
+        this.usageAggregator.recordDirect({
+          taskId: `chat:${interactionId ?? sessionId}`,
+          agentId: agent.agentId,
+          usage: run.usage,
+          timestamp: Date.now(),
+        });
+      }
       if (run.success && run.result.trim().length > 0) {
         text = run.result.trim();
       } else {
@@ -1597,7 +1635,7 @@ export class Orchestrator {
         rejectedFindings: [],
         incompleteSteps: [],
         finalSummary: body,
-        usage: emptyReviewUsage,
+        usage: this.totalReviewUsage(),
       },
       report,
       planId: 'none',
@@ -1773,7 +1811,16 @@ export class Orchestrator {
       for (const interaction of session.interactions) {
         if (interaction.completedAt) continue;
         const ids = interaction.planIds ?? [];
-        if (ids.length === 0) continue;
+        if (ids.length === 0) {
+          // C-13: chat/answer turns never get a planId; a killed process
+          // left them pending forever.
+          this.sessionStore.updateInteraction(sessionId, interaction.id, {
+            outcome: 'cancelled',
+            reviewSummary: interaction.reviewSummary ?? 'Reconciled abandoned chat turn.',
+            completedAt: Date.now(),
+          });
+          continue;
+        }
         const plans = ids.map((id) => this.planStore.load(id)).filter((p): p is NonNullable<typeof p> => Boolean(p));
         if (plans.length === 0) continue;
         if (!plans.every((p) => terminal.has(p.status))) continue;

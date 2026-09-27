@@ -487,7 +487,7 @@ export function createFetchTool(projectRoot: string, toolOptions: FetchToolOptio
   });
 
   const fetchTool: Tool<FetchInput, FetchOutcome> & {
-    execute: (input: FetchToolInput) => Promise<FetchOutcome>;
+    execute: (input: FetchToolInput, options?: { abortSignal?: AbortSignal }) => Promise<FetchOutcome>;
   } = {
     description:
       'Fetches a URL and returns its content as Markdown (or raw HTML with raw: true). Use it to read ' +
@@ -496,7 +496,7 @@ export function createFetchTool(projectRoot: string, toolOptions: FetchToolOptio
       'private addresses are always blocked (an operator-only setting, not available here); robots.txt ' +
       'is honoured unless respectRobots is false.',
     inputSchema,
-    execute: async (input) => {
+    execute: async (input, options) => {
       // The schema's `.default()` values are applied by the SDK when the model
       // calls the tool; a direct `execute()` (tests, e2e) does not go through
       // it, so the same defaults are applied here — one source of truth for
@@ -508,6 +508,10 @@ export function createFetchTool(projectRoot: string, toolOptions: FetchToolOptio
         raw = false,
         respectRobots = true,
       } = input;
+      const abortSignal = options?.abortSignal;
+      if (abortSignal?.aborted) {
+        return { success: false, error: 'Aborted', code: 'ABORTED' };
+      }
       const allowPrivate = toolOptions.allowPrivate ?? envAllowPrivate();
       const started = Date.now();
       const remaining = (): number => Math.max(500, timeoutMs - (Date.now() - started));
@@ -536,6 +540,7 @@ export function createFetchTool(projectRoot: string, toolOptions: FetchToolOptio
             userAgent: agentHeader,
             // robots.txt lives on the same host as `safety.url`, already vetted.
             pinnedAddresses: safety.addresses,
+            ...(abortSignal ? { signal: abortSignal } : {}),
           });
           if (isFailure(fetched)) {
             entry = {
@@ -613,6 +618,7 @@ export function createFetchTool(projectRoot: string, toolOptions: FetchToolOptio
         maxRedirects,
         userAgent: agentHeader,
         ...(toolOptions.lookup ? { lookup: toolOptions.lookup } : {}),
+        ...(abortSignal ? { signal: abortSignal } : {}),
       });
       if (!followed.ok) {
         return {

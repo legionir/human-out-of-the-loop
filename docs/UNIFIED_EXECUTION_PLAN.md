@@ -27,7 +27,7 @@
 |---|---|---|---|
 | A | امنیت — سرور وب و گیت اعتماد | ۰ 🟢 | ۰ |
 | B | صحت ارکستراسیون، state، پیکربندی و registry | ۰ 🟢 | ۰ |
-| C | صحت runtime، تسک و ایجنت | ۱۴ | ۴ |
+| C | صحت runtime، تسک و ایجنت | ۰ 🟢 | ۰ |
 | D | صحت ابزارها و journal | ۱۸ | ۰ |
 | E | context، prompt و مدل | ۱۲ | ۵ |
 | F | کارایی و مصرف توکن | ۱۰ | ۳ |
@@ -36,7 +36,7 @@
 | I | تست، CI و مستندات | ۸ | ۱ |
 | J | قابلیت‌های جدید | ۹ | ۰ |
 | K | راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) | ۹ | ۱ |
-| | **جمع ردیف‌های باز** | **۱۱۲** | **۱۴** |
+| | **جمع ردیف‌های باز** | **۹۸** | **۱۰** |
 
 ---
 
@@ -89,24 +89,24 @@
 
 **معیار پذیرش فاز:** هیچ state ناسازگار در سناریوهای kill/cancel/resume هم‌زمان؛ همهٔ تست‌های جهت‌دار (بدون رفع fail) در repo.
 
-### فاز C — صحت runtime، تسک و ایجنت 🔴
+### فاز C — صحت runtime، تسک و ایجنت 🟢 (۲۰۲۶-۰۹-۲۷، v27.17.6)
 
 | ID | Pri | عنوان | رفع / تست | منبع |
 |---|---|---|---|---|
-| **C-01** | P0 | timeout/cancel قفل را آزاد می‌کند در حالی که ابزار هنوز اجراست | نگه‌داشتن قفل/اسلات تا settle شدن `executionPromise`؛ `abortSignal` به ابزارهای fs/git/fetch. تست: تسک B با منبع مشترک پس از پایان واقعی A شروع شود | S1:R2-01 |
-| **C-02** | P0 | خطای provider وسط استریم موفقیت گزارش می‌شود | part نوع `error` در `pipeThoughts` → failure؛ `finishReason==='error'` → failure. تست: step 2 خطای 502 → `success:false` | S1:R2-02 |
-| **C-03** | P0 | لغو پلن هیچ تسکی را لغو نمی‌کند | `cancelTask` برای مراحل running؛ لغو آبشاری فرزندان؛ رد `runAcceptanceChecks` پس از cancel. تست: AbortSignal فعال، هیچ داوری پس از cancel | S1:R2-03؛ S2:REL-002 (notify گم) ادغام در همین رفع |
-| **C-04** | P0 | retry و rate limiter به‌کل بی‌اثرند (dead wiring) | وصل `RetryableAgentRuntime` به TaskRuntime/answerRun یا حذف؛ retry فقط در سطح فراخوانی مدل برای 429/5xx/شبکه با تشخیص status code. تست: 429 → retry با backoff بدون اجرای دوبارهٔ ابزارها؛ per-provider concurrency | S1:R2-09؛ S2:ARCH-001؛ S3:WF-0001(W) |
-| **C-05** | P1 | عمق تفویض همیشه ۰ و persona اشتباه | ساخت `delegate_task` به ازای ایجنت با depth+1؛ بررسی persona فراخواننده. تست: تفویض دوم با depth:1 رد شود | S1:R2-04 |
-| **C-06** | P1 | توکن اجراهای شکست‌خورده شمرده نمی‌شود | جمع usage در `onStepFinish` + گزارش جزئی در خطا. تست: timeout در step 2 → usage step 1 ثبت | S1:R2-05 |
-| **C-07** | P1 | تسک‌های تفویض‌شده planId ندارند و نتیجه به والد برنمی‌گردد | planId والد به فرزند؛ نتیجهٔ فرزند در خروجی `delegate_task`. تست: usage فرزند در bucket پلن والد | S1:R2-06 |
-| **C-08** | P1 | `waitForAll` حلقهٔ داغ + سراسری | cleanup در `.finally`؛ `waitFor(planId)`. تست: run reject → بازگشت < ۱ ثانیه؛ دو پلن مستقل | S1:R2-07 |
-| **C-09** | P1 | mapهای TaskRuntime هرگز پاک نمی‌شوند | آزادسازی `agents`/`taskOverrides` پس از پایان پلن؛ TTL/سقف رکورد. تست: اندازهٔ map پس از ۱۰۰ تسک | S1:R2-08 |
-| **C-10** | P1 | race شکستن قفل کهنه؛ `sleepSync` مسدودکننده | شکستن با rename اتمیک + بررسی مالکیت؛ نسخهٔ async قفل برای سرور. تست: دو waiter → دقیقاً یکی | S1:R2-10 |
-| **C-11** | P2 | Journal بسته نمی‌شود؛ retention/rotation ندارد | `journal.close()` در shutdown؛ prune دوره‌ای؛ rotation سایز‌محور `observability.jsonl`؛ cleanup stale temp/lock در initialize؛ retention plans/sessions. تست: fd باز نماند؛ rotate بالای سقف | S1:R2-11 |
-| **C-12** | P1 | رویدادهای `agent:tool_call` پس از پایان اجرا | ارسال هنگام شروع ابزار؛ در timeout، ابزارهای اجراشده در `toolsUsed`. تست | S1:R2-12 |
-| **C-13** | P1 | همهٔ نوبت‌های chat یک task id مشترک | `chat:${interactionId}`. تست: دو نوبت = دو task؛ chat kill‌شده reconcile شود | S1:R9-12 |
-| **C-14** | P2 | `review.usage` ناقص در ۳ مسیر | usage دورهای clarification + answer + `withStructuredRetry` تلاش اول. تست هر ۳ مسیر | S1:R1-13 |
+| **C-01** 🟢 | P0 | timeout/cancel قفل را آزاد می‌کند در حالی که ابزار هنوز اجراست | نگه‌داشتن قفل/اسلات تا settle شدن `executionPromise`؛ `abortSignal` به ابزارهای fs/git/fetch. تست: تسک B با منبع مشترک پس از پایان واقعی A شروع شود | S1:R2-01 |
+| **C-02** 🟢 | P0 | خطای provider وسط استریم موفقیت گزارش می‌شود | part نوع `error` در `pipeThoughts` → failure؛ `finishReason==='error'` → failure. تست: step 2 خطای 502 → `success:false` | S1:R2-02 |
+| **C-03** 🟢 | P0 | لغو پلن هیچ تسکی را لغو نمی‌کند | `cancelTask` برای مراحل running؛ لغو آبشاری فرزندان؛ رد `runAcceptanceChecks` پس از cancel. تست: AbortSignal فعال، هیچ داوری پس از cancel | S1:R2-03؛ S2:REL-002 (notify گم) ادغام در همین رفع |
+| **C-04** 🟢 | P0 | retry و rate limiter به‌کل بی‌اثرند (dead wiring) | وصل `RetryableAgentRuntime` به TaskRuntime/answerRun یا حذف؛ retry فقط در سطح فراخوانی مدل برای 429/5xx/شبکه با تشخیص status code. تست: 429 → retry با backoff بدون اجرای دوبارهٔ ابزارها؛ per-provider concurrency | S1:R2-09؛ S2:ARCH-001؛ S3:WF-0001(W) |
+| **C-05** 🟢 | P1 | عمق تفویض همیشه ۰ و persona اشتباه | ساخت `delegate_task` به ازای ایجنت با depth+1؛ بررسی persona فراخواننده. تست: تفویض دوم با depth:1 رد شود | S1:R2-04 |
+| **C-06** 🟢 | P1 | توکن اجراهای شکست‌خورده شمرده نمی‌شود | جمع usage در `onStepFinish` + گزارش جزئی در خطا. تست: timeout در step 2 → usage step 1 ثبت | S1:R2-05 |
+| **C-07** 🟢 | P1 | تسک‌های تفویض‌شده planId ندارند و نتیجه به والد برنمی‌گردد | planId والد به فرزند؛ نتیجهٔ فرزند در خروجی `delegate_task`. تست: usage فرزند در bucket پلن والد | S1:R2-06 |
+| **C-08** 🟢 | P1 | `waitForAll` حلقهٔ داغ + سراسری | cleanup در `.finally`؛ `waitFor(planId)`. تست: run reject → بازگشت < ۱ ثانیه؛ دو پلن مستقل | S1:R2-07 |
+| **C-09** 🟢 | P1 | mapهای TaskRuntime هرگز پاک نمی‌شوند | آزادسازی `agents`/`taskOverrides` پس از پایان پلن؛ TTL/سقف رکورد. تست: اندازهٔ map پس از ۱۰۰ تسک | S1:R2-08 |
+| **C-10** 🟢 | P1 | race شکستن قفل کهنه؛ `sleepSync` مسدودکننده | شکستن با rename اتمیک + بررسی مالکیت؛ نسخهٔ async قفل برای سرور. تست: دو waiter → دقیقاً یکی | S1:R2-10 |
+| **C-11** 🟢 | P2 | Journal بسته نمی‌شود؛ retention/rotation ندارد | `journal.close()` در shutdown؛ prune دوره‌ای؛ rotation سایز‌محور `observability.jsonl`؛ cleanup stale temp/lock در initialize؛ retention plans/sessions. تست: fd باز نماند؛ rotate بالای سقف | S1:R2-11 |
+| **C-12** 🟢 | P1 | رویدادهای `agent:tool_call` پس از پایان اجرا | ارسال هنگام شروع ابزار؛ در timeout، ابزارهای اجراشده در `toolsUsed`. تست | S1:R2-12 |
+| **C-13** 🟢 | P1 | همهٔ نوبت‌های chat یک task id مشترک | `chat:${interactionId}`. تست: دو نوبت = دو task؛ chat kill‌شده reconcile شود | S1:R9-12 |
+| **C-14** 🟢 | P2 | `review.usage` ناقص در ۳ مسیر | usage دورهای clarification + answer + `withStructuredRetry` تلاش اول. تست هر ۳ مسیر | S1:R1-13 |
 
 ### فاز D — صحت ابزارها 🟡
 
@@ -344,7 +344,7 @@
 |---|---|---|
 | A | A-01..A-08 | ۰ 🟢 |
 | B | B-01..B-22 | ۲۲ |
-| C | C-01..C-14 | ۱۴ |
+| C | C-01..C-14 | ۰ 🟢 |
 | D | D-01..D-18 | ۱۸ |
 | E | E-01..E-12 | ۱۲ |
 | F | F-01..F-10 | ۱۰ |
@@ -353,7 +353,7 @@
 | I | I-01..I-08 | ۸ |
 | J | J-01..J-09 | ۹ |
 | K | K-01..K-09 | ۹ |
-| | **جمع** | **۱۴۲** |
+| | **جمع** | **۱۲۸** |
 
 ---
 
@@ -385,7 +385,7 @@ I-01 زودهنگام؛ I-02 مستمر؛ I-08/I-07 انتهایی
 |---|---|---|---|
 | A | 🟢 | 2026-09-27 | 3887ed5 |
 | B | 🟢 | 2026-09-27 | 9b41a9c |
-| C | ⬜ | | |
+| C | 🟢 | 2026-09-27 | f977650 |
 | D | ⬜ | | |
 | E | ⬜ | | |
 | F | ⬜ | | |

@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { resolvePathInWorkspace } from '../implementations/path-security.js';
+import { getAgentRunContext } from '../../runtime/agent-run-context.js';
 
 /**
  * Phase 41 — the shared git core: one place that runs git, and one place that
@@ -55,6 +56,7 @@ export type GitErrorCode =
   | 'NOT_A_REPO'
   | 'GIT_MISSING'
   | 'TIMEOUT'
+  | 'ABORTED'
   | 'PATH_TRAVERSAL_BLOCKED'
   | 'BAD_ARGUMENT'
   | 'OUTPUT_TOO_LARGE'
@@ -97,6 +99,8 @@ export interface RunGitOptions {
   env?: NodeJS.ProcessEnv;
   /** Treat a specific stdout shape as a failure (e.g. `git rev-parse` on a bad ref). */
   allowFailure?: boolean;
+  /** C-01: kill the child when the agent run is cancelled. */
+  abortSignal?: AbortSignal;
 }
 
 /**
@@ -114,6 +118,7 @@ export function runGit(
 ): Promise<GitResult> {
   const timeoutMs = options.timeoutMs ?? GIT_TIMEOUT_MS;
   const maxBytes = options.maxBytes ?? GIT_OUTPUT_LIMIT_BYTES;
+  const abortSignal = options.abortSignal ?? getAgentRunContext()?.abortSignal;
 
   return new Promise<GitResult>((resolve) => {
     let child;
@@ -142,6 +147,7 @@ export function runGit(
       if (settled) return;
       settled = true;
       if (timer) clearTimeout(timer);
+      abortSignal?.removeEventListener('abort', onAbort);
       resolve(result);
     };
 
@@ -153,6 +159,14 @@ export function runGit(
         // already gone
       }
     };
+
+    const onAbort = (): void => {
+      kill({ ok: false, code: 'ABORTED', error: 'Aborted' });
+    };
+    abortSignal?.addEventListener('abort', onAbort, { once: true });
+    if (abortSignal?.aborted) {
+      onAbort();
+    }
 
     const collect = (chunk: Buffer, into: Buffer[], isStdout: boolean): void => {
       const used = isStdout ? stdoutBytes : stderrBytes;

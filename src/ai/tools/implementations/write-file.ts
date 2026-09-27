@@ -31,7 +31,10 @@ export function createWriteFileTool(projectRoot: string) {
     description:
       'Writes content to a file. Creates parent directories if needed. Refuses to overwrite existing files unless overwrite=true.',
     inputSchema,
-    execute: async ({ filePath, content, overwrite }) => {
+    execute: async ({ filePath, content, overwrite }, options) => {
+      if (options?.abortSignal?.aborted) {
+        return { success: false as const, error: 'Aborted', code: 'ABORTED' };
+      }
       try {
         // Schema defaults are not applied when execute() is called directly.
         const replaceExisting = overwrite ?? false;

@@ -1,4 +1,4 @@
-import { generateObject } from 'ai';
+import { generateObject, NoObjectGeneratedError } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from './llm-timeout.js';
 import { detectLanguage, languageSection } from '../language.js';
 import { reportLlmUsage, type LlmUsageReporter } from './llm-usage.js';
@@ -109,22 +109,29 @@ a JSON object containing "accepted" (boolean) and "reason" (string).
 `.trim();
 
     const attempt = () =>
-      withStructuredRetry(() =>
-        withLlmTimeout(
-          'Acceptance check',
-          this.config.timeoutMs,
-          (abortSignal) =>
-            generateObject({
-              model: reviewerAgent.model,
-              system: reviewerAgent.systemPrompt,
-              prompt,
-              schema: AcceptanceResultSchema,
-              schemaName: 'AcceptanceJudgment',
-              schemaDescription:
-                'Whether the step output meets its acceptance criteria, with a reason.',
-              abortSignal,
-            })
-        )
+      withStructuredRetry(
+        () =>
+          withLlmTimeout(
+            'Acceptance check',
+            this.config.timeoutMs,
+            (abortSignal) =>
+              generateObject({
+                model: reviewerAgent.model,
+                system: reviewerAgent.systemPrompt,
+                prompt,
+                schema: AcceptanceResultSchema,
+                schemaName: 'AcceptanceJudgment',
+                schemaDescription:
+                  'Whether the step output meets its acceptance criteria, with a reason.',
+                abortSignal,
+              })
+          ),
+        2,
+        (err) => {
+          if (NoObjectGeneratedError.isInstance(err)) {
+            reportLlmUsage(this.config.onUsage, 'acceptance', err.usage, taskResult.planId);
+          }
+        }
       );
 
     // R1-07: a timeout or reviewer error is an infrastructure failure, not

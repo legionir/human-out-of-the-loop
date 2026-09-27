@@ -107,7 +107,8 @@ export class RateLimiter {
   }
 
   /**
-   * Check if an error is a rate-limit error.
+   * Check if an error is a rate-limit error (message-based, legacy).
+   * Prefer `isRetryableModelError` in `model-call-retry.ts` which uses status codes.
    */
   isRateLimitError(error: unknown): boolean {
     if (error instanceof Error) {
@@ -124,7 +125,8 @@ export class RateLimiter {
 
   /**
    * Execute a function with rate-limit awareness.
-   * Retries with backoff on 429 errors.
+   * Retries with backoff on 429 errors. The concurrency slot is released
+   * during backoff so other callers are not blocked by a sleeping retry.
    */
   async executeWithRetry<T>(
     provider: string,
@@ -134,20 +136,20 @@ export class RateLimiter {
 
     while (true) {
       await this.acquire(provider);
+      let backoffMs: number | undefined;
       try {
-        const result = await fn();
-        return result;
+        return await fn();
       } catch (err) {
         if (this.isRateLimitError(err) && this.shouldRetry(attempt)) {
-          const delay = this.getBackoffDelay(attempt);
+          backoffMs = this.getBackoffDelay(attempt);
           attempt++;
-          await this.sleep(delay);
-          continue;
+        } else {
+          throw err;
         }
-        throw err;
       } finally {
         this.release(provider);
       }
+      await this.sleep(backoffMs ?? 0);
     }
   }
 

@@ -43,7 +43,10 @@ export function createReadFileTool(projectRoot: string) {
       'Reads the full contents of a file at the given path and returns it as a string. ' +
       'Optionally returns only the first (head) or last (tail) N lines.',
     inputSchema,
-    execute: async ({ filePath, encoding, head, tail }) => {
+    execute: async ({ filePath, encoding, head, tail }, options) => {
+      if (options?.abortSignal?.aborted) {
+        return { success: false as const, error: 'Aborted', code: 'ABORTED' };
+      }
       try {
         // `execute` may also be called directly (tests, programmatic use), so the
         // schema defaults are re-applied here — the SDK applies them only when it

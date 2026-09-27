@@ -577,6 +577,10 @@ export class Planner {
           }
           throw err;
         }
+      }, 2, (err) => {
+        if (NoObjectGeneratedError.isInstance(err)) {
+          reportLlmUsage(this.config.onUsage, 'planning', err.usage, usagePlanId);
+        }
       });
 
       return this.finishAssessment(object, usage, mode, language, usagePlanId);
@@ -686,6 +690,12 @@ export class Planner {
             object: recovered,
             usage: NoObjectGeneratedError.isInstance(err) ? err.usage : undefined,
           };
+        }
+      },
+      2,
+      (err) => {
+        if (NoObjectGeneratedError.isInstance(err)) {
+          reportLlmUsage(this.config.onUsage, 'planning', err.usage, usagePlanId);
         }
       }
     );

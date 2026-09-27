@@ -27,6 +27,17 @@ type LegacyUsageShape = { promptTokens?: number; completionTokens?: number };
  * shape (inputTokens/outputTokens); the promptTokens/completionTokens
  * fallback keeps test mocks built against the older shape working.
  */
+export function addTokenUsage(a?: TokenUsage, b?: TokenUsage): TokenUsage | undefined {
+  if (!a && !b) return undefined;
+  const promptTokens = (a?.promptTokens ?? 0) + (b?.promptTokens ?? 0);
+  const completionTokens = (a?.completionTokens ?? 0) + (b?.completionTokens ?? 0);
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: (a?.totalTokens ?? 0) + (b?.totalTokens ?? 0) || promptTokens + completionTokens,
+  };
+}
+
 export function toTokenUsage(raw: unknown): TokenUsage | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
   const u = raw as LanguageModelUsage & LegacyUsageShape;

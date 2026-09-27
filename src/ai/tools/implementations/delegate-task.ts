@@ -9,6 +9,8 @@ import type { ModelRegistry } from '../../registries/model-registry.js';
 import type { AgentDefinition } from '../../schemas/agent-definition.js';
 import { createAgent, type ResolvedAgent } from '../../agents/agent-factory.js';
 import type { DelegationGuard } from '../../runtime/delegation-guard.js';
+import { getAgentRunContext } from '../../runtime/agent-run-context.js';
+import type { Task } from '../../schemas/task.js';
 
 const StaticDelegation = z.object({
   mode: z.literal('static').default('static'),
@@ -75,10 +77,15 @@ export interface DelegateTaskDeps {
   skillRegistry: SkillRegistry;
   toolRegistry: ToolRegistry;
   modelRegistry: ModelRegistry;
-  onTaskCreated: (resolved: ResolvedAgent, prompt: string) => string | Promise<string>;
+  onTaskCreated: (
+    resolved: ResolvedAgent,
+    prompt: string,
+    meta?: { planId?: string; parentTaskId?: string }
+  ) => string | Promise<string>;
   resolveAgentId?: (agentId: string) => AgentDefinition | undefined;
   delegationGuard?: DelegationGuard;
   currentDelegationDepth?: number;
+  waitForTask?: (taskId: string) => Promise<Task | undefined>;
 }
 
 export function createDelegateTaskTool(deps: DelegateTaskDeps) {
@@ -93,12 +100,15 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
     inputSchema: DelegateTaskInput,
     execute: async (input: z.infer<typeof DelegateTaskInput>) => {
       try {
+        const runCtx = getAgentRunContext();
+        const callerDepth = runCtx?.delegationDepth ?? deps.currentDelegationDepth ?? 0;
+        const callerPersona = runCtx?.personaId;
         let agentDef: AgentDefinition;
 
         if (input.mode === 'dynamic' && deps.delegationGuard) {
           const check = deps.delegationGuard.canDelegate(
-            input.persona,
-            deps.currentDelegationDepth ?? 0
+            callerPersona ?? input.persona,
+            callerDepth
           );
           if (!check.allowed) {
             return {
@@ -131,8 +141,8 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
 
           if (deps.delegationGuard) {
             const check = deps.delegationGuard.canDelegate(
-              agentDef.personaId,
-              deps.currentDelegationDepth ?? 0
+              callerPersona ?? agentDef.personaId,
+              callerDepth
             );
             if (!check.allowed) {
               return {
@@ -217,7 +227,7 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
             toolRegistry: deps.toolRegistry,
             modelRegistry: deps.modelRegistry,
           },
-          delegationDepth: deps.currentDelegationDepth ?? 0,
+          delegationDepth: callerDepth + 1,
           delegationGuard: deps.delegationGuard,
         });
 
@@ -225,7 +235,12 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
           ? `${input.prompt}\n\n--- Context ---\n${input.context}`
           : input.prompt;
 
-        const taskId = await deps.onTaskCreated(resolved, fullPrompt);
+        const taskId = await deps.onTaskCreated(resolved, fullPrompt, {
+          ...(runCtx?.planId ? { planId: runCtx.planId } : {}),
+          ...(runCtx?.taskId ? { parentTaskId: runCtx.taskId } : {}),
+        });
+
+        const child = deps.waitForTask ? await deps.waitForTask(taskId) : undefined;
 
         return {
           success: true as const,
@@ -236,6 +251,14 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
           toolsGranted: Object.keys(resolved.tools),
           toolsDenied: resolved.toolWarnings.map((w) => w.toolId),
           contextBudgetExceeded: resolved.contextBudgetExceeded,
+          ...(child
+            ? {
+                status: child.status,
+                result: child.result,
+                summary: child.summary,
+                usage: child.usage,
+              }
+            : {}),
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

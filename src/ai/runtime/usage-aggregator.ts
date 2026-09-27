@@ -1,6 +1,6 @@
 import type { TokenUsage } from './event-bus.js';
 import type { Task } from '../schemas/task.js';
-import type { EventBus, UnsubscribeFn, AgentCompletedEvent } from './event-bus.js';
+import type { EventBus, UnsubscribeFn } from './event-bus.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -54,15 +54,22 @@ export class UsageAggregator {
    * from the task), so per-plan breakdowns are no longer "unassigned".
    */
   subscribeToEventBus(eventBus: EventBus): void {
-    this.unsubscribeFn = eventBus.subscribe('agent:completed', (event) => {
-      const completedEvent = event as AgentCompletedEvent;
-      if (completedEvent.usage) {
+    this.unsubscribeFn = eventBus.subscribe('*', (event) => {
+      if (event.type === 'agent:completed' && event.usage) {
         this.recordDirect({
-          taskId: completedEvent.taskId,
-          planId: completedEvent.planId,
-          agentId: completedEvent.agentId,
-          usage: completedEvent.usage,
-          timestamp: completedEvent.timestamp,
+          taskId: event.taskId,
+          planId: event.planId,
+          agentId: event.agentId,
+          usage: event.usage,
+          timestamp: event.timestamp,
+        });
+      } else if (event.type === 'agent:error' && event.usage) {
+        this.recordDirect({
+          taskId: event.taskId,
+          planId: event.planId,
+          agentId: event.agentId,
+          usage: event.usage,
+          timestamp: event.timestamp,
         });
       }
     });

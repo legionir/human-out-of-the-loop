@@ -340,7 +340,18 @@ describe('AgentRuntime — error paths', () => {
   it('handles timeout without crashing', async () => {
     // Simulate a very slow provider
     mockGenerateText.mockImplementationOnce(
-      () => new Promise((resolve) => setTimeout(resolve, 5000))
+      ((opts: { abortSignal?: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          const timer = setTimeout(() => _resolve({ text: 'late' }), 5000);
+          opts.abortSignal?.addEventListener(
+            'abort',
+            () => {
+              clearTimeout(timer);
+              reject(new Error('Agent run timed out'));
+            },
+            { once: true }
+          );
+        })) as never
     );
 
     const result = await runtime.run({

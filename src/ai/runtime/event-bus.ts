@@ -75,6 +75,8 @@ export interface AgentErrorEvent extends AgentEventBase {
   status: 'error';
   error: string;
   code: string;
+  /** C-06: partial token usage collected before the failure. */
+  usage?: TokenUsage;
 }
 
 export type AgentEvent =
