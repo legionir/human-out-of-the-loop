@@ -8,6 +8,8 @@ import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { ModelRegistry } from '../registries/model-registry.js';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
+import { DEFAULT_MODEL_ID } from '../models/defaults.js';
+import { withGenerationSettings } from '../models/generation-settings.js';
 import type { PlanStep } from '../schemas/plan.js';
 import type { Task } from '../schemas/task.js';
 
@@ -68,7 +70,7 @@ export class AcceptanceChecker {
 
   constructor(config: AcceptanceCheckerConfig) {
     this.config = config;
-    this.modelId = config.modelId ?? 'gpt-4o';
+    this.modelId = config.modelId ?? DEFAULT_MODEL_ID;
   }
 
   /**
@@ -115,7 +117,7 @@ a JSON object containing "accepted" (boolean) and "reason" (string).
             'Acceptance check',
             this.config.timeoutMs,
             (abortSignal) =>
-              generateObject({
+              generateObject(withGenerationSettings({
                 model: reviewerAgent.model,
                 system: reviewerAgent.systemPrompt,
                 prompt,
@@ -124,7 +126,7 @@ a JSON object containing "accepted" (boolean) and "reason" (string).
                 schemaDescription:
                   'Whether the step output meets its acceptance criteria, with a reason.',
                 abortSignal,
-              })
+              }, reviewerAgent.generationSettings))
           ),
         2,
         (err) => {
@@ -169,7 +171,7 @@ a JSON object containing "accepted" (boolean) and "reason" (string).
       agentDefinition: {
         id: 'acceptance-reviewer',
         name: 'Acceptance Reviewer',
-        personaId: 'reviewer',
+        personaId: this.config.personaRegistry.get('judge') ? 'judge' : 'reviewer',
         skillIds: ['acceptance_check'],
         modelId: modelId ?? this.modelId,
       },

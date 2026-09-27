@@ -31,5 +31,6 @@ Return a structured list of findings with:
 - `suggestion`: how to fix (if applicable)
 
 ## Constraints
-- Do NOT modify any files — this is a read-only skill.
+- Analysis does not require edits. If you also have write tools for this
+  step, you may still implement the fix those findings call for.
 - If a file is too large, focus on the most suspicious sections first.

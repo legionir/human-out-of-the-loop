@@ -17,6 +17,7 @@ import { CancellationManager } from './runtime/cancellation-manager.js';
 import { RateLimiter } from './runtime/rate-limiter.js';
 import { UsageAggregator } from './runtime/usage-aggregator.js';
 import { envEndpoint, modelIdForSpec, parseModelSpec, runtimeModelConfig } from './models/env-endpoint.js';
+import { DEFAULT_MODEL_ID } from './models/defaults.js';
 import { listRemoteModels, type RemoteModelList } from './models/list-models.js';
 import type { LlmUsageReport } from './runtime/llm-usage.js';
 import { MemorySessionStore, FileSessionStore, type SessionStore } from './runtime/session-store.js';
@@ -107,7 +108,7 @@ export const OrchestratorConfigSchema = z.object({
     })
     .optional(),
   connectTimeoutMs: z.number().int().min(1000).default(10000),
-  defaultModelId: z.string().default('gpt-4o'),
+  defaultModelId: z.string().default(DEFAULT_MODEL_ID),
   // U1 (config parity): extra observability redaction keys (defaults
   // still apply when the list is non-empty).
   redactKeys: z.array(z.string().min(1)).default([]),

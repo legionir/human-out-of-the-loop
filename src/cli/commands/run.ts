@@ -49,7 +49,7 @@ export interface RunCommandOptions {
   projectRoot?: string;
   /** Force persistent stores (default: global config or off) */
   persistent?: boolean;
-  /** Model id (default: global config or 'gpt-4o') */
+  /** Model id (default: global config or DEFAULT_MODEL_ID) */
   model?: string;
   /** Resume in an existing session */
   session?: string;

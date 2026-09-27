@@ -21,24 +21,27 @@ export type PlanStepStatus = z.infer<typeof PlanStepStatusSchema>;
 
 export const PlanStepSchema = z.object({
   /** Unique step identifier within the plan (e.g. "step-1", "step-2") */
-  id: z.string().min(1),
+  id: z.string().min(1).describe('Unique step id within the plan (e.g. step-1)'),
   /** What exactly should be done — one clear deliverable */
-  description: z.string().min(1),
+  description: z.string().min(1).describe('One clear deliverable this step produces'),
   /** IDs of steps that must complete before this one can start */
-  dependsOn: z.array(z.string()).default([]),
+  dependsOn: z.array(z.string()).default([]).describe('Step ids that must finish first'),
   /** Persona id from PersonaRegistry */
-  assignedPersona: z.string().min(1),
+  assignedPersona: z.string().min(1).describe('Persona id from the catalog'),
   /** Skill ids from SkillRegistry */
-  assignedSkills: z.array(z.string()).default([]),
+  assignedSkills: z.array(z.string()).default([]).describe('Skill ids from the catalog'),
   /** Tool ids — MUST be a subset of persona.allowedTools */
-  assignedTools: z.array(z.string()).default([]),
+  assignedTools: z
+    .array(z.string())
+    .default([])
+    .describe("Tool ids; must be a subset of the persona's allowedTools"),
   /** Resources this step will touch (for lock management) */
-  claimedResources: z.array(z.string()).default([]),
+  claimedResources: z.array(z.string()).default([]).describe('Files or resources this step will modify'),
   /**
    * Testable statement defining when this step is "done".
    * Used by the acceptance check in Phase 11.
    */
-  acceptanceCriteria: z.string().min(1),
+  acceptanceCriteria: z.string().min(1).describe('Testable statement that defines done'),
   /** Current execution status */
   status: PlanStepStatusSchema.default('pending'),
   /** Failure classification (populated on failure) */
@@ -51,7 +54,11 @@ export const PlanStepSchema = z.object({
    * B-05: when this step is a re-plan replacement, the id of the failed
    * step it supersedes. Dependants of that id are rewired onto this step.
    */
-  replacesStepId: z.string().min(1).optional(),
+  replacesStepId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('When this step replaces a failed one, that step id'),
 });
 
 export type PlanStep = z.infer<typeof PlanStepSchema>;
@@ -98,6 +105,28 @@ export const PlanSchema = z.object({
 });
 
 export type Plan = z.infer<typeof PlanSchema>;
+
+/**
+ * E-10: schema sent to the model — no runtime-owned fields (status, taskId,
+ * resultSummary, failureType, sessionId, modelId, timestamps).
+ */
+export const PlanStepModelSchema = PlanStepSchema.omit({
+  status: true,
+  failureType: true,
+  resultSummary: true,
+  taskId: true,
+});
+
+export const PlanModelSchema = z.object({
+  goal: z.string().min(1).describe("The user's goal this plan achieves"),
+  steps: z
+    .array(PlanStepModelSchema)
+    .min(1)
+    .describe('Atomic execution steps; keep descriptions to a few sentences each'),
+  clarifications: z.array(z.string()).default([]).describe('Questions already answered, if any'),
+});
+
+export type PlanModel = z.infer<typeof PlanModelSchema>;
 
 // ─── Clarification Response ───────────────────────────────────────
 
@@ -151,6 +180,11 @@ export const PlannerAssessmentSchema = z.object({
   reply: z.string().optional(),
   /** The plan (only when isClear=true) */
   plan: PlanSchema.optional(),
+});
+
+/** Assessment schema sent to the model — nested plan has no runtime fields. */
+export const PlannerAssessmentLlmSchema = PlannerAssessmentSchema.extend({
+  plan: PlanModelSchema.optional(),
 });
 
 export type PlannerAssessment = z.infer<typeof PlannerAssessmentSchema>;

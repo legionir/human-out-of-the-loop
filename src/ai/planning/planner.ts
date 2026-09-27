@@ -12,12 +12,16 @@ import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { ModelRegistry } from '../registries/model-registry.js';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
 import { DEFAULT_RUN_MODE, type RunMode } from '../modes.js';
-import { detectLanguage, languageSection, type DetectedLanguage } from '../language.js';
+import { detectLanguage, type DetectedLanguage } from '../language.js';
+import { DEFAULT_MODEL_ID } from '../models/defaults.js';
+import { withGenerationSettings } from '../models/generation-settings.js';
+import { buildCatalogBlock } from './catalog-prompt.js';
 import {
-  PlanSchema,
+  PlanModelSchema,
+  PlannerAssessmentLlmSchema,
   PlannerAssessmentRecoverySchema,
-  PlannerAssessmentSchema,
   type Plan,
+  type PlanModel,
   type PlannerAssessment,
 } from '../schemas/plan.js';
 
@@ -28,7 +32,7 @@ export interface PlannerConfig {
   skillRegistry: SkillRegistry;
   toolRegistry: ToolRegistry;
   modelRegistry: ModelRegistry;
-  /** Model id to use for planning (default: "gpt-4o") */
+  /** Model id to use for planning (default: DEFAULT_MODEL_ID) */
   modelId?: string;
   /**
    * Phase 30 (P5): deadline for each structured LLM call.  A provider that
@@ -107,12 +111,19 @@ export interface PlanningResult {
  * on: an id (`plan_<uuid>` when the model omitted one), `draft` status, a
  * creation timestamp and every step `pending`.
  */
-export function finalizePlan(plan: Plan): Plan {
-  for (const step of plan.steps) {
-    step.status = 'pending';
-  }
+export function finalizePlan(plan: Plan | PlanModel): Plan {
+  const steps = plan.steps.map((step) => ({
+    ...step,
+    dependsOn: step.dependsOn ?? [],
+    assignedSkills: step.assignedSkills ?? [],
+    assignedTools: step.assignedTools ?? [],
+    claimedResources: step.claimedResources ?? [],
+    status: 'pending' as const,
+  }));
   return {
     ...plan,
+    steps,
+    clarifications: plan.clarifications ?? [],
     // R1-09: `id`/`createdAt` are runtime-assigned identity, never trusted
     // from the model. A model that always answers `id: "plan-1"` must not
     // be able to make two separate runs collide on the same plan file.
@@ -191,6 +202,7 @@ export function buildAssessmentPrompt(
   projectRoot?: string,
   mode: RunMode = DEFAULT_RUN_MODE,
   sessionHistory?: string,
+  catalog?: string,
 ): string {
   const context = buildProjectContext(projectRoot);
   const note = context
@@ -211,8 +223,7 @@ export function buildAssessmentPrompt(
 You are deciding what to do with the following user request.
 ${note ? `\n${note}` : ''}
 ${modeRule}
-${'\n' + languageSection(userRequest)}
-
+${catalog ? `\n${catalog}\n` : ''}
 USER REQUEST:
 """
 ${userRequest}
@@ -224,6 +235,7 @@ Set kind="plan" or kind="answer" or kind="clarify" and fill the matching field:
 - "clarify": put 1-5 specific, answerable questions in the "needsClarification" array — never an empty list.
 
 A request that is a question about the project, its files, or the runtime is kind="answer"; when it can only be answered by reading the project, say what you need in the answer — do not invent file contents.
+Assign only persona, skill and tool ids from the catalog above — never invent ids.
 `.trim();
 }
 
@@ -236,13 +248,13 @@ export function buildPlanPrompt(
   clarifications?: Record<string, string>,
   projectRoot?: string,
   sessionHistory?: string,
+  catalog?: string,
 ): string {
   const context = buildProjectContext(projectRoot);
   let prompt = `
 Decompose the following user request into a detailed execution plan.
 ${context ? `\n${context}\n` : ''}
-${languageSection(userRequest)}
-
+${catalog ? `${catalog}\n` : ''}
 USER REQUEST:
 """
 ${userRequest}
@@ -350,8 +362,8 @@ export function recoverPlan(error: unknown): Plan | undefined {
   if (!NoObjectGeneratedError.isInstance(error)) return undefined;
   const text = typeof error.text === 'string' ? error.text : '';
   if (text.trim() === '') return undefined;
-  const parsed = PlanSchema.safeParse(extractJsonObject(text));
-  return parsed.success ? parsed.data : undefined;
+  const parsed = PlanModelSchema.safeParse(extractJsonObject(text));
+  return parsed.success ? finalizePlan(parsed.data) : undefined;
 }
 
 /**
@@ -401,9 +413,7 @@ export function fallbackClarificationQuestion(
   if (language?.code === 'fa') {
     const where = root ? ` در ${root}` : '';
     const listing = entries.length > 0 ? ` اینها را می‌بینم: ${entries.join('، ')}.` : '';
-    if (language.code === 'fa') {
-      return `دقیقاً چه کاری باید${where} انجام دهم؟${listing} خروجی مورد نظر را مشخص کن — کدام فایل‌ها یا دایرکتوری‌ها باید تغییر کنند و «تمام‌شده» یعنی چه.`;
-    }
+    return `دقیقاً چه کاری باید${where} انجام دهم؟${listing} خروجی مورد نظر را مشخص کن — کدام فایل‌ها یا دایرکتوری‌ها باید تغییر کنند و «تمام‌شده» یعنی چه.`;
   }
 
   if (!root) {
@@ -528,14 +538,14 @@ export class Planner {
     abortSignal?: AbortSignal,
   ): Promise<PlannerAssessment> {
     throwIfAborted(abortSignal, 'Planner assessment');
-    const agent = this.buildPlannerAgent(modelId);
-
     const language = detectLanguage(userRequest);
+    const agent = this.buildPlannerAgent(modelId, language);
     const assessmentPrompt = buildAssessmentPrompt(
       userRequest,
       this.config.projectRoot,
       mode,
       this.config.sessionHistory,
+      this.catalogBlock(),
     );
 
     try {
@@ -548,17 +558,17 @@ export class Planner {
             'Planner assessment',
             this.config.timeoutMs,
             (signal) =>
-              generateObject({
+              generateObject(withGenerationSettings({
                 model: agent.model,
                 system: agent.systemPrompt,
                 prompt: assessmentPrompt,
-                schema: PlannerAssessmentSchema,
+                schema: PlannerAssessmentLlmSchema,
                 schemaName: 'PlannerAssessment',
                 schemaDescription:
                   'Assessment of whether a user request is clear enough to plan, ' +
                   'with optional clarification questions or a full plan.',
                 abortSignal: signal,
-              }),
+              }, agent.generationSettings)),
             abortSignal,
           );
         } catch (err) {
@@ -651,13 +661,14 @@ export class Planner {
     abortSignal?: AbortSignal,
   ): Promise<Plan> {
     throwIfAborted(abortSignal, 'Plan generation');
-    const agent = this.buildPlannerAgent(modelId);
+    const agent = this.buildPlannerAgent(modelId, detectLanguage(userRequest));
 
     const prompt = buildPlanPrompt(
       userRequest,
       clarifications,
       this.config.projectRoot,
       this.config.sessionHistory,
+      this.catalogBlock(),
     );
 
     const { object, usage } = await withStructuredRetry<{ object: Plan; usage: unknown }>(
@@ -667,15 +678,15 @@ export class Planner {
             'Plan generation',
             this.config.timeoutMs,
             (signal) =>
-              generateObject({
+              generateObject(withGenerationSettings({
                 model: agent.model,
                 system: agent.systemPrompt,
                 prompt,
-                schema: PlanSchema,
+                schema: PlanModelSchema,
                 schemaName: 'ExecutionPlan',
                 schemaDescription: 'A dependency-aware execution plan with atomic steps.',
                 abortSignal: signal,
-              }),
+              }, agent.generationSettings)),
             abortSignal,
           );
         } catch (err) {
@@ -798,8 +809,7 @@ export class Planner {
   buildAnswerPrompt(userRequest: string): string {
     const context = buildProjectContext(this.config.projectRoot);
     return `
-${context ? `${context}\n` : ''}${languageSection(userRequest)}
-
+${context ? `${context}\n` : ''}
 USER REQUEST:
 """
 ${userRequest}
@@ -822,7 +832,7 @@ Answer the request above directly, in the user's language. Use the read-only too
         personaId: 'chat',
         skillIds: [],
         ...(toolIds ? { toolIds: [...toolIds] } : {}),
-        modelId: modelId ?? this.config.modelId ?? 'gpt-4o',
+        modelId: modelId ?? this.config.modelId ?? DEFAULT_MODEL_ID,
       },
       refs: {
         personaRegistry: this.config.personaRegistry,
@@ -835,8 +845,16 @@ Answer the request above directly, in the user's language. Use the read-only too
 
   // ── Private helpers ───────────────────────────────────────────
 
-  private buildPlannerAgent(override?: string): ResolvedAgent {
-    const modelId = override ?? this.config.modelId ?? 'gpt-4o';
+  private catalogBlock(): string {
+    return buildCatalogBlock({
+      personaRegistry: this.config.personaRegistry,
+      skillRegistry: this.config.skillRegistry,
+      toolRegistry: this.config.toolRegistry,
+    });
+  }
+
+  private buildPlannerAgent(override?: string, languageHint?: DetectedLanguage): ResolvedAgent {
+    const modelId = override ?? this.config.modelId ?? DEFAULT_MODEL_ID;
 
     return createAgent({
       agentDefinition: {
@@ -852,6 +870,8 @@ Answer the request above directly, in the user's language. Use the read-only too
         toolRegistry: this.config.toolRegistry,
         modelRegistry: this.config.modelRegistry,
       },
+      languageHint,
+      includeEnvironment: false,
     });
   }
 

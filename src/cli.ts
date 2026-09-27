@@ -232,7 +232,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '  2. Environment variables    real env plus .env files in the project root',
         '                              and in the current directory (API keys live here)',
         '  3. Global config file       ~/.human-out-of-the-loop/config.json, e.g.',
-        '                              { "persistent": true, "defaultModel": "gpt-4o" }',
+        '                              { "persistent": true, "defaultModel": "<DEFAULT_MODEL_ID>" }',
         '',
         'REGISTRY LAYERS (global + local, merged)',
         '  Every command reads registries from two layers and merges them by id:',

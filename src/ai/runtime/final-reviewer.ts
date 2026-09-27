@@ -7,6 +7,8 @@ import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { ModelRegistry } from '../registries/model-registry.js';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
+import { DEFAULT_MODEL_ID } from '../models/defaults.js';
+import { withGenerationSettings } from '../models/generation-settings.js';
 import { ReviewSchema, emptyReviewUsage, type Review } from '../schemas/review.js';
 import type { Plan } from '../schemas/plan.js';
 import type { PlanExecutionResult } from './plan-runtime.js';
@@ -18,7 +20,7 @@ export interface FinalReviewerConfig {
   skillRegistry: SkillRegistry;
   toolRegistry: ToolRegistry;
   modelRegistry: ModelRegistry;
-  /** Model id for the final reviewer (default: "gpt-4o") */
+  /** Model id for the final reviewer (DEFAULT_MODEL_ID) */
   modelId?: string;
   /** Phase 30 (P5): deadline for the review call (default 120s). */
   timeoutMs?: number;
@@ -64,7 +66,7 @@ export class FinalReviewer {
 
   constructor(config: FinalReviewerConfig) {
     this.config = config;
-    this.modelId = config.modelId ?? 'gpt-4o';
+    this.modelId = config.modelId ?? DEFAULT_MODEL_ID;
   }
 
   /**
@@ -131,7 +133,7 @@ export class FinalReviewer {
         'Final review',
         this.config.timeoutMs,
         (abortSignal) =>
-          generateObject({
+          generateObject(withGenerationSettings({
             model: reviewerAgent.model,
             system: reviewerAgent.systemPrompt,
             prompt,
@@ -142,7 +144,7 @@ export class FinalReviewer {
               'accepted findings, rejected findings, incomplete steps, and ' +
               'a human-readable summary.',
             abortSignal,
-          })
+          }, reviewerAgent.generationSettings))
       ),
       2,
       (err) => {

@@ -283,9 +283,9 @@ describe("v27.17.0 — the answer is in the user's language", () => {
     expect(fallbackClarificationQuestion('/tmp/proj')).toContain('What exactly should I do');
   });
 
-  it('carries the rule into both planner prompts', () => {
-    expect(buildAssessmentPrompt('این پروژه را مرتب کن', REPO_ROOT)).toContain('Persian');
-    expect(buildPlanPrompt('این پروژه را مرتب کن', undefined, REPO_ROOT)).toContain('Persian');
+  it('does not duplicate the language rule in planner user prompts (E-07)', () => {
+    expect(buildAssessmentPrompt('این پروژه را مرتب کن', REPO_ROOT)).not.toContain('## Language');
+    expect(buildPlanPrompt('این پروژه را مرتب کن', undefined, REPO_ROOT)).not.toContain('## Language');
   });
 });
 

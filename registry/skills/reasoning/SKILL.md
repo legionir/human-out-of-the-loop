@@ -17,9 +17,9 @@ date, deadline and time zone in the answer factually correct.
    later turn — or a resumed run — continues with the same `sessionId` rather
    than rebuilding the reasoning. A session holds at most 50 steps: when it is
    close, summarise what is settled and start a new id.
-4. Use `get_current_time` before writing anything that depends on today's date
-   (changelogs, "last week", deadline maths, timestamps in a report). Never
-   guess the date, and never assume the machine is in UTC.
+4. Today's date is already in the ENVIRONMENT / system prompt. Use that clock.
+   Call `get_current_time` only when you need another timezone or a conversion.
+   Never guess a date from training data, and never assume the machine is in UTC.
 5. Use `convert_time` for anything spanning zones — a standup, a release
    window, a deadline — and say which zone a time is in when you restate it.
 

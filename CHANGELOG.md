@@ -5,6 +5,23 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.8] — 2026-09-27 — Phase E: context, prompts, and models
+
+Closes every open row of **Phase E** in `docs/UNIFIED_EXECUTION_PLAN.md` (E-01…E-12).
+
+- **E-01 — catalog in the planner.** Assess/plan prompts list registered persona, skill and tool ids; `task_decomposition` no longer calls `list_personas`.
+- **E-02 — step context.** Each step gets the plan goal, its acceptance criteria, and clipped dependency `resultSummary`s; re-plan uses done-step summaries.
+- **E-03 — generation settings.** `temperature` / `maxOutputTokens` reach every SDK call; Anthropic honours `baseURL` and `apiKeyEnv`.
+- **E-04 — coder persona.** Verification no longer claims a test run the persona has no tool for.
+- **E-05 — judge.** Neutral `judge` persona (no tools) scores acceptance; `code_analysis` no longer forbids a coder from editing.
+- **E-06 — skill filter.** SKILL.md sections that name disallowed tools are dropped (researcher no longer sees `git_push`).
+- **E-07 — one ENVIRONMENT, one Language.** Planner system prompt skips the env block already in PROJECT CONTEXT; user prompts drop the duplicate Language section.
+- **E-08 — dominant script.** Language detection ignores digits, requires the script to beat Latin, maps Urdu markers and any kana to Japanese.
+- **E-09 — reasoning clock.** The skill uses the ENVIRONMENT date; `get_current_time` is only for other zones.
+- **E-10 — model Plan schema.** `PlanModelSchema` omits runtime fields; `finalizePlan` fills them; steps are asked to summarise in ≤8 sentences.
+- **E-11 — `DEFAULT_MODEL_ID`.** Production fallbacks use the constant; catalog `maxContextTokens` wins; `claude-sonnet` ships as `claude-sonnet-5`.
+- **E-12 — clarification.** The nested Persian `if` in `fallbackClarificationQuestion` is gone.
+
 ## [27.17.7] — 2026-09-27 — Phase D: tools and journal
 
 Closes every open row of **Phase D** in `docs/UNIFIED_EXECUTION_PLAN.md` (D-01…D-18).

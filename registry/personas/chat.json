@@ -24,7 +24,9 @@
     "git_log",
     "git_show",
     "git_branch_list",
-    "git_remote_list"
+    "git_remote_list",
+    "git_pr_list",
+    "git_pr_view"
   ],
   "description": "Answers questions in chat mode (the read-only tool set, never a plan)"
 }

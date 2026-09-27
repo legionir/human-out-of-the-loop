@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { generateText, streamText, stepCountIs, type Tool } from 'ai';
+import { withGenerationSettings } from '../models/generation-settings.js';
 import { withJournal, type JournalWriter } from './journal.js';
 import { withToolCallLog, type ToolCallLogOptions, type ToolCallSink } from './tool-call-log.js';
 import { addTokenUsage, toTokenUsage } from './llm-usage.js';
@@ -601,16 +602,19 @@ export class AgentRuntime {
       }
     };
 
-    const generateOptions: Parameters<typeof generateText>[0] = {
-      model,
-      system: agent.systemPrompt,
-      prompt,
-      stopWhen: stepCountIs(maxSteps),
-      ...(tools ? { tools } : {}),
-      // Phase 22: real cancellation — aborting rejects generateText
-      ...(signal ? { abortSignal: signal } : {}),
-      onStepFinish,
-    };
+    const generateOptions: Parameters<typeof generateText>[0] = withGenerationSettings(
+      {
+        model,
+        system: agent.systemPrompt,
+        prompt,
+        stopWhen: stepCountIs(maxSteps),
+        ...(tools ? { tools } : {}),
+        // Phase 22: real cancellation — aborting rejects generateText
+        ...(signal ? { abortSignal: signal } : {}),
+        onStepFinish,
+      },
+      agent.generationSettings
+    );
 
     // Phase 32: with a thinking sink the same turn is executed by
     // `streamText`, so reasoning deltas can be forwarded while the model
@@ -644,6 +648,7 @@ export class AgentRuntime {
           signal,
           onThought,
           context: { taskId, agentId, ...planContext },
+          generationSettings: agent.generationSettings,
         });
       } catch (err) {
         if (!stillWanted()) throw err;
@@ -753,29 +758,36 @@ export class AgentRuntime {
     system: string;
     prompt: string;
     maxSteps: number;
+    generationSettings?: ResolvedAgent['generationSettings'];
     tools?: ResolvedAgent['tools'];
     signal?: AbortSignal;
     onThought: ThoughtSink;
     context: { taskId?: string; agentId?: string; planId?: string; planStepId?: string };
   }): Promise<SdkRunOutcome> {
-    const { model, system, prompt, maxSteps, tools, signal, onThought, context } = params;
+    const { model, system, prompt, maxSteps, tools, signal, onThought, context, generationSettings } =
+      params;
 
     // `await` on purpose: the SDK returns the result object synchronously, and
     // awaiting a non-promise is a no-op — but a provider shim (a test double,
     // a gateway adapter) may hand back a promise, and then every field below
     // would read `undefined`.
-    const streamed = await streamText({
-      model,
-      system,
-      prompt,
-      stopWhen: stepCountIs(maxSteps),
-      ...(tools ? { tools } : {}),
-      ...(signal ? { abortSignal: signal } : {}),
-      // OpenAI-compatible gateways answer reasoning in
-      // `delta.reasoning_content`, which the SDK's chat chunk schema
-      // drops; the raw chunk still carries it.
-      includeRawChunks: true,
-    });
+    const streamed = await streamText(
+      withGenerationSettings(
+        {
+          model,
+          system,
+          prompt,
+          stopWhen: stepCountIs(maxSteps),
+          ...(tools ? { tools } : {}),
+          ...(signal ? { abortSignal: signal } : {}),
+          // OpenAI-compatible gateways answer reasoning in
+          // `delta.reasoning_content`, which the SDK's chat chunk schema
+          // drops; the raw chunk still carries it.
+          includeRawChunks: true,
+        },
+        generationSettings
+      )
+    );
 
     const emittedChars = await this.pipeThoughts(streamed.fullStream, onThought, context);
 

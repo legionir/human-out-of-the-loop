@@ -19,6 +19,8 @@ import {
 import type { AcceptanceChecker } from './acceptance-checker.js';
 import type { Task } from '../schemas/task.js';
 import { mergeReplannedSteps } from './replan-merge.js';
+import { buildStepPrompt, formatDoneStepSummaries } from './step-prompt.js';
+import { DEFAULT_MODEL_ID } from '../models/defaults.js';
 
 const ACCEPTANCE_MARK = '[Acceptance:';
 
@@ -37,7 +39,7 @@ export interface PlanRuntimeConfig {
   };
   /** Maximum total re-planning attempts across the entire plan (default: 3) */
   maxReplanningAttempts?: number;
-  /** Default model id for dynamically composed agents (default: "gpt-4o") */
+  /** Default model id for dynamically composed agents (DEFAULT_MODEL_ID) */
   defaultModelId?: string;
   /**
    * U3: per-run execution overrides (Orchestrator.run `runOverrides`).
@@ -113,7 +115,7 @@ export class PlanRuntime {
     > &
       PlanRuntimeConfig;
     this.maxReplanning = config.maxReplanningAttempts ?? 3;
-    this.defaultModelId = config.defaultModelId ?? 'gpt-4o';
+    this.defaultModelId = config.defaultModelId ?? DEFAULT_MODEL_ID;
   }
 
   // ── Public API ────────────────────────────────────────────────
@@ -300,7 +302,7 @@ export class PlanRuntime {
       // Create the task
       const taskId = this.config.taskRuntime.createTask({
         agent,
-        prompt: step.description,
+        prompt: `${buildStepPrompt(plan, step)}\n\nSummarise your final answer in at most 8 sentences. Do not repeat tool transcripts.`,
         claimedResources: step.claimedResources,
         planStepId: step.id,
         // Phase 20 (CORR-03): plan id so UsageAggregator can bucket
@@ -562,10 +564,7 @@ FAILED STEPS:
 ${failureContext}
 
 COMPLETED STEPS (do not re-do these):
-${plan.steps
-  .filter((s) => s.status === 'done')
-  .map((s) => `- ${s.id}: ${s.description}`)
-  .join('\n')}
+${formatDoneStepSummaries(plan)}
 
 PENDING STEPS (may need re-ordering):
 ${plan.steps

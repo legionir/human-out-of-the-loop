@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ModelConfig } from '../schemas/model-config.js';
+import { DEFAULT_MODEL_ID } from './defaults.js';
 
 /**
  * A model endpoint configured entirely from the environment — no registry
@@ -68,13 +69,13 @@ export function envEndpoint(env: EnvLike, known: ReadonlyArray<ModelConfig>): En
     config: {
       id: ENV_MODEL_ID,
       provider: 'openai',
-      model: name ?? 'gpt-4o',
+      model: name ?? DEFAULT_MODEL_ID,
       config: {
         ...(baseURL ? { baseURL } : {}),
         ...(api ? { api } : {}),
         ...(keyVar ? { apiKeyEnv: keyVar } : {}),
       },
-      description: `From the environment (HOTL_MODEL=${name ?? 'gpt-4o'}${baseURL ? `, HOTL_BASE_URL=${baseURL}` : ''})`,
+      description: `From the environment (HOTL_MODEL=${name ?? DEFAULT_MODEL_ID}${baseURL ? `, HOTL_BASE_URL=${baseURL}` : ''})`,
     },
   };
 }

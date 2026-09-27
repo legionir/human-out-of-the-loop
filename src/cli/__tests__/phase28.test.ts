@@ -351,6 +351,7 @@ describe('phase 28 — registry layering', () => {
       'chat',
       'coder',
       'house',
+      'judge',
       'planner',
       'reviewer',
     ]);

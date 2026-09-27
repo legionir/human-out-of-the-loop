@@ -10,20 +10,30 @@ import { createRequire } from 'node:module';
  * Requires `ANTHROPIC_API_KEY`.  Phase 27 (CFG-08): the key is read from
  * the injected `env` when given, otherwise from `process.env`.
  */
+export function resolveAnthropicClientOptions(
+  config: ModelConfig,
+  env?: EnvSource
+): { apiKey: string; baseURL?: string } {
+  const source = env ?? process.env;
+  const keyVar =
+    typeof config.config?.apiKeyEnv === 'string' ? config.config.apiKeyEnv : 'ANTHROPIC_API_KEY';
+  const apiKey = source[keyVar] || source.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      `[anthropicProvider] ${keyVar === 'ANTHROPIC_API_KEY' ? 'ANTHROPIC_API_KEY' : `${keyVar} (or ANTHROPIC_API_KEY)`} environment variable is not set.`
+    );
+  }
+  const baseURL = typeof config.config?.baseURL === 'string' ? config.config.baseURL : undefined;
+  return { apiKey, ...(baseURL ? { baseURL } : {}) };
+}
+
 export const anthropicProviderFactory: ProviderFactory = {
   name: 'anthropic',
 
   create(config: ModelConfig, env?: EnvSource): LanguageModel {
-    // Phase 27 (CFG-08): an injected env wins; process.env is the
-    // default — the DevOps gate asserts this explicit fallback.
-    const apiKey = env ? env.ANTHROPIC_API_KEY : process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      throw new Error(`[anthropicProvider] ANTHROPIC_API_KEY environment variable is not set.`);
-    }
-
+    const options = resolveAnthropicClientOptions(config, env);
     const { createAnthropic } = getAnthropicSdk();
-
-    const anthropic = createAnthropic({ apiKey });
+    const anthropic = createAnthropic(options);
     return anthropic(config.model) as unknown as LanguageModel;
   },
 };

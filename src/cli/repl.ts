@@ -35,6 +35,7 @@ import { stopActiveActivity } from './utils/activity.js';
 import { showSplash } from './splash.js';
 import { listRemoteModels, type RemoteModel } from '../ai/models/list-models.js';
 import { modelIdForSpec } from '../ai/models/env-endpoint.js';
+import { DEFAULT_MODEL_ID } from '../ai/models/defaults.js';
 
 /** The product name as the prompt and banner show it. */
 export const BRAND = 'HOOTL';
@@ -66,7 +67,7 @@ export interface ReplOptions {
   output?: NodeJS.WritableStream;
 }
 
-const DEFAULT_MODEL = 'gpt-4o';
+const DEFAULT_MODEL = DEFAULT_MODEL_ID;
 
 /** Commands handled by the REPL itself (everything else goes to commander). */
 const BUILTINS: Record<string, string> = {

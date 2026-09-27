@@ -10,6 +10,11 @@ import type { ResolvedSkill } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { ModelRegistry } from '../registries/model-registry.js';
 import type { DelegationGuard } from '../runtime/delegation-guard.js';
+import {
+  generationSettingsFromConfig,
+  type GenerationSettings,
+} from '../models/generation-settings.js';
+import { DEFAULT_MODEL_ID } from '../models/defaults.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -49,6 +54,8 @@ export interface ResolvedAgent {
   delegationDepth?: number;
   /** Provider id of the resolved model (rate limiter / retry). */
   providerId?: string;
+  /** Sampling / length settings from the model config (E-03). */
+  generationSettings?: GenerationSettings;
 }
 
 export interface CreateAgentOptions {
@@ -70,6 +77,11 @@ export interface CreateAgentOptions {
    * back in it instead of switching to English.
    */
   languageHint?: DetectedLanguage;
+  /**
+   * When false, skip the ENVIRONMENT block (the planner already puts it in
+   * PROJECT CONTEXT — E-07). Default true.
+   */
+  includeEnvironment?: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────
@@ -85,10 +97,11 @@ const DEFAULT_CONTEXT_BUDGET_CHARS = 120_000;
  * This is a fallback — in production, ModelConfig should carry this.
  */
 const KNOWN_MODEL_LIMITS: Record<string, number> = {
-  'gpt-4o': 128_000,
+  [DEFAULT_MODEL_ID]: 128_000,
   'gpt-4o-mini': 128_000,
   'claude-sonnet': 200_000,
   'claude-sonnet-4-20250514': 200_000,
+  'claude-sonnet-5': 200_000,
   'local-llama': 8_192,
 };
 
@@ -112,8 +125,14 @@ const KNOWN_MODEL_LIMITS: Record<string, number> = {
  * that the runtime can consume.
  */
 export function createAgent(options: CreateAgentOptions): ResolvedAgent {
-  const { agentDefinition: def, refs, delegationDepth = 0, delegationGuard, languageHint } =
-    options;
+  const {
+    agentDefinition: def,
+    refs,
+    delegationDepth = 0,
+    delegationGuard,
+    languageHint,
+    includeEnvironment = true,
+  } = options;
 
   // ── 1. Resolve references ───────────────────────────────────
 
@@ -199,10 +218,13 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
 
   // ── 3. Determine context budget ─────────────────────────────
 
-  const modelTokenLimit =
-    KNOWN_MODEL_LIMITS[def.modelId] ??
-    (refs.modelRegistry.getConfig(def.modelId)?.config?.maxContextTokens as number) ??
-    30_000;
+  const modelCfg = refs.modelRegistry.getConfig(def.modelId);
+  const configuredLimit =
+    typeof modelCfg?.config?.maxContextTokens === 'number'
+      ? (modelCfg.config.maxContextTokens as number)
+      : undefined;
+  const modelTokenLimit = configuredLimit ?? KNOWN_MODEL_LIMITS[def.modelId] ?? 30_000;
+  const generationSettings = generationSettingsFromConfig(modelCfg);
 
   const budgetChars = options.contextBudgetChars ?? modelTokenLimit * CHARS_PER_TOKEN;
 
@@ -212,6 +234,7 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
     persona,
     skills,
     budgetChars,
+    allowedToolIds,
   });
 
   // Phase 36: the agent (not only the planner) is told which machine it is on.
@@ -223,10 +246,10 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
   // its goal); otherwise the generic rule, which matches whatever request the
   // agent is handed in its prompt.  Appended with the environment block: after
   // trimming, so persona and skills stay within budget.
-  const systemPromptWithEnvironment = `${systemPrompt}\n\n${buildEnvironmentContext()}\n\n${languageSection(
-    '',
-    languageHint
-  )}`;
+  const language = languageSection('', languageHint);
+  const systemPromptWithEnvironment = includeEnvironment
+    ? `${systemPrompt}\n\n${buildEnvironmentContext()}\n\n${language}`
+    : `${systemPrompt}\n\n${language}`;
 
   return {
     agentId: def.id,
@@ -239,7 +262,8 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
     trimmingLog,
     contextBudgetExceeded,
     delegationDepth,
-    providerId: refs.modelRegistry.getConfig(def.modelId)?.provider,
+    providerId: modelCfg?.provider,
+    ...(generationSettings ? { generationSettings } : {}),
   };
 }
 
@@ -249,6 +273,26 @@ interface BuildPromptOptions {
   persona: Persona;
   skills: ResolvedSkill[];
   budgetChars: number;
+  allowedToolIds: ReadonlySet<string>;
+}
+
+/**
+ * Drop SKILL.md sections that instruct tools the agent is not allowed to use
+ * (E-06). Sections are split on `## ` headings; a section is kept only when
+ * every skill-declared tool it names is in `allowedTools`.
+ */
+export function filterSkillInstructions(
+  markdown: string,
+  allowedTools: ReadonlySet<string>,
+  skillToolIds: readonly string[]
+): string {
+  const disallowed = skillToolIds.filter((id) => !allowedTools.has(id));
+  if (disallowed.length === 0) return markdown;
+  const patterns = disallowed.map((id) => new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`));
+  const sections = markdown.split(/(?=^## )/m);
+  const kept = sections.filter((section) => !patterns.some((pattern) => pattern.test(section)));
+  const text = kept.join('').trim();
+  return text.length > 0 ? text : markdown;
 }
 
 interface BuildPromptResult {
@@ -270,7 +314,7 @@ interface BuildPromptResult {
  *      a flag is set.
  */
 function buildSystemPrompt(opts: BuildPromptOptions): BuildPromptResult {
-  const { persona, skills, budgetChars } = opts;
+  const { persona, skills, budgetChars, allowedToolIds } = opts;
   const trimmingLog: TrimmingRecord[] = [];
 
   const personaSection = `# Persona: ${persona.name}\n\n${persona.system}`;
@@ -278,9 +322,17 @@ function buildSystemPrompt(opts: BuildPromptOptions): BuildPromptResult {
 
   // If persona alone exceeds budget, include it anyway (never trim persona)
   if (personaLength >= budgetChars) {
+    for (const skill of skills) {
+      trimmingLog.push({
+        skillId: skill.id,
+        originalLength: skill.resolvedInstructions.length,
+        trimmedLength: 0,
+        reason: 'context-budget',
+      });
+    }
     return {
       systemPrompt: personaSection,
-      trimmingLog: [],
+      trimmingLog,
       contextBudgetExceeded: true,
     };
   }
@@ -291,10 +343,17 @@ function buildSystemPrompt(opts: BuildPromptOptions): BuildPromptResult {
   );
 
   // Calculate total length
-  const skillSections = sortedSkills.map((skill) => ({
-    skill,
-    text: `\n\n# Skill: ${skill.name}\n\n${skill.resolvedInstructions}`,
-  }));
+  const skillSections = sortedSkills.map((skill) => {
+    const instructions = filterSkillInstructions(
+      skill.resolvedInstructions,
+      allowedToolIds,
+      skill.resolvedTools
+    );
+    return {
+      skill,
+      text: `\n\n# Skill: ${skill.name}\n\n${instructions}`,
+    };
+  });
 
   let totalLength = personaLength;
   for (const s of skillSections) {

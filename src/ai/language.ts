@@ -29,9 +29,13 @@ interface ScriptRule {
 
 /** Persian-only letters: without one of these, Arabic-script text is Arabic. */
 const PERSIAN_MARKER = /[\u067e\u0686\u0698\u06a9\u06af\u06cc\u06c0]/;
+/** Urdu-only letters (ٹ ڈ ڑ ں ے ھ) that Persian/Arabic do not use this way. */
+const URDU_MARKER = /[\u0679\u0688\u0691\u06ba\u06d2\u06be]/;
 
 const PERSIAN = { code: 'fa', name: 'Persian', native: 'فارسی' };
 const ARABIC = { code: 'ar', name: 'Arabic', native: 'العربية' };
+const URDU = { code: 'ur', name: 'Urdu', native: 'اردو' };
+const JAPANESE = { code: 'ja', name: 'Japanese', native: '日本語' };
 /**
  * Arabic-script text without a Persian-only letter.  "خواندن README" is Persian
  * and "مرحبا" is Arabic, and no amount of character counting can tell them
@@ -45,12 +49,12 @@ const ARABIC_SCRIPT = {
   native: 'خط عربی',
 };
 
+const KANA_RANGES: ReadonlyArray<readonly [number, number]> = [[0x3040, 0x30ff]];
+const CJK_RANGES: ReadonlyArray<readonly [number, number]> = [[0x4e00, 0x9fff]];
+
 // Order matters: the Arabic-script rules come first because they are the ones
 // that need the marker to be told apart.
 const SCRIPT_RULES: ReadonlyArray<ScriptRule> = [
-  // Arabic and Persian share a block: the marker (پ چ ژ گ ی ک, which Arabic
-  // does not have) decides.  This rule must stay first, because it is the one
-  // with two possible answers.
   {
     language: ARABIC,
     ranges: [
@@ -65,7 +69,7 @@ const SCRIPT_RULES: ReadonlyArray<ScriptRule> = [
   { language: { code: 'hi', name: 'Hindi', native: 'हिन्दी' }, ranges: [[0x0900, 0x097f]] },
   { language: { code: 'bn', name: 'Bengali', native: 'বাংলা' }, ranges: [[0x0980, 0x09ff]] },
   { language: { code: 'th', name: 'Thai', native: 'ไทย' }, ranges: [[0x0e00, 0x0e7f]] },
-  { language: { code: 'ja', name: 'Japanese', native: '日本語' }, ranges: [[0x3040, 0x30ff]] },
+  { language: JAPANESE, ranges: KANA_RANGES },
   {
     language: { code: 'ko', name: 'Korean', native: '한국어' },
     ranges: [
@@ -73,16 +77,34 @@ const SCRIPT_RULES: ReadonlyArray<ScriptRule> = [
       [0x1100, 0x11ff],
     ],
   },
-  { language: { code: 'zh', name: 'Chinese', native: '中文' }, ranges: [[0x4e00, 0x9fff]] },
+  { language: { code: 'zh', name: 'Chinese', native: '中文' }, ranges: CJK_RANGES },
 ];
 /** How many characters of a script make a detection trustworthy. */
 const MIN_SCRIPT_CHARS = 2;
+
+function isDigitCodePoint(code: number): boolean {
+  if (code >= 0x30 && code <= 0x39) return true;
+  if (code >= 0x0660 && code <= 0x0669) return true; // Arabic-Indic
+  if (code >= 0x06f0 && code <= 0x06f9) return true; // Extended Arabic-Indic
+  if (code >= 0xff10 && code <= 0xff19) return true;
+  return false;
+}
 
 function countInRanges(text: string, ranges: ScriptRule['ranges']): number {
   let count = 0;
   for (const char of text) {
     const code = char.codePointAt(0) ?? 0;
+    if (isDigitCodePoint(code)) continue;
     if (ranges.some(([lo, hi]) => code >= lo && code <= hi)) count++;
+  }
+  return count;
+}
+
+function latinLetterCount(text: string): number {
+  let count = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    if ((code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a)) count++;
   }
   return count;
 }
@@ -91,18 +113,30 @@ function countInRanges(text: string, ranges: ScriptRule['ranges']): number {
  * Name the language of `text` from its script, or `undefined` when the text is
  * Latin (or too short) — the caller then keeps the generic "same language as
  * the user's request" instruction.
+ *
+ * A non-Latin script must *dominate* the Latin letters in the string, so a
+ * quoted foreign word inside an English sentence does not flip the language.
+ * Digits (including Arabic-Indic) are ignored.
  */
 export function detectLanguage(text: string): DetectedLanguage | undefined {
   if (typeof text !== 'string' || text.trim() === '') return undefined;
+  const latin = latinLetterCount(text);
+
+  const kana = countInRanges(text, KANA_RANGES);
+  const cjk = countInRanges(text, CJK_RANGES);
+  if (kana >= 1 && kana + cjk >= latin) return JAPANESE;
+
   for (const rule of SCRIPT_RULES) {
+    if (rule.language.code === 'ja') continue; // handled above (any kana)
     const count = countInRanges(text, rule.ranges);
-    if (count < MIN_SCRIPT_CHARS) continue;
-    // Persian and Arabic share a block: without a Persian-only letter the text
-    // is Arabic here (Dari/Urdu are closer to Persian and will still be
-    // answered in their own words — this only picks the instruction).
+    const min = rule.language.code === 'ja' ? 1 : MIN_SCRIPT_CHARS;
+    if (count < min) continue;
+    if (latin > count) continue;
     if (rule.language.code === 'ar') {
+      if (URDU_MARKER.test(text)) return URDU;
       return PERSIAN_MARKER.test(text) ? PERSIAN : ARABIC_SCRIPT;
     }
+    if (rule.language.code === 'zh' && kana >= 1) return JAPANESE;
     return rule.language;
   }
   return undefined;
@@ -124,7 +158,6 @@ export function languageInstruction(text: string, detected?: DetectedLanguage): 
     return `Answer in the same language the user wrote their request in. ${keep}`;
   }
   if (language.code === 'arabic-script') {
-    // Persian/Arabic/Urdu share the script; the request itself is the evidence.
     return (
       'The user wrote their request in a language written in the Arabic script ' +
       '(Persian, Arabic, Urdu and others). ' +
