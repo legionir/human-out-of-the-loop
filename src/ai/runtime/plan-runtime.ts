@@ -82,6 +82,8 @@ export interface PlanRuntimeConfig {
   onPersistError?: (err: unknown) => void;
   /** Workspace root for checkpoints, self-verify, and command policy. */
   projectRoot?: string;
+  /** Where checkpoints are stored (default `<projectRoot>/.ai-runtime`). */
+  runtimeDir?: string;
   /** J-06: persona → model id. */
   modelRoutes?: ModelRoutes;
   /** J-03: return a cancel reason to stop dispatching. */
@@ -344,7 +346,7 @@ export class PlanRuntime {
       }
       const root = this.config.projectRoot;
       if (root && step.assignedTools.some((id) => !isReadOnlyTool(id))) {
-        if (captureCheckpoint(root, plan.id ?? 'plan', step.id)) {
+        if (captureCheckpoint(root, plan.id ?? 'plan', step.id, { runtimeDir: this.config.runtimeDir })) {
           step.checkpointId = step.id;
         }
         if (this.writableRunning.size > 0) {
@@ -795,7 +797,7 @@ Produce a new plan that:
       step.resultSummary = `${step.resultSummary ?? ''}\n[Rollback skipped: another writable step ran concurrently — use \`hootl plans rollback\` after review.]`.trim();
       return;
     }
-    restoreCheckpoint(root, plan.id ?? 'plan', step.checkpointId);
+    restoreCheckpoint(root, plan.id ?? 'plan', step.checkpointId, this.config.runtimeDir);
   }
 
   private async selfVerifyCoderStep(plan: Plan, step: PlanStep): Promise<void> {

@@ -529,3 +529,34 @@ describe('J-04 — a credential in a step handoff never reaches the plan file', 
     expect(JSON.stringify(inner.load(plan.id!))).not.toContain(secret);
   });
 });
+
+describe('J-05 — checkpoints stay in the runtime dir; restore only removes new files', () => {
+  it('writes snapshots under runtimeDir, not beside the project files', async () => {
+    const { captureCheckpoint } = await import('../runtime/checkpoint.js');
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-cp-proj-'));
+    const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-cp-rt-'));
+    fs.writeFileSync(path.join(project, 'a.txt'), 'a');
+    captureCheckpoint(project, 'p', 's', { runtimeDir: runtime });
+    expect(fs.existsSync(path.join(project, '.ai-runtime'))).toBe(false);
+    expect(fs.existsSync(path.join(runtime, 'checkpoints', 'p', 's', 'manifest.json'))).toBe(true);
+    fs.rmSync(project, { recursive: true, force: true });
+    fs.rmSync(runtime, { recursive: true, force: true });
+  });
+
+  it('a file older than the snapshot that the snapshot did not hold is left alone', async () => {
+    const { captureCheckpoint, restoreCheckpoint, checkpointDir } = await import('../runtime/checkpoint.js');
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-cp-old-'));
+    fs.writeFileSync(path.join(project, 'kept.txt'), 'x');
+    captureCheckpoint(project, 'p', 's');
+    // Simulate a file the snapshot skipped (e.g. could not copy) that predates it.
+    const manifestPath = path.join(checkpointDir(project, 'p', 's'), 'manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+    manifest.files = [];
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest));
+    fs.writeFileSync(path.join(project, 'new.txt'), 'made by the step');
+    restoreCheckpoint(project, 'p', 's');
+    expect(fs.existsSync(path.join(project, 'kept.txt'))).toBe(true);
+    expect(fs.existsSync(path.join(project, 'new.txt'))).toBe(false);
+    fs.rmSync(project, { recursive: true, force: true });
+  });
+});

@@ -22,12 +22,22 @@ export const CHECKPOINT_MAX_BYTES = 200 * 1024 * 1024;
 /** Snapshots kept per plan (the newest ones). */
 export const CHECKPOINTS_KEPT_PER_PLAN = 2;
 
-export function checkpointDir(projectRoot: string, planId: string, stepId: string): string {
-  return path.join(projectRoot, '.ai-runtime', 'checkpoints', planId, stepId);
+/**
+ * Snapshots live in the run's runtime directory (`--runtime-dir`, default
+ * `<project>/.ai-runtime`) — never beside the project files of a caller that
+ * chose another runtime directory.
+ */
+function checkpointsRoot(projectRoot: string, runtimeDir?: string): string {
+  return path.join(runtimeDir ?? path.join(projectRoot, '.ai-runtime'), 'checkpoints');
 }
 
-function checkpointsRoot(projectRoot: string): string {
-  return path.join(projectRoot, '.ai-runtime', 'checkpoints');
+export function checkpointDir(
+  projectRoot: string,
+  planId: string,
+  stepId: string,
+  runtimeDir?: string,
+): string {
+  return path.join(checkpointsRoot(projectRoot, runtimeDir), planId, stepId);
 }
 
 function walkFiles(root: string, dir: string, out: string[]): void {
@@ -58,8 +68,8 @@ function copyFile(from: string, to: string): void {
 }
 
 /** Keep only the newest `keep` snapshots of one plan. */
-function pruneStepSnapshots(projectRoot: string, planId: string, keep: number): void {
-  const dir = path.join(checkpointsRoot(projectRoot), planId);
+function pruneStepSnapshots(projectRoot: string, planId: string, keep: number, runtimeDir?: string): void {
+  const dir = path.join(checkpointsRoot(projectRoot, runtimeDir), planId);
   let names: string[];
   try {
     names = fs.readdirSync(dir);
@@ -88,7 +98,7 @@ export function captureCheckpoint(
   projectRoot: string,
   planId: string,
   stepId: string,
-  limits: { maxFiles?: number; maxBytes?: number } = {},
+  limits: { maxFiles?: number; maxBytes?: number; runtimeDir?: string } = {},
 ): string | undefined {
   const files = listProjectFiles(projectRoot);
   if (files.length > (limits.maxFiles ?? CHECKPOINT_MAX_FILES)) return undefined;
@@ -103,7 +113,7 @@ export function captureCheckpoint(
     if (bytes > maxBytes) return undefined;
   }
 
-  const dest = checkpointDir(projectRoot, planId, stepId);
+  const dest = checkpointDir(projectRoot, planId, stepId, limits.runtimeDir);
   fs.rmSync(dest, { recursive: true, force: true });
   fs.mkdirSync(path.join(dest, 'files'), { recursive: true });
   const copied: string[] = [];
@@ -122,23 +132,36 @@ export function captureCheckpoint(
     path.join(dest, 'manifest.json'),
     JSON.stringify({ planId, stepId, files: copied, capturedAt: Date.now() }),
   );
-  pruneStepSnapshots(projectRoot, planId, CHECKPOINTS_KEPT_PER_PLAN);
+  pruneStepSnapshots(projectRoot, planId, CHECKPOINTS_KEPT_PER_PLAN, limits.runtimeDir);
   return dest;
 }
 
-export function restoreCheckpoint(projectRoot: string, planId: string, stepId: string): boolean {
-  const dest = checkpointDir(projectRoot, planId, stepId);
+export function restoreCheckpoint(
+  projectRoot: string,
+  planId: string,
+  stepId: string,
+  runtimeDir?: string,
+): boolean {
+  const dest = checkpointDir(projectRoot, planId, stepId, runtimeDir);
   const manifestPath = path.join(dest, 'manifest.json');
   if (!fs.existsSync(manifestPath)) return false;
-  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { files: string[] };
+  const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
+    files: string[];
+    capturedAt?: number;
+  };
   const snap = new Set(manifest.files);
+  // Only a file that appeared AFTER the snapshot is the step's to remove; an
+  // older file the snapshot merely skipped (or could not copy) is not.
+  const since = manifest.capturedAt ?? 0;
   for (const rel of listProjectFiles(projectRoot)) {
-    if (!snap.has(rel)) {
-      try {
-        fs.unlinkSync(path.join(projectRoot, rel));
-      } catch {
-        /* ignore */
-      }
+    if (snap.has(rel)) continue;
+    const full = path.join(projectRoot, rel);
+    try {
+      const st = fs.statSync(full);
+      if (Math.max(st.mtimeMs, st.birthtimeMs || 0) < since) continue;
+      fs.unlinkSync(full);
+    } catch {
+      /* ignore */
     }
   }
   for (const rel of manifest.files) {
@@ -150,8 +173,12 @@ export function restoreCheckpoint(projectRoot: string, planId: string, stepId: s
   return true;
 }
 
-export function latestCheckpointStep(projectRoot: string, planId: string): string | undefined {
-  const dir = path.join(checkpointsRoot(projectRoot), planId);
+export function latestCheckpointStep(
+  projectRoot: string,
+  planId: string,
+  runtimeDir?: string,
+): string | undefined {
+  const dir = path.join(checkpointsRoot(projectRoot, runtimeDir), planId);
   if (!fs.existsSync(dir)) return undefined;
   const steps = fs
     .readdirSync(dir)
@@ -162,9 +189,14 @@ export function latestCheckpointStep(projectRoot: string, planId: string): strin
 }
 
 /** Remove every plan's snapshots older than `days` (housekeeping at start-up). */
-export function pruneCheckpoints(projectRoot: string, days: number, now = Date.now()): number {
+export function pruneCheckpoints(
+  projectRoot: string,
+  days: number,
+  now = Date.now(),
+  runtimeDir?: string,
+): number {
   if (days <= 0) return 0;
-  const root = checkpointsRoot(projectRoot);
+  const root = checkpointsRoot(projectRoot, runtimeDir);
   let names: string[];
   try {
     names = fs.readdirSync(root);

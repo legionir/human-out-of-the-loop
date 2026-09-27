@@ -720,7 +720,7 @@ export class Orchestrator {
       const retentionDays = storeRetentionDays(this.env);
       this.planStore.pruneOlderThan?.(retentionDays);
       this.sessionStore.pruneOlderThan?.(retentionDays);
-      pruneCheckpoints(root, 7);
+      pruneCheckpoints(root, 7, Date.now(), runtimeDir);
     } catch {
       // housekeeping must never block startup
     }
@@ -1590,6 +1590,7 @@ export class Orchestrator {
       ...(ov?.agentTimeoutMs !== undefined ? { agentTimeoutMs: ov.agentTimeoutMs } : {}),
       ...(ov?.maxSteps !== undefined ? { maxSteps: ov.maxSteps } : {}),
       projectRoot: this.config.projectRoot,
+      runtimeDir: this.config.runtimeDir,
       modelRoutes: this.config.modelRoutes as ModelRoutes | undefined,
       budgetExceeded: () => (this.activeBudget?.exceeded() ? 'budget exceeded' : undefined),
       onStatusChange: (p, event) => {
@@ -2037,6 +2038,7 @@ export class Orchestrator {
       maxReplanningAttempts: this.config.maxReplanningAttempts,
       defaultModelId: this.config.defaultModelId,
       projectRoot: this.config.projectRoot,
+      runtimeDir: this.config.runtimeDir,
       modelRoutes: this.config.modelRoutes as ModelRoutes | undefined,
       budgetExceeded: () => (this.activeBudget?.exceeded() ? 'budget exceeded' : undefined),
       // Phase 20 (CORR-04): same explicit acceptance hook on resume
