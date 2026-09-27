@@ -2,8 +2,8 @@
 
 **شناسه سند:** `docs/UNIFIED_EXECUTION_PLAN.md`
 **تاریخ تألیف:** 2026-09-26
-**آخرین به‌روزرسانی:** 2026-09-27
-**مبنای کد:** شاخه `arena/01a0e249-human-out-of-the-loop`؛ فاز K جزئی در `b2a8acb` / v27.17.15 (A–J 🟢؛ K جزئی 🟡)
+**آخرین به‌روزرسانی:** 2026-09-27 (پس از Code Review فازهای A–K)
+**مبنای کد:** شاخه `arena/01a0e249-human-out-of-the-loop`؛ v27.17.16 — A–J 🟢؛ فاز R (اصلاحات Code Review) 🟢؛ K: K-03/K-04/K-06/K-08/K-09 🟢، بقیه با مالک
 **جایگاه:** این سند، **تنها مرجع ردیابی و اجرا** برای رفع همهٔ نواقص و باگ‌های شناسایی‌شده است. هر موردی که در هر سند منبع ثبت شده، یا اینجا یک ردیف دارد یا صراحتاً به یک ردیف ادغام شده — **هیچ موردی حذف نشده است** (اثبات کامل تطبیق در §۴).
 
 ---
@@ -13,10 +13,11 @@
 | # | سند منبع | محتوا | وضعیت |
 |---|---|---|---|
 | S1 | `docs/REVIEW_EXECUTION_PLAN.md` (834 خط) | ماتریس ۱۴۵ یافته R0–R11 + فازهای R8 (قابلیت جدید) | ۱۲۴ ردیف اجرایی در A–J 🟢؛ باقی‌مانده فقط K (بیرونی) |
-| S2 | `docs/FORENSIC_AUDIT_REPORT.md` (891 خط) | ممیزی فارنزیک ۱۹بخشی: SEC/BUG/ARCH/REL/CONF/DEBT/POT/TEST | POT-001/005 🟢 (K-08/K-06)؛ POT-002/003 و REL-004 هنوز باز |
+| S2 | `docs/FORENSIC_AUDIT_REPORT.md` (891 خط) | ممیزی فارنزیک ۱۹بخشی: SEC/BUG/ARCH/REL/CONF/DEBT/POT/TEST/OPS + Appendix B | POT-001/005 🟢 (K-08/K-06)؛ ARCH-003 و OPS-001 و Appendix B-1 (در نسخهٔ قبلی این سند جا افتاده بودند) → R-28/R-27/R-29 🟢؛ POT-002/003 و REL-004 هنوز با مالک |
 | S3 | `audit/` (workspace ممیزی integration) | ۶۵ EP، ۶۰ WF، ۵ ENT، ۱۰ BND، یافته‌های F-0001..F-0011 | F-0007 سقف SSE 🟢 (K-04)؛ بقیهٔ بازها در K-01/K-03 |
 | S4 | `docs/READINESS_AUDIT.md` (514 خط) | ۱۰ محور readiness P1–P10 + CI | P1 ⛔ = K-01؛ P8 🟡 = K-02 (ماتریس در `ci.yml` هست، verdict Actions با مالک) |
-| S5 | `audit/unknowns.md` + Appendix B فارنزیک | ۴ + ۵ مورد UNKNOWN/UNVERIFIED | UNKNOWN-0001 🟢 پذیرش مکتوب (K-04)؛ 0002/0003/0004 هنوز مالک/CI |
+| S5 | `audit/unknowns.md` + Appendix B فارنزیک | ۴ + ۱۰ مورد UNKNOWN/UNVERIFIED | UNKNOWN-0001 🟢 (K-04)؛ UNKNOWN-0004 🟢 (K-03)؛ 0002/0003 مالک؛ Appendix B-1..B-10 در §۴.۲ |
+| S6 | Code Review فازهای A–K (همین شاخه، 2026-09-27) | باگ‌ها/پس‌رفت‌هایی که خودِ رفع‌ها ساختند یا ناقص گذاشتند | همه در فاز R 🟢 (R-01…R-30) |
 
 **قانون طلایی این سند:** هر یافته یک **ردیف واحد** با ID پایدار دارد. IDهای قدیمی در ستون «منبع» حفظ شده‌اند تا هیچ ردپایی گم نشود. رفع = نوشتن تست fail-سپس-pass + رفع + `tsc`/`vitest` سبز + تیک 🟢 در همین جدول + کامیت جدا.
 
@@ -36,6 +37,7 @@
 | H | رابط وب ↔ سرور (UI) | ۰ 🟢 | ۰ |
 | I | تست، CI و مستندات | ۰ 🟢 | ۰ |
 | J | قابلیت‌های جدید | ۰ 🟢 | ۰ |
+| R | اصلاحات Code Review فازهای A–K | ۰ 🟢 | ۰ |
 | K | راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) | ۵ 🟡 | ۱ |
 | | **جمع ردیف‌های باز** | **۵** | **۱** |
 
@@ -50,14 +52,14 @@
 
 | ID | Pri | عنوان | رفع / تست | منبع |
 |---|---|---|---|---|
-| **A-01** 🟢 | P0 | سرور وب بدون auth روی 0.0.0.0 | bind پیش‌فرض 127.0.0.1؛ token middleware مشابه `serve --http` (`transports.ts:169-174` الگو)؛ `HOTL_SERVER_TOKEN`/`--token`؛ بدون توکن و host≠loopback → refuse startup. تست: درخواست بدون توکن → 401 روی همهٔ routeها | S2:SEC-001؛ S3:F-0003/0004/0005/0006/0008/0009؛ S1:غیردامنه(سرور) |
+| **A-01** 🟢 | P0 | سرور وب بدون auth روی 0.0.0.0 (UI با توکن: R-07) | bind پیش‌فرض 127.0.0.1؛ token middleware مشابه `serve --http` (`transports.ts:169-174` الگو)؛ `HOTL_SERVER_TOKEN`/`--token`؛ بدون توکن و host≠loopback → refuse startup. تست: درخواست بدون توکن → 401 روی همهٔ routeها | S2:SEC-001؛ S3:F-0003/0004/0005/0006/0008/0009؛ S1:غیردامنه(سرور) |
 | **A-02** 🟢 | P0 | گیت اعتماد R0-08 نیمه‌پیاده — `--trust-project` وجود ندارد | سیم‌کشی پرچم در `run`/`repl`/`serve` + persist با `trust.ts` و `GlobalCliConfig.trustedProjects`. تست: پروژهٔ غیرمطمئن → mcp-servers لایهٔ پروژه spawn نشود؛ پس از پرچم → اجرا | S1:R0-08(بخش سیم‌کشی)؛ S2:CONF-001,ARCH-002,DEBT-002 |
 | **A-03** 🟢 | P0 | دورزدن گیت اعتماد در ۳ مسیر introspection | `collectMcpTools` (`registry.ts:150`)، `mcpTestCommand` (`mcp.ts:87`)، `POST /api/mcp/:id/test` (`routes/registry.ts:110`) همگی با همان فیلتر `trustedProject`. تست برای هر ۳ مسیر | S2:SEC-003؛ S3:WF-0021..27(W1.3),WF-0038..45(W1.3) |
 | **A-04** 🟢 | P0 | اجرا در مرحلهٔ پلن‌سازی قابل لغو نیست | `POST /api/runs/:runId/cancel` + `AbortSignal` تا planner. تست: لغو حین planning → هیچ فراخوانی LLM بعدی | S1:R11-10؛ S3:WF-0002 |
 | **A-05** 🟢 | P0 | ران‌های رهاشده (clarification/confirmation) هرگز timeout نمی‌شوند | TTL قابل پیکربندی (پیش‌فرض ۳۰ دقیقه → `confirmed:false`) + cleanup resolver در cancel. تست: TTL → run `cancelled`، interaction بسته | S1:R6-03؛ S3:F-0002؛ S1:R6-04(map رشد) ادغام شد |
 | **A-06** 🟢 | P1 | schema MCP فیلد `env` ندارد؛ تناقض کامنت | افزودن `env: Record<string,string>` (از EnvSource) به `McpServerConfigSchema` و پاس‌دادن به `createStdioTransport`؛ یا پاکسازی کامنت‌ها. تست: env سفارشی به فرزند برسد | S2:SEC-002 |
 | **A-07** 🟢 | P1 | قید scheme/url و tokenEnvVar در schema MCP | zod refine: scheme فقط http/https برای http-transport؛ `tokenEnvVar` الگوی نام متغیر. تست: `file://` و env-var نامعتبر رد شود | S2:POT-004 |
-| **A-08** 🟢 | P2 | ownership فقط با دانستن UUID | مدل مالکیت حداقلی: session/plan bound به توکن/کلاینت در سرور (پس از A-01)؛ یا صراحتاً پذیرفته‌شده و مستند. تست: کلاینت A روی run کلاینت B (پس از auth) 403 بگیرد | S3:F-0004/0007(SEC-001 propagation) |
+| **A-08** 🟢 | P2 | ownership فقط با دانستن UUID (در ابتدا فقط runها؛ session/plan/stream/log در R-17 تکمیل شد) | مدل مالکیت حداقلی: session/plan bound به توکن/کلاینت در سرور (پس از A-01)؛ یا صراحتاً پذیرفته‌شده و مستند. تست: کلاینت A روی run کلاینت B (پس از auth) 403 بگیرد | S3:F-0004/0007(SEC-001 propagation) |
 
 **معیار پذیرش فاز:** همهٔ endpointها تست 401/404/403 دارند؛ سه مسیر probe با گیت اعتماد؛ `tsc`/`vitest` سبز.
 
@@ -146,7 +148,7 @@
 | **E-08** 🟢 | P1 | تشخیص زبان خط اول به‌جای خط غالب | غلبهٔ خط؛ نادیده‌گرفتن ارقام؛ اردو/ژاپنی با حروف ویژه. تست جدول‌محور ۵ نمونه | S1:R4-12 |
 | **E-09** 🟢 | P1 | `reasoning/SKILL.md` فراخوانی زائد time | دستور: از زمان system prompt استفاده کن. تست | S1:R4-07 |
 | **E-10** 🟢 | P2 | schema پلن فیلدهای داخلی را از مدل می‌خواهد؛ دستور طول خروجی نیست | schema جدا برای خروجی مدل بدون status/taskId/...؛ JSDoc→describe؛ دستور خلاصه ≤N. تست schema | S1:R4-08 |
-| **E-11** 🟢 | P2 | پیش‌فرض‌های مدل کهنه؛ سخت‌کد 'gpt-4o' ×۲۳ | `claude-sonnet-5`؛ ثابت واحد `DEFAULT_MODEL_ID`؛ اولویت maxContextTokens پیکربندی. تست grep + override | S1:R4-10 |
+| **E-11** 🟡 | P2 | پیش‌فرض‌های مدل کهنه؛ سخت‌کد 'gpt-4o' ×۲۳ | ✅ ثابت واحد `DEFAULT_MODEL_ID` و اولویت maxContextTokens پیکربندی. ⛔ تغییر مقدار پیش‌فرض به `claude-sonnet-5` انجام **نشده** (مقدار هنوز `gpt-4o`): عوض‌کردن provider پیش‌فرض برای همهٔ کاربران تصمیم مالک است → **K-10** | S1:R4-10 |
 | **E-12** 🟢 | P3 | شرط تکراری زبان در planner | حذف شرط درونی. تست‌های موجود سبز | S1:R4-11 |
 
 ### فاز F — کارایی و مصرف توکن 🟢 (۲۰۲۶-۰۹-۲۷، v27.17.9)
@@ -241,19 +243,57 @@
 |---|---|---|---|---|
 | **K-01** | P0 | اجرا با provider واقعی (OpenAI/Anthropic) | ⛔ مالک: secret + `real-provider.yml` یا run دستی. چک‌لیست: `audit/baseline/K01_OWNER_CHECKLIST.md`. این sandbox کلید ندارد و API واقعی صدا زده نشد. | S4:P1 ⛔؛ S5:UNKNOWN-0003؛ S2:POT-002 |
 | **K-02** | P1 | windows-leg ماتریس CI | 🟡 مالک: `ci.yml` از قبل windows/mac/ubuntu دارد؛ سبز بودن Actions اینجا دیده نمی‌شود. `audit/baseline/K02_CI_WINDOWS.md` | S4:P8 🟡 |
-| **K-03** | P1 | baseline typecheck/test | 🟡 اجرا شد (2026-09-27، node v22.22.3): tsc 0، build 0، vitest **1607 passed / 19 failed**، e2e **144/194**. خلاصه: `audit/baseline/k03-SUMMARY.md`. سبز کامل نیست. | S5:UNKNOWN-0004؛ S3:P2 |
+| **K-03** 🟢 | P1 | baseline typecheck/test | پس از فاز R: tsc 0، build 0، vitest **1670/1670** (و با ترتیب تصادفی، ۳ seed)، e2e **209/209**. (پیش از R: 1607/19 و 144/194.) خلاصه: `audit/baseline/k03-SUMMARY.md`. اجرای ماتریس CI همچنان K-02 است. | S5:UNKNOWN-0004؛ S3:P2 |
 | **K-04** 🟢 | P2 | اندازهٔ SSE / log | سقف اتصال ۳۲ + بافر ۲۰۰؛ تست synthetic `phase-k-sse-scale.test.ts` (به‌علاوهٔ F-10 در `phase-f-perf.test.ts`). telemetry پروداکشن نیست — پذیرش مکتوب همین سقف‌ها به‌عنوان کنترل F-10. | S5:UNKNOWN-0001؛ S3:F-0007/0011 |
 | **K-05** | P2 | bind غیر-loopback در دیپلوی | 🟡 تصمیم مالک. پس از A-01 غیر-loopback فقط با توکن. `audit/baseline/K05_BIND_OWNER.md` | S5:UNKNOWN-0002؛ S2:POT-003 |
 | **K-06** 🟢 | P2 | MCP SSE کند / UND_ERR_BODY_TIMEOUT | `bodyTimeout: 0`؛ تست زندهٔ استریم ساکت `phase30-p10-fetch.test.ts`؛ قفل مقدار در `phase-k-sse-scale.test.ts` | S2:POT-005 |
 | **K-07** | P3 | SIGKILL روی waitForAll | 🟡 نیمه: cancel مسیر shutdown را باز می‌کند (`phase-k-shutdown.test.ts`). SIGKILL واقعی قابل catch نیست — تست زنده با مالک. | S2:REL-004 |
 | **K-08** 🟢 | P3 | XSS / escapeHtml تک‌نقطه‌ای | `escapeHtml`/`renderMarkdown` فقط در `public/ui-logic.js`؛ اسکن innerHTML + payload. تست: `phase-k-xss.test.ts` | S2:POT-001؛ S2:ARCH-004 |
+| **K-10** | P2 | مقدار مدل پیش‌فرض (باقی‌ماندهٔ E-11) | 🟡 تصمیم مالک: `DEFAULT_MODEL_ID` در `src/ai/models/defaults.ts` یک‌جا عوض می‌شود؛ مدل جدید باید در `registry/models` باشد و کاربران بدون کلید Anthropic باید مطلع شوند | S1:R4-10 |
 | **K-09** 🟢 | P3 | re-verify R0-07/09/10 | تست‌های اصلی + `phase-k-r0-reverify.test.ts` سبز (همراه `r0-07-key-leak.test.ts`، `r0-09-protected-paths.test.ts`، `r0-10-outside-workspace.test.ts`) | S2:§۹ نکته |
+
+### فاز R — اصلاحات Code Review فازهای A–K 🟢 (۲۰۲۶-۰۹-۲۷، v27.17.16)
+
+بازبینی کد رفع‌های A–K (منبع S6) این موارد را یافت: پس‌رفت یا باگی که خودِ رفع ساخت، رفعی که ناقص بود، یا یافتهٔ منبعی که در نسخهٔ قبلی این سند جا افتاده بود. هر ردیف تست regression دارد؛ بیشترشان در `src/ai/__tests__/review-fixes.test.ts` (نام describe = ID ردیف).
+
+| ID | Pri | مشکل | رفع / تست | کامیت | ریشه |
+|---|---|---|---|---|---|
+| **R-01** 🟢 | P0 | نتیجهٔ ابزارِ کوتاه‌شده شکل `ToolResultOutput` نداشت → از فراخوانی چهارمِ ابزار، پیام tool بدون content به provider می‌رفت | stub `{type:'text',value}`؛ اندازه per-message (نه O(n²)). تست با provider واقعی OpenAI در `phase-f-perf.test.ts` | `78b0545` | F-04 |
+| **R-02** 🟢 | P1 | `registry/models/local-llama.json` با config شخصی (`local-aur`) جایگزین شده بود → ۸ تست قرمز | بازگردانی فایل پکیج | `78b0545` | کامیت `12c06b5` |
+| **R-03** 🟢 | P0 | `ANTHROPIC_API_KEY` به هر `baseURL` سفارشی می‌رفت؛ `apiKeyEnv` می‌توانست کلید اصلی را نام ببرد | قاعدهٔ R0-07 برای هر دو provider. `r0-07-key-leak.test.ts` | `fb9e8c5`، `5ee92d4` | E-03 |
+| **R-04** 🟢 | P0 | `run_command`: allowlist فقط basename (`./evil/npm`)، `commands.json` پروژهٔ untrusted خوانده می‌شد، allowlist خالی = هر testCommand، کل env (کلیدها) به فرزند | گیت اعتماد، تطبیق دقیق argv[0]، env بدون credential. `phase-j-run-command.test.ts` | `9090d78` | J-01/J-02 |
+| **R-05** 🟢 | P1 | rollback چک‌پوینت کار مرحلهٔ هم‌زمان را پاک می‌کرد؛ کپی کامل درخت در هر مرحله، بدون پاک‌سازی | rollback فقط بدون هم‌زمانی؛ reflink، سقف ۵۰۰۰ فایل/۲۰۰MB، ۲ snapshot/plan، prune ۷ روزه. `phase-j-checkpoint.test.ts` | `868c28e` | J-05 |
+| **R-06** 🟢 | P1 | چک‌پوینت همیشه در `<project>/.ai-runtime` (نه runtimeDir) — تست‌ها ~۲۰۰MB snapshot از خود مخزن ساختند؛ restore هر فایلِ غایب را حذف می‌کرد | ذخیره در runtimeDir؛ حذف فقط فایل‌های پس از snapshot | `51fc52e` | J-05 |
+| **R-07** 🟢 | P0 | UI توکن نمی‌فرستاد (fetch و EventSource) → با `--token` کل UI 401 | `?token=` یک‌بار → sessionStorage؛ header در fetch؛ `?access_token=` فقط روی دو مسیر GET SSE. `phase-a-security.test.ts` | `68eb720` | A-01 |
+| **R-08** 🟢 | P1 | timeout ایجنت وقتی فراخوانی abort را نادیده می‌گرفت هرگز برنمی‌گشت | بازگشت فوری + `settled`؛ قفل/اسلات تا settle (سقف ۳۰s)؛ `waitForAll` منتظر آزادسازی | `ff32bd1` | C-01 |
+| **R-09** 🟢 | P1 | Ctrl-C/shutdown/cancel اپراتور re-plan پولی می‌ساخت | پرچم صریح `cancelled`؛ Ctrl-C در سؤال feedback؛ abort حین re-plan | `5271971` | B-07 × G-07 |
+| **R-10** 🟢 | P1 | تاریخچهٔ session و budget، state مشترک Planner/Orchestrator — اجراهای هم‌زمان وب هم را می‌دیدند | AsyncLocalStorage per run | `e290552` | B-15، J-03 |
+| **R-11** 🟢 | P1 | reconcile، interaction/پلن draft اجرای زنده (همین سرور یا CLI دیگر) را لغو می‌کرد | `ownerPid` روی interaction؛ رد live | `14f6cc7` | B-06 |
+| **R-12** 🟢 | P2 | توکن chat دو بار شمرده می‌شد؛ review چت/clarification کل مصرف orchestrator را گزارش می‌داد | tally per-run | `06b05db` | C-06/C-14 |
+| **R-13** 🟢 | P1 | `delegate_task`: والدِ منتظر اسلات را نگه می‌داشت → deadlock | والد اسلاتش را قرض می‌دهد | `34823b0` | C-07 |
+| **R-14** 🟢 | P1 | قفل مالکیت پلن اتمیک نبود | check+write زیر قفل. تست چندپروسه‌ای | `6f65cc1` | B-01 |
+| **R-15** 🟢 | P1 | شکستن قفل کهنه می‌توانست قفل تازه را بدزدد؛ pid بازیافتی = قفل ابدی | هویت inode+محتوا؛ سقف سخت ۱۰ دقیقه | `0c00624` | C-10 |
+| **R-16** 🟢 | P1 | persona با ابزار سرور MCP قطع/skip‌شده، startup را متوقف می‌کرد (تناقض B-18/B-19) | هشدار در حالت degraded؛ typo واقعی همچنان خطا | `05a35a9`، `f26895e` | B-18/B-19 |
+| **R-17** 🟢 | P2 | A-08 فقط runها را پوشش می‌داد | session/plan/stream/log/list per owner. `phase-a-security.test.ts` | `32c78d4` | A-08 |
+| **R-18** 🟢 | P2 | settle روی `exit` → خروجی git/command بریده | `close` یا ۲۵۰ms پس از `exit`؛ تست D-07 zombie را مرده می‌شمارد | `cb1ec6c` | D-07 |
+| **R-19** 🟢 | P2 | درخواست فارسی با مسیر/شناسهٔ کد، فارسی تشخیص داده نمی‌شد | فقط واژه‌های prose شمرده می‌شوند | `0ae0e27` | E-08 |
+| **R-20** 🟢 | P2 | سقف نتیجهٔ ابزار فیلدها را به ۲۰۰۰ کاراکتر می‌برید | برش به اندازهٔ overshoot | `81240fa` | F-03 |
+| **R-21** 🟢 | P3 | دو `stat` در هر نوشتن log؛ فایل‌های چرخیده بی‌پایان؛ نام تکراری در یک ms؛ retention ثابت | یک stat؛ ۵ فایل آخر؛ نام یکتا؛ `HOTL_RETENTION_DAYS` | `9e6d389`، `d21d362` | C-11 |
+| **R-22** 🟢 | P3 | انتظارهای TaskRuntime هر ۱۰–۱۵ms poll | سیگنال تغییر وضعیت | `d21d362` | C-08/B-14 |
+| **R-23** 🟢 | P3 | فایل مختلط CRLF/LF کلاً CRLF می‌شد | EOL per line با diff خطی | `6304c89` | D-03 |
+| **R-24** 🟢 | P1 | resume پلن با گام `done` داوری‌نشده → crash در acceptance | Task کامل مصنوعی | `5430b9c` | B-08 |
+| **R-25** 🟢 | P2 | C-02 re-ask v27.17.2 را شکست؛ G-02 قبل از pre-flight رایگان | re-ask فقط پیش از هر خروجی؛ G-02 پس از pre-flight و نه در chat | `5430b9c` | C-02، G-02 |
+| **R-26** 🟢 | P1 | پاسخ chat دستور زبان کاربر را نمی‌گرفت (E-07 آن را از prompt برداشت ولی به agent چت نداد) | `buildChatAgent(…, language)` | `0f06514` | E-07 |
+| **R-27** 🟢 | P2 | OPS-001: ۱۰–۱۲ تست با ترتیب تصادفی قرمز | reset mockها در phase11؛ phase42 سناریوی مرتب (`shuffle:false`) | `815aafa` | S2:OPS-001 |
+| **R-28** 🟢 | P3 | ARCH-003: سه پیاده‌سازی جدا برای لایه‌بندی mcp-servers (`tools --mcp` حتی سرورهای پکیج را در پروژهٔ untrusted رد می‌کرد) | `loadLayeredMcpServers` + `mayConnectMcpServer` | `855b9fa` | S2:ARCH-003 |
+| **R-29** 🟢 | P3 | Appendix B-1: `.env.example` نبود | افزوده شد (بدون مقدار) | `815aafa` | S2:App.B-1 |
+| **R-30** 🟢 | P1 | کاتالوگ پلن‌ساز ابزار persona را در ۱۶ می‌برید (coder: ۴۸)؛ stub e2e، persona بی‌ابزار `judge` را انتخاب می‌کرد؛ کلید اکو‌شده از `handoff` به فایل پلن می‌رسید؛ e2e بدون HOME ایزوله | کاتالوگ کامل؛ stub اصلاح؛ scrub عمیق پلن؛ HOME موقت. e2e 144/194 → 209/209 | `55e8756`، `0f06514`، `8514b82` | E-01، I-01، J-04 |
 
 **ثبت تست‌های فاز K (اجرا شده در همین شاخه، 2026-09-27):**
 
 | ID | فایل تست | چه چیزی اثبات می‌شود | نتیجهٔ آخرین اجرا |
 |---|---|---|---|
-| K-03 | `audit/baseline/k03-SUMMARY.md` (نه vitest واحد) | `tsc --noEmit`؛ `vitest run` کامل؛ `npm run e2e` | tsc ✅ · vitest 1607/19 · e2e 144/194 → ردیف 🟡 |
+| K-03 | `audit/baseline/k03-SUMMARY.md` (نه vitest واحد) | `tsc --noEmit`؛ `vitest run` کامل؛ `npm run e2e` | tsc ✅ · vitest 1670/1670 · e2e 209/209 → 🟢 |
 | K-04 | `src/ai/__tests__/phase-k-sse-scale.test.ts` | سقف N+1 اتصال؛ ring buffer ≤ `bufferSize` | ✅ |
 | K-06 | همان فایل + `src/ai/__tests__/phase30-p10-fetch.test.ts` | `MCP_STREAM_BODY_TIMEOUT_MS === 0`؛ استریم ساکت با fetch پیش‌فرض می‌میرد، با MCP fetch زنده می‌ماند | ✅ |
 | K-07 | `src/ai/__tests__/phase-k-shutdown.test.ts` | `cancelTask` → `waitForAll` در < ۲s برمی‌گردد | ✅ (نیمه؛ SIGKILL زنده نیست) |
@@ -268,7 +308,7 @@
 
 ### ۴.۱ — ماتریس ۱۴۵یافتهٔ S1 → ردیف‌های این سند
 
-**۲۱ مورد 🟢 (رفع‌شده پیش از این سند، مرجع تاریخی):** R0-01..R0-05، R0-06..R0-12، R1-01، R1-02، R1-04..R1-10، R1-05(superseded)، R1-06، R1-07، R1-08، R1-09، R1-10. در git log با کامیت‌های `fix(R0-*)`/`fix(R1-*)`. R0-07/09/10 در K-09 دوباره سبز شدند.
+**۲۱ مورد 🟢 (رفع‌شده پیش از این سند، مرجع تاریخی):** R0-01، R0-02، R0-03، R0-04، R0-05، R0-06، R0-07، R0-08، R0-09، R0-10، R0-11، R0-12، R1-00 (mode در re-plan پس از clarification)، R1-01، R1-02، R1-04..R1-10، R1-05(superseded)، R1-06، R1-07، R1-08، R1-09، R1-10. در git log با کامیت‌های `fix(R0-*)`/`fix(R1-*)`. R0-07/09/10 در K-09 دوباره سبز شدند.
 
 **۱۲۴ مورد که در تألیف سند باز بودند — همه از طریق ردیف‌های A–J بسته شده‌اند.** نگاشت پایدار (S1 → ردیف این سند) برای ردپا:
 
@@ -319,6 +359,24 @@
 | REL-004 | K-07 🟡 | `phase-k-shutdown.test.ts` (نه SIGKILL زنده) |
 | §۱۱ LOW (readEntries full scan) | F-09 | |
 | R0-09/R0-10/R0-07 re-verify | K-09 🟢 | `phase-k-r0-reverify.test.ts` + r0-07/09/10 |
+| ARCH-003 | R-28 🟢 | در نسخهٔ قبلی جا افتاده بود |
+| ARCH-004 (INFO) | K-08 🟢 | همان ریسک POT-001 |
+| OPS-001 (UNVERIFIED) | R-27 🟢 | با `--sequence.shuffle` بازتولید و رفع شد |
+| §12 شکاف تست #1 (TEST-001) | I-01 🟢 | |
+| §12 شکاف تست #2 (BUG-001 summary) | D-18 🟢 | |
+| §12 شکاف تست #3/#4/#5 (SEC-003/CONF-001/SEC-001) | A-03/A-02/A-01 🟢 | `phase-a-security.test.ts` |
+| §12 شکاف تست #6 (429 integration) | C-04 🟢 | `phase-c-model-retry.test.ts` (AgentRuntime → 429 → retry) |
+| §12 شکاف تست #7 (REL-001 persist) | B-10 🟢 | |
+| §12 شکاف تست #8 (e2e 429/timeout) | 🟢 | سناریوی e2e `faults` (`FAULT:429`/`500`/`401`/`HANG`) — مستقل از POT-002 |
+| Appendix B-1 (`.env.example`) | R-29 🟢 | |
+| Appendix B-2 (provider واقعی) | K-01 ⛔ | |
+| Appendix B-3 (workflowها) | 🟢 | `.github/workflows/ci.yml` و `real-provider.yml` در شاخه موجودند (I-04/I-06) |
+| Appendix B-4 (XSS) | K-08 🟢 | |
+| Appendix B-5 (schema MCP) | A-07 🟢 | |
+| Appendix B-6 (shutdown سیگنال) | K-07 🟡 | |
+| Appendix B-7 (readEntries بزرگ) | F-09 🟢 | |
+| Appendix B-8 (R0 re-verify) | K-09 🟢 | |
+| Appendix B-9 / B-10 (نسخه/شمارش مستندات) | I-07 🟢 | README/CHANGELOG با v27.17.16 و شمارش واقعی |
 
 ### ۴.۳ — یافته‌های S3 (ممیزی integration) → ردیف‌ها
 
@@ -350,9 +408,9 @@
 | S5:UNKNOWN-0001 | K-04 🟢 پذیرش مکتوب سقف SSE |
 | S5:UNKNOWN-0002 | K-05 🟡 (`K05_BIND_OWNER.md`) |
 | S5:UNKNOWN-0003 | K-01 ⛔ |
-| S5:UNKNOWN-0004 | K-03 🟡 (`k03-SUMMARY.md`) |
+| S5:UNKNOWN-0004 | K-03 🟢 (`k03-SUMMARY.md`) |
 
-### ۴.۵ — شمارش نهایی ردیف‌های باز (پس از v27.17.15)
+### ۴.۵ — شمارش نهایی ردیف‌های باز (پس از v27.17.16)
 
 | فاز | ردیف‌ها | شمار باز |
 |---|---|---|
@@ -366,10 +424,11 @@
 | H | H-01..H-14 | ۰ 🟢 |
 | I | I-01..I-08 | ۰ 🟢 |
 | J | J-01..J-09 | ۰ 🟢 |
-| K | K-01، K-02، K-03، K-05، K-07 | ۵ 🟡 |
+| R | R-01..R-30 | ۰ 🟢 |
+| K | K-01، K-02، K-05، K-07، K-10 | ۵ 🟡 |
 | | **جمع باز** | **۵** (P0 = K-01) |
 
-K-04 / K-06 / K-08 / K-09 در همین فاز 🟢 شدند.
+K-03 / K-04 / K-06 / K-08 / K-09 🟢. E-11 به‌خاطر مقدار پیش‌فرض مدل 🟡 است و ادامه‌اش K-10 است.
 
 ---
 
@@ -379,36 +438,37 @@ K-04 / K-06 / K-08 / K-09 در همین فاز 🟢 شدند.
 A 🟢 ─→ B 🟢 ─→ C 🟢 ─┬─→ F 🟢 ─→ H 🟢 ─→ J 🟢
                      └─→ G 🟢 ─┘
 D 🟢 پس از C-01 · E 🟢 · I 🟢
-K-04/K-06/K-08/K-09 🟢 (این شاخه)
-K-03 🟡 recorded (نه کاملاً سبز) · K-07 🟡 نیمه
-K-01 ⛔ / K-02 🟡 / K-05 🟡 ── موازی، ورودی مالک/CI
+K-03/K-04/K-06/K-08/K-09 🟢 (این شاخه) ─→ R 🟢 (Code Review)
+K-07 🟡 نیمه
+K-01 ⛔ / K-02 🟡 / K-05 🟡 / K-10 🟡 ── موازی، ورودی مالک/CI
 ```
 
-**قواعد اجرا (از S1 حفظ شد):** هر فاز = یک مرحلهٔ اجرا؛ تست fail-سپس-pass پیش از رفع؛ `tsc --noEmit` + `vitest run` + `npm run e2e` سبز؛ کامیت و push جدا per فاز؛ تیک 🟢 در همین سند؛ ورودی در `CHANGELOG.md`. K-03 فعلاً با خروجی مکتوب در `audit/baseline/` ثبت است، نه با suite تمام‌سبز.
+**قواعد اجرا (از S1 حفظ شد):** هر فاز = یک مرحلهٔ اجرا؛ تست fail-سپس-pass پیش از رفع؛ `tsc --noEmit` + `vitest run` + `npm run e2e` سبز؛ کامیت و push جدا per فاز؛ تیک 🟢 در همین سند؛ ورودی در `CHANGELOG.md`. K-03 اکنون با suite تمام‌سبز ثبت است (`audit/baseline/k03-SUMMARY.md`).
 
 ## §۶ — معیار پذیرش کل سند
 
 1. همهٔ ردیف‌های P0 داخل‌ریپو 🟢 شدند. تنها P0 باز **K-01** است (کلید واقعی — خارج از sandbox).
-2. K-01 تا K-03 هنوز بسته نیستند: K-03 baseline ثبت شد ولی vitest/e2e تمام‌سبز نیست؛ K-01/K-02 ورودی مالک/CI می‌خواهند.
+2. K-03 🟢 (tsc/vitest/e2e تمام‌سبز). K-01/K-02/K-05/K-10 ورودی مالک/CI می‌خواهند.
 3. I-02 پوشش A–H دارد؛ J و K فایل تست مستقل per-ID دارند (`phase-j-*.test.ts`، `phase-k-*.test.ts`).
 4. اندازه‌گیری‌های F در فاز F ثبت شد.
-5. `CHANGELOG.md` برای هر فاز یک ورودی (A…J کامل؛ K = `[27.17.15]` جزئی)؛ این سند تنها مرجع status است.
+5. `CHANGELOG.md` برای هر فاز یک ورودی (A…J کامل؛ K = `[27.17.15]`؛ R = `[27.17.16]`)؛ این سند تنها مرجع status است.
 
 ## §۷ — جدول وضعیت اجرا (برای تیک‌زدن)
 
 | فاز | وضعیت | تاریخ | کامیت |
 |---|---|---|---|
-| A | 🟢 | 2026-09-27 | 3887ed5 |
-| B | 🟢 | 2026-09-27 | 9b41a9c |
-| C | 🟢 | 2026-09-27 | f977650 |
-| D | 🟢 | 2026-09-27 | 87c3ade |
-| E | 🟢 | 2026-09-27 | 619c739 |
-| F | 🟢 | 2026-09-27 | 366a4e0 |
-| G | 🟢 | 2026-09-27 | 720c267 |
-| H | 🟢 | 2026-09-27 | f8b0bb1 |
+| A | 🟢 | 2026-09-27 | `d8c02cf` |
+| B | 🟢 | 2026-09-27 | `db443ec` |
+| C | 🟢 | 2026-09-27 | `c15ea77` |
+| D | 🟢 | 2026-09-27 | `763baec` |
+| E | 🟢 | 2026-09-27 | `d20659c` |
+| F | 🟢 | 2026-09-27 | `b18f389` |
+| G | 🟢 | 2026-09-27 | `720c267` |
+| H | 🟢 | 2026-09-27 | `433188d` |
 | I | 🟢 | 2026-09-27 | `d4f4cb7` |
 | J | 🟢 | 2026-09-27 | `5a4b51e` |
-| K | 🟡 جزئی | 2026-09-27 | `b2a8acb` (K-04/06/08/09 🟢؛ K-01/02/03/05/07 باز) |
+| K | 🟡 جزئی | 2026-09-27 | `b2a8acb` (K-03/04/06/08/09 🟢؛ K-01/02/05/07/10 با مالک) |
+| R | 🟢 | 2026-09-27 | `78b0545` … `51fc52e` (هش هر ردیف در جدول فاز R) |
 
 ---
 *پایان سند. هر تغییر وضعیت فقط با ویرایش همین فایل و کامیت مرتبط.*

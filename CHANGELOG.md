@@ -5,6 +5,46 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.16] — 2026-09-27 — Code review of phases A–K: fixes
+
+A review of the A–K fixes (tracked as phase **R** in `docs/UNIFIED_EXECUTION_PLAN.md`) found defects the fixes introduced or left open. All are fixed with regression tests (`src/ai/__tests__/review-fixes.test.ts` plus the phase test files named below). Suite: tsc clean, **vitest 1670/1670** (also under three shuffled orders), **e2e 209/209**.
+
+**Security**
+- **E-03** `ANTHROPIC_API_KEY` is never sent to a custom `baseURL`, and neither provider accepts an `apiKeyEnv` that names the real key for a custom endpoint (R0-07 regression).
+- **J-01/J-02** `run_command`/`run_tests`: `.ai-runtime/commands.json` is honoured only for a trusted project; argv[0] must equal an allowlist entry exactly (no `./scripts/npm`); an empty allowlist no longer admits any test binary; children run without credential variables.
+- **J-04** plan files scrub every string (a step `handoff` carried an echoed key into the plan file — found once the e2e credential trap really ran).
+- **A-01** the web UI sends the token (fetch header; `?access_token=` for the two GET SSE routes only).
+- **A-08** sessions, their plans, both SSE streams and the plan/session lists are bound to the owning token.
+
+**Correctness**
+- **F-04** trimmed tool results keep the SDK `ToolResultOutput` shape (providers sent tool messages without content from the 4th tool call on).
+- **C-01** an agent timeout returns even when the call ignores its abort; the task keeps its lock/slot until the work settles (max 30 s).
+- **B-07/G-07** Ctrl-C, shutdown and operator cancel end the run; only real feedback text re-plans.
+- **B-15/J-03** session history and the budget are per run (concurrent web runs shared them).
+- **B-06** reconciliation never closes an interaction a live process (this one or another) is working on.
+- **B-08** resuming a plan with an unjudged `done` step no longer crashes the acceptance check.
+- **C-07** a parent waiting in `delegate_task` lends its concurrency slot to the child (no deadlock).
+- **B-01** plan ownership is claimed atomically; **C-10** breaking a stale lock never steals a fresh one.
+- **B-18/B-19** tools of an unavailable or untrusted-skipped MCP server warn instead of failing start-up.
+- **J-05** checkpoints: no rollback over a concurrent writable step, stored under `runtimeDir`, restore removes only files created after the snapshot, bounded size and retention.
+- **E-07** chat answers get the detected language; **E-08** Persian requests quoting code stay Persian.
+- **E-01** the planner catalog lists every tool a persona may use (was cut at 16).
+- **D-07** git/command runners read output to the end; **D-03** mixed CRLF/LF files keep each line's ending.
+- **Usage** a chat turn is counted once; chat/clarification reviews report their own run only.
+- **C-02 / v27.17.2** a stream that fails before any output is re-asked without streaming; after output it fails.
+- **G-02** the no-TTY check runs after the free pre-flight and not in chat mode.
+
+**Performance / housekeeping**
+- **F-03** the tool-result cap trims to the budget instead of to 2 000 chars.
+- **C-11** one `stat` per log write; the newest 5 rotated logs kept; `HOTL_RETENTION_DAYS` (default 365) for plans/sessions; unique rotated names.
+- TaskRuntime waits are event-driven (no 10–15 ms polling).
+
+**Audit items**
+- **ARCH-003** one layered MCP-server loader (`loadLayeredMcpServers`) for CLI, server and runtime.
+- **OPS-001** the suite passes in shuffled order (phase11 mock queue reset; phase42 is an ordered scenario by design).
+- **Appendix B-1** `.env.example`.
+- `registry/models/local-llama.json` restored (a personal config had replaced it); e2e runs with an isolated `HOME`.
+
 ## [27.17.15] — 2026-09-27 — Phase K (partial): XSS encoder, R0 re-verify, baseline
 
 Does **not** close K-01 (real provider), K-02 (Windows Actions), K-03 (full-green suite), K-05 (deploy bind), or K-07 (live SIGKILL).
