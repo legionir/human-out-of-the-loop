@@ -19,6 +19,7 @@
  */
 import path from 'node:path';
 import { prepareCliEnvironment } from '../utils/config.js';
+import { resolveAndMaybePersistTrust } from '../utils/trust-project.js';
 import { color, err, out } from '../utils/output.js';
 import { McpServer } from '../../mcp/server.js';
 import { serveHttp, serveStdio } from '../../mcp/transports.js';
@@ -35,6 +36,8 @@ export interface ServeCommandOptions {
   /** Comma-separated list of local tool ids. */
   allowTools?: string;
   prefix?: string;
+  /** A-02: persist this project as trusted (for later run/repl/web). */
+  trustProject?: boolean;
 }
 
 /**
@@ -83,6 +86,7 @@ export function resolveToken(
 export async function serveCommand(options: ServeCommandOptions): Promise<number> {
   const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
   prepareCliEnvironment(projectRoot);
+  resolveAndMaybePersistTrust(projectRoot, options.trustProject === true);
 
   if (options.mcp !== true) {
     err(

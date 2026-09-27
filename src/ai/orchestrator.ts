@@ -26,6 +26,7 @@ import type { ToolCallLogOptions, ToolCallSink } from './runtime/tool-call-log.j
 import { ScrubbingPlanStore } from './runtime/secret-scrub.js';
 import { logStepEvent, parseStepEvent } from './runtime/step-events.js';
 import { JournalWriter, journalOptionsFromEnv } from './runtime/journal.js';
+import { isAbortError, throwIfAborted } from './runtime/abort.js';
 import { formatReviewForUser as formatFinalReview } from './runtime/review-formatter.js';
 import { RetryableAgentRuntime } from './runtime/agent-runtime-retry.js';
 
@@ -208,6 +209,11 @@ export interface OrchestratorRunOptions {
     planText: string,
     plan?: Plan,
   ) => Promise<{ confirmed: boolean; feedback?: string }>;
+  /**
+   * A-04: abort planning (and skip later LLM calls). The web server
+   * `POST /api/runs/:runId/cancel` fires this while state is `planning`.
+   */
+  abortSignal?: AbortSignal;
 }
 
 export interface OrchestratorResult {
@@ -846,7 +852,54 @@ export class Orchestrator {
     // The run's model (a per-run override wins) — for EVERY call of the run.
     const runModelId = ov?.modelId ?? this.config.defaultModelId;
     const mode = options?.mode ?? DEFAULT_RUN_MODE;
-    let planningResult = await this.planner.plan(userRequest, undefined, runModelId, mode);
+    const abortSignal = options?.abortSignal;
+    const cancelledResult = (summary: string, report: string): OrchestratorResult => {
+      if (interaction) {
+        this.sessionStore.updateInteraction(sessionId, interaction.id, {
+          outcome: 'cancelled',
+          reviewSummary: summary,
+          completedAt: Date.now(),
+        });
+      }
+      return {
+        kind: 'plan',
+        review: {
+          planId: 'none',
+          goal: userRequest,
+          outcome: 'cancelled',
+          acceptedFindings: [],
+          rejectedFindings: [],
+          incompleteSteps: [],
+          finalSummary: summary,
+          usage: emptyReviewUsage,
+        },
+        report,
+        planId: 'none',
+        sessionId,
+        executionResult: {
+          planId: 'none',
+          status: 'cancelled',
+          completedSteps: 0,
+          failedSteps: 0,
+          totalSteps: 0,
+          incompleteSteps: [],
+          replanningAttempts: 0,
+        },
+      };
+    };
+    let planningResult;
+    try {
+      throwIfAborted(abortSignal);
+      planningResult = await this.planner.plan(userRequest, undefined, runModelId, mode, abortSignal);
+    } catch (err) {
+      if (isAbortError(err) || abortSignal?.aborted) {
+        return cancelledResult(
+          'Run cancelled during planning.',
+          '🛑 Run cancelled during planning — no further model calls will be made.',
+        );
+      }
+      throw err;
+    }
 
     // v27.17.0: the request was a conversation, not work.  Answer it (with the
     // read-only tools), record it as an answered interaction, and stop — no
@@ -888,12 +941,24 @@ export class Orchestrator {
       const block = Object.entries(answers)
         .map(([q, a]) => `Q: ${q}\nA: ${a}`)
         .join('\n');
-      planningResult = await this.planner.plan(
-        `${userRequest}\n\nCLARIFICATIONS FROM USER:\n${block}`,
-        undefined,
-        runModelId,
-        mode,
-      );
+      try {
+        throwIfAborted(abortSignal);
+        planningResult = await this.planner.plan(
+          `${userRequest}\n\nCLARIFICATIONS FROM USER:\n${block}`,
+          undefined,
+          runModelId,
+          mode,
+          abortSignal,
+        );
+      } catch (err) {
+        if (isAbortError(err) || abortSignal?.aborted) {
+          return cancelledResult(
+            'Run cancelled during planning.',
+            '🛑 Run cancelled during planning — no further model calls will be made.',
+          );
+        }
+        throw err;
+      }
     }
 
     // R1-01: a re-plan INSIDE the clarification loop can come back as
@@ -1133,8 +1198,22 @@ export class Orchestrator {
     const summary = summarizePlan(plan);
     const planText = formatPlanForUser(summary);
 
+    if (abortSignal?.aborted) {
+      return cancelledResult(
+        'Run cancelled during planning.',
+        '🛑 Run cancelled during planning — no further model calls will be made.',
+      );
+    }
     const confirmation = await options.confirmCallback(planText, plan);
     if (!confirmation.confirmed) {
+      if (interaction) {
+        this.sessionStore.updateInteraction(sessionId, interaction.id, {
+          outcome: 'cancelled',
+          reviewSummary: `Plan was not confirmed by user. Feedback: ${confirmation.feedback ?? 'none'}`,
+          planIds: [plan.id ?? 'unknown'],
+          completedAt: Date.now(),
+        });
+      }
       return {
         kind: 'plan',
         review: {

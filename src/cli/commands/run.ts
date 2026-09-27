@@ -27,6 +27,7 @@ import {
   type ConfirmationResult,
 } from '../utils/confirm.js';
 import { prepareCliEnvironment } from '../utils/config.js';
+import { resolveAndMaybePersistTrust } from '../utils/trust-project.js';
 import { parseModePrefix, resolveRunMode, modeWords } from '../utils/mode-prefix.js';
 import type { RunMode } from '../../ai/modes.js';
 import { createProgressRenderer } from '../utils/streaming.js';
@@ -84,6 +85,11 @@ export interface RunCommandOptions {
    * the goal wins over this flag.
    */
   mode?: RunMode | string;
+  /**
+   * A-02: mark this project trusted (persist in global config) so its
+   * `registry/mcp-servers` layer is allowed to spawn.
+   */
+  trustProject?: boolean;
 }
 
 /** C3: option validation → undefined when OK, error message otherwise (exit 2). */
@@ -321,9 +327,12 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
   const renderer = createProgressRenderer({ verbose: opts.verbose ?? false });
 
 
+  const trustedProject = resolveAndMaybePersistTrust(projectRoot, opts.trustProject === true);
+
   const orchestrator = new Orchestrator({
     projectRoot,
     persistent,
+    trustedProject,
     ...(model ? { defaultModelId: model } : {}),
     ...(opts.timeoutMs !== undefined ? { agentTimeoutMs: opts.timeoutMs } : {}),
     ...(opts.maxSteps !== undefined ? { maxSteps: opts.maxSteps } : {}),

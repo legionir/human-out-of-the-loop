@@ -19,6 +19,7 @@ import { color, err, out, renderTable } from '../utils/output.js';
 import { loadMcpServerConfigs } from '../../ai/tools/mcp-bootstrap.js';
 import { listRemoteModels, modelSources } from '../../ai/models/list-models.js';
 import { prepareCliEnvironment } from '../utils/config.js';
+import { resolveAndMaybePersistTrust, untrustedProjectMcpMessage } from '../utils/trust-project.js';
 import { McpConnector } from '../../ai/tools/mcp-connector.js';
 import { ToolRegistry } from '../../ai/registries/tool-registry.js';
 
@@ -36,6 +37,8 @@ export interface ToolsCommandOptions extends RegistryCommandOptions {
    * which made an MCP config impossible to verify from the CLI.
    */
   mcp?: boolean;
+  /** A-02: persist trust so `tools --mcp` may spawn project-layer servers. */
+  trustProject?: boolean;
 }
 
 /** Dim one-line provenance line: which layers these entries came from. */
@@ -151,7 +154,8 @@ export async function toolsCommand(opts: ToolsCommandOptions): Promise<number> {
   let failed = 0;
 
   if (opts.mcp) {
-    const mcp = await collectMcpTools(root);
+    const trusted = resolveAndMaybePersistTrust(root, opts.trustProject === true);
+    const mcp = await collectMcpTools(root, trusted);
     failed = mcp.failed;
     // Notes go to stderr when the caller asked for JSON, so the document on
     // stdout stays parseable.
@@ -178,7 +182,7 @@ export async function toolsCommand(opts: ToolsCommandOptions): Promise<number> {
  * A listing must never affect a running plan: it uses its own ToolRegistry
  * and closes every connection (and child process) again.
  */
-async function collectMcpTools(root: string): Promise<{
+async function collectMcpTools(root: string, trusted: boolean): Promise<{
   rows: Array<Array<string | number>>;
   items: unknown[];
   notes: string[];
@@ -193,6 +197,11 @@ async function collectMcpTools(root: string): Promise<{
 
   if (configs.length === 0) {
     notes.push(`No MCP servers configured in ${path.relative(root, dir) || dir}.`);
+    return { rows, items, notes, failed };
+  }
+
+  if (!trusted) {
+    notes.push(untrustedProjectMcpMessage());
     return { rows, items, notes, failed };
   }
 

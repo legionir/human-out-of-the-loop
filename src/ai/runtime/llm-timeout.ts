@@ -1,4 +1,5 @@
 import { NoObjectGeneratedError } from 'ai';
+import { abortReason } from './abort.js';
 /**
  * Phase 30 (P5): bounded LLM calls.
  *
@@ -36,27 +37,50 @@ export class LlmTimeoutError extends Error {
 export async function withLlmTimeout<T>(
   label: string,
   ms: number | undefined,
-  call: (signal: AbortSignal) => Promise<T>
+  call: (signal: AbortSignal) => Promise<T>,
+  /** A-04: operator cancel (run abort) races the timeout and the call. */
+  external?: AbortSignal,
 ): Promise<T> {
+  if (external?.aborted) throw abortReason(external, label);
   const timeoutMs = ms && ms > 0 ? ms : DEFAULT_LLM_TIMEOUT_MS;
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const onExternalAbort = (): void => {
+    controller.abort(abortReason(external, label));
+  };
+  external?.addEventListener('abort', onExternalAbort, { once: true });
 
   try {
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        const error = new LlmTimeoutError(label, timeoutMs);
+        // Abort, then reject: the request is cancelled at the socket,
+        // so nothing keeps the process alive after the failure.
+        controller.abort(error);
+        reject(error);
+      }, timeoutMs);
+    });
+    const cancelled = external
+      ? new Promise<never>((_resolve, reject) => {
+          if (external.aborted) {
+            reject(abortReason(external, label));
+            return;
+          }
+          external.addEventListener(
+            'abort',
+            () => reject(abortReason(external, label)),
+            { once: true },
+          );
+        })
+      : undefined;
     return await Promise.race([
       call(controller.signal),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
-          const error = new LlmTimeoutError(label, timeoutMs);
-          // Abort, then reject: the request is cancelled at the socket,
-          // so nothing keeps the process alive after the failure.
-          controller.abort(error);
-          reject(error);
-        }, timeoutMs);
-      }),
+      timeout,
+      ...(cancelled ? [cancelled] : []),
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+    external?.removeEventListener('abort', onExternalAbort);
   }
 }
 

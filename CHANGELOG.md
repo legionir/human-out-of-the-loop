@@ -5,6 +5,19 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.4] — 2026-09-27 — Phase A: web-server auth, project trust, cancel-during-planning
+
+Closes every open row of **Phase A** in `docs/UNIFIED_EXECUTION_PLAN.md` (A-01…A-08).
+
+- **A-01 — web server bind + auth.** Default listen address is `127.0.0.1` (was `0.0.0.0`). A non-loopback bind without `--token` / `HOTL_SERVER_TOKEN` is refused at startup. When a token is configured, every `/api/*` route requires `Authorization: Bearer <token>` (401 otherwise). `HOTL_HOST` selects the bind address.
+- **A-02 — `--trust-project`.** The R0-08 gate is now wired on `run`, the REPL, `serve`, `mcp test` and `tools --mcp`. The flag persists the project root in `~/.human-out-of-the-loop/config.json` (`trustedProjects`) so later invocations see it.
+- **A-03 — no trust-gate bypass.** `tools --mcp`, `mcp test <id>` and `POST /api/mcp/:id/test` refuse to spawn a project-layer MCP server until the project is trusted.
+- **A-04 — cancel during planning.** `POST /api/runs/:runId/cancel` aborts the planner's in-flight LLM call (`AbortSignal`); no further `generateObject` runs.
+- **A-05 — idle TTL.** Clarification and confirmation waits time out after 30 minutes (`HOTL_RUN_TTL_MS`, `0` disables). The run ends `cancelled` and the session interaction is closed.
+- **A-06 — MCP `env`.** `McpServerConfigSchema.env` is a `Record<string,string>` passed through to the stdio child (on top of the R0-04 allowlist).
+- **A-07 — MCP URL / env-var names.** `http`/`sse` URLs must be `http:` or `https:` (`file://` is rejected). `tokenEnvVar` / `keyEnvVar` must match `^[A-Za-z_][A-Za-z0-9_]*$`.
+- **A-08 — ownership.** A run is bound to the presenting bearer token. A second valid token gets 403 on that run (and on confirm/cancel of its plan).
+
 ## [27.17.3] — 2026-09-25 — every tool call on one line, and the records behind it
 
 Asked for in the CLI: each AI tool call logged with the tool's type, its name,

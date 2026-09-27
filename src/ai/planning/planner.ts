@@ -4,6 +4,7 @@ import { environmentBullets } from '../environment-context.js';
 import { randomUUID } from 'node:crypto';
 import { NoObjectGeneratedError, generateObject } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from '../runtime/llm-timeout.js';
+import { isAbortError, throwIfAborted } from '../runtime/abort.js';
 import { reportLlmUsage, type LlmUsageReporter } from '../runtime/llm-usage.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
@@ -490,8 +491,10 @@ export class Planner {
     userRequest: string,
     usagePlanId?: string,
     modelId?: string,
-    mode: RunMode = DEFAULT_RUN_MODE
+    mode: RunMode = DEFAULT_RUN_MODE,
+    abortSignal?: AbortSignal,
   ): Promise<PlannerAssessment> {
+    throwIfAborted(abortSignal, 'Planner assessment');
     const agent = this.buildPlannerAgent(modelId);
 
     const language = detectLanguage(userRequest);
@@ -506,7 +509,7 @@ export class Planner {
           return await withLlmTimeout(
             'Planner assessment',
             this.config.timeoutMs,
-            (abortSignal) =>
+            (signal) =>
               generateObject({
                 model: agent.model,
                 system: agent.systemPrompt,
@@ -516,10 +519,12 @@ export class Planner {
                 schemaDescription:
                   'Assessment of whether a user request is clear enough to plan, ' +
                   'with optional clarification questions or a full plan.',
-                abortSignal,
-              })
+                abortSignal: signal,
+              }),
+            abortSignal,
           );
         } catch (err) {
+          if (isAbortError(err) || abortSignal?.aborted) throw err;
           // v27.17.2: a recoverable answer is used as it is — the retry is for
           // answers that CANNOT be read, not for providers that merely skip a
           // schema field.  (The reporter's gateway skipped `isClear` on every
@@ -538,6 +543,7 @@ export class Planner {
 
       return this.finishAssessment(object, usage, mode, language, usagePlanId);
     } catch (err) {
+      if (isAbortError(err) || abortSignal?.aborted) throw err;
       // v27.17.1: a provider that does not enforce the response schema can
       // answer almost correctly — one missing field is enough for the SDK to
       // refuse the object — and the run used to die right here with
@@ -599,8 +605,10 @@ export class Planner {
     userRequest: string,
     clarifications?: Record<string, string>,
     usagePlanId?: string,
-    modelId?: string
+    modelId?: string,
+    abortSignal?: AbortSignal,
   ): Promise<Plan> {
+    throwIfAborted(abortSignal, 'Plan generation');
     const agent = this.buildPlannerAgent(modelId);
 
     const prompt = buildPlanPrompt(userRequest, clarifications, this.config.projectRoot);
@@ -611,7 +619,7 @@ export class Planner {
           return await withLlmTimeout(
             'Plan generation',
             this.config.timeoutMs,
-            (abortSignal) =>
+            (signal) =>
               generateObject({
                 model: agent.model,
                 system: agent.systemPrompt,
@@ -619,10 +627,12 @@ export class Planner {
                 schema: PlanSchema,
                 schemaName: 'ExecutionPlan',
                 schemaDescription: 'A dependency-aware execution plan with atomic steps.',
-                abortSignal,
-              })
+                abortSignal: signal,
+              }),
+            abortSignal,
           );
         } catch (err) {
+          if (isAbortError(err) || abortSignal?.aborted) throw err;
           // v27.17.2: same recovery as the assessment — the provider can
           // return a usable plan that only its own (unenforced) schema
           // complained about, and that plan is used instead of paying for a
@@ -663,10 +673,12 @@ export class Planner {
     userRequest: string,
     usagePlanId?: string,
     modelId?: string,
-    mode: RunMode = DEFAULT_RUN_MODE
+    mode: RunMode = DEFAULT_RUN_MODE,
+    abortSignal?: AbortSignal,
   ): Promise<PlanningResult> {
     try {
-      const assessment = await this.assess(userRequest, usagePlanId, modelId, mode);
+      throwIfAborted(abortSignal);
+      const assessment = await this.assess(userRequest, usagePlanId, modelId, mode, abortSignal);
 
       if (assessment.kind === 'answer') {
         return {
@@ -697,7 +709,8 @@ export class Planner {
         };
       }
 
-      const plan = await this.generatePlan(userRequest, undefined, usagePlanId, modelId);
+      throwIfAborted(abortSignal);
+      const plan = await this.generatePlan(userRequest, undefined, usagePlanId, modelId, abortSignal);
       return {
         kind: 'plan',
         isClear: true,
@@ -706,6 +719,7 @@ export class Planner {
         errors: [],
       };
     } catch (err) {
+      if (isAbortError(err) || abortSignal?.aborted) throw err;
       const message = err instanceof Error ? err.message : String(err);
       // v27.17.1: in chat mode the user asked for a conversation, so a broken
       // classifier must not turn a greeting into "Planning failed".  Answer

@@ -27,6 +27,7 @@ import {
   saveGlobalConfig,
   type GlobalCliConfig,
 } from './utils/config.js';
+import { resolveAndMaybePersistTrust } from './utils/trust-project.js';
 import { color, err, out, renderTable } from './utils/output.js';
 import type { Command } from 'commander';
 import { readLine, type Suggestion } from './line-editor.js';
@@ -173,6 +174,8 @@ export interface InteractiveArgs {
   persistent?: boolean;
   yes?: boolean;
   splash?: boolean;
+  /** A-02: persist this directory as a trusted project. */
+  trustProject?: boolean;
 }
 
 /**
@@ -210,6 +213,9 @@ export function parseInteractiveArgs(args: string[]): InteractiveArgs | undefine
       case '--no-splash':
         result.splash = false;
         break;
+      case '--trust-project':
+        result.trustProject = true;
+        break;
       default:
         return undefined;
     }
@@ -226,6 +232,7 @@ export function initialState(cwd: string = process.cwd(), args: InteractiveArgs 
       : cwd;
   // The project's .env may carry HOTL_MODEL / HOTL_BASE_URL.
   loadDotEnv([root]);
+  if (args.trustProject) resolveAndMaybePersistTrust(root, true);
   return {
     cwd: root,
     model: args.model ?? envDefaultModelId(root) ?? config.defaultModel,

@@ -15,6 +15,7 @@
  */
 import { Router } from 'express';
 import type { Task } from '../../ai/schemas/task.js';
+import { sendOwnerForbidden } from '../run-control.js';
 import type { ServerContext } from '../types.js';
 
 /** Compact, wire-safe view of a task (no prompts beyond a short preview). */
@@ -59,6 +60,7 @@ export function usageRouter(ctx: ServerContext): Router {
       res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
       return;
     }
+    if (sendOwnerForbidden(ctx, req, res, run.ownerToken)) return;
     // Tasks are owned by the plan (the TaskRuntime is shared across runs —
     // that is what keeps the resource locks meaningful).
     const tasks = run.planId
@@ -85,6 +87,7 @@ export function usageRouter(ctx: ServerContext): Router {
       res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
       return;
     }
+    if (sendOwnerForbidden(ctx, req, res, run.ownerToken)) return;
     const task = ctx.orchestrator.taskRuntime.getDetails(req.params.taskId);
     // Scope check: a task is only cancellable through the run that owns its plan.
     if (!task || !run.planId || task.planId !== run.planId) {

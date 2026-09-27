@@ -13,6 +13,7 @@
 import fs from 'node:fs';
 import { Router } from 'express';
 import type { LogEntry } from '../../ai/runtime/observability-logger.js';
+import { findRunByPlanId, sendOwnerForbidden } from '../run-control.js';
 import type { RunState, ServerContext } from '../types.js';
 
 export function plansRouter(ctx: ServerContext): Router {
@@ -42,10 +43,14 @@ export function plansRouter(ctx: ServerContext): Router {
       res.status(404).json({ error: `Plan "${req.params.id}" not found.` });
       return;
     }
+    const owner = findRunByPlanId(ctx, req.params.id);
+    if (owner && sendOwnerForbidden(ctx, req, res, owner.ownerToken)) return;
     res.json(plan);
   });
 
   router.post('/api/plans/:id/cancel', async (req, res) => {
+    const owner = findRunByPlanId(ctx, req.params.id);
+    if (owner && sendOwnerForbidden(ctx, req, res, owner.ownerToken)) return;
     const result = await ctx.orchestrator.cancelPlan(req.params.id);
     if (!result.success) {
       res.status(409).json({ error: result.message });
@@ -60,6 +65,8 @@ export function plansRouter(ctx: ServerContext): Router {
       res.status(404).json({ error: `Plan "${req.params.id}" not found.` });
       return;
     }
+    const owner = findRunByPlanId(ctx, req.params.id);
+    if (owner && sendOwnerForbidden(ctx, req, res, owner.ownerToken)) return;
     // Fire-and-track: resume executes in the background; progress flows
     // through the SSE stream for this plan id.
     ctx.orchestrator
@@ -96,6 +103,7 @@ export function plansRouter(ctx: ServerContext): Router {
         .json({ error: `Plan "${req.params.id}" is not awaiting confirmation.` });
       return;
     }
+    if (sendOwnerForbidden(ctx, req, res, run.ownerToken)) return;
     run.confirmResolver?.({
       confirmed,
       feedback: typeof feedback === 'string' && feedback.trim() !== '' ? feedback.trim() : undefined,

@@ -23,6 +23,7 @@ import { Router } from 'express';
 import { McpConnector } from '../../ai/tools/mcp-connector.js';
 import { loadMcpServerConfigs } from '../../ai/tools/mcp-bootstrap.js';
 import { ToolRegistry } from '../../ai/registries/tool-registry.js';
+import { untrustedProjectMcpMessage } from '../../cli/utils/trust-project.js';
 import type { ServerContext } from '../types.js';
 
 export function registryRouter(ctx: ServerContext): Router {
@@ -112,6 +113,13 @@ export function registryRouter(ctx: ServerContext): Router {
     const config = configs.find((c) => c.id === req.params.id);
     if (!config) {
       res.status(404).json({ ok: false, error: `MCP server "${req.params.id}" not found in registry/mcp-servers.` });
+      return;
+    }
+    if (!ctx.orchestrator.config.trustedProject) {
+      res.status(403).json({
+        ok: false,
+        error: untrustedProjectMcpMessage(req.params.id),
+      });
       return;
     }
     try {

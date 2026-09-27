@@ -25,7 +25,7 @@
 
 | فاز | دامنه | تعداد ردیف باز | بحرانی (P0) |
 |---|---|---|---|
-| A | امنیت — سرور وب و گیت اعتماد | ۸ | ۵ |
+| A | امنیت — سرور وب و گیت اعتماد | ۰ 🟢 | ۰ |
 | B | صحت ارکستراسیون، state، پیکربندی و registry | ۲۲ | ۴ |
 | C | صحت runtime، تسک و ایجنت | ۱۴ | ۴ |
 | D | صحت ابزارها و journal | ۱۸ | ۰ |
@@ -36,7 +36,7 @@
 | I | تست، CI و مستندات | ۸ | ۱ |
 | J | قابلیت‌های جدید | ۹ | ۰ |
 | K | راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) | ۹ | ۱ |
-| | **جمع ردیف‌های باز** | **۱۴۲** | **۲۳** |
+| | **جمع ردیف‌های باز** | **۱۳۴** | **۱۸** |
 
 ---
 
@@ -45,18 +45,18 @@
 اولویت: P0 = پیش از هر دیپلوی/اشتراک‌گذاری · P1 = بلوک‌کننده کیفیت · P2 = مهم · P3 = بهبود.
 ستون «رفع/تست» خلاصه فنی است؛ شرح کامل، معیار پذیرش و محل دقیق در سند منبع (ستون آخر) آمده است.
 
-### فاز A — امنیت: سرور وب و گیت اعتماد 🔴 (P0)
+### فاز A — امنیت: سرور وب و گیت اعتماد 🟢 (۲۰۲۶-۰۹-۲۷، v27.17.4)
 
 | ID | Pri | عنوان | رفع / تست | منبع |
 |---|---|---|---|---|
-| **A-01** | P0 | سرور وب بدون auth روی 0.0.0.0 | bind پیش‌فرض 127.0.0.1؛ token middleware مشابه `serve --http` (`transports.ts:169-174` الگو)؛ `HOTL_SERVER_TOKEN`/`--token`؛ بدون توکن و host≠loopback → refuse startup. تست: درخواست بدون توکن → 401 روی همهٔ routeها | S2:SEC-001؛ S3:F-0003/0004/0005/0006/0008/0009؛ S1:غیردامنه(سرور) |
-| **A-02** | P0 | گیت اعتماد R0-08 نیمه‌پیاده — `--trust-project` وجود ندارد | سیم‌کشی پرچم در `run`/`repl`/`serve` + persist با `trust.ts` و `GlobalCliConfig.trustedProjects`. تست: پروژهٔ غیرمطمئن → mcp-servers لایهٔ پروژه spawn نشود؛ پس از پرچم → اجرا | S1:R0-08(بخش سیم‌کشی)؛ S2:CONF-001,ARCH-002,DEBT-002 |
-| **A-03** | P0 | دورزدن گیت اعتماد در ۳ مسیر introspection | `collectMcpTools` (`registry.ts:150`)، `mcpTestCommand` (`mcp.ts:87`)، `POST /api/mcp/:id/test` (`routes/registry.ts:110`) همگی با همان فیلتر `trustedProject`. تست برای هر ۳ مسیر | S2:SEC-003؛ S3:WF-0021..27(W1.3),WF-0038..45(W1.3) |
-| **A-04** | P0 | اجرا در مرحلهٔ پلن‌سازی قابل لغو نیست | `POST /api/runs/:runId/cancel` + `AbortSignal` تا planner. تست: لغو حین planning → هیچ فراخوانی LLM بعدی | S1:R11-10؛ S3:WF-0002 |
-| **A-05** | P0 | ران‌های رهاشده (clarification/confirmation) هرگز timeout نمی‌شوند | TTL قابل پیکربندی (پیش‌فرض ۳۰ دقیقه → `confirmed:false`) + cleanup resolver در cancel. تست: TTL → run `cancelled`، interaction بسته | S1:R6-03؛ S3:F-0002؛ S1:R6-04(map رشد) ادغام شد |
-| **A-06** | P1 | schema MCP فیلد `env` ندارد؛ تناقض کامنت | افزودن `env: Record<string,string>` (از EnvSource) به `McpServerConfigSchema` و پاس‌دادن به `createStdioTransport`؛ یا پاکسازی کامنت‌ها. تست: env سفارشی به فرزند برسد | S2:SEC-002 |
-| **A-07** | P1 | قید scheme/url و tokenEnvVar در schema MCP | zod refine: scheme فقط http/https برای http-transport؛ `tokenEnvVar` الگوی نام متغیر. تست: `file://` و env-var نامعتبر رد شود | S2:POT-004 |
-| **A-08** | P2 | ownership فقط با دانستن UUID | مدل مالکیت حداقلی: session/plan bound به توکن/کلاینت در سرور (پس از A-01)؛ یا صراحتاً پذیرفته‌شده و مستند. تست: کلاینت A روی run کلاینت B (پس از auth) 403 بگیرد | S3:F-0004/0007(SEC-001 propagation) |
+| **A-01** 🟢 | P0 | سرور وب بدون auth روی 0.0.0.0 | bind پیش‌فرض 127.0.0.1؛ token middleware مشابه `serve --http` (`transports.ts:169-174` الگو)؛ `HOTL_SERVER_TOKEN`/`--token`؛ بدون توکن و host≠loopback → refuse startup. تست: درخواست بدون توکن → 401 روی همهٔ routeها | S2:SEC-001؛ S3:F-0003/0004/0005/0006/0008/0009؛ S1:غیردامنه(سرور) |
+| **A-02** 🟢 | P0 | گیت اعتماد R0-08 نیمه‌پیاده — `--trust-project` وجود ندارد | سیم‌کشی پرچم در `run`/`repl`/`serve` + persist با `trust.ts` و `GlobalCliConfig.trustedProjects`. تست: پروژهٔ غیرمطمئن → mcp-servers لایهٔ پروژه spawn نشود؛ پس از پرچم → اجرا | S1:R0-08(بخش سیم‌کشی)؛ S2:CONF-001,ARCH-002,DEBT-002 |
+| **A-03** 🟢 | P0 | دورزدن گیت اعتماد در ۳ مسیر introspection | `collectMcpTools` (`registry.ts:150`)، `mcpTestCommand` (`mcp.ts:87`)، `POST /api/mcp/:id/test` (`routes/registry.ts:110`) همگی با همان فیلتر `trustedProject`. تست برای هر ۳ مسیر | S2:SEC-003؛ S3:WF-0021..27(W1.3),WF-0038..45(W1.3) |
+| **A-04** 🟢 | P0 | اجرا در مرحلهٔ پلن‌سازی قابل لغو نیست | `POST /api/runs/:runId/cancel` + `AbortSignal` تا planner. تست: لغو حین planning → هیچ فراخوانی LLM بعدی | S1:R11-10؛ S3:WF-0002 |
+| **A-05** 🟢 | P0 | ران‌های رهاشده (clarification/confirmation) هرگز timeout نمی‌شوند | TTL قابل پیکربندی (پیش‌فرض ۳۰ دقیقه → `confirmed:false`) + cleanup resolver در cancel. تست: TTL → run `cancelled`، interaction بسته | S1:R6-03؛ S3:F-0002؛ S1:R6-04(map رشد) ادغام شد |
+| **A-06** 🟢 | P1 | schema MCP فیلد `env` ندارد؛ تناقض کامنت | افزودن `env: Record<string,string>` (از EnvSource) به `McpServerConfigSchema` و پاس‌دادن به `createStdioTransport`؛ یا پاکسازی کامنت‌ها. تست: env سفارشی به فرزند برسد | S2:SEC-002 |
+| **A-07** 🟢 | P1 | قید scheme/url و tokenEnvVar در schema MCP | zod refine: scheme فقط http/https برای http-transport؛ `tokenEnvVar` الگوی نام متغیر. تست: `file://` و env-var نامعتبر رد شود | S2:POT-004 |
+| **A-08** 🟢 | P2 | ownership فقط با دانستن UUID | مدل مالکیت حداقلی: session/plan bound به توکن/کلاینت در سرور (پس از A-01)؛ یا صراحتاً پذیرفته‌شده و مستند. تست: کلاینت A روی run کلاینت B (پس از auth) 403 بگیرد | S3:F-0004/0007(SEC-001 propagation) |
 
 **معیار پذیرش فاز:** همهٔ endpointها تست 401/404/403 دارند؛ سه مسیر probe با گیت اعتماد؛ `tsc`/`vitest` سبز.
 
@@ -342,7 +342,7 @@
 
 | فاز | ردیف‌ها | شمار |
 |---|---|---|
-| A | A-01..A-08 | ۸ |
+| A | A-01..A-08 | ۰ 🟢 |
 | B | B-01..B-22 | ۲۲ |
 | C | C-01..C-14 | ۱۴ |
 | D | D-01..D-18 | ۱۸ |
@@ -383,7 +383,7 @@ I-01 زودهنگام؛ I-02 مستمر؛ I-08/I-07 انتهایی
 
 | فاز | وضعیت | تاریخ | کامیت |
 |---|---|---|---|
-| A | ⬜ | | |
+| A | 🟢 | 2026-09-27 | 3887ed5 |
 | B | ⬜ | | |
 | C | ⬜ | | |
 | D | ⬜ | | |

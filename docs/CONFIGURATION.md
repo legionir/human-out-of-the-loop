@@ -17,6 +17,9 @@
 |-------|-------|-------|
 | `HOTL_PROJECT_ROOT` | خیر | ریشه‌ی پروژه برای سرور (registry + `.ai-runtime`). اگر نباشد: `projectRoot` از global config، وگرنه `process.cwd()` |
 | `HOTL_PORT` | خیر | پورت HTTP سرور (پیش‌فرض: ۳۰۰۰) |
+| `HOTL_HOST` | خیر | آدرس bind سرور وب (پیش‌فرض: `127.0.0.1`). bind غیر-loopback بدون توکن در استارت رد می‌شود |
+| `HOTL_SERVER_TOKEN` | بله اگر host غیر-loopback باشد | توکن Bearer برای همهٔ `/api/*` (چند توکن با کاما). معادل `--token`. بدون توکن روی loopback، auth خاموش است |
+| `HOTL_RUN_TTL_MS` | خیر | مهلت انتظار clarification/confirmation (پیش‌فرض ۳۰ دقیقه؛ `0` = خاموش). پس از TTL ران `cancelled` می‌شود |
 | `HOTL_MODEL` | خیر | مدل پیش‌فرض سرور — اولویت از بالا: گزینه‌ی `model` در `createApp()` > `HOTL_MODEL` > `defaultModel` در global config > `gpt-4o`. از UI هم per-run قابل تغییر است (U3) |
 | `HOTL_REDACT_KEYS` | خیر | لیست کلیدهای اضافی برای redact شدن در observability (با کاما جدا می‌شود؛ مکمل `redactKeys` در config) |
 

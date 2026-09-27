@@ -154,7 +154,11 @@ function defaultCreateTransport(config: McpServerConfig, env: EnvSource): unknow
     // Phase 30 (P6): stdio is a real transport now — see
     // `mcp-stdio-transport.ts` (newline-delimited JSON-RPC over the
     // child's stdio, no extra dependency).
-    return createStdioTransport({ command: config.command, args: config.args });
+    return createStdioTransport({
+      command: config.command,
+      args: config.args,
+      ...(config.env ? { env: config.env } : {}),
+    });
   }
 
   // http / sse — use plain transport descriptor object accepted by

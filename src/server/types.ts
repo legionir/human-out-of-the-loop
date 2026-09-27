@@ -38,6 +38,12 @@ export interface RunState {
    * answer (the orchestrator records that as a cancelled run).
    */
   clarificationResolver?: (answers: Record<string, string> | null) => void;
+  /** A-04: abort in-flight planning (LLM calls honour this signal). */
+  abortController?: AbortController;
+  /** A-08: bearer token that created this run (undefined when auth is off). */
+  ownerToken?: string;
+  /** A-05: idle TTL while awaiting clarification/confirmation. */
+  ttlTimer?: ReturnType<typeof setTimeout>;
 }
 
 export interface ServerContext {
@@ -50,4 +56,8 @@ export interface ServerContext {
   logFilePath: string;
   /** One-time orchestrator initialization (lazy — first request triggers it). */
   ready: Promise<void>;
+  /** A-01: configured bearer tokens. Empty = auth middleware is off. */
+  authTokens: string[];
+  /** A-05: idle TTL for clarification/confirmation; 0 disables. */
+  runTtlMs: number;
 }

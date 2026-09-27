@@ -293,6 +293,10 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
       '--tool-log <mode>',
       'log every AI tool call with type, name, input and status: auto|on|off (default: auto — on unless HOTL_TOOL_LOG says otherwise)',
     )
+    .option(
+      '--trust-project',
+      "trust this project's registry/mcp-servers (persisted in ~/.human-out-of-the-loop/config.json)",
+    )
     .action(async (goal: string, opts: Record<string, string | boolean | undefined>) => {
       // `persistent` stays undefined when the flag is absent so
       // runCommand can fall back to the global config default.
@@ -312,6 +316,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         label: opts.label as string | undefined,
         thinking: opts.thinking as string | undefined,
         toolLog: opts.toolLog as string | undefined,
+        trustProject: opts.trustProject === true,
       });
       process.exitCode = result.exitCode;
     })
@@ -485,8 +490,12 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .addHelpText('after', MCP_HELP)
     .argument('<serverId>', 'MCP server id from the registry')
     .option('--project-root <dir>', 'project root (default: current directory)')
-    .action(async (id: string, opts: Record<string, string | undefined>) => {
-      process.exitCode = await mcpTestCommand(id, { projectRoot: opts.projectRoot });
+    .option('--trust-project', "trust this project's registry/mcp-servers (required to spawn a project-layer server)")
+    .action(async (id: string, opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await mcpTestCommand(id, {
+        projectRoot: opts.projectRoot as string | undefined,
+        trustProject: opts.trustProject === true,
+      });
     });
 
   // ── serve (phase 43: this runtime AS an MCP server) ───────────
@@ -501,6 +510,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .option('--read-only', 'expose only tools that cannot change anything')
     .option('--allow-tools <ids>', 'expose only these tool ids (comma-separated)')
     .option('--prefix <p>', 'name tools "<p>_<id>" (for clients that merge servers)')
+    .option('--trust-project', "trust this project's registry/mcp-servers (persisted for later run/repl)")
     .addHelpText(
       'after',
       helpBlock(
@@ -532,6 +542,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         readOnly: opts.readOnly === true,
         allowTools: opts.allowTools as string | undefined,
         prefix: opts.prefix as string | undefined,
+        trustProject: opts.trustProject === true,
       });
     });
 
@@ -602,11 +613,13 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
       '--mcp',
       'also connect to registry/mcp-servers and list the tools they expose (slower: starts stdio servers)',
     )
+    .option('--trust-project', "trust this project's registry/mcp-servers (required for --mcp to spawn them)")
     .action(async (opts: Record<string, string | boolean | undefined>) => {
       process.exitCode = await toolsCommand({
         projectRoot: opts.projectRoot as string | undefined,
         json: opts.json === true,
         mcp: opts.mcp === true,
+        trustProject: opts.trustProject === true,
       });
     })
     .addHelpText(

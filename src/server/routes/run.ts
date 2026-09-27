@@ -24,6 +24,8 @@ import { Router } from 'express';
 import type { Plan } from '../../ai/schemas/plan.js';
 import type { RunOverrides } from '../../ai/orchestrator.js';
 import { parseRunMode, type RunMode } from '../../ai/modes.js';
+import { getAuthToken } from '../auth.js';
+import { armRunTtl, cancelInFlightRun, clearRunTtl, sendOwnerForbidden } from '../run-control.js';
 import type { ServerContext } from '../types.js';
 
 export function runRouter(ctx: ServerContext): Router {
@@ -105,11 +107,14 @@ export function runRouter(ctx: ServerContext): Router {
     }
 
     const runId = randomUUID();
+    const abortController = new AbortController();
     ctx.runs.set(runId, {
       runId,
       sessionId: sessionId as string | undefined,
       state: 'planning',
       createdAt: Date.now(),
+      abortController,
+      ownerToken: getAuthToken(req),
     });
     const run = ctx.runs.get(runId)!;
 
@@ -119,6 +124,7 @@ export function runRouter(ctx: ServerContext): Router {
       try {
         const result = await ctx.orchestrator.run(message.trim(), {
           sessionId: run.sessionId,
+          abortSignal: abortController.signal,
           ...(runMode ? { mode: runMode } : {}),
           // U3: per-run overrides (validated above)
           ...(Object.keys(runOverrides).length > 0 ? { runOverrides } : {}),
@@ -136,8 +142,10 @@ export function runRouter(ctx: ServerContext): Router {
               questions,
               attempt: round,
             });
+            armRunTtl(ctx, run);
             return new Promise<Record<string, string> | null>((resolve) => {
               run.clarificationResolver = (answers) => {
+                clearRunTtl(run);
                 run.state = 'planning';
                 run.clarificationQuestions = undefined;
                 run.clarificationResolver = undefined;
@@ -159,8 +167,10 @@ export function runRouter(ctx: ServerContext): Router {
                 planText,
               });
             }
+            armRunTtl(ctx, run);
             return new Promise((resolve) => {
               run.confirmResolver = (decision) => {
+                clearRunTtl(run);
                 run.state = 'running';
                 resolve(decision);
               };
@@ -168,6 +178,7 @@ export function runRouter(ctx: ServerContext): Router {
           },
         });
 
+        clearRunTtl(run);
         run.sessionId = result.sessionId;
         run.state = 'done';
         run.outcome = result.review.outcome;
@@ -179,6 +190,7 @@ export function runRouter(ctx: ServerContext): Router {
           });
         }
       } catch (err) {
+        clearRunTtl(run);
         run.state = 'error';
         run.error = err instanceof Error ? err.message : String(err);
       }
@@ -197,12 +209,31 @@ export function runRouter(ctx: ServerContext): Router {
    * 400 when an answer is missing/empty (every pending question must be
    * answered — a partial answer cannot be fed back to the planner).
    */
+  /**
+   * A-04: cancel a run during planning (no plan id yet) or while it is
+   * waiting for a human. Also aborts in-flight planner LLM calls.
+   */
+  router.post('/api/runs/:runId/cancel', (req, res) => {
+    const run = ctx.runs.get(req.params.runId);
+    if (!run) {
+      res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
+      return;
+    }
+    if (sendOwnerForbidden(ctx, req, res, run.ownerToken)) return;
+    if (!cancelInFlightRun(ctx, run)) {
+      res.status(409).json({ error: `Run "${run.runId}" is already ${run.state}.` });
+      return;
+    }
+    res.json({ ok: true, runId: run.runId, cancelled: true });
+  });
+
   router.post('/api/runs/:runId/clarification', (req, res) => {
     const run = ctx.runs.get(req.params.runId);
     if (!run) {
       res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
       return;
     }
+    if (sendOwnerForbidden(ctx, req, res, run.ownerToken)) return;
     if (run.state !== 'awaiting-clarification' || !run.clarificationResolver) {
       res.status(409).json({
         error: `Run "${run.runId}" is not awaiting clarification (state: ${run.state}).`,
@@ -254,10 +285,21 @@ export function runRouter(ctx: ServerContext): Router {
       res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
       return;
     }
-    // Never leak the resolvers to the wire.
-    const { confirmResolver, clarificationResolver, ...publicState } = run;
+    if (sendOwnerForbidden(ctx, req, res, run.ownerToken)) return;
+    // Never leak the resolvers, abort controller, owner token or timer.
+    const {
+      confirmResolver,
+      clarificationResolver,
+      abortController,
+      ownerToken,
+      ttlTimer,
+      ...publicState
+    } = run;
     void confirmResolver;
     void clarificationResolver;
+    void abortController;
+    void ownerToken;
+    void ttlTimer;
     res.json(publicState);
   });
 

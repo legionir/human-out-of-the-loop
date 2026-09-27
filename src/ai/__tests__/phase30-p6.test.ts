@@ -507,7 +507,7 @@ describe('Phase 30 / P6 — `mcp test` does not leave the child running', () => 
       })
     );
 
-    const code = await mcpTestCommand('p6-cli', { projectRoot: tmpRoot });
+    const code = await mcpTestCommand('p6-cli', { projectRoot: tmpRoot, trusted: true });
 
     expect(code).toBe(0);
     // No `closeAll()` in the command → no SIGTERM → no marker file

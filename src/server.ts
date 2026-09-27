@@ -28,6 +28,13 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import express, { type Express } from 'express';
 import { Orchestrator } from './ai/orchestrator.js';
 import { loadDotEnv, loadGlobalConfig } from './cli/utils/config.js';
+import { resolveAndMaybePersistTrust } from './cli/utils/trust-project.js';
+import {
+  DEFAULT_BIND_HOST,
+  assertCanBind,
+  createApiAuthMiddleware,
+  resolveServerTokens,
+} from './server/auth.js';
 import { SseHub } from './server/sse.js';
 import { sessionsRouter } from './server/routes/sessions.js';
 import { plansRouter } from './server/routes/plans.js';
@@ -52,7 +59,25 @@ export interface ServerOptions {
   model?: string;
   /** Extra observability redaction keys (defaults still apply). */
   redactKeys?: string[];
+  /**
+   * A-01: bearer token(s) for `/api/*`. A comma-separated `HOTL_SERVER_TOKEN`
+   * is the env equivalent. When empty, auth is off (loopback-only).
+   */
+  token?: string;
+  authTokens?: string[];
+  /** A-02: persist this project as trusted and bootstrap its mcp-servers. */
+  trustProject?: boolean;
+  /** A-02: treat the project as trusted without persisting (tests). */
+  trustedProject?: boolean;
+  /**
+   * A-05: idle TTL for clarification/confirmation waits.
+   * Default 30 minutes; `0` disables. `HOTL_RUN_TTL_MS` overrides.
+   */
+  runTtlMs?: number;
 }
+
+/** A-05: 30 minutes. Abandoned clarification/confirmation becomes cancelled. */
+export const DEFAULT_RUN_TTL_MS = 30 * 60 * 1000;
 
 export interface CreatedServer {
   app: Express;
@@ -84,11 +109,16 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
   const runtimeDir = path.join(projectRoot, '.ai-runtime');
   const persistent = options.persistent ?? globalCfg.persistent ?? true;
 
+  const trustedProject =
+    options.trustedProject === true ||
+    resolveAndMaybePersistTrust(projectRoot, options.trustProject === true);
+
   const orchestrator = new Orchestrator({
     projectRoot,
     persistent,
     defaultModelId: model,
     redactKeys,
+    trustedProject,
   });
 
   const hub = new SseHub();
@@ -113,7 +143,15 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
   });
 
   const app = express();
+  app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
+
+  const authTokens = resolveServerTokens(options);
+  if (authTokens.length > 0) {
+    app.use(createApiAuthMiddleware(authTokens));
+  }
+
+  const runTtlMs = resolveRunTtlMs(options.runTtlMs);
 
   const ctx: ServerContext = {
     app,
@@ -123,6 +161,8 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
     projectRoot,
     runtimeDir,
     logFilePath: path.join(runtimeDir, 'observability.jsonl'),
+    authTokens,
+    runTtlMs,
     ready: orchestrator.initialize().catch((err) => {
       // Surface initialization failures on the first request instead of
       // crashing the process.
@@ -168,6 +208,12 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
     // before shutting down — otherwise shutdown races initialize's
     // filesystem reads (e.g. SIGINT during startup, or a test removing
     // its temp project while init is in flight).
+    for (const run of ctx.runs.values()) {
+      if (run.ttlTimer) {
+        clearTimeout(run.ttlTimer);
+        run.ttlTimer = undefined;
+      }
+    }
     await ctx.ready.catch(() => {});
     await orchestrator.shutdown();
   };
@@ -193,17 +239,29 @@ export interface ServeOptions extends ServerOptions {
   host?: string;
 }
 
+function resolveRunTtlMs(override?: number): number {
+  if (override !== undefined) return override;
+  const raw = process.env.HOTL_RUN_TTL_MS;
+  if (raw !== undefined && raw.trim() !== '') {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return DEFAULT_RUN_TTL_MS;
+}
+
 export async function startServer(options: ServeOptions = {}): Promise<CreatedServer> {
+  const host = options.host ?? process.env.HOTL_HOST ?? DEFAULT_BIND_HOST;
+  const tokens = resolveServerTokens(options);
+  assertCanBind(host, tokens);
   const { app, ctx, close } = createApp(options);
   const port = options.port ?? Number(process.env.HOTL_PORT ?? 3000);
-  const host = options.host ?? '0.0.0.0';
 
   await new Promise<void>((resolve, reject) => {
     const server = app.listen(port, host, () => resolve());
     server.on('error', reject);
   });
   // eslint-disable-next-line no-console
-  console.log(`[hotl-ui] http://localhost:${port}  (project root: ${ctx.projectRoot})`);
+  console.log(`[hotl-ui] http://${host === '0.0.0.0' ? 'localhost' : host}:${port}  (project root: ${ctx.projectRoot})`);
   return { app, ctx, close };
 }
 
@@ -258,6 +316,10 @@ function parseArgs(argv: string[]): Partial<ServeOptions> {
       options.port = Number(argv[++i]);
     } else if (arg === '--host' && argv[i + 1]) {
       options.host = argv[++i];
+    } else if (arg === '--token' && argv[i + 1]) {
+      options.token = argv[++i];
+    } else if (arg === '--trust-project') {
+      options.trustProject = true;
     }
   }
   return options;
