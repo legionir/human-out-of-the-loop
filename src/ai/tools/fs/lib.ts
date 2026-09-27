@@ -215,6 +215,27 @@ function withRealPaths(allowedDirectories: string[]): string[] {
 }
 
 /**
+ * A checked real path, expressed under the root as the caller gave it
+ * (`/var/…` rather than `/private/var/…`, `RUNNER~1` rather than the long
+ * name), so relative paths and protected-path checks computed against the
+ * configured root stay right.  The containment check has already run on
+ * the real path.
+ */
+function inCallerForm(resolved: string, allowedDirs: string[]): string {
+  const normalized = normalizePath(resolved);
+  if (isPathWithinAllowedDirectories(normalized, allowedDirs)) return resolved;
+  for (const dir of allowedDirs) {
+    const real = realAllowedCache.get(dir);
+    if (!real || real === dir) continue;
+    if (isPathWithinAllowedDirectories(normalized, [real])) {
+      const rel = path.relative(real, normalized);
+      return rel ? path.join(dir, rel) : dir;
+    }
+  }
+  return resolved;
+}
+
+/**
  * Resolve the Unicode-equivalent (NFC/NFD) form of a path that does not exist
  * yet, component by component, refusing ambiguous matches.
  *
@@ -319,13 +340,13 @@ export async function validatePath(
         `Access denied - symlink target outside allowed directories: ${realPath} not in ${allowedDirectories.join(', ')}`
       );
     }
-    return realPath;
+    return inCallerForm(realPath, allowedDirs);
   } catch (error) {
     if (error instanceof PathAccessError) throw error;
     // For a path that does not exist yet, resolve its existing ancestors.
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       try {
-        return await resolveUnicodeEquivalentPath(absolute, allowedDirectories);
+        return inCallerForm(await resolveUnicodeEquivalentPath(absolute, allowedDirs), allowedDirs);
       } catch (resolutionError) {
         if (resolutionError instanceof PathAccessError) throw resolutionError;
         if ((resolutionError as NodeJS.ErrnoException).code === 'ENOENT') {

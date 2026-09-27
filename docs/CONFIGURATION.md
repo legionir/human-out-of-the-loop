@@ -83,6 +83,7 @@
 | `HOTL_ALLOWED_COMMANDS` | خیر | لیست باینری‌های مجاز برای `run_command` (با کاما). هر مورد دقیقاً با argv[0] تطبیق می‌شود: نام خالی (`npm`) فقط همان نام از PATH را مجاز می‌کند، نه `./scripts/npm`. `.ai-runtime/commands.json` فقط برای پروژهٔ trusted (`--trust-project`) خوانده می‌شود |
 | `HOTL_TEST_COMMAND` | خیر | argv دستور تست پروژه برای `run_tests` / حلقهٔ خودتأییدی (جدا با فاصله). فرزند بدون متغیرهای credential (کلید/توکن/رمز) اجرا می‌شود |
 | `HOTL_RETENTION_DAYS` | خیر | نگه‌داری پلن‌ها و sessionهای `.ai-runtime` (روز؛ پیش‌فرض ۳۶۵؛ `0` = همه نگه داشته شوند). checkpointها ۷ روز، و از `observability.jsonl` چرخش‌یافته فقط ۵ فایل آخر می‌ماند |
+| `HOTL_UNREADABLE_RETRY_MS` | خیر | اگر provider/gateway پاسخ HTTP 200 با بدنه‌ی نامعتبر بدهد (مثلاً `upstream_error: temporarily unavailable`)، درخواست تا ۳ بار تکرار می‌شود؛ فاصله = این مقدار × شماره‌ی تلاش (میلی‌ثانیه؛ پیش‌فرض ۲۰۰۰) |
 | `HOTL_PLAN_EXAMPLES` | خیر | `0`/`false`/`off` = خاموش‌کردن نمونه‌های پلن موفق در پرامپت پلن‌ساز |
 | `HOTL_MODE` | خیر | حالت پیش‌فرض اجرا: `auto` (پیش‌فرض؛ سؤال جواب داده می‌شود، کار واقعی پلن می‌شود) \| `chat` (هرگز پلن نکن) \| `plan` (هرگز جواب نده). ترتیب: پیشوند `@chat`/`@plan` در خود درخواست > `--mode` > `HOTL_MODE` > `defaultMode` در global config > `auto`. مقدار نامعتبر = خطای مصرف (exit 2) با نام منبع |
 

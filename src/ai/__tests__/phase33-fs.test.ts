@@ -65,9 +65,11 @@ describe('Phase 33 — validatePath (ported from the MCP reference server)', () 
     fs.rmSync(outside, { recursive: true, force: true });
   });
 
-  it('accepts a path inside the allowed directory and returns its real path', async () => {
+  it('accepts a path inside the allowed directory and returns it under the root as given', async () => {
+    // Symlinks are resolved for the check; the answer keeps the caller's
+    // spelling of the root (macOS /var vs /private/var, Windows 8.3 names).
     const resolved = await validatePath('src/index.ts', [root]);
-    expect(resolved).toBe(fs.realpathSync(path.join(root, 'src', 'index.ts')));
+    expect(resolved).toBe(path.join(root, 'src', 'index.ts'));
   });
 
   it('refuses a lexical traversal out of the allowed directory', async () => {
@@ -126,7 +128,7 @@ describe('Phase 33 — validatePath (ported from the MCP reference server)', () 
 
   it('resolves a missing nested path through its existing ancestors', async () => {
     const resolved = await validatePath('src/new/deep/file.txt', [root]);
-    expect(resolved).toBe(path.join(fs.realpathSync(path.join(root, 'src')), 'new', 'deep', 'file.txt'));
+    expect(resolved).toBe(path.join(root, 'src', 'new', 'deep', 'file.txt'));
   });
 
   it('reports PARENT_MISSING when an allowed directory itself does not exist', async () => {

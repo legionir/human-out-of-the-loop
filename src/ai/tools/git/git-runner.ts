@@ -557,7 +557,7 @@ export async function ensureRepo(
   const top = await run(resolved, ['rev-parse', '--show-toplevel'], {
     timeoutMs: options.timeoutMs,
   });
-  const root = top.ok ? top.stdout.trim() : resolved;
+  const root = top.ok ? inDirectoryForm(top.stdout.trim(), resolved) : resolved;
 
   // The repository root may sit *above* the workspace (a project directory
   // inside a bigger checkout). That is allowed — the tools still only ever name
@@ -569,6 +569,22 @@ export async function ensureRepo(
     bare: false,
     display: path.relative(projectRoot, resolved) || '.',
   };
+}
+
+/**
+ * git prints the top level as a real path (`/private/var/…` on macOS,
+ * `C:/Users/runneradmin/…` for a `RUNNER~1` workspace on Windows).  Express
+ * it relative to the directory as the caller spelled it, so comparisons with
+ * workspace paths (path.relative) do not see two different trees.
+ */
+function inDirectoryForm(top: string, directory: string): string {
+  if (top === '') return top;
+  try {
+    const rel = path.relative(fs.realpathSync.native(directory), fs.realpathSync.native(top));
+    return path.resolve(directory, rel);
+  } catch {
+    return top;
+  }
 }
 
 export function isFailure<T extends { ok: boolean }>(value: T | GitFailure): value is GitFailure {

@@ -150,7 +150,8 @@ suite('Phase 41 — git runner core', () => {
     const repo = await ensureRepo('src', root);
     expect(repo.ok).toBe(true);
     if (repo.ok) {
-      expect(repo.root).toBe(fs.realpathSync(root));
+      // Same spelling as the workspace (git itself prints the real path).
+      expect(repo.root).toBe(path.resolve(root));
       expect(repo.display).toBe('src');
     }
   });

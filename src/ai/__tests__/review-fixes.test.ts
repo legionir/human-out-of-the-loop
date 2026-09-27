@@ -583,7 +583,8 @@ describe('validatePath with a root reached through a symlink (macOS /var, Window
     fs.writeFileSync(path.join(real, 'a.txt'), 'x');
     const link = path.join(base, 'link');
     fs.symlinkSync(real, link, 'dir');
-    await expect(validatePath(path.join(link, 'a.txt'), [link])).resolves.toBe(fs.realpathSync(path.join(real, 'a.txt')));
+    await expect(validatePath(path.join(link, 'a.txt'), [link])).resolves.toBe(path.join(link, 'a.txt'));
+    await expect(validatePath(path.join(fs.realpathSync(real), 'a.txt'), [link])).resolves.toBe(path.join(link, 'a.txt'));
     await expect(validatePath('new/dir/b.txt', [link])).resolves.toContain('b.txt');
     const outside = path.join(base, 'outside');
     fs.mkdirSync(outside);
@@ -594,7 +595,8 @@ describe('validatePath with a root reached through a symlink (macOS /var, Window
 });
 
 describe('an unreadable provider response (HTTP 200, body not a valid response)', () => {
-  it('is retried once and described with its status and body', async () => {
+  it('is retried (up to 3 attempts) and described with its status and body', async () => {
+    process.env.HOTL_UNREADABLE_RETRY_MS = '0';
     const { APICallError } = await import('ai');
     const { withStructuredRetry, describeLlmError } = await import('../runtime/llm-timeout.js');
     const garbled = () =>
@@ -614,11 +616,15 @@ describe('an unreadable provider response (HTTP 200, body not a valid response)'
       }),
     ).resolves.toBe('ok');
     expect(calls).toBe(2);
+    calls = 0;
+    await expect(withStructuredRetry(async () => { calls += 1; throw garbled(); })).rejects.toThrow('Invalid JSON response');
+    expect(calls).toBe(3);
     expect(describeLlmError(garbled())).toBe('Invalid JSON response (HTTP 200, body: "<html>upstream timeout</html>")');
     // A real API error (401) is still not retried here.
     calls = 0;
     const unauthorized = new APICallError({ message: 'Unauthorized', url: 'x', requestBodyValues: {}, statusCode: 401 });
     await expect(withStructuredRetry(async () => { calls += 1; throw unauthorized; })).rejects.toBe(unauthorized);
     expect(calls).toBe(1);
+    delete process.env.HOTL_UNREADABLE_RETRY_MS;
   });
 });

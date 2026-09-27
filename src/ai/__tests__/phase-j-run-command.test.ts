@@ -112,7 +112,8 @@ describe('J-01 — run_command / run_tests', () => {
       timeoutMs: 5_000,
     });
     expect(result.ok).toBe(true);
-    expect(result.stdout).toBe(nested);
+    // The child reports the OS's real path (macOS: /private/var/…).
+    expect(fs.realpathSync(result.stdout)).toBe(fs.realpathSync(nested));
   });
 
   it('kills on timeout and caps output with truncated=true', async () => {

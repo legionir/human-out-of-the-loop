@@ -119,6 +119,15 @@ export function describeLlmError(err: unknown): string {
   return `${message} (HTTP ${status ?? '?'}, body: ${shown ? `"${shown}${body.length > 200 ? '…' : ''}"` : 'empty'})`;
 }
 
+function unreadableRetryDelayMs(): number {
+  const raw = Number(process.env.HOTL_UNREADABLE_RETRY_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 2_000;
+}
+
+function sleep(ms: number): Promise<void> {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
 export async function withStructuredRetry<T>(
   call: () => Promise<T>,
   attempts = 2,
@@ -128,9 +137,14 @@ export async function withStructuredRetry<T>(
     try {
       return await call();
     } catch (err) {
-      const retryable = NoObjectGeneratedError.isInstance(err) || isUnreadableResponse(err);
-      if (attempt >= attempts || !retryable) throw err;
+      const unreadable = isUnreadableResponse(err);
+      const retryable = NoObjectGeneratedError.isInstance(err) || unreadable;
+      // A gateway that is "temporarily unavailable" needs a moment, not an
+      // immediate identical request: up to 3 attempts, 2s then 4s apart.
+      const limit = unreadable ? Math.max(attempts, 3) : attempts;
+      if (attempt >= limit || !retryable) throw err;
       onAttemptError?.(err);
+      if (unreadable) await sleep(unreadableRetryDelayMs() * attempt);
     }
   }
 }
