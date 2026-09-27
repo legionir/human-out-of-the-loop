@@ -50,11 +50,22 @@ function log(...args) {
   process.stdout.write(`${args.join(' ')}\n`);
 }
 
+/**
+ * The CLI's global config (~/.human-out-of-the-loop/config.json — trusted
+ * projects, defaults) must never be the developer's own: every CLI process
+ * of a run gets one scratch HOME.
+ */
+function isolatedEnv(env = {}) {
+  const home = path.join(scratchRoot, '.home');
+  fs.mkdirSync(home, { recursive: true });
+  return { ...process.env, HOME: home, USERPROFILE: home, ...env };
+}
+
 function run(args, { cwd = scratchRoot, env = {}, timeoutMs = 120_000 } = {}) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [CLI, ...args], {
       cwd,
-      env: { ...process.env, ...env },
+      env: isolatedEnv(env),
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     let stdout = '';
@@ -77,7 +88,7 @@ function run(args, { cwd = scratchRoot, env = {}, timeoutMs = 120_000 } = {}) {
 function spawnCli(args, { cwd = scratchRoot, env = {} } = {}) {
   const child = spawn(process.execPath, [CLI, ...args], {
     cwd,
-    env: { ...process.env, ...env },
+    env: isolatedEnv(env),
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const closed = new Promise((resolve) => child.on('close', (code) => resolve({ code, closed: true })));
@@ -292,10 +303,11 @@ scenarios.files = async () => {
   const probeRequests = stubRequests().filter((body) => JSON.stringify(body).includes('FILEPROBE'));
   // The tree result travels back as an escaped JSON string inside a later
   // function_call_output item, so assert on markers of the tool's own payload
-  // (`formatted` + a real entry name) rather than on quoted JSON.
+  // (`entriesVisited` + a real entry name) rather than on quoted JSON.  F-03
+  // dropped the duplicate `formatted` text copy of the tree.
   const treeResultSeen = probeRequests.some((body) => {
     const text = JSON.stringify(body);
-    return text.includes('formatted') && text.includes('edit.txt');
+    return text.includes('entriesVisited') && text.includes('edit.txt');
   });
   check('files: the directory_tree result reached the next model turn', treeResultSeen);
   check('files: every step completed', Boolean(plan) && plan.steps.every((s) => s.status === 'done'));
@@ -1301,8 +1313,15 @@ scenarios.mcpserve = async () => {
     )
   );
 
-  // (1) Our own MCP client connects to our own MCP server.
-  const listing = await run(['tools', '--mcp', '--json', '--project-root', root]);
+  // R0-08 / A-03: an untrusted project's own MCP servers are not spawned.
+  const refused = await run(['tools', '--mcp', '--project-root', root]);
+  check(
+    'mcpserve: an untrusted project\'s server is not spawned',
+    /untrusted project/.test(refused.stdout + refused.stderr) && !refused.stdout.includes('self_read_file'),
+  );
+
+  // (1) Our own MCP client connects to our own MCP server (project trusted once).
+  const listing = await run(['tools', '--mcp', '--json', '--trust-project', '--project-root', root]);
   let tools = [];
   try {
     tools = JSON.parse(listing.stdout);
@@ -1528,7 +1547,7 @@ scenarios.chat = async () => {
   check(
     'chat: the session records an answered interaction',
     readSessions(root).some(
-      (session) => session.includes('"outcome": "success"') && session.includes('رانتایم')
+      (session) => /"outcome":\s*"success"/.test(session) && session.includes('رانتایم')
     ),
     'session file'
   );
@@ -1745,7 +1764,11 @@ scenarios.mcp = async () => {
     )
   );
 
-  const { stdout } = await run(['tools', '--mcp', '--project-root', root]);
+  const untrusted = await run(['mcp', 'test', 'e2e-stdio', '--project-root', root]);
+  check('mcp: `mcp test` refuses a project server of an untrusted project', untrusted.code !== 0);
+
+  // Trust persists (in the scratch HOME): later commands need no flag.
+  const { stdout } = await run(['tools', '--mcp', '--trust-project', '--project-root', root]);
   check('mcp: the live server and its tool are listed', stdout.includes('✔ e2e-stdio') && stdout.includes('demo_echo'));
   check('mcp: the dead server is reported, not hidden', stdout.includes('✖ e2e-dead'));
 

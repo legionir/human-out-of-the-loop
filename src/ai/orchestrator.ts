@@ -1722,7 +1722,7 @@ export class Orchestrator {
     let errors: string[] = [];
 
     try {
-      const agent = this.planner.buildChatAgent(modelId, mode === 'chat' ? toolIds : undefined);
+      const agent = this.planner.buildChatAgent(modelId, mode === 'chat' ? toolIds : undefined, language);
       const run = await this.agentRuntime.run({
         agent,
         taskId: `chat:${interactionId ?? sessionId}`,

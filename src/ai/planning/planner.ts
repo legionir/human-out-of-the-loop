@@ -851,7 +851,11 @@ Answer the request above directly, in the user's language. Use the read-only too
    * catalog.  `toolIds: []` gives a pure text answer (used by previews, which
    * must not touch the project).
    */
-  buildChatAgent(modelId?: string, toolIds?: readonly string[]): ResolvedAgent {
+  buildChatAgent(
+    modelId?: string,
+    toolIds?: readonly string[],
+    languageHint?: DetectedLanguage,
+  ): ResolvedAgent {
     return createAgent({
       agentDefinition: {
         id: 'chat-runtime',
@@ -867,6 +871,10 @@ Answer the request above directly, in the user's language. Use the read-only too
         toolRegistry: this.config.toolRegistry,
         modelRegistry: this.config.modelRegistry,
       },
+      // E-07 moved the language rule out of the prompt into the agent: the
+      // chat agent must get it too, or a Persian question is answered in
+      // whatever language the model prefers.
+      ...(languageHint ? { languageHint } : {}),
     });
   }
 

@@ -494,3 +494,23 @@ describe('E-01 — the planner catalog shows every tool a persona may use', () =
     expect(line).not.toContain('…+');
   });
 });
+
+describe('E-07 — a chat answer keeps the user\'s language', () => {
+  it('the chat agent of a Persian question is told to answer in Persian', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-lang-'));
+    const orch = new Orchestrator({
+      projectRoot: root,
+      persistent: false,
+      env: { ...process.env, OPENAI_API_KEY: 'sk-test' },
+    });
+    await orch.initialize();
+    const { detectLanguage } = await import('../language.js');
+    const planner = (orch as unknown as {
+      planner: { buildChatAgent: (m?: string, t?: readonly string[], l?: unknown) => { systemPrompt: string } };
+    }).planner;
+    const agent = planner.buildChatAgent(undefined, undefined, detectLanguage('این پروژه چه کاری انجام می‌دهد؟'));
+    expect(agent.systemPrompt).toMatch(/Persian/);
+    await orch.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
