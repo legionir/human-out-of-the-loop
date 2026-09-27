@@ -813,9 +813,17 @@ export class Orchestrator {
     // B-19: tools of an MCP server that is down — or whose layer was skipped
     // because the project is untrusted — are missing, and that must not stop
     // start-up: skills and personas referencing them get a warning instead.
+    const skippedLayerHasServers = allMcpServerLayers
+      .filter((l) => !mcpServerLayers.includes(l))
+      .some((l) => {
+        try {
+          return fs.readdirSync(l.dir).some((f) => f.endsWith('.json'));
+        } catch {
+          return false;
+        }
+      });
     const mcpToolsMayBeMissing =
-      mcp.connectionResults.some((r) => !r.success) ||
-      mcpServerLayers.length < allMcpServerLayers.length;
+      mcp.connectionResults.some((r) => !r.success) || skippedLayerHasServers;
     if (mcp.connectionResults.length > 0 || mcpToolsMayBeMissing) {
       this.skillRegistry.setAllowUnknownTools(true);
       for (const c of mcp.connectionResults.filter((r) => !r.success)) {
