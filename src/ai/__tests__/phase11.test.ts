@@ -253,6 +253,10 @@ describe('AcceptanceChecker — checkStep', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Queued mockResolvedValueOnce answers survive clearAllMocks — a test run
+    // after another that left one unconsumed would read it (OPS-001).
+    mockGenerateObject.mockReset();
+    mockGenerateText.mockReset();
     env = setup();
     checker = new AcceptanceChecker(createCheckerConfig(env));
   });
@@ -332,6 +336,10 @@ describe('AcceptanceChecker — PlanRuntime hook (Phase 20)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Queued mockResolvedValueOnce answers survive clearAllMocks — a test run
+    // after another that left one unconsumed would read it (OPS-001).
+    mockGenerateObject.mockReset();
+    mockGenerateText.mockReset();
     env = setup();
   });
 
@@ -579,6 +587,10 @@ describe('Failure type distinction', () => {
 
   it('quality failure comes from AcceptanceChecker', async () => {
     vi.clearAllMocks();
+    // Queued mockResolvedValueOnce answers survive clearAllMocks — a test run
+    // after another that left one unconsumed would read it (OPS-001).
+    mockGenerateObject.mockReset();
+    mockGenerateText.mockReset();
     const env = setup();
     const checker = new AcceptanceChecker(createCheckerConfig(env));
 
@@ -617,6 +629,10 @@ describe('Failure type distinction', () => {
 describe('Quality failure → re-planning integration', () => {
   it('onQualityFailure callback is invoked with correct args (Phase 20 hook)', async () => {
     vi.clearAllMocks();
+    // Queued mockResolvedValueOnce answers survive clearAllMocks — a test run
+    // after another that left one unconsumed would read it (OPS-001).
+    mockGenerateObject.mockReset();
+    mockGenerateText.mockReset();
     const env = setup();
     const failures: any[] = [];
 

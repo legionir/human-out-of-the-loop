@@ -52,6 +52,8 @@ try {
 } catch {
   hasGit = false;
 }
+// These suites are one scenario on one repository (each test builds on the
+// previous commit/branch/stash), so their order is part of the test.
 const suite = hasGit ? describe : describe.skip;
 
 let root = '';
@@ -83,7 +85,7 @@ afterAll(() => {
   for (const dir of [root, bare]) if (dir) fs.rmSync(dir, { recursive: true, force: true });
 });
 
-suite('Phase 42 — the safety model', () => {
+suite('Phase 42 — the safety model', { shuffle: false }, () => {
   it('protects main and master by default, and can be configured', () => {
     expect(protectedBranches({})).toEqual(['main', 'master']);
     expect(protectedBranches({ HOTL_PROTECTED_BRANCHES: 'trunk, release/*' })).toEqual([
@@ -135,7 +137,7 @@ suite('Phase 42 — the safety model', () => {
   });
 });
 
-suite('Phase 42 — git_add and git_commit', () => {
+suite('Phase 42 — git_add and git_commit', { shuffle: false }, () => {
   it('stages paths and reports the before/after state', async () => {
     const add = executeOf(createGitAddTool(root));
     fs.writeFileSync(path.join(root, 'feature.ts'), 'export const added = true;\n');
@@ -248,7 +250,7 @@ suite('Phase 42 — git_add and git_commit', () => {
   });
 });
 
-suite('Phase 42 — branches and checkout', () => {
+suite('Phase 42 — branches and checkout', { shuffle: false }, () => {
   it('creates a branch and switches to it, without confirmation', async () => {
     const create = executeOf(createGitCreateBranchTool(root));
     const result = await create({ directory: '.', name: 'feature/guarded-write' });
@@ -311,7 +313,7 @@ suite('Phase 42 — branches and checkout', () => {
   });
 });
 
-suite('Phase 42 — git_reset', () => {
+suite('Phase 42 — git_reset', { shuffle: false }, () => {
   it('unstages everything by default (the reference behaviour) without any confirmation', async () => {
     const file = path.join(root, 'staged-only.ts');
     fs.writeFileSync(file, 'export const staged = true;\n');
@@ -372,7 +374,7 @@ suite('Phase 42 — git_reset', () => {
   });
 });
 
-suite('Phase 42 — git_push (to a local bare remote)', () => {
+suite('Phase 42 — git_push (to a local bare remote)', { shuffle: false }, () => {
   it('refuses to push a protected branch', async () => {
     const push = executeOf(createGitPushTool(root));
     const result = await push({ directory: '.', remote: 'origin', branch: 'main' });
@@ -445,7 +447,7 @@ suite('Phase 42 — git_push (to a local bare remote)', () => {
   });
 });
 
-suite('Phase 42 — git_stash', () => {
+suite('Phase 42 — git_stash', { shuffle: false }, () => {
   it('pushes, lists and pops work', async () => {
     const stash = executeOf(createGitStashTool(root));
     fs.writeFileSync(path.join(root, 'app.ts'), 'export const version = 7; // stashed\n');
@@ -589,7 +591,7 @@ function githubRepo(name: string): string {
   return dir;
 }
 
-suite('Phase 42 — pull requests (gh backend)', () => {
+suite('Phase 42 — pull requests (gh backend)', { shuffle: false }, () => {
   const calls: GhCall[] = [];
   let repo = '';
 
@@ -689,7 +691,7 @@ suite('Phase 42 — pull requests (gh backend)', () => {
   });
 });
 
-suite('Phase 42 — pull requests (REST backend and refusals)', () => {
+suite('Phase 42 — pull requests (REST backend and refusals)', { shuffle: false }, () => {
   let repo = '';
 
   beforeAll(() => {
@@ -892,7 +894,7 @@ exit 1
   });
 });
 
-suite('Phase 42 — registry wiring', () => {
+suite('Phase 42 — registry wiring', { shuffle: false }, () => {
   const WRITE_TOOLS = [
     'git_add',
     'git_commit',
