@@ -19,12 +19,34 @@ export const openaiProviderFactory: ProviderFactory = {
     // default — the DevOps gate asserts this explicit fallback.
     const source = env ?? process.env;
     // A model may name its own key variable (the HOTL_* endpoint does);
-    // OPENAI_API_KEY and HOTL_API_KEY are the fallbacks.
+    // HOTL_API_KEY is the generic fallback for any endpoint.
     const keyVar = typeof config.config?.apiKeyEnv === 'string' ? config.config.apiKeyEnv : undefined;
-    const apiKey = (keyVar ? source[keyVar] : undefined) || source.OPENAI_API_KEY || source.HOTL_API_KEY;
+    const baseURL = typeof config.config?.baseURL === 'string' ? config.config.baseURL : undefined;
+    // R0-07: OPENAI_API_KEY is the real, high-value OpenAI credential. It
+    // must never be sent to a custom baseURL — a project-controlled model
+    // config or .env pointing baseURL somewhere else must not be able to
+    // exfiltrate it. It is only used as a fallback when talking to the
+    // real OpenAI API (no baseURL, or api.openai.com explicitly).
+    const isRealOpenAiEndpoint =
+      baseURL === undefined ||
+      (() => {
+        try {
+          return /(^|\.)api\.openai\.com$/i.test(new URL(baseURL).hostname);
+        } catch {
+          return false;
+        }
+      })();
+    // A config that names OPENAI_API_KEY itself as its key variable is the
+    // same exfiltration path, so it gets the same rule.
+    const namedKey = keyVar === 'OPENAI_API_KEY' && !isRealOpenAiEndpoint ? undefined : keyVar;
+    const apiKey =
+      (namedKey ? source[namedKey] : undefined) ||
+      source.HOTL_API_KEY ||
+      (isRealOpenAiEndpoint ? source.OPENAI_API_KEY : undefined);
     if (!apiKey) {
       throw new Error(
-        `[openaiProvider] No API key: set OPENAI_API_KEY (or HOTL_API_KEY${keyVar && keyVar !== 'HOTL_API_KEY' ? ` / ${keyVar}` : ''}).`
+        `[openaiProvider] No API key: set ${keyVar && keyVar !== 'HOTL_API_KEY' ? `${keyVar} or ` : ''}HOTL_API_KEY` +
+          `${isRealOpenAiEndpoint ? ' (or OPENAI_API_KEY)' : ` (OPENAI_API_KEY is not sent to a custom baseURL)`}.`
       );
     }
 

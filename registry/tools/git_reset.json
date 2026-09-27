@@ -1,0 +1,8 @@
+{
+  "id": "git_reset",
+  "name": "Git Reset",
+  "description": "Unstages by default (safe); hard reset discards work and needs confirmDestructive, refused on protected branches",
+  "source": "local",
+  "modulePath": "./implementations/git-reset",
+  "category": "git"
+}

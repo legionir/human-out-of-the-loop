@@ -48,6 +48,7 @@ import type { ResolvedAgent } from '../agents/agent-factory.js';
 import type { Persona } from '../schemas/persona.js';
 import type { Task } from '../schemas/task.js';
 import { createPlan } from '../schemas/plan.js';
+import { registerLocalToolFixtures } from './helpers/local-tools-fixture.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -88,6 +89,9 @@ function setupRegistries() {
   toolRegistry.registerImplementation('search_code', createSearchCodeTool(TEST_ROOT));
   toolRegistry.registerImplementation('write_file', createWriteFileTool(TEST_ROOT));
   toolRegistry.registerImplementation('git_status', createGitStatusTool(TEST_ROOT));
+  // Phase 33: register the reference filesystem toolset so skill cross-validation
+  // (registry/skills/*) sees the same catalog as production bootstrapTools().
+  registerLocalToolFixtures(toolRegistry, TEST_ROOT);
 
   const skillRegistry = new SkillRegistry({ toolRegistry });
   bootstrapCatalogTools({ toolRegistry, personaRegistry, skillRegistry });
@@ -221,5 +225,8 @@ describe('Phase 30 P5 — structured calls are bounded too', () => {
     expect(Date.now() - started).toBeLessThan(3000);
     expect(judgment.accepted).toBe(false);
     expect(judgment.reason).toContain('timed out after 60ms');
+    // R1-07: a timeout is a checker failure, not a real quality verdict —
+    // callers must not fail the step for this.
+    expect(judgment.checkerError).toBe(true);
   });
 });

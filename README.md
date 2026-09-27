@@ -9,6 +9,8 @@ npm install
 export OPENAI_API_KEY="sk-..."
 npm run build
 npx vitest run
+# CI prints `N/M tests passed` from scripts/ci-test.mjs; keep that count
+# in sync with CHANGELOG when a phase lands.
 ```
 
 ```typescript
@@ -244,7 +246,7 @@ human-out-of-the-loop run "Build a login page" --dry-run
 
 | Command | Purpose | Key options |
 |---|---|---|
-| `run <goal>` | Plan, confirm (once), execute to completion | `--project-root`, `--persistent`, `--model <id>`, `--session <id>`, `--yes`, `--verbose`, `--dry-run`, `--timeout-ms <ms>`, `--max-steps <n>`, `--max-replans <0-10>`, `--max-delegation-depth <0-5>`, `--label <text>` |
+| `run <goal>` | Plan, confirm (once), execute to completion | `--project-root`, `--persistent`, `--model <id>`, `--session <id>`, `--yes`, `--verbose`, `--dry-run`, `--thinking <auto\|on\|off>`, `--tool-log <auto\|on\|off>`, `--timeout-ms <ms>`, `--max-steps <n>`, `--max-replans <0-10>`, `--max-delegation-depth <0-5>`, `--label <text>` |
 | `sessions list` | List persisted sessions | `--project-root` |
 | `sessions show <id>` | Session detail (interactions, plan ids, summaries) | `--project-root` |
 | `sessions label <id> <label>` | Rename a session (empty string clears the label) | `--project-root` |
@@ -255,6 +257,7 @@ human-out-of-the-loop run "Build a login page" --dry-run
 | `plans resume <id>` | Re-execute a plan that is not in a terminal state | `--project-root`, `--model`, `--timeout-ms` |
 | `mcp list` | MCP servers from `registry/mcp-servers` | `--json` |
 | `mcp test <serverId>` | Connect to one MCP server (`stdio` child process, `http` or `sse`), list its tools | `--json` |
+| `serve --mcp` | Expose *these* tools to an MCP client (stdio by default; `--http` on 127.0.0.1 with a required `--token`; `--read-only`, `--allow-tools`, `--prefix`) | `--project-root` |
 | `models` / `personas` / `skills` / `tools` | List registry entries | `--json` |
 | `usage` | Token usage per plan (prompt/completion/total + task count) | `--plan <planId>`, `--json` |
 | `tasks list` | Tasks from the observability log (derived status, tokens) | `--plan <planId>`, `--json` |
@@ -266,12 +269,97 @@ Registry introspection commands (`models`, `personas`, `skills`, `tools`) exit
 fails validation (the valid entries are still printed) and **2** when no registry
 layer exists at all.
 
-`run` exits **0** on success/partial-success, **1** on failure (plan rejected,
-clarification unanswered, agent failure), **2** on usage errors (unknown model,
-bad flag values). With `--yes` or in a non-TTY environment the CLI never
+`run` exits **0** on success/partial-success — including a chat answer, which
+executes nothing — **1** on failure (plan rejected, clarification unanswered,
+agent failure), **2** on usage errors (unknown model, bad flag values, unknown
+mode). With `--yes` or in a non-TTY environment the CLI never
 prompts: an unclear request fails with the planner's questions instead of
-hanging. In an interactive terminal the CLI asks clarification questions
-before planning and shows the plan summary before executing.
+hanging — and an unclear verdict always carries at least one question, so if a
+provider ever omits them the runtime asks one built from the project context
+rather than printing a blank `⚠️ Clarification needed:`. In an interactive
+terminal the CLI asks clarification questions before planning and shows the
+plan summary before executing.
+
+### Chat or plan: the mode decides
+
+A request is not automatically a plan.  `auto` — the default — lets the planner
+decide, and the three outcomes are the three things a user can actually want:
+
+| the request | what happens |
+| --- | --- |
+| a greeting, a question, an explanation | **answered** (`💬 Answer`): the `chat` persona with the read-only tools (it can read files, search, inspect git — it cannot write). No plan is created, nothing is executed, the run exits 0. |
+| real work (files to change, commands to run, several steps) | **planned**: the plan is shown, confirmed once, executed, reviewed — exactly as before. |
+| too vague for either | **clarified**: the planner asks, and a run without an interactive prompt fails with the questions rather than guessing. |
+
+Say which you want, wherever it is most natural:
+
+```bash
+hootl run "hello"                          # auto → answered
+hootl run "@chat what does this repo do?"  # forced to a conversation
+hootl run "@plan tidy the fixtures"        # forced to a plan
+hootl run "tidy the fixtures" --mode plan  # the same, as a flag
+```
+
+`HOTL_MODE=chat` and `defaultMode` in `~/.human-out-of-the-loop/config.json`
+set the default; the order is **prefix in the request > `--mode` > `HOTL_MODE`
+> `defaultMode` > auto**.  In the REPL: `/mode [auto|chat|plan]` and
+`/chat <message>`.  Only `@chat`, `@plan` and `@auto` followed by a space are
+prefixes — `@aur/auto fix the tests` is an @mention and stays in the request.
+
+A chat answer that reads the project is journalled like any other tool call
+(`hootl journal`), and it counts in `hootl usage`.
+
+**Everything the model writes for you is in your language.**  The request's
+script is detected (Persian, Arabic, Russian, Greek, Hebrew, Hindi, Bengali,
+Thai, Japanese, Korean, Chinese) and named in the prompt; when the Arabic
+script cannot tell Persian from Arabic the instruction names the script and
+tells the model to match the request instead of guessing.  That rule reaches
+the assessment, the plan, every agent turn, the acceptance judgment and the
+final review — so plan steps, questions and summaries come back in Persian for
+a Persian request (`هشدار`/`Error:` labels stay English: they are the CLI's own
+chrome, not the model's prose).
+
+### While it works: the terminal is never blank
+
+A model call can take a while — a slow gateway, a reasoning model, a
+rate-limited provider. `run` says so while it waits:
+
+- **A rotating status line.** While a result is pending, one self-overwriting
+  line shows a spinner and a message that changes every **3 seconds**, picked
+  at random from: *dreaming…*, *Crunching the numbers…*, *Analyzing the data…*,
+  *Generating insights…*, *Processing your request…*, *Thinking deeply…*,
+  *Working on it…*, *Hold tight, almost there…*, *Just a moment, please…*,
+  *Loading the magic…*, *Preparing the response…*, *Hang tight, we're on it…*.
+  Every real line of output erases it first, so the two never collide.
+- **The model's thinking, streamed.** Every reasoning token a provider exposes
+  is printed as it arrives — italic, violet, prefixed with 💭 — instead of
+  showing up only once the answer is complete. Agent turns switch to a
+  streaming call to make that possible. Thinking text is display-only: it is
+  never persisted to a plan, the observability log or a report. Which wire the
+  provider uses does not matter (`delta.reasoning_content` for
+  OpenAI-compatible gateways, reasoning parts, or the Responses API's
+  `reasoning_text`/item shapes the SDK does not map), and a gateway that cannot
+  stream at all is asked once more without streaming rather than answering with
+  nothing.
+- **The planner is told where it works.** Planning prompts carry a
+  `PROJECT CONTEXT` block (absolute project root, platform, top-level
+  entries), so "which project should be scanned?" is answered before the model
+  can ask it.
+
+```bash
+hootl run "list every TypeScript file" --yes           # status line + 💭 thinking
+hootl run "list every TypeScript file" --thinking off  # plain, non-streaming path
+```
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `HOTL_THINKING` / `HOTL_SHOW_THINKING` | `auto` | `on`/`off`/`1`/`0`; `--thinking <mode>` wins over the environment, and `auto` shows thinking only when stdout is a terminal |
+| `HOTL_TOOL_LOG` | `on` | `on`/`off`/`1`/`0`; `--tool-log <mode>` wins, and `auto` leaves the decision to this variable |
+| `HOTL_NO_ACTIVITY=1` / `HOTL_ACTIVITY=off` | — | turn the status line off in a terminal |
+| `HOTL_ACTIVITY_INTERVAL_MS` | `3000` | how often the status message changes (minimum 250) |
+
+Both are terminal-only by default, so pipes, CI logs and `--json` output stay
+exactly what they were.
 
 ### Examples
 
@@ -286,6 +374,335 @@ human-out-of-the-loop logs --follow --project-root ./app
 # Rename a session for easier reference
 human-out-of-the-loop sessions label session_5c1d… "Login page v2"
 ```
+
+### Time and structured reasoning
+
+Three tools from the reference `time` and `sequentialthinking` servers:
+
+| Tool | What it answers |
+|------|-----------------|
+| `get_current_time` | the date and time in any IANA zone, with day of week, UTC offset and DST state — plus the **machine's** zone, so "local" is never ambiguous. `date` asks about another day (offsets are date-dependent). An unknown zone is refused with suggestions (`Asia/Tehrn` → *did you mean Asia/Tehran?*) instead of silently becoming UTC |
+| `convert_time` | a wall-clock time (HH:MM) from one zone to **one or many** others, each with its own offset, DST flag and hour difference — resolved for the target day, so it is right across a DST switch |
+| `sequentialthinking` | one step of a numbered, estimated, revisable, branchable reasoning chain — kept in `<project>/.ai-runtime/thinking/<sessionId>.json` (atomic write), so a resumed run continues the same chain instead of rebuilding it |
+
+The environment block (below) also carries the current time in the machine's
+zone, so ordinary "what is today?" questions cost no tool call. A reasoning
+session is capped at 50 steps / 256 KB with a `THINKING_LIMIT` error that asks
+for a fresh id — "think forever" is what a stuck model does.
+
+### Reading and writing a git repository
+
+Seventeen tools: six reads, seven writes and four pull-request calls — enough
+for an agent to understand a repository, do the work on a branch, and open the
+PR, with the irreversible half fenced off. They share one core: `git` runs
+through `spawn` with an argument array (**no shell**), with
+`GIT_TERMINAL_PROMPT=0` / `GIT_ASKPASS=echo` / `GIT_PAGER=cat` /
+`GIT_OPTIONAL_LOCKS=0` — a call can never hang on a password prompt or a pager,
+and a read never takes a lock out from under your editor. Any caller-supplied
+ref, path or filter that starts with `-` is refused outright (`BAD_ARGUMENT`),
+paths go after `--`, and output is capped at 256 KB by killing the child.
+
+| Tool | What it answers |
+|------|-----------------|
+| `git_status` | the working tree, parsed: porcelain **v1/v2** entries (index/worktree characters, renames with their `from`, untracked, unmerged), counts, and the branch with its upstream and `ahead`/`behind`. `path` focuses on one file |
+| `git_diff` | the three reference tools in one: the working tree by default, `staged: true` for the index, `target: 'HEAD~1'` for a ref. `statOnly`, `nameOnly`, `path`, `contextLines`, plus files with per-file `+`/`-` counts |
+| `git_log` | parsed history — sha, author, ISO date, parents, refs, subject, body — filtered by `path`, `author`, `since`, `until`, rendered as `oneline`, `short` or `json` |
+| `git_show` | one revision: the commit object *and* its patch, `path` to narrow it, `statOnly` to keep a merge out of the context |
+| `git_branch_list` | branches as data: current flag, sha, upstream, ahead/behind, last commit — with `contains`/`notContains` ("which branches already have this fix?"). A detached HEAD is reported as detached, with its sha |
+| `git_remote_list` | where a push would go: name, fetch URL and push URL (they differ more often than you would think). Config only — no network |
+
+What an agent may change, and what it may not:
+
+- **Protected branches** — `main` and `master` (or your own list in
+  `HOTL_PROTECTED_BRANCHES`) cannot be pushed to, hard-reset or amended:
+  `PROTECTED_BRANCH`, with the alternative in the message. Branching *from*
+  `main` and standing on `main` are fine; the guards are on rewriting it.
+- **Nothing irreversible without `confirmDestructive: true`** — `reset --hard`,
+  a checkout with `discardChanges`, `stash drop`/`clear`, `commit --amend`. The
+  refusal **names every file that would be lost**, and the flag is the caller's
+  explicit acknowledgement, not a default.
+- **No force, anywhere** — `--force`, `--force-with-lease`, `--mirror`,
+  `--no-verify` do not exist in any schema, so no prompt or file can conjure
+  one. A rejected push is git's answer: fetch and merge, or ask.
+- **Every write answers with `before` and `after`** — HEAD, short sha, branch,
+  porcelain — plus `changed`/`headChanged`/`branchChanged`, so a "successful"
+  no-op is visible as one (and the Journal records the same result).
+
+| Write | What it does |
+|-------|--------------|
+| `git_create_branch` | a branch from `HEAD` or `base`, switched to by default. The name is validated by git itself (`check-ref-format --branch`); no confirmation, because starting a branch is the safe move |
+| `git_add` | stages paths (resolved inside the workspace, `["."]` for everything), with the before/after state |
+| `git_commit` | commits the staged index, or stages `paths` first. The message is required, an empty index is `NOTHING_TO_COMMIT`, and the author identity is **read** from `git config` and never written — no identity means `MISSING_IDENTITY`, not an invented author |
+| `git_checkout` | switches branch/ref (`create` for `-b`); uncommitted work makes it fail the way git intends unless `discardChanges: true` is confirmed |
+| `git_reset` | the reference's behaviour by default (unstage everything — safe); `soft` moves HEAD; `hard` is gated and refused on a protected branch |
+| `git_push` | `origin` and the current branch by default, `setUpstream` for the first push; protected branches refused before git runs |
+| `git_stash` | push (`-u` for untracked), list, pop, apply — and a gated `drop`/`clear`. The tidy-up that is *not* a hard reset |
+
+| Pull request | What it does |
+|--------------|--------------|
+| `git_pr_create` | opens a PR for the pushed branch (`base`, `head`, `draft`, Markdown body) |
+| `git_pr_list` | PRs as data: number, title, state, author, head/base, URL — filtered by `state`, `base`, `head` |
+| `git_pr_view` | one PR: state, author, branches, URL and body |
+| `git_pr_comment` | reports progress or a review finding on the PR |
+
+The backend is `gh` when it is installed (probed, `GH_PROMPT_DISABLED=1`, 30 s
+timeout), otherwise the GitHub REST API with `GITHUB_TOKEN`/`GH_TOKEN`, otherwise
+`PR_UNAVAILABLE` with both fixes named. Owner and name come from the remote URL
+git actually has (`https`, `git@host:owner/repo`, `ssh://`) — GitHub Enterprise
+gets `https://<host>/api/v3` — and both backends return one shape. The token is
+read per call and never appears in a result.
+
+Errors are structured and mean different things on purpose: `NOT_A_REPO` (this
+directory is not a work tree), `PATH_TRAVERSAL_BLOCKED` (outside the workspace),
+`BAD_ARGUMENT` (a value git would read as an option), `TIMEOUT`,
+`OUTPUT_TOO_LARGE`, `GIT_MISSING`, `GIT_FAILED` — plus `PROTECTED_BRANCH`,
+`CONFIRM_REQUIRED`, `NOTHING_TO_COMMIT`, `MISSING_IDENTITY`,
+`NOTHING_TO_STASH`, `PR_UNAVAILABLE`, `NOT_GITHUB_REMOTE`, `PR_NOT_FOUND` and
+`PR_FAILED` for the write half.
+
+### Reading the web
+
+`fetch` reads one URL and returns it as **Markdown** — headings, links, lists,
+code, tables, quotes — with the page's `<title>`, the status, the content type
+and the redirect count. `script`, `style`, `nav` and `footer` are removed with
+their contents, so a page's markup never becomes prompt tokens; non-HTML text
+(JSON, plain text, XML) passes through untouched. Long pages are paged:
+`maxLength` (default 5000) plus `startIndex`, and a truncated result carries
+`nextStartIndex` and says exactly which call continues it. `raw: true` returns
+the markup itself, for the cases where the markup *is* the answer.
+
+```bash
+hootl run "read https://vitejs.dev/guide/ and use what fits" --yes
+```
+
+Three limits are the point of the port, not afterthoughts:
+
+- **Only public addresses, unless a human says otherwise.** Loopback, private,
+  link-local, CGNAT and reserved targets are refused (`BLOCKED_PRIVATE_ADDRESS`,
+  with the address and the reason). The check runs on what the host *resolves
+  to* — so `localhost`, `127.0.0.1`, `[::1]`, IPv4-mapped IPv6 and a public name
+  with a private A record are all caught — and it runs again on **every redirect
+  hop**, so a public page cannot bounce the agent into `http://169.254.169.254/`.
+  A URL reaches an agent from its context (a fetched page, a README), which is
+  exactly the prompt-injection path SSRF travels. `allowPrivate: true` is the
+  documented override, reported back as `privateAllowed`.
+- **Bounded.** 10 s per request, ≤ 5 redirects, ≤ 2 MB read from the wire (the
+  stream is cancelled at the cap), ≤ 100 000 characters returned.
+- **No credentials.** One header set for every request: our own User-Agent and a
+  plain `Accept`. Nothing from the environment is forwarded, ever.
+
+robots.txt is honoured by default (per host, cached 10 minutes; longest matching
+rule wins, Allow takes ties, and an exact token group beats `*`). A 401/403 or an
+*unreadable* robots.txt is a refusal — "we could not find out whether we are
+welcome" is not permission — and the rule is reported so the model can say why.
+`respectRobots: false` is the deliberate override. Failures are structured:
+`INVALID_URL`, `BLOCKED_PROTOCOL`, `BLOCKED_PRIVATE_ADDRESS`, `DNS_FAILED`,
+`ROBOTS_FORBIDDEN`, `ROBOTS_UNAVAILABLE`, `TIMEOUT`, `TOO_MANY_REDIRECTS`,
+`TOO_LARGE`, `HTTP_ERROR`.
+
+### Serving this runtime as an MCP server
+
+`hootl mcp list` / `mcp test` make this project an MCP *client*. `hootl serve
+--mcp` is the mirror image: any MCP client — Claude Desktop, Cursor, an IDE
+agent — can list and call the same 45 local tools the agent uses.
+
+```bash
+hootl serve --mcp --project-root /path/to/project            # stdio (what clients spawn)
+hootl serve --mcp --read-only                                # reads, listings, searches, git reads only
+hootl serve --mcp --http --port 3300 --token "$(openssl rand -hex 16)"
+```
+
+```jsonc
+// claude_desktop_config.json / any MCP client config
+{ "mcpServers": { "human-out-of-the-loop": {
+    "command": "hootl",
+    "args": ["serve", "--mcp", "--project-root", "/path/to/project", "--read-only"] } } }
+```
+
+Three properties are the whole design:
+
+- **One execution path.** A `tools/call` reaches the same tool object the agent
+  runtime uses — the same workspace sandbox, the same zod validation (a bad
+  argument is `-32602`, exactly the shape the runtime would reject), the same
+  structured `{ success: false, code }` results. There is no second, looser
+  implementation for external callers, and a tool refusal comes back *in-band*
+  as `isError` with its code rather than as a broken connection.
+- **Audited from outside too.** Calls are wrapped by the Journal, so a client's
+  edit lands in `<project>/.ai-runtime/journal/` like the agent's own, marked
+  `agentId: "mcp"` — successes *and* refusals, with their codes.
+- **Least privilege is a flag, not a hope.** `--read-only` exposes only tools
+  that cannot change anything (`read_*`, `list_*`, `search_*`, `get_*`, the git
+  reads, `fetch`, `convert_time`, the memory reads); `--allow-tools a,b` narrows
+  further; `--prefix m` renames tools to `m_<id>` for clients that merge several
+  servers. Both filters apply to `tools/list` **and** `tools/call`: a client that
+  ignored the listing cannot call what it never saw.
+
+Transports: **stdio** is the default, and stdout carries protocol only (the
+banner goes to stderr — a stray `console.log` would corrupt the stream). `--http`
+binds **127.0.0.1** and *requires* a bearer token (`--token` or
+`HOTL_MCP_TOKEN`); the endpoint can read and write files in the project, so an
+unauthenticated port is not a configuration this command offers.
+
+Protocol: JSON-RPC 2.0 with `initialize` (2025-06-18, falling back to
+2025-03-26 / 2024-11-05), `ping`, `tools/list`, `tools/call`, `resources/list`,
+`resources/read` and `prompts/list` (empty). Tool schemas are converted from the
+tools' own zod definitions (`z.toJSONSchema`) — one source of truth, so adding a
+parameter cannot forget a hand-written copy. Read-only tools are annotated
+`readOnlyHint`, which is what lets a client auto-approve them safely.
+Resources are read-only: `plan://{id}`, `journal://{YYYY-MM-DD}` and
+`memory://graph` — every uri is validated against a shape before it is looked up,
+so a resource read cannot become a file read outside the project.
+
+### Project memory
+
+Nine tools from the reference `memory` server, so what a run *learns* is still
+there tomorrow. The Journal (below) is the history of what happened; memory is
+the current state of what the project knows — decisions, constraints, owners,
+gotchas that a future run would otherwise rediscover (or contradict).
+
+| Write | Read |
+|-------|------|
+| `create_entities` (name, type, observations; an existing name is left alone) | `read_graph` (the whole graph, paged) |
+| `create_relations` (an active verb, both endpoints must exist) | `search_nodes` (case-insensitive over name, type and observations) |
+| `add_observations` (duplicates skipped) | `open_nodes` (named entities, each with its relations) |
+| `delete_entities` (cascades its relations) · `delete_observations` · `delete_relations` | |
+
+The graph is **per project** — `<project>/.ai-runtime/memory.json`, written
+through a file lock and a temp file + `rename`, so two agents (or two terminals)
+cannot lose each other's update. Four rules are visible in the result rather
+than guessed at: a relation to a name nobody created is refused with
+`ENTITY_NOT_FOUND` (the reference's semantics — no endpoint is invented), a
+corrupt file is reported as `GRAPH_CORRUPT` and never overwritten, every result
+names the file it used (`memoryFile`), and the read tools page —
+`read_graph` at 200 entities, `search_nodes` at 100 — reporting `total` and
+`truncated` plus the names of neighbours that fell outside the page, so a graph
+that grew for months cannot blow up a prompt. `search_nodes` and `open_nodes`
+return the relations touching a hit *even when the other end is not a hit*, with
+those names listed, because "what does this depend on?" is usually the question.
+
+Reading and capturing is open to `architect` and `reviewer` as well; the three
+`delete_*` tools are granted to `coder` only — erasing history is a deliberate
+act. Every write is journalled automatically, like every other tool call.
+
+### Journal — what the AI actually did
+
+Every tool execution and every plan/step transition is appended, automatically,
+to `<project-root>/.ai-runtime/journal/YYYY-MM-DD.jsonl` — one line per action,
+with the arguments, a summary, the files it touched (path, size, sha256), the
+duration, the outcome, and the `taskId`/`agentId`/`planId`/`planStepId` that
+connect it to the run. It is written at the one place the runtime hands its
+tools to the model (`AgentRuntime`), so local tools, MCP tools and
+`delegate_task` are all covered without any tool knowing about it, and the
+`streamText` (live-thinking) path is covered by the same wiring.
+
+It is deliberately *not* the observability log: `observability.jsonl` records
+what happened to the run and never stores tool arguments or results; the Journal
+is the transcript. Credentials are redacted by key **and** by the actual secret
+values of the process, entries are capped, files rotate daily and old ones are
+pruned (`journal.retentionDays`, default 30).
+
+```bash
+human-out-of-the-loop journal --failed --since 24h       # what went wrong today
+human-out-of-the-loop journal --tool write_file --json   # machine-readable
+human-out-of-the-loop journal --stats                    # per-tool call/failure/time
+```
+
+Disable per process with `HOTL_JOURNAL=0`; `HOTL_JOURNAL_RESULTS=full` keeps
+complete results instead of summaries. Config:
+`journal: { enabled, includeResults, maxEntryBytes, retentionDays }`.
+
+### Tool-call log — every call, in four fields
+
+While a run works, the terminal shows each AI tool call on one line: the type of
+tool, its name, the input it was given, and whether it succeeded.
+
+```
+🔧 tool: write_file  type: filesystem  input: {"filePath":"notes/a.txt","content":"…"}  status: ✅ success
+🔧 tool: git_push  type: git  input: {"directory":".","branch":"main"}  status: ❌ failed — PROTECTED_BRANCH: Refusing to push "main" …
+```
+
+The records come from the runtime, not from the CLI: `src/ai/runtime/`
+`tool-call-log.ts` exposes a `ToolCallSink` that receives
+`{ phase, status, toolType, toolName, input, taskId, agentId, planId,
+planStepId, callId, durationMs, error, code }` for every call — the same hook
+point the Journal uses, one layer outside it. A UI, an editor extension or a
+test can register its own sink and consume the identical objects; when no sink
+is registered the tools are passed through untouched.
+
+The type is the tool's registry category (`filesystem`, `git`, `memory`,
+`time`, `web`, `reasoning`, `mcp`, else `other`); the input is the real
+arguments with credential keys redacted and the process's secret values
+scrubbed, capped at 400 characters; the status is the runtime's own verdict
+(`success: false`, an SDK error output, an MCP `isError`), and a thrown error is
+logged and still re-thrown. Failures carry the message and its code.
+
+```bash
+hootl run "rename the notes" --tool-log on     # the default: one line per call
+hootl run "rename the notes" --tool-log off    # quiet, e.g. for a scripted run
+HOTL_TOOL_LOG=0 hootl run "rename the notes"   # the same, via the environment
+```
+
+### Filesystem tools
+
+The workspace tools are a native port of the MCP reference *filesystem* server
+(`servers-main/src/filesystem/`) — the same path validation, not an MCP server
+registration. With phase 35 the reference set is **complete**: every tool that
+server registers has a native counterpart here, plus three of our own. Sixteen
+tools, all bound to `--project-root` and refusing anything that escapes it
+(symlinked parents included):
+
+| Read | Write | Inspect |
+|------|-------|---------|
+| `read_file` (full, `head`/`tail`, base64) | `write_file` (atomic, `overwrite`) | `list_directory` |
+| `read_media_file` (image/audio attached to the model call) | `write_multiple_files` (batch/scaffold, per-file status) | `list_directory_with_sizes` (`sortBy: name\|size`, totals) |
+| `read_multiple_files` | `edit_file` (line-based + diff, `dryRun`) | `directory_tree` (globs, `maxDepth`) |
+| `search_code` (VS Code style, see below) | `create_directory` | `get_file_info` |
+| `search_files` (glob names/paths, sizes, counts) | `move_file` (never overwrites) | `list_allowed_directories` |
+| | | `git_status` |
+
+`read_media_file` is the one read that is not text: an image or audio file comes
+back as base64 **and is attached to the model call** as a real content part, so a
+vision model can look at a screenshot or a diagram. Two deliberate deviations
+from the reference keep that from flooding a run: a `maxBytes` ceiling (default
+10 MiB) refuses an oversized file with `FILE_TOO_LARGE`, and a non-media binary
+is returned with its metadata but *not* attached (`attachedToModel: false`).
+`list_directory_with_sizes` adds what a plain listing cannot answer — where the
+bytes are: per-file sizes, `sortBy: 'size'`, and the `Total: N files, M
+directories` / `Combined size:` footer. It lists with `lstat`, so a symlink is
+reported as `[LINK]` (and never followed), and only regular files carry a size.
+
+`search_files` is the glob counterpart, at the same level: a **bare name matches
+at any depth** (`*.ts` finds `src/lib/util.ts`, like an editor's file finder —
+`matchBaseName: false` restores whole-path matching), `node_modules`, `dist`,
+`.git` and friends are **skipped by default** (the same list `search_code` uses,
+and `ignoredDirectories` reports what was skipped), `excludePatterns` accept a
+leading `!` re-include, `includeFiles`/`includeDirectories` pick the kind of
+entry, and every result carries `size` + `modified` (via `lstat` — a symlink is
+reported as itself, never followed) with `counts`, `filesScanned` and
+`skippedSymlinks`. Matching happens on POSIX separators on **every** host, which
+fixes a real Windows bug in the port: a relative path with `\` used to be handed
+to `minimatch`, where the backslash is an escape character, so `src/**` + `/*.ts`
+matched nothing there.
+
+`search_code` follows the VS Code "search in files" model: a **content** pattern
+(regex, or literal text with `literal: true`, case-insensitive unless
+`caseSensitive`, `wholeWord` optional) plus a **path** pattern (`pathPattern`,
+regex over the workspace-relative path) and glob `excludePatterns` to decide
+which files are searched. Every occurrence is reported with its 1-based line
+**and column**, optional `contextLines`, the list of matched files, and a
+`file:line:column: text` rendering — one call answers "where is this used?"
+including *every* hit on a line, which a per-line grep cannot.
+
+Safety properties the port keeps from the reference implementation: every
+component of a path is resolved through its symlinks and re-checked (a *new*
+file behind a symlinked directory is refused before it is created), a Windows
+drive path on a POSIX host is refused instead of being written as a literal
+name, Unicode-equivalent (NFC/NFD) names resolve to the file that exists, new
+files are created with `O_EXCL`, existing ones are replaced through a temp file
++ `rename` with the original permissions restored, and `edit_file` never
+silently skips a non-matching edit. Path-check failures come back as
+`{ success: false, code }` — `PATH_TRAVERSAL_BLOCKED`, `EEXIST`, `EDIT_NOT_FOUND`
+— so a refused write is visible in the log and can never be judged a success.
 
 ## Web UI
 
@@ -322,6 +739,7 @@ HOTL_PORT=4000 HOTL_MODEL=claude-sonnet npx tsx src/server.ts
 | `GET /api/health` | `{ok, projectRoot, model, persistent, redactKeysCount}` |
 | `POST /api/run` | `{message, sessionId?, confirm?, model?, timeoutMs?, maxSteps?, maxReplans?}` → `202 {runId}` |
 | `GET /api/runs/:runId` | Live run state (`planning` → `awaiting-clarification` → `awaiting-confirmation` → `running` → `done`/`error`) |
+| `POST /api/run` | `{message, sessionId?, confirm?, model?, mode?}` — `mode` is `auto\|chat\|plan` (400 on anything else); a chat run ends `done` with the answer as its report and **no plan id** |
 | `POST /api/runs/:runId/clarification` | `{answers:{question:answer}}` or `{decline:true}` (400 on incomplete answers, 409 when not awaiting) |
 | `GET /api/runs/:runId/tasks` | Tasks of the run's plan + counts |
 | `POST /api/runs/:runId/tasks/:taskId/cancel` | Cancel one pending/running task |
@@ -420,10 +838,22 @@ See [docs/CONFIGURATION.md](./docs/CONFIGURATION.md) for env vars, configurable 
 | 16 | Hardening + 15 Fixes | 🟢 |
 | 17 | Documentation & Delivery | 🟢 |
 | 18–26 | Runtime hardening, CLI parity, server-side controls, registry introspection, clarification, usage/tasks | 🟢 |
+| 27–32 | Env-injected endpoints, registry layers, the REPL and `/` menu, runtime models, live run feedback (status line + streamed thinking) & project context for the planner | 🟢 |
+| 33 | Native port of the MCP reference filesystem toolset (13 tools, symlink/Unicode-safe paths, atomic writes, line-based edits) | 🟢 |
+| 34 | Batch writing (`write_multiple_files`) and VS Code-style `search_code` (path pattern, toggles, columns, context) | 🟢 |
+| 35 | `read_media_file` (attached image/audio) and `list_directory_with_sizes` — the reference filesystem toolset is complete | 🟢 |
+| 36 | `search_files` at editor level (base-name matching, default excludes, type filters, sizes, counters) and the OS environment block given to the planner *and* the agent (shell, separator, GNU/BSD, line endings) | 🟢 |
+| 37 | **Journal** — every tool execution and plan/step transition recorded automatically at the runtime's tool hook, redacted and rotated (`hootl journal`) | 🟢 |
+| 38 | `get_current_time`, `convert_time`, `sequentialthinking` (persisted reasoning sessions) + the clock in the environment block | 🟢 |
+| 39 | Project memory — the nine reference `memory` tools, per project in `.ai-runtime/memory.json` (locked + atomic, cascading deletes, `ENTITY_NOT_FOUND`, paged reads) | 🟢 |
+| 40 | `fetch` — a URL as Markdown (in-tree HTML→Markdown, paging, `raw`), with robots.txt honoured and loopback/private addresses blocked by default | 🟢 |
+| 41 | Git, read-only — `git_status` extended (porcelain v1/v2, branch, counts) plus `git_diff`, `git_log`, `git_show`, `git_branch_list`, `git_remote_list`, on a no-shell/bounded-output core | 🟢 |
+| 42 | Git, writing — feature branches, commits (identity read, never written), pushes with no force option, stashes, and pull requests through `gh` or the GitHub REST API. `main`/`master` are protected; anything irreversible needs `confirmDestructive: true` | 🟢 |
+| 43 | Exposing this runtime as an MCP server — `hootl serve --mcp` (stdio + loopback HTTP with a bearer token, read-only and allow-tools filters, `plan://`/`journal://`/`memory://` resources), sharing one execution path with the agent | 🟢 |
 | C1–C5 | CLI completion plan (`docs/history/CLI_COMPLETION_PLAN.md`) | 🟢 |
 | U1–U7 | UI completion plan (`docs/history/UI_COMPLETION_PLAN.md`) | 🟢 |
 
-**723 tests green (53 files), 0 tsc errors — plus 46 committed end-to-end checks (`npm run e2e`)** (phases 18–26 complete — see `docs/history/`)
+**1670 tests green (118 files), 0 tsc errors — plus 209 end-to-end checks green (`npm run e2e`)** (phases 18–43 complete — see `docs/history/`)
 
 ## Law Compliance
 

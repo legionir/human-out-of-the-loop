@@ -1,0 +1,61 @@
+id	name	entry_point	triggered_by	tier	expected_outcome	status
+WF-0001	cli run (orchestrator.run)	EP-0029,EP-0060		T1	CLI command run → orchestrator.run outcome (plan/answer/review)	DONE
+WF-0002	web POST /api/run (async run start)	EP-0016		T1	202 {runId}; background orchestrator.run with clarification+confirm callbacks	DONE
+WF-0003	web POST /api/runs/:runId/clarification	EP-0017		T1	resolve clarification answers or decline	DONE
+WF-0004	web GET /api/runs/:runId	EP-0018		T2	poll run state	DONE
+WF-0005	web GET /api/plans	EP-0019		T2	list saved plans	DONE
+WF-0006	web GET /api/plans/:id	EP-0020		T2	read one plan	DONE
+WF-0007	web POST /api/plans/:id/cancel	EP-0021		T1	cancel plan	DONE
+WF-0008	web POST /api/plans/:id/resume	EP-0022		T1	resume plan (resumePlan → execution)	DONE
+WF-0009	web POST /api/plans/:id/confirm	EP-0023		T1	confirm decision resolves confirmCallback → execution	DONE
+WF-0010	web GET /api/observability	EP-0024		T2	snapshot of events	DONE
+WF-0011	web POST /api/preview	EP-0025		T1	preview plan without execution (orchestrator.previewPlan)	DONE
+WF-0012	web GET /api/observability/stream	EP-0026		T2	SSE stream of observability events	DONE
+WF-0013	web GET /api/stream/:planId	EP-0008		T2	SSE stream per planId	DONE
+WF-0014	web GET /api/sessions	EP-0009		T2	list sessions	DONE
+WF-0015	web GET /api/sessions/:id	EP-0010		T2	show session	DONE
+WF-0016	web PATCH /api/sessions/:id	EP-0011		T1	relabel session	DONE
+WF-0017	web DELETE /api/sessions/:id	EP-0012		T1	delete session (persistent state write)	DONE
+WF-0018	web GET /api/usage	EP-0013		T2	usage summary	DONE
+WF-0019	web GET /api/runs/:runId/tasks	EP-0014		T2	tasks of run	DONE
+WF-0020	web POST /api/runs/:runId/tasks/:taskId/cancel	EP-0015		T1	cancel running task	DONE
+WF-0021	web GET /api/models	EP-0001		T2	list models	DONE
+WF-0022	web GET /api/models/remote	EP-0002		T1	list remote provider models (external I/O)	DONE
+WF-0023	web GET /api/personas	EP-0003		T2	list personas	DONE
+WF-0024	web GET /api/skills	EP-0004		T2	list skills	DONE
+WF-0025	web GET /api/tools	EP-0005		T2	list tools	DONE
+WF-0026	web GET /api/mcp	EP-0006		T2	list mcp servers	DONE
+WF-0027	web POST /api/mcp/:id/test	EP-0007		T1	test mcp server (spawns stdio process)	DONE
+WF-0028	server.ts listen	EP-0027		T1	http server up on HOTL_PORT/PORT	DONE
+WF-0029	mcp transports listen	EP-0028		T1	mcp http transport server up	DONE
+WF-0030	cli sessions list	EP-0031		T2	list sessions	DONE
+WF-0031	cli sessions show	EP-0032		T2	show one session	DONE
+WF-0032	cli sessions delete	EP-0033		T1	delete session	DONE
+WF-0033	cli sessions label	EP-0034		T1	relabel session	DONE
+WF-0034	cli plans list	EP-0036		T2	list plans	DONE
+WF-0035	cli plans show	EP-0037		T2	show plan	DONE
+WF-0036	cli plans cancel	EP-0038		T1	cancel plan	DONE
+WF-0037	cli plans resume	EP-0039		T1	resume plan	DONE
+WF-0038	cli mcp list	EP-0041		T2	list mcp servers	DONE
+WF-0039	cli mcp test	EP-0042		T1	test mcp server	DONE
+WF-0040	cli serve	EP-0043		T1	start http server	DONE
+WF-0041	cli models	EP-0044		T2	list models	DONE
+WF-0042	cli personas	EP-0045		T2	list personas	DONE
+WF-0043	cli skills	EP-0046		T2	list skills	DONE
+WF-0044	cli tools	EP-0047		T2	list tools	DONE
+WF-0045	cli usage	EP-0048		T2	usage summary	DONE
+WF-0046	cli tasks list	EP-0050		T2	list tasks	DONE
+WF-0047	cli tasks show	EP-0051		T2	show task	DONE
+WF-0048	cli journal	EP-0052		T2	journal entries	DONE
+WF-0049	cli logs	EP-0053		T2	tail logs with optional follow	DONE
+WF-0050	MCP tools/call	EP-0054		T1	execute registered hootl tool (arbitrary tool exec)	DONE
+WF-0051	MCP initialize	EP-0055		T2	handshake + capabilities	DONE
+WF-0052	MCP ping	EP-0056		T2	pong	DONE
+WF-0053	MCP tools/list	EP-0057		T2	list tools	DONE
+WF-0054	MCP resources/list	EP-0058		T2	list resources	DONE
+WF-0055	MCP resources/read	EP-0059		T2	read resource	DONE
+WF-0056	previewPlan (library)	EP-0061		T1	plan preview without execution	DONE
+WF-0057	cancelPlan (library)	EP-0062		T1	cancel stored plan	DONE
+WF-0058	getPlanStatus (library)	EP-0063		T2	plan status	DONE
+WF-0059	getUsageSummary (library)	EP-0064		T2	usage summary	DONE
+WF-0060	resumePlan (library)	EP-0065		T1	resume stored plan → PlanRuntime execution	DONE

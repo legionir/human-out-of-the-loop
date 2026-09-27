@@ -8,15 +8,17 @@
  *
  * Plans live in `<projectRoot>/.ai-runtime/plans/` (persistent mode).
  */
-import { envDefaultModelId } from '../utils/registries.js';
 import path from 'node:path';
 import { Orchestrator } from '../../ai/orchestrator.js';
 import { CancellationManager } from '../../ai/runtime/cancellation-manager.js';
 import { FilePlanStore } from '../../ai/runtime/plan-store.js';
 import { EventBus } from '../../ai/runtime/event-bus.js';
 import { TaskRuntime } from '../../ai/runtime/task-runtime.js';
-import { prepareCliEnvironment } from '../utils/config.js';
+import { resolveCliDefaults } from '../utils/config.js';
 import { color, err, out, renderTable } from '../utils/output.js';
+import { validateRunOptions } from './run.js';
+import { evaluatePlanResume } from '../../ai/runtime/resume-guard.js';
+import { latestCheckpointStep, restoreCheckpoint } from '../../ai/runtime/checkpoint.js';
 
 export interface PlansCommandOptions {
   projectRoot?: string;
@@ -28,18 +30,43 @@ export interface PlansCommandOptions {
 }
 
 function planStoreFor(opts: PlansCommandOptions): FilePlanStore {
-  const projectRoot = path.resolve(opts.projectRoot ?? process.cwd());
-  prepareCliEnvironment(projectRoot);
+  const { projectRoot } = resolveCliDefaults({ projectRoot: opts.projectRoot });
   return new FilePlanStore(path.join(projectRoot, '.ai-runtime', 'plans'));
 }
 
 function projectRootFor(opts: PlansCommandOptions): string {
-  return path.resolve(opts.projectRoot ?? process.cwd());
+  return resolveCliDefaults({ projectRoot: opts.projectRoot }).projectRoot;
+}
+
+/** J-05: restore the working tree captured before a writable step. */
+export async function plansRollbackCommand(planId: string, opts: PlansCommandOptions): Promise<number> {
+  const projectRoot = projectRootFor(opts);
+  const store = planStoreFor(opts);
+  const plan = store.load(planId);
+  if (!plan) {
+    err(color.failed(`Plan "${planId}" not found.`));
+    return 1;
+  }
+  const stepId = latestCheckpointStep(projectRoot, planId);
+  if (!stepId) {
+    err(color.failed(`No checkpoint for plan "${planId}".`));
+    return 1;
+  }
+  const ok = restoreCheckpoint(projectRoot, planId, stepId);
+  if (!ok) {
+    err(color.failed(`Failed to restore checkpoint ${stepId}.`));
+    return 1;
+  }
+  out(color.done(`Restored working tree from checkpoint ${stepId} of ${planId}.`));
+  return 0;
 }
 
 export async function plansListCommand(opts: PlansCommandOptions): Promise<number> {
   const store = planStoreFor(opts);
   const ids = store.list();
+  for (const w of store.loadWarnings) {
+    err(color.warn(`Skipped corrupt plan file ${w.file}: ${w.error}`));
+  }
 
   if (ids.length === 0) {
     out(color.dim('No plans found (persistent mode stores plans in .ai-runtime/plans).'));
@@ -128,8 +155,6 @@ export async function plansShowCommand(planId: string, opts: PlansCommandOptions
  * and the other process's loop honours the persisted status on reload).
  */
 export async function plansCancelCommand(planId: string, opts: PlansCommandOptions): Promise<number> {
-  const projectRoot = projectRootFor(opts);
-  prepareCliEnvironment(projectRoot);
   const planStore = planStoreFor(opts);
   const taskRuntime = new TaskRuntime({
     maxConcurrentTasks: 1,
@@ -150,9 +175,14 @@ export async function plansCancelCommand(planId: string, opts: PlansCommandOptio
 
 /** Resume a previously interrupted plan (needs the full orchestrator). */
 export async function plansResumeCommand(planId: string, opts: PlansCommandOptions): Promise<number> {
-  const projectRoot = projectRootFor(opts);
-  const globalConfig = prepareCliEnvironment(projectRoot);
-  const model = opts.model ?? envDefaultModelId(projectRoot) ?? globalConfig.defaultModel;
+  const invalid = validateRunOptions({ timeoutMs: opts.timeoutMs, model: opts.model });
+  if (invalid) {
+    err(color.failed(invalid));
+    return 2;
+  }
+  const defaults = resolveCliDefaults({ projectRoot: opts.projectRoot, model: opts.model });
+  const projectRoot = defaults.projectRoot;
+  const model = defaults.model;
 
   const orchestrator = new Orchestrator({
     projectRoot,
@@ -166,7 +196,12 @@ export async function plansResumeCommand(planId: string, opts: PlansCommandOptio
     // Phase 30 (P10 follow-up): say WHY nothing happens.  A terminal plan is
     // not resumable — resuming it silently used to re-run finished work.
     const status = orchestrator.getPlanStatus(planId)?.status;
-    if (status === 'cancelling') {
+    const decision = evaluatePlanResume({
+      found: status !== undefined,
+      status,
+      liveOwner: orchestrator.hasLiveOwner(planId),
+    });
+    if (decision.action === 'finalize-cancel' || status === 'cancelling') {
       // A cancel was requested but the process left before the runtime could
       // finish it.  Finalise it here — a plan must never stay in a state no
       // process owns.
@@ -182,9 +217,18 @@ export async function plansResumeCommand(planId: string, opts: PlansCommandOptio
       );
       return 1;
     }
-    if (status === 'completed') {
+    if (status === 'completed' || decision.action === 'noop') {
       err(color.dim(`Plan "${planId}" is already completed — nothing to resume.`));
       return 0;
+    }
+    if (decision.action !== 'resume') {
+      err(color.failed(decision.message));
+      return 1;
+    }
+    try {
+      orchestrator.reconcileAbandonedInteractions();
+    } catch {
+      // best-effort
     }
     const result = await orchestrator.resumePlan(planId);
     if (!result) {
@@ -198,7 +242,11 @@ export async function plansResumeCommand(planId: string, opts: PlansCommandOptio
       ? 0
       : 1;
   } catch (e) {
-    err(color.failed(`Error: ${e instanceof Error ? e.message : String(e)}`));
+    const message = e instanceof Error ? e.message : String(e);
+    err(color.failed(`Error: ${message}`));
+    if (e && typeof e === 'object' && 'status' in e && (e as { status?: number }).status === 409) {
+      return 1;
+    }
     return 1;
   } finally {
     await orchestrator.shutdown();

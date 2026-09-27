@@ -16,6 +16,8 @@ export interface LlmUsageReport {
   usage: TokenUsage;
   /** Plan the call worked for, when it is known at call time. */
   planId?: string;
+  /** J-06: model id that produced this usage. */
+  modelId?: string;
 }
 
 export type LlmUsageReporter = (report: LlmUsageReport) => void;
@@ -27,15 +29,41 @@ type LegacyUsageShape = { promptTokens?: number; completionTokens?: number };
  * shape (inputTokens/outputTokens); the promptTokens/completionTokens
  * fallback keeps test mocks built against the older shape working.
  */
+type CacheUsageShape = {
+  cachedInputTokens?: number;
+  cacheReadInputTokens?: number;
+  cacheCreationInputTokens?: number;
+  cacheWriteInputTokens?: number;
+};
+
+export function addTokenUsage(a?: TokenUsage, b?: TokenUsage): TokenUsage | undefined {
+  if (!a && !b) return undefined;
+  const promptTokens = (a?.promptTokens ?? 0) + (b?.promptTokens ?? 0);
+  const completionTokens = (a?.completionTokens ?? 0) + (b?.completionTokens ?? 0);
+  const cacheReadTokens = (a?.cacheReadTokens ?? 0) + (b?.cacheReadTokens ?? 0);
+  const cacheWriteTokens = (a?.cacheWriteTokens ?? 0) + (b?.cacheWriteTokens ?? 0);
+  return {
+    promptTokens,
+    completionTokens,
+    totalTokens: (a?.totalTokens ?? 0) + (b?.totalTokens ?? 0) || promptTokens + completionTokens,
+    ...(cacheReadTokens ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens ? { cacheWriteTokens } : {}),
+  };
+}
+
 export function toTokenUsage(raw: unknown): TokenUsage | undefined {
   if (!raw || typeof raw !== 'object') return undefined;
-  const u = raw as LanguageModelUsage & LegacyUsageShape;
+  const u = raw as LanguageModelUsage & LegacyUsageShape & CacheUsageShape;
   const promptTokens = u.promptTokens ?? u.inputTokens ?? 0;
   const completionTokens = u.completionTokens ?? u.outputTokens ?? 0;
+  const cacheReadTokens = u.cachedInputTokens ?? u.cacheReadInputTokens ?? 0;
+  const cacheWriteTokens = u.cacheCreationInputTokens ?? u.cacheWriteInputTokens ?? 0;
   return {
     promptTokens,
     completionTokens,
     totalTokens: u.totalTokens ?? promptTokens + completionTokens,
+    ...(cacheReadTokens ? { cacheReadTokens } : {}),
+    ...(cacheWriteTokens ? { cacheWriteTokens } : {}),
   };
 }
 

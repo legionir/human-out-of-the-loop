@@ -13,15 +13,10 @@ export interface RetryableAgentRunOptions extends AgentRunOptions {
 // ─── RetryableAgentRuntime ───────────────────────────────────────
 
 /**
- * Wraps AgentRuntime with automatic retry on recoverable errors
- * (rate-limit, timeout) and rate-limit awareness.
- *
- * Distinction from Phase 13 RateLimiter:
- *   - RateLimiter handles per-provider concurrency and 429 backoff.
- *   - This wrapper handles retry of the ENTIRE agent run on
- *     transient failures (timeout, provider crash).
- *   - They compose: RateLimiter wraps individual API calls,
- *     this wraps the full agent execution.
+ * Legacy wrapper that retried the ENTIRE agent run.  C-04 moved retry
+ * to the model-call layer (`wrapModelForRetry`) so tools are not
+ * re-executed.  TaskRuntime uses a bare `AgentRuntime` with a
+ * RateLimiter; this class is kept for existing Phase 15 tests.
  */
 export class RetryableAgentRuntime {
   private readonly runtime: AgentRuntime;

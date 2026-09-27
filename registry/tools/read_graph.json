@@ -1,0 +1,8 @@
+{
+  "id": "read_graph",
+  "name": "Read Graph",
+  "description": "Reads the whole project memory graph (entities, observations, relations)",
+  "source": "local",
+  "modulePath": "./implementations/memory-tools",
+  "category": "memory"
+}

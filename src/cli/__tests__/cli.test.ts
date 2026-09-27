@@ -38,6 +38,7 @@ import { FilePlanStore } from '../../ai/runtime/plan-store.js';
 import { loadGlobalConfig, loadDotEnv } from '../../cli/utils/config.js';
 import { followLog } from '../../cli/commands/logs.js';
 import { createPlan, type Plan } from '../../ai/schemas/plan.js';
+import { waitUntil } from '../../test-utils/wait-until.js';
 import { Orchestrator } from '../../ai/orchestrator.js';
 import type { LogEntry } from '../../ai/runtime/observability-logger.js';
 import { useIsolatedHome } from '../../test-utils/isolated-home.js';
@@ -563,8 +564,6 @@ describe('Phase 23 — CLI: mcp + logs', () => {
     const seen: string[] = [];
     const stop = followLog(logFile, undefined, 50, (entry) => seen.push(entry.message));
 
-    // Give the watcher a beat to attach, then append two new entries.
-    await new Promise((r) => setTimeout(r, 150));
     fs.appendFileSync(
       logFile,
       JSON.stringify({
@@ -575,7 +574,10 @@ describe('Phase 23 — CLI: mcp + logs', () => {
         message: 'new entry 1',
       }) + '\n',
     );
-    await new Promise((r) => setTimeout(r, 300));
+    await waitUntil(() => seen.includes('new entry 1'), {
+      timeoutMs: 5_000,
+      message: 'followLog never emitted the first appended entry',
+    });
     fs.appendFileSync(
       logFile,
       JSON.stringify({
@@ -586,7 +588,10 @@ describe('Phase 23 — CLI: mcp + logs', () => {
         message: 'new entry 2',
       }) + '\n',
     );
-    await new Promise((r) => setTimeout(r, 300));
+    await waitUntil(() => seen.includes('new entry 2'), {
+      timeoutMs: 5_000,
+      message: 'followLog never emitted the second appended entry',
+    });
     stop();
 
     expect(seen).toContain('new entry 1');
@@ -852,7 +857,8 @@ describe('C2 — usage + tasks commands (from the observability log)', () => {
     expect(out).toContain('300');
     expect(out).toContain('450');
     expect(out).toContain('Build a login page');
-    expect(out).toMatch(/Totals: 300 prompt \+ 150 completion = 450 tokens across 2 task/);
+    expect(out).toMatch(/Totals: 300 prompt \+ 150 completion = 450 tokens/);
+    expect(out).toContain('across 2 task');
   });
 
   it('usage --plan filters to one plan; unknown plan → exit 1', async () => {
@@ -879,6 +885,8 @@ describe('C2 — usage + tasks commands (from the observability log)', () => {
       promptTokens: 300,
       completionTokens: 150,
       totalTokens: 450,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
       taskCount: 2,
     });
   });
@@ -1063,6 +1071,142 @@ describe('C3 — run flags (--max-replans/--max-delegation-depth/--label) + sess
 });
 
 // ─── C4: CLI clarification wiring (non-TTY = CI-safe) ───────────
+
+
+describe('v27.17.0 — run modes (@chat/@plan, --mode, HOTL_MODE)', () => {
+  let projectRoot: string;
+
+  beforeEach(() => {
+    projectRoot = makeTempProject('phase23-modes-');
+    installModelMocks();
+    mockGenerateObject.mockClear();
+    mockGenerateText.mockClear();
+    delete process.env.HOTL_MODE;
+  });
+
+  afterEach(() => {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+    delete process.env.HOTL_MODE;
+  });
+
+  /** The assessment says "answer this", the answer call returns the text. */
+  function answerAssessment(answer = 'draft') {
+    mockGenerateObject.mockImplementationOnce(
+      async () => ({ object: { kind: 'answer', isClear: true, needsClarification: [], answer } }) as never
+    );
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'این پروژه یک رانتایم است.',
+      usage: { inputTokens: 10, outputTokens: 5, totalTokens: 15 },
+    } as never);
+  }
+
+  it('@chat answers, prints no plan, and exits 0', async () => {
+    answerAssessment();
+    const { code, out } = await runCli(['run', '@chat سلام', '--project-root', projectRoot, '--yes']);
+
+    expect(code).toBe(0);
+    expect(out).toContain('💬 Answer');
+    expect(out).toContain('این پروژه یک رانتایم است.');
+    expect(out).toContain('Plan: none (answered in chat mode)');
+    expect(out).toContain('Mode: chat (prefix)');
+    // One planner call (the assessment) — nothing was generated, nothing ran.
+    expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('auto mode answers when the planner says the request is a conversation', async () => {
+    answerAssessment();
+    const { code, out } = await runCli(['run', 'سلام', '--project-root', projectRoot, '--yes']);
+    expect(code).toBe(0);
+    expect(out).toContain('💬 Answer');
+    expect(out).toContain('Plan: none (answered in auto mode)');
+  });
+
+  it('--mode plan forces a plan for a greeting the model wanted to answer', async () => {
+    mockGenerateObject.mockImplementationOnce(
+      async () => ({ object: { kind: 'answer', isClear: true, needsClarification: [], answer: 'hi' } }) as never
+    );
+    const { out } = await runCli([
+      'run', 'سلام', '--mode', 'plan', '--project-root', projectRoot, '--yes',
+    ]);
+    // The forced plan means a real plan was produced and confirmed.
+    expect(out).toContain('Mode: plan (flag)');
+    expect(out).not.toContain('💬 Answer');
+  });
+
+  it('the prefix wins over the flag', async () => {
+    answerAssessment();
+    const { out } = await runCli([
+      'run', '@chat سلام', '--mode', 'plan', '--project-root', projectRoot, '--yes',
+    ]);
+    expect(out).toContain('Mode: chat (prefix)');
+  });
+
+  it('HOTL_MODE sets the default, and a bad value is a usage error (exit 2)', async () => {
+    process.env.HOTL_MODE = 'chat';
+    answerAssessment();
+    const viaEnv = await runCli(['run', 'سلام', '--project-root', projectRoot, '--yes']);
+    expect(viaEnv.code).toBe(0);
+    expect(viaEnv.out).toContain('Mode: chat (env)');
+
+    process.env.HOTL_MODE = 'talk';
+    mockGenerateObject.mockClear();
+    const bad = await runCli(['run', 'سلام', '--project-root', projectRoot, '--yes']);
+    expect(bad.code).toBe(2);
+    expect(bad.errOut).toContain('Invalid default mode "talk"');
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
+  it('--mode rejects an unknown word with exit 2', async () => {
+    const { code, errOut } = await runCli([
+      'run', 'do it', '--mode', 'talk', '--project-root', projectRoot, '--yes',
+    ]);
+    expect(code).toBe(2);
+    expect(errOut).toContain('--mode must be auto, chat or plan');
+  });
+
+  it('a request that merely starts with an @mention is untouched', async () => {
+    const { out } = await runCli([
+      'run', '@aur/auto tidy the fixtures', '--project-root', projectRoot, '--yes',
+    ]);
+    // Not a mode: the auto path planned it (the mock plan is the greeting plan).
+    expect(out).not.toContain('Mode: ');
+    expect(out).toContain('FINAL REPORT');
+  });
+
+  it('--dry-run in chat mode prints the answer and executes nothing', async () => {
+    mockGenerateObject.mockImplementationOnce(
+      async () => ({ object: { isClear: true, needsClarification: [], answer: 'a preview answer' } }) as never
+    );
+    const { code, out } = await runCli([
+      'run', '@chat what does this do?', '--dry-run', '--project-root', projectRoot,
+    ]);
+    expect(code).toBe(0);
+    expect(out).toContain('💬 Answer (nothing to execute)');
+    expect(out).toContain('a preview answer');
+  });
+
+  it('a bare @chat is not a mode — the goal is used as written', async () => {
+    const { out } = await runCli(['run', '@chat', '--project-root', projectRoot, '--yes']);
+    // `@chat` alone is a goal (and the mocked planner plans it like any other).
+    expect(out).not.toContain('Mode: ');
+  });
+
+  it('the chat reply reaches the session as a success', async () => {
+    answerAssessment();
+    const { code } = await runCli([
+      'run', '@chat سلام', '--project-root', projectRoot, '--yes', '--persistent', '--label', 'chat turn',
+    ]);
+    expect(code).toBe(0);
+    const sessionsDir = path.join(projectRoot, '.ai-runtime', 'sessions');
+    const file = fs.readdirSync(sessionsDir)[0]!;
+    const session = JSON.parse(fs.readFileSync(path.join(sessionsDir, file), 'utf-8')) as {
+      interactions: Array<{ outcome: string; reviewSummary: string; planIds?: string[] }>;
+    };
+    expect(session.interactions.at(-1)?.outcome).toBe('success');
+    expect(session.interactions.at(-1)?.planIds ?? []).toEqual([]);
+    expect(session.interactions.at(-1)?.reviewSummary).toContain('رانتایم');
+  });
+});
 
 describe('C4 — run CLI clarification behavior', () => {
   let projectRoot: string;

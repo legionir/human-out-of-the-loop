@@ -1,0 +1,8 @@
+{
+  "id": "git_diff",
+  "name": "Git Diff",
+  "description": "Shows what changed in the working tree, the index (staged) or against a ref, as a patch with file stats",
+  "source": "local",
+  "modulePath": "./implementations/git-diff",
+  "category": "git"
+}

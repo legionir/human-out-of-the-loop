@@ -12,11 +12,11 @@
  *      otherwise: run() → confirm (inquirer, or --yes) → execute → report
  *   4. exit code: 0 success/partial, 1 failure, 2 usage error
  */
-import { envDefaultModelId } from '../utils/registries.js';
 import path from 'node:path';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
 import { Orchestrator, type OrchestratorResult } from '../../ai/orchestrator.js';
+import type { CachedOrchestratorHooks } from '../utils/orchestrator-cache.js';
 import type { Plan } from '../../ai/schemas/plan.js';
 import { FilePlanStore } from '../../ai/runtime/plan-store.js';
 import fs from 'node:fs';
@@ -26,16 +26,31 @@ import {
   promptClarifications,
   type ConfirmationResult,
 } from '../utils/confirm.js';
-import { prepareCliEnvironment } from '../utils/config.js';
+import { resolveCliDefaults } from '../utils/config.js';
+import { resolveAndMaybePersistTrust } from '../utils/trust-project.js';
+import { parseModePrefix, resolveRunMode, modeWords } from '../utils/mode-prefix.js';
+import type { RunMode } from '../../ai/modes.js';
 import { createProgressRenderer } from '../utils/streaming.js';
 import { color, err, out } from '../utils/output.js';
+import {
+  ActivityIndicator,
+  resolveActivityEnabled,
+  resolveActivityIntervalMs,
+} from '../utils/activity.js';
+import {
+  createReasoningRenderer,
+  resolveThinkingMode,
+  type ThinkingMode,
+} from '../utils/reasoning.js';
+import { createToolLogRenderer, resolveToolLogEnabled } from '../utils/tool-log.js';
+import { parseBudget } from '../../ai/runtime/budget.js';
 
 export interface RunCommandOptions {
   /** Default: '.' (or the global config's projectRoot) */
   projectRoot?: string;
   /** Force persistent stores (default: global config or off) */
   persistent?: boolean;
-  /** Model id (default: global config or 'gpt-4o') */
+  /** Model id (default: global config or DEFAULT_MODEL_ID) */
   model?: string;
   /** Resume in an existing session */
   session?: string;
@@ -55,10 +70,50 @@ export interface RunCommandOptions {
   maxDelegationDepth?: number;
   /** C3: label for the NEW session (mutually exclusive with --session) */
   label?: string;
+  /**
+   * Phase 32: show the model's own thinking text while it answers
+   * (`auto` = only in a terminal).  See `resolveThinkingMode`.
+   */
+  thinking?: ThinkingMode | string;
+  /**
+   * v27.17.3: log every tool call (type, name, input, status).
+   * `auto` (default) = on, unless `HOTL_TOOL_LOG=0` says otherwise.
+   */
+  toolLog?: string;
+  /**
+   * v27.17.0: `auto` (default) plans or answers depending on the request,
+   * `chat` never plans, `plan` never answers.  An `@chat`/`@plan` prefix in
+   * the goal wins over this flag.
+   */
+  mode?: RunMode | string;
+  /**
+   * G-17: force persistence off even when the global config has persistent:true.
+   */
+  noPersistent?: boolean;
+  /**
+   * G-01: when false (REPL) Ctrl-C during planning aborts the goal instead of
+   * `process.exit(130)`.  Default true for `hootl run`.
+   */
+  exitOnInterrupt?: boolean;
+  /** G-09: reuse a live Orchestrator (REPL cache). */
+  orchestrator?: Orchestrator;
+  /** G-09: leave the reused Orchestrator running. */
+  skipShutdown?: boolean;
+  /** G-09: live callback slot on a cached Orchestrator. */
+  runHooks?: CachedOrchestratorHooks;
+  /**
+   * A-02: mark this project trusted (persist in global config) so its
+   * `registry/mcp-servers` layer is allowed to spawn.
+   */
+  trustProject?: boolean;
+  /** J-03: token count or `$1.50`. */
+  budget?: string;
+  /** J-07: plan only and print an estimate; nothing is executed. */
+  estimate?: boolean;
 }
 
 /** C3: option validation → undefined when OK, error message otherwise (exit 2). */
-function validateRunOptions(opts: RunCommandOptions): string | undefined {
+export function validateRunOptions(opts: RunCommandOptions): string | undefined {
   if (opts.maxReplans !== undefined && (!Number.isInteger(opts.maxReplans) || opts.maxReplans < 0 || opts.maxReplans > 10)) {
     return '--max-replans must be an integer between 0 and 10';
   }
@@ -88,6 +143,31 @@ function validateRunOptions(opts: RunCommandOptions): string | undefined {
   ) {
     return '--timeout-ms must be an integer between 1000 and 600000';
   }
+  if (opts.budget !== undefined) {
+    const parsed = parseBudget(String(opts.budget));
+    if ('error' in parsed) return `--budget: ${parsed.error}`;
+  }
+  // Phase 32: a typo in --thinking must fail fast, not silently do nothing.
+  if (
+    opts.thinking !== undefined &&
+    !['auto', 'on', 'off'].includes(String(opts.thinking).trim().toLowerCase())
+  ) {
+    return `--thinking must be auto, on or off (got "${String(opts.thinking)}")`;
+  }
+  // v27.17.3: same for --tool-log.
+  if (
+    opts.toolLog !== undefined &&
+    !['auto', 'on', 'off'].includes(String(opts.toolLog).trim().toLowerCase())
+  ) {
+    return `--tool-log must be auto, on or off (got "${String(opts.toolLog)}")`;
+  }
+  // v27.17.0: same for --mode.
+  if (
+    opts.mode !== undefined &&
+    !['auto', 'chat', 'plan'].includes(String(opts.mode).trim().toLowerCase())
+  ) {
+    return `--mode must be auto, chat or plan (got "${String(opts.mode)}")`;
+  }
   return undefined;
 }
 
@@ -105,6 +185,20 @@ export interface RunCommandResult {
   exitCode: number;
   /** The session the run was recorded in (full runs only). */
   sessionId?: string;
+  /** G-04: `--session` pointed at a missing id. */
+  sessionNotFound?: boolean;
+}
+
+/** G-01: first Ctrl-C during planning vs. a confirmed plan. */
+export function planningInterruptAction(opts: {
+  currentPlanId: string | undefined;
+  interruptRequested: boolean;
+  exitOnInterrupt: boolean;
+}): 'exit' | 'abort-planning' | 'cancel-plan' {
+  if (opts.interruptRequested || !opts.currentPlanId) {
+    return opts.exitOnInterrupt || Boolean(opts.currentPlanId) ? 'exit' : 'abort-planning';
+  }
+  return 'cancel-plan';
 }
 
 /**
@@ -141,19 +235,77 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     err(chalk.red(invalid));
     return { exitCode: 2 };
   }
+
+  // v27.17.0: the mode can be written inside the goal (`@chat …`, `@plan …`).
+  const prefixed = parseModePrefix(goal);
+  const requested = prefixed.text;
+
   // Phase 29: an empty goal reached the planner (and produced an opaque
   // schema error); it is a usage mistake, so fail fast with exit 2.
-  if (goal.trim().length === 0) {
+  if (requested.trim().length === 0) {
     err(chalk.red('The goal must not be empty.'));
-    err(chalk.dim('Example: hootl run "summarize the README"'));
+    err(chalk.dim(`Example: hootl run "summarize the README"   (or "${'@chat'} hello")`));
     return { exitCode: 2 };
   }
 
-  const projectRoot = path.resolve(opts.projectRoot ?? process.cwd());
-  const globalConfig = prepareCliEnvironment(projectRoot);
+  const defaults = resolveCliDefaults({
+    projectRoot: opts.projectRoot,
+    persistent: opts.persistent,
+    noPersistent: opts.noPersistent,
+    model: opts.model,
+  });
+  const projectRoot = defaults.projectRoot;
+  const globalConfig = defaults.global;
 
-  const persistent = opts.persistent ?? globalConfig.persistent ?? false;
-  const model = opts.model ?? envDefaultModelId(projectRoot) ?? globalConfig.defaultModel;
+  const { resolved, invalid: badMode } = resolveRunMode({
+    ...(prefixed.mode ? { prefix: prefixed.mode } : {}),
+    ...(opts.mode !== undefined ? { flag: String(opts.mode) } : {}),
+    env: process.env,
+    config: globalConfig,
+  });
+  if (badMode) {
+    err(
+      chalk.red(
+        `Invalid default mode "${badMode.value}" (${badMode.source === 'env' ? 'HOTL_MODE' : 'defaultMode in the global config'}).`,
+      ),
+    );
+    err(chalk.dim(`Use one of: ${['auto', 'chat', 'plan'].join(', ')} — or an ${modeWords()} prefix in the goal.`));
+    return { exitCode: 2 };
+  }
+
+  const persistent = defaults.persistent;
+  const model = defaults.model;
+
+  // ── Phase 32: tell the user the run is alive, and stream its thinking ──
+  //
+  // Everything from here to the report can wait on a model: planning,
+  // clarification, a step's agent turn, the acceptance judgment, the final
+  // review.  The spinner covers "no result yet"; the reasoning renderer
+  // shows the model's own thinking when the provider exposes it (showing it
+  // switches agent turns to `streamText` — see AgentRuntime).
+  const showThinking = resolveThinkingMode(opts.thinking);
+  const activity = new ActivityIndicator({
+    enabled: resolveActivityEnabled(),
+    intervalMs: resolveActivityIntervalMs(),
+  });
+  const reasoning = createReasoningRenderer({ indicator: activity });
+  // v27.17.3: what the AI does, line by line (see utils/tool-log.ts).  The
+  // sink is wired through the Orchestrator, so plan steps AND chat turns
+  // report through it — one renderer for the whole run.
+  const toolLog = createToolLogRenderer({
+    enabled: resolveToolLogEnabled(opts.toolLog),
+  });
+  activity.start();
+
+  /** Run a prompt with the spinner out of the way. */
+  const withoutActivity = async <T>(fn: () => Promise<T>): Promise<T> => {
+    activity.pause();
+    try {
+      return await fn();
+    } finally {
+      activity.resume();
+    }
+  };
 
   // Phase 30 (P10 follow-up): graceful Ctrl-C.
   //
@@ -169,12 +321,22 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
   let currentPlanId: string | undefined;
   let interruptRequested = false;
   let orchestratorRef: Orchestrator | undefined;
+  const abortController = new AbortController();
+  const exitOnInterrupt = opts.exitOnInterrupt !== false;
   const onSigint = (): void => {
     if (!orchestratorRef) return;
-    if (interruptRequested || !currentPlanId) {
+    const action = planningInterruptAction({ currentPlanId, interruptRequested, exitOnInterrupt });
+    if (action === 'abort-planning') {
+      abortController.abort();
+      out(color.warn('\n⏹  Planning cancelled.'));
+      return;
+    }
+    if (action === 'exit') {
       out(color.warn('\n⏹  Interrupted again — exiting now.'));
       if (currentPlanId) finalizeCancelledPlan(projectRoot, currentPlanId);
-      process.exit(130);
+      abortController.abort();
+      if (exitOnInterrupt) process.exit(130);
+      return;
     }
     interruptRequested = true;
     out(
@@ -183,9 +345,11 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
           '\n   The step in flight finishes; press Ctrl-C again to leave now.',
       ),
     );
-    void orchestratorRef.cancelPlan(currentPlanId).catch(() => undefined);
+    void orchestratorRef.cancelPlan(currentPlanId!).catch(() => undefined);
   };
   process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigint);
+  process.on('SIGHUP', onSigint);
 
   const confirmCallback: (
     planText: string,
@@ -199,7 +363,8 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       }
     : (planText: string, plan?: Plan) => {
         currentPlanId = plan?.id ?? currentPlanId;
-        return confirmPlanInteractively(planText);
+        // The prompt owns the terminal while it is up.
+        return withoutActivity(() => confirmPlanInteractively(planText));
       };
 
   // C4: clarification only when interactive AND not auto-confirming.
@@ -212,22 +377,38 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
   const clarificationCallback =
     opts.yes || !process.stdout.isTTY || !process.stdin.isTTY
       ? undefined
-      : (questions: string[], round: number) => promptClarifications(questions, round);
+      : (questions: string[], round: number) =>
+          withoutActivity(() => promptClarifications(questions, round));
 
   const renderer = createProgressRenderer({ verbose: opts.verbose ?? false });
 
 
-  const orchestrator = new Orchestrator({
-    projectRoot,
-    persistent,
-    ...(model ? { defaultModelId: model } : {}),
+  const trustedProject = resolveAndMaybePersistTrust(projectRoot, opts.trustProject === true);
+
+  const extraOrch = {
+    trustedProject,
     ...(opts.timeoutMs !== undefined ? { agentTimeoutMs: opts.timeoutMs } : {}),
     ...(opts.maxSteps !== undefined ? { maxSteps: opts.maxSteps } : {}),
-    // C3: execution-control passthrough
     ...(opts.maxReplans !== undefined ? { maxReplanningAttempts: opts.maxReplans } : {}),
     ...(opts.maxDelegationDepth !== undefined ? { maxDelegationDepth: opts.maxDelegationDepth } : {}),
-    onProgress: (event: ProgressEvent) => renderer(event),
-  });
+  };
+  if (opts.runHooks) {
+    opts.runHooks.onProgress = (event: ProgressEvent) => renderer(event);
+    if (showThinking) opts.runHooks.onThought = reasoning;
+    opts.runHooks.onToolCall = toolLog;
+  }
+
+  const orchestrator =
+    opts.orchestrator ??
+    new Orchestrator({
+      projectRoot,
+      persistent,
+      ...extraOrch,
+      ...(model ? { defaultModelId: model } : {}),
+      onProgress: (event: ProgressEvent) => renderer(event),
+      ...(showThinking ? { onThought: reasoning } : {}),
+      onToolCall: toolLog,
+    });
   orchestratorRef = orchestrator;
 
   try {
@@ -248,7 +429,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
             : 'Sessions are only stored with --persistent (or persistent:true in the global config).',
         ),
       );
-      return { exitCode: 2 };
+      return { exitCode: 2, sessionNotFound: true };
     }
 
     // Any model spec runs — a registered id, `<provider>:<name>`, or a
@@ -256,14 +437,45 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     // which one, so a typo is visible before the first call fails.
     const active = orchestrator.modelRegistry.getConfig(orchestrator.config.defaultModelId);
     if (active && active.description?.startsWith('Selected at runtime')) {
-      const where = (active.config?.baseURL as string | undefined) ?? `the ${active.provider} API`;
-      out(color.dim(`Model: ${active.model} (not in the registry) via ${where}`));
+      // G-18: never print a custom baseURL (it may be an internal gateway).
+      out(color.dim(`Model: ${active.model} (not in the registry) via the ${active.provider} API`));
+    }
+
+    // Say which mode is in force when the user (or their config) chose it —
+    // a stray `HOTL_MODE` must never surprise anyone.
+    if (resolved.source !== 'default') {
+      out(color.dim(`Mode: ${resolved.mode} (${resolved.source})`));
+    }
+
+    // ── Estimate: plan, print cost, stop ──────────────────────
+    if (opts.estimate) {
+      out(color.bold('📊 Estimate — planning only, nothing will be executed.'));
+      const estimated = await orchestrator.estimatePlan(requested, undefined, resolved.mode);
+      if (!estimated.ok && !estimated.plan) {
+        out(color.failed(estimated.error ?? 'Planning failed.'));
+        return { exitCode: 1 };
+      }
+      if (estimated.planText) {
+        out(color.bold('\n── Planned steps ─────────────────────────────'));
+        out(estimated.planText);
+      }
+      out(color.bold('\n── Estimate ──────────────────────────────────'));
+      out(`Steps:  ${estimated.estimate.steps}`);
+      out(`Tokens: ~${estimated.estimate.tokens} (planning used ${estimated.usage.totalTokens})`);
+      out(`Cost:   ~$${estimated.estimate.usd.toFixed(4)}`);
+      return { exitCode: 0 };
     }
 
     // ── Dry run: plan, show, stop ─────────────────────────────
     if (opts.dryRun) {
       out(color.bold('📋 Dry run — planning only, nothing will be executed.'));
-      const preview = await orchestrator.previewPlan(goal);
+      const preview = await orchestrator.previewPlan(requested, undefined, resolved.mode);
+      if (preview.ok && preview.answer !== undefined) {
+        // Chat mode has nothing to execute, so the answer IS the preview.
+        out(color.bold('\n💬 Answer (nothing to execute)'));
+        out(preview.answer);
+        return { exitCode: 0 };
+      }
       if (preview.planText) {
         out(color.bold('\n── Planned steps ─────────────────────────────'));
         out(preview.planText);
@@ -275,9 +487,38 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       return { exitCode: 1 };
     }
 
+    // G-02: fail before any paid LLM call.  Confirmation needs a TTY unless
+    // `--yes`; a chat-mode run never confirms.  This comes after the free
+    // pre-flight (options, --session, model) so usage errors still exit 2.
+    if (
+      !opts.yes &&
+      resolved.mode !== 'chat' &&
+      (!process.stdout.isTTY || !process.stdin.isTTY)
+    ) {
+      err(
+        chalk.red(
+          'Interactive confirmation requires a TTY. Re-run with --yes to auto-confirm (CI / Human-Out-Of-Loop mode), or from an interactive terminal.',
+        ),
+      );
+      return { exitCode: 1 };
+    }
+
     // ── Full run (Human-Out-Of-Loop after confirmation) ───────
-    const result: OrchestratorResult = await orchestrator.run(goal, {
+    const result: OrchestratorResult = await orchestrator.run(requested, {
       sessionId: opts.session,
+      abortSignal: abortController.signal,
+      // v27.17.0: auto (default) / chat / plan — the prefix in the goal wins.
+      mode: resolved.mode,
+      ...(opts.budget || opts.timeoutMs !== undefined || opts.maxSteps !== undefined || opts.maxReplans !== undefined
+        ? {
+            runOverrides: {
+              ...(opts.budget !== undefined ? { budget: opts.budget } : {}),
+              ...(opts.timeoutMs !== undefined ? { agentTimeoutMs: opts.timeoutMs } : {}),
+              ...(opts.maxSteps !== undefined ? { maxSteps: opts.maxSteps } : {}),
+              ...(opts.maxReplans !== undefined ? { maxReplanningAttempts: opts.maxReplans } : {}),
+            },
+          }
+        : {}),
       // C3: label the NEW session (--label is rejected with --session)
       ...(opts.label !== undefined ? { sessionLabel: opts.label } : {}),
       confirmCallback,
@@ -285,6 +526,9 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       ...(clarificationCallback ? { clarificationCallback } : {}),
     });
 
+    // A thinking block that was still streaming must not run into the
+    // report; the spinner belongs to the waiting, which is over.
+    reasoning.close();
     out('');
     out(result.report);
 
@@ -295,7 +539,14 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
           `(${usage.totalPromptTokens} prompt + ${usage.totalCompletionTokens} completion)`,
       ),
     );
-    out(color.dim(`Session: ${result.sessionId}   Plan: ${result.planId}`));
+    out(
+      color.dim(
+        `Session: ${result.sessionId}   ` +
+          (result.kind === 'answer'
+            ? `Plan: none (answered in ${resolved.mode === 'chat' ? 'chat' : 'auto'} mode)`
+            : `Plan: ${result.planId}`),
+      ),
+    );
 
     const exitCode =
       result.review.outcome === 'success' || result.review.outcome === 'partial-success'
@@ -311,6 +562,11 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     return { exitCode: 1 };
   } finally {
     process.removeListener('SIGINT', onSigint);
-    await orchestrator.shutdown();
+    process.removeListener('SIGTERM', onSigint);
+    process.removeListener('SIGHUP', onSigint);
+    // ...including an error path that left a thinking block open.
+    reasoning.close();
+    activity.stop();
+    if (!opts.skipShutdown) await orchestrator.shutdown();
   }
 }

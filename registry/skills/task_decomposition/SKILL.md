@@ -11,10 +11,10 @@ criteria.
 ### Step 1: Understand the Goal
 Restate the user's goal in one sentence. Identify the key deliverables.
 
-### Step 2: Query the Catalog
-Before planning, use `list_personas`, `list_skills`, and `list_tools` to
-understand what capabilities are available. Never assume a persona, skill,
-or tool exists without checking.
+### Step 2: Use the Catalog in the Prompt
+The user message already lists the registered personas, skills and tools.
+Assign only those ids. Never invent a persona, skill or tool, and never
+ask to list them — generateObject cannot call tools.
 
 ### Step 3: Decompose into Steps
 Break the goal into atomic steps. For each step specify:
@@ -23,7 +23,7 @@ Break the goal into atomic steps. For each step specify:
 - **assignedPersona**: The persona best suited (check `allowedTools`!).
 - **assignedSkills**: Skills the persona needs for this step.
 - **assignedTools**: Tools the step will use — MUST be a subset of the
-  persona's `allowedTools`. Cross-check with `list_tools`.
+  persona's `allowedTools` as listed in the catalog.
 - **claimedResources**: Files or resources this step will modify (for lock
   management). Steps modifying the same resource will be serialized.
 - **acceptanceCriteria**: A clear, testable statement that defines when this

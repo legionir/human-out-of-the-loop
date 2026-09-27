@@ -37,6 +37,7 @@ vi.mock('ai', async () => {
 });
 
 import { generateObject } from 'ai';
+import { registerLocalToolFixtures } from './helpers/local-tools-fixture.js';
 const mockGenerateObject = vi.mocked(generateObject);
 
 // ─── Test infrastructure ─────────────────────────────────────────
@@ -76,6 +77,9 @@ function setupReviewer() {
   toolRegistry.registerImplementation('search_code', searchCodeTool);
   toolRegistry.registerImplementation('write_file', writeFileTool);
   toolRegistry.registerImplementation('git_status', gitStatusTool);
+  // Phase 33: register the reference filesystem toolset so skill cross-validation
+  // (registry/skills/*) sees the same catalog as production bootstrapTools().
+  registerLocalToolFixtures(toolRegistry, TEST_ROOT);
 
   const skillRegistry = new SkillRegistry({ toolRegistry });
   // Minimal fix: bootstrap catalog BEFORE loading skills because task_decomposition, acceptance_check etc depend on catalog tools

@@ -1,0 +1,8 @@
+{
+  "id": "delete_entities",
+  "name": "Delete Entities",
+  "description": "Deletes memory entities and the relations that touch them",
+  "source": "local",
+  "modulePath": "./implementations/memory-tools",
+  "category": "memory"
+}

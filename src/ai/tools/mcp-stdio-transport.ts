@@ -38,6 +38,45 @@ const CLOSE_GRACE_MS = 1000;
 const IS_WINDOWS = process.platform === 'win32';
 
 /**
+ * Environment variables the base allowlist keeps from the parent process
+ * (R0-04). An MCP stdio server declared in `registry/mcp-servers` used to
+ * inherit the *entire* `process.env` — including every API key, token or
+ * secret the orchestrator's own process happened to have — even though the
+ * server only ever asked for `config.env`. A server never needs more than
+ * these to run at all; anything else must be named explicitly in its own
+ * `env` block.
+ */
+const BASE_ENV_ALLOWLIST = [
+  'PATH',
+  'Path', // Windows env lookups are case-insensitive but the key case varies
+  'HOME',
+  'USERPROFILE',
+  'SystemRoot',
+  'SystemDrive',
+  'WINDIR',
+  'TEMP',
+  'TMP',
+  'LANG',
+  'LC_ALL',
+  'LOCALAPPDATA',
+  'APPDATA',
+  'ComSpec',
+  'PATHEXT',
+  'NUMBER_OF_PROCESSORS',
+  'PROCESSOR_ARCHITECTURE',
+] as const;
+
+/** The base environment every stdio child gets, before `config.env`. */
+export function baseChildEnv(source: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const base: Record<string, string> = {};
+  for (const key of BASE_ENV_ALLOWLIST) {
+    const value = source[key];
+    if (value !== undefined) base[key] = value;
+  }
+  return base;
+}
+
+/**
  * Spawn options for the child process (a pure function of the platform, so
  * the Windows decision is unit-testable from Linux).
  *
@@ -45,6 +84,11 @@ const IS_WINDOWS = process.platform === 'win32';
  * `npm …` — `.cmd` shims that CreateProcess cannot execute directly, so
  * spawning them without a shell fails with ENOENT.  Command and args come
  * from the user's own registry file, never from model output.
+ *
+ * R0-04: the child's environment is the base allowlist plus whatever the
+ * server's own config declares — never the orchestrator's full
+ * `process.env`, so a compromised or merely careless server config cannot
+ * exfiltrate secrets it was never given.
  */
 export function stdioSpawnOptions(
   platform: NodeJS.Platform,
@@ -52,7 +96,7 @@ export function stdioSpawnOptions(
 ): SpawnOptions {
   return {
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: env ? { ...process.env, ...env } : process.env,
+    env: { ...baseChildEnv(), ...env },
     ...(platform === 'win32' ? { shell: true } : {}),
   };
 }

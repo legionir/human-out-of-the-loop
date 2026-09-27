@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { EventBus, type AgentEvent } from './event-bus.js';
 import { AgentRuntime, type AgentRunResult } from './agent-runtime.js';
+import type { ThoughtSink } from './thought-stream.js';
+import type { ToolCallLogOptions, ToolCallSink } from './tool-call-log.js';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { createTaskRecord, type Task, type TaskStatus } from '../schemas/task.js';
 
@@ -33,6 +35,21 @@ export interface TaskRuntimeConfig {
    * default); now it actually applies.
    */
   maxSteps?: number;
+  /**
+   * Phase 32: default sink for the model's thinking text, forwarded to
+   * every `AgentRuntime.run()` call that does not carry its own.  When it
+   * is absent, agent turns use the non-streaming call exactly as before.
+   */
+  onThought?: ThoughtSink;
+  /**
+   * v27.17.3: default sink for structured tool-call records, forwarded to
+   * every `AgentRuntime.run()` call that does not carry its own.
+   */
+  onToolCall?: ToolCallSink;
+  /** v27.17.3: category resolver + secrets for those records. */
+  toolCallOptions?: ToolCallLogOptions;
+  /** C-09: max retained task records (default 500). */
+  maxTaskRecords?: number;
 }
 
 export interface CreateTaskOptions {
@@ -52,7 +69,21 @@ export interface CreateTaskOptions {
    */
   agentTimeoutMs?: number;
   maxSteps?: number;
+  /**
+   * Phase 32: per-task thinking sink (wins over `TaskRuntimeConfig.onThought`).
+   */
+  onThought?: ThoughtSink;
+  /** v27.17.3: per-task tool-call sink (wins over the runtime default). */
+  onToolCall?: ToolCallSink;
+  /** C-03/C-07: parent task that spawned this one (delegate_task). */
+  parentTaskId?: string;
 }
+
+/**
+ * C-01: longest a timed-out task keeps its locks while its abandoned work
+ * settles.  Past this, the work is assumed dead and the locks are freed.
+ */
+export const LINGER_RELEASE_MS = 30_000;
 
 // ─── Resource Lock Manager ───────────────────────────────────────
 
@@ -153,11 +184,17 @@ export class TaskRuntime {
   private readonly maxConcurrentTasks: number;
   private readonly agentTimeoutMs?: number;
   private readonly maxSteps?: number;
+  /** Phase 32: default thinking sink for every task of this runtime. */
+  private readonly onThought?: ThoughtSink;
+  /** v27.17.3: default sink for structured tool-call records. */
+  private readonly onToolCall?: ToolCallSink;
+  /** v27.17.3: how those records resolve a tool's type, and what to redact. */
+  private readonly toolCallOptions?: ToolCallLogOptions;
   private readonly eventBus: EventBus;
   /** U3: per-task execution overrides (runOverrides from Orchestrator.run). */
   private readonly taskOverrides = new Map<
     string,
-    Pick<CreateTaskOptions, 'agentTimeoutMs' | 'maxSteps'>
+    Pick<CreateTaskOptions, 'agentTimeoutMs' | 'maxSteps' | 'onThought' | 'onToolCall'>
   >();
   private readonly runtime: AgentRuntime;
   private readonly runningPromises = new Map<string, Promise<AgentRunResult>>();
@@ -168,12 +205,29 @@ export class TaskRuntime {
   // Phase 22: per-task abort controllers — cancelTask on a RUNNING task
   // now truly aborts the in-flight generateText (not just bookkeeping).
   private readonly abortControllers = new Map<string, AbortController>();
+  private readonly children = new Map<string, Set<string>>();
+  /**
+   * C-07: parents blocked in `delegate_task` waiting for their child.  They
+   * lend their concurrency slot to the child — otherwise N parents that all
+   * delegate at once fill every slot and no child can ever start.
+   */
+  private readonly suspendedParents = new Set<string>();
+  /** Waiters for the next task state change (start, finish, cancel). */
+  private changeWaiters: Array<() => void> = [];
+  /** C-01: lock releases waiting for a timed-out task's work to settle. */
+  private readonly lingering = new Set<Promise<void>>();
+  private readonly completedOrder: string[] = [];
+  private readonly maxTaskRecords: number;
   private unsubscribeFn?: () => void;
 
   constructor(config: Pick<TaskRuntimeConfig, 'eventBus'> & Partial<TaskRuntimeConfig>) {
     this.maxConcurrentTasks = config.maxConcurrentTasks ?? 5;
+    this.maxTaskRecords = config.maxTaskRecords ?? 500;
     this.agentTimeoutMs = config.agentTimeoutMs;
     this.maxSteps = config.maxSteps;
+    this.onThought = config.onThought;
+    this.onToolCall = config.onToolCall;
+    this.toolCallOptions = config.toolCallOptions;
     this.eventBus = config.eventBus;
     this.runtime = config.agentRuntime ?? new AgentRuntime();
 
@@ -198,17 +252,30 @@ export class TaskRuntime {
       claimedResources: options.claimedResources,
       planStepId: options.planStepId,
       planId: options.planId,
+      parentTaskId: options.parentTaskId,
     });
 
     this.tasks.set(taskId, task);
     this.agents.set(taskId, options.agent);
     this.pendingIds.add(taskId);
+    if (options.parentTaskId) {
+      const set = this.children.get(options.parentTaskId) ?? new Set<string>();
+      set.add(taskId);
+      this.children.set(options.parentTaskId, set);
+    }
 
     // U3: remember per-run execution overrides for this task
-    if (options.agentTimeoutMs !== undefined || options.maxSteps !== undefined) {
+    if (
+      options.agentTimeoutMs !== undefined ||
+      options.maxSteps !== undefined ||
+      options.onThought !== undefined ||
+      options.onToolCall !== undefined
+    ) {
       this.taskOverrides.set(taskId, {
         agentTimeoutMs: options.agentTimeoutMs,
         maxSteps: options.maxSteps,
+        ...(options.onThought !== undefined ? { onThought: options.onThought } : {}),
+        ...(options.onToolCall !== undefined ? { onToolCall: options.onToolCall } : {}),
       });
     }
 
@@ -240,8 +307,27 @@ export class TaskRuntime {
     return Array.from(this.tasks.values());
   }
 
+  /** Resolve every `nextChange()` waiter — a task started, ended or was cancelled. */
+  private notifyChange(): void {
+    const waiters = this.changeWaiters;
+    this.changeWaiters = [];
+    for (const wake of waiters) wake();
+  }
+
+  /** Resolves on the next task state change (replaces fixed-interval polling). */
+  private nextChange(): Promise<void> {
+    return new Promise((resolve) => this.changeWaiters.push(resolve));
+  }
+
   getRunningCount(): number {
     return this.runningIds.size;
+  }
+
+  /** Running tasks that hold a slot (a parent waiting on its child does not). */
+  private activeSlotCount(): number {
+    let suspended = 0;
+    for (const id of this.suspendedParents) if (this.runningIds.has(id)) suspended += 1;
+    return this.runningIds.size - suspended;
   }
 
   getPendingCount(): number {
@@ -255,8 +341,13 @@ export class TaskRuntime {
    * respecting resource locks.
    */
   private scheduleNext(): void {
-    const runningCount = this.getRunningCount();
-    const availableSlots = this.maxConcurrentTasks - runningCount;
+    const before = this.runningIds.size;
+    this.startPending();
+    if (this.runningIds.size !== before) this.notifyChange();
+  }
+
+  private startPending(): void {
+    const availableSlots = this.maxConcurrentTasks - this.activeSlotCount();
 
     if (availableSlots <= 0) return;
 
@@ -303,6 +394,9 @@ export class TaskRuntime {
         const overrides = this.taskOverrides.get(task.id) ?? {};
         const timeoutMs = overrides.agentTimeoutMs ?? this.agentTimeoutMs;
         const maxSteps = overrides.maxSteps ?? this.maxSteps;
+        // Phase 32: live thinking text (per-task sink wins over the default).
+        const onThought = overrides.onThought ?? this.onThought;
+        const onToolCall = overrides.onToolCall ?? this.onToolCall;
         this.taskOverrides.delete(task.id);
         const promise = this.runtime
           .run({
@@ -318,10 +412,30 @@ export class TaskRuntime {
             // Phase 20 (CORR-03/05): carry plan context on emitted events
             ...(task.planId !== undefined ? { planId: task.planId } : {}),
             ...(task.planStepId !== undefined ? { planStepId: task.planStepId } : {}),
+            // Phase 32: none/undefined keeps the turn non-streaming
+            ...(onThought ? { onThought } : {}),
+            // v27.17.3: structured tool-call records for this step
+            ...(onToolCall ? { onToolCall } : {}),
+            ...(this.toolCallOptions ? { toolCallOptions: this.toolCallOptions } : {}),
           })
           .then((result) => {
             this.handleRunResult(task.id, result);
             return result;
+          })
+          .catch((err: unknown) => {
+            const message = err instanceof Error ? err.message : String(err);
+            const failed: AgentRunResult = {
+              taskId: task.id,
+              agentId: agent.agentId,
+              success: false,
+              summary: `Agent execution failed: ${message}`,
+              result: '',
+              toolsUsed: [],
+              errors: [message],
+              failureType: 'technical',
+            };
+            this.handleRunResult(task.id, failed);
+            return failed;
           });
         this.runningPromises.set(task.id, promise);
       }
@@ -352,10 +466,33 @@ export class TaskRuntime {
     const task = this.tasks.get(taskId);
     if (!task) return;
 
-    // Release resource locks
-    this.lockManager.release(taskId);
     this.runningPromises.delete(taskId);
-    this.runningIds.delete(taskId);
+    // C-01: a run that timed out may still have a tool writing to the
+    // claimed resources; keep the lock and the concurrency slot until that
+    // work settles (bounded, so a call that never ends cannot wedge them).
+    if (result.settled) {
+      const release = (): void => {
+        if (!this.runningIds.has(taskId)) return;
+        this.lockManager.release(taskId);
+        this.runningIds.delete(taskId);
+        this.scheduleNext();
+        this.notifyChange();
+      };
+      let cap: ReturnType<typeof setTimeout> | undefined;
+      const lingering: Promise<void> = new Promise<void>((resolve) => {
+        cap = setTimeout(resolve, LINGER_RELEASE_MS);
+        cap.unref?.();
+        void result.settled!.then(resolve);
+      }).then(() => {
+        if (cap) clearTimeout(cap);
+        this.lingering.delete(lingering);
+        release();
+      });
+      this.lingering.add(lingering);
+    } else {
+      this.lockManager.release(taskId);
+      this.runningIds.delete(taskId);
+    }
     // Phase 22: drop the (now settable) controller
     this.abortControllers.delete(taskId);
 
@@ -377,12 +514,46 @@ export class TaskRuntime {
         task.summary = result.summary;
         task.errors = result.errors;
         task.failureType = result.failureType ?? 'technical';
+        if (result.usage) task.usage = result.usage;
       }
+    } else if (result.usage && !task.usage) {
+      task.usage = result.usage;
     }
     task.completedAt = Date.now();
 
+    this.pruneTaskMaps(taskId);
+
     // Try to start queued tasks now that a slot is free
     this.scheduleNext();
+    this.notifyChange();
+  }
+
+  private pruneTaskMaps(taskId: string): void {
+    this.agents.delete(taskId);
+    this.taskOverrides.delete(taskId);
+    this.abortControllers.delete(taskId);
+    this.runningPromises.delete(taskId);
+    this.completedOrder.push(taskId);
+    while (this.completedOrder.length > this.maxTaskRecords) {
+      const old = this.completedOrder.shift();
+      if (!old) break;
+      if (this.runningIds.has(old) || this.pendingIds.has(old)) continue;
+      this.tasks.delete(old);
+      this.children.delete(old);
+    }
+  }
+
+  /** Test/diagnostics: sizes of internal maps. */
+  debugMapSizes(): { tasks: number; agents: number; taskOverrides: number } {
+    return {
+      tasks: this.tasks.size,
+      agents: this.agents.size,
+      taskOverrides: this.taskOverrides.size,
+    };
+  }
+
+  isResourceHeld(resource: string): boolean {
+    return this.lockManager.getLockedResources().has(resource);
   }
 
   // ── Cleanup ───────────────────────────────────────────────────
@@ -392,6 +563,35 @@ export class TaskRuntime {
    * Useful for graceful shutdown and testing.
    * Loops until no pending or running tasks remain (handles queued tasks that start after others complete).
    */
+  /**
+   * B-14: resolve as soon as ANY of `taskIds` is terminal so the plan
+   * loop can persist that step without waiting for the rest of the wave.
+   */
+  async waitForAny(taskIds: string[]): Promise<void> {
+    const terminal = new Set(['completed', 'failed', 'cancelled']);
+    const ids = taskIds.filter(Boolean);
+    if (ids.length === 0) return;
+    while (true) {
+      let anyRunning = false;
+      for (const id of ids) {
+        const task = this.tasks.get(id);
+        if (task && terminal.has(task.status)) return;
+        if (this.runningPromises.has(id) || task?.status === 'running' || task?.status === 'pending') {
+          anyRunning = true;
+        }
+      }
+      if (!anyRunning) return;
+      const promises = ids
+        .map((id) => this.runningPromises.get(id))
+        .filter((p): p is Promise<AgentRunResult> => p !== undefined);
+      if (promises.length === 0) {
+        await this.nextChange();
+        continue;
+      }
+      await Promise.race(promises);
+    }
+  }
+
   async waitForAll(): Promise<void> {
     // Loop until quiescent — pending tasks may become running after each batch completes
     while (true) {
@@ -399,6 +599,11 @@ export class TaskRuntime {
       if (promises.length === 0) {
         // No running tasks — check if any pending remain that could be scheduled
         if (this.getPendingCount() === 0) break;
+        // A pending task may be waiting for a timed-out task's lock.
+        if (this.lingering.size > 0) {
+          await Promise.race(this.lingering);
+          continue;
+        }
         // Pending exists but not running (maybe blocked) — try scheduling and wait a tick
         this.scheduleNext();
         if (this.runningPromises.size === 0 && this.getPendingCount() > 0) {
@@ -413,11 +618,70 @@ export class TaskRuntime {
     }
   }
 
+  /** C-08: wait only for tasks belonging to one plan. */
+  async waitFor(planId: string): Promise<void> {
+    const terminal = new Set(['completed', 'failed', 'cancelled']);
+    for (;;) {
+      const inflight: Promise<AgentRunResult>[] = [];
+      let pending = false;
+      for (const [id, task] of this.tasks) {
+        if (task.planId !== planId) continue;
+        if (terminal.has(task.status)) continue;
+        const p = this.runningPromises.get(id);
+        if (p) inflight.push(p);
+        else if (task.status === 'pending' || task.status === 'running') pending = true;
+      }
+      if (inflight.length === 0 && !pending) return;
+      if (inflight.length === 0) {
+        await this.nextChange();
+        continue;
+      }
+      await Promise.allSettled(inflight);
+    }
+  }
+
+  async waitForTask(taskId: string, parentTaskId?: string): Promise<Task | undefined> {
+    const lend = parentTaskId !== undefined && this.runningIds.has(parentTaskId);
+    if (lend) {
+      this.suspendedParents.add(parentTaskId);
+      this.scheduleNext();
+    }
+    try {
+      return await this.waitForTaskSettled(taskId);
+    } finally {
+      if (lend) this.suspendedParents.delete(parentTaskId);
+    }
+  }
+
+  private async waitForTaskSettled(taskId: string): Promise<Task | undefined> {
+    const terminal = new Set(['completed', 'failed', 'cancelled']);
+    for (;;) {
+      const task = this.tasks.get(taskId);
+      if (!task) return undefined;
+      if (terminal.has(task.status)) return task;
+      const p = this.runningPromises.get(taskId);
+      if (p) {
+        await p.then(
+          () => undefined,
+          () => undefined
+        );
+        continue;
+      }
+      await this.nextChange();
+    }
+  }
+
   /**
    * Cancel a pending or running task.
    * Phase 13 extends this with full cancellation support.
    */
   cancelTask(taskId: string): boolean {
+    const cancelled = this.cancelTaskInner(taskId);
+    if (cancelled) this.notifyChange();
+    return cancelled;
+  }
+
+  private cancelTaskInner(taskId: string): boolean {
     const task = this.tasks.get(taskId);
     if (!task) return false;
 
@@ -425,23 +689,28 @@ export class TaskRuntime {
       task.status = 'cancelled';
       task.completedAt = Date.now();
       this.pendingIds.delete(taskId);
+      for (const child of this.children.get(taskId) ?? []) {
+        this.cancelTask(child);
+      }
       return true;
     }
 
     if (task.status === 'running') {
-      // Phase 22: REAL cancellation — abort the in-flight model call
-      // (AgentRuntime forwards the signal to generateText as
-      // abortSignal).  The run rejects with an AbortError; since the
-      // task is already "cancelled", handleRunResult keeps that status.
+      // Phase 22: REAL cancellation — abort the in-flight model call.
+      // C-01: do NOT release the resource lock or the concurrency slot
+      // here — handleRunResult does that when executionPromise settles.
       task.status = 'cancelled';
       task.completedAt = Date.now();
-      this.lockManager.release(taskId);
-      this.runningIds.delete(taskId);
       this.abortControllers.get(taskId)?.abort();
-      this.scheduleNext();
+      for (const child of this.children.get(taskId) ?? []) {
+        this.cancelTask(child);
+      }
       return true;
     }
 
+    for (const child of this.children.get(taskId) ?? []) {
+      this.cancelTask(child);
+    }
     return false; // Already completed/failed/cancelled
   }
 

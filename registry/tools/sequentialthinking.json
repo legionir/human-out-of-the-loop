@@ -1,0 +1,8 @@
+{
+  "id": "sequentialthinking",
+  "name": "Sequential Thinking",
+  "description": "Records numbered, revisable and branchable reasoning steps, persisted per project so a resumed run continues the same chain",
+  "source": "local",
+  "modulePath": "./implementations/sequential-thinking",
+  "category": "reasoning"
+}

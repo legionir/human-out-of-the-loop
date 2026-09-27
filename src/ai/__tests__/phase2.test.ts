@@ -225,7 +225,7 @@ describe('git_status tool', () => {
 // ─── Loader integration ─────────────────────────────────────────
 
 describe('Tool loader integration', () => {
-  it('loads all four tool definitions from registry/tools/', () => {
+  it('loads every tool definition from registry/tools/', () => {
     const reg = new ToolRegistry();
     const baseReg = createRegistry({ schema: ToolDefinitionSchema, label: 'Tool' });
     const dir = path.resolve(__dirname, '../../../registry/tools');
@@ -234,11 +234,21 @@ describe('Tool loader integration', () => {
       registry: baseReg,
       schema: ToolDefinitionSchema,
     });
-    expect(result.loaded).toBe(4);
+    // 4 original filesystem/git tools + the phases 33-35 filesystem set
+    // + the phase-38 time/reasoning trio + the phases 39-42 additions.
+    expect(result.loaded).toBe(48);
     expect(result.errors).toHaveLength(0);
     expect(baseReg.has('read_file')).toBe(true);
     expect(baseReg.has('search_code')).toBe(true);
     expect(baseReg.has('write_file')).toBe(true);
     expect(baseReg.has('git_status')).toBe(true);
+    expect(baseReg.has('edit_file')).toBe(true);
+    expect(baseReg.has('directory_tree')).toBe(true);
+    expect(baseReg.has('read_media_file')).toBe(true);
+    expect(baseReg.has('list_directory_with_sizes')).toBe(true);
+    expect(baseReg.has('get_current_time')).toBe(true);
+    expect(baseReg.has('convert_time')).toBe(true);
+    expect(baseReg.has('sequentialthinking')).toBe(true);
+    expect(baseReg.has('write_multiple_files')).toBe(true);
   });
 });

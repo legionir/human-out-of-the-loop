@@ -16,6 +16,8 @@ import { color, out } from './output.js';
 export interface ConfirmationResult {
   confirmed: boolean;
   feedback?: string;
+  /** The prompt was aborted (Ctrl-C / Escape): stop, never re-plan. */
+  cancelled?: boolean;
 }
 
 /** Thrown when interactive confirmation is impossible (no TTY). */
@@ -42,34 +44,56 @@ export async function confirmPlanInteractively(planText: string): Promise<Confir
   out(planText);
   out(color.bold('───────────────────────────────────────────────\n'));
 
-  const { choice } = await inquirer.prompt<{ choice: 'yes' | 'no' }>([
-    {
-      // Phase 29: inquirer v14 renamed the arrow-key list prompt from
-      // `list` to `select`; `list` is no longer registered and made every
-      // interactive confirmation fail with
-      // 'Prompt type "list" is not registered'.
-      type: 'select',
-      name: 'choice',
-      message: 'Execute this plan?',
-      choices: [
-        { name: 'Yes, execute (Human-Out-Of-Loop — no further questions)', value: 'yes' },
-        { name: 'No, reject', value: 'no' },
-      ],
-      default: 'yes',
-    },
-  ]);
+  let choice: 'yes' | 'no';
+  try {
+    const answered = await inquirer.prompt<{ choice: 'yes' | 'no' }>([
+      {
+        // Phase 29: inquirer v14 renamed the arrow-key list prompt from
+        // `list` to `select`; `list` is no longer registered and made every
+        // interactive confirmation fail with
+        // 'Prompt type "list" is not registered'.
+        type: 'select',
+        name: 'choice',
+        message: 'Execute this plan?',
+        choices: [
+          { name: 'Yes, execute (Human-Out-Of-Loop — no further questions)', value: 'yes' },
+          { name: 'No, reject', value: 'no' },
+        ],
+        default: 'yes',
+      },
+    ]);
+    choice = answered.choice;
+  } catch (e) {
+    // G-07: Ctrl-C / Escape must reject the plan (close the interaction),
+    // not print a stack and leave it pending.
+    if (isExitPromptError(e)) {
+      out(color.warn('cancelled'));
+      return { confirmed: false, cancelled: true, feedback: 'User cancelled the confirmation prompt.' };
+    }
+    throw e;
+  }
 
   if (choice === 'yes') {
     return { confirmed: true };
   }
 
-  const { feedback } = await inquirer.prompt<{ feedback: string }>([
-    {
-      type: 'input',
-      name: 'feedback',
-      message: 'Feedback for the planner (optional, enter to skip):',
-    },
-  ]);
+  let feedback: string;
+  try {
+    ({ feedback } = await inquirer.prompt<{ feedback: string }>([
+      {
+        type: 'input',
+        name: 'feedback',
+        message: 'Feedback for the planner (optional, enter to skip):',
+      },
+    ]));
+  } catch (e) {
+    // Ctrl-C at the feedback question is still a rejection, not a crash.
+    if (isExitPromptError(e)) {
+      out(color.warn('cancelled'));
+      return { confirmed: false, cancelled: true, feedback: 'User cancelled the confirmation prompt.' };
+    }
+    throw e;
+  }
   const trimmed = feedback.trim();
   return {
     confirmed: false,
@@ -120,4 +144,10 @@ export async function promptClarifications(
     return null;
   }
   return answers;
+}
+
+function isExitPromptError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const name = (error as { name?: string }).name;
+  return name === 'ExitPromptError' || name === 'AbortPromptError';
 }

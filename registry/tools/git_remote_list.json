@@ -1,0 +1,8 @@
+{
+  "id": "git_remote_list",
+  "name": "Git Remote List",
+  "description": "Lists configured remotes with their fetch and push URLs (git remote -v), without touching the network",
+  "source": "local",
+  "modulePath": "./implementations/git-remote-list",
+  "category": "git"
+}

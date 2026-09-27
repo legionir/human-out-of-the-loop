@@ -1,0 +1,8 @@
+{
+  "id": "fetch",
+  "name": "Fetch URL",
+  "description": "Fetches an http(s) URL and returns its content as Markdown (or raw HTML), paged, with robots.txt honoured and private addresses blocked",
+  "source": "local",
+  "modulePath": "./implementations/fetch",
+  "category": "web"
+}

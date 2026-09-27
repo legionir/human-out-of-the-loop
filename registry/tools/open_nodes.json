@@ -1,0 +1,8 @@
+{
+  "id": "open_nodes",
+  "name": "Open Nodes",
+  "description": "Opens specific memory entities with every relation that touches them",
+  "source": "local",
+  "modulePath": "./implementations/memory-tools",
+  "category": "memory"
+}

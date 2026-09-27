@@ -1,12 +1,15 @@
-import { generateObject } from 'ai';
+import { generateObject, NoObjectGeneratedError } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from './llm-timeout.js';
+import { languageSection } from '../language.js';
 import { reportLlmUsage, type LlmUsageReporter } from './llm-usage.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { ModelRegistry } from '../registries/model-registry.js';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
-import { ReviewSchema, emptyReviewUsage, type Review } from '../schemas/review.js';
+import { DEFAULT_MODEL_ID } from '../models/defaults.js';
+import { withGenerationSettings } from '../models/generation-settings.js';
+import { ReviewModelSchema, emptyReviewUsage, type Review } from '../schemas/review.js';
 import type { Plan } from '../schemas/plan.js';
 import type { PlanExecutionResult } from './plan-runtime.js';
 
@@ -17,7 +20,7 @@ export interface FinalReviewerConfig {
   skillRegistry: SkillRegistry;
   toolRegistry: ToolRegistry;
   modelRegistry: ModelRegistry;
-  /** Model id for the final reviewer (default: "gpt-4o") */
+  /** Model id for the final reviewer (DEFAULT_MODEL_ID) */
   modelId?: string;
   /** Phase 30 (P5): deadline for the review call (default 120s). */
   timeoutMs?: number;
@@ -63,7 +66,7 @@ export class FinalReviewer {
 
   constructor(config: FinalReviewerConfig) {
     this.config = config;
-    this.modelId = config.modelId ?? 'gpt-4o';
+    this.modelId = config.modelId ?? DEFAULT_MODEL_ID;
   }
 
   /**
@@ -130,32 +133,36 @@ export class FinalReviewer {
         'Final review',
         this.config.timeoutMs,
         (abortSignal) =>
-          generateObject({
+          generateObject(withGenerationSettings({
             model: reviewerAgent.model,
             system: reviewerAgent.systemPrompt,
             prompt,
-            schema: ReviewSchema,
+            schema: ReviewModelSchema,
             schemaName: 'FinalReview',
             schemaDescription:
-              'Structured review of a completed plan execution, including ' +
-              'accepted findings, rejected findings, incomplete steps, and ' +
-              'a human-readable summary.',
+              'Accepted findings, rejected findings, and a human-readable summary.',
             abortSignal,
-          })
-      )
+          }, reviewerAgent.generationSettings))
+      ),
+      2,
+      (err) => {
+        if (NoObjectGeneratedError.isInstance(err)) {
+          reportLlmUsage(this.config.onUsage, 'review', err.usage, plan.id);
+        }
+      }
     );
     reportLlmUsage(this.config.onUsage, 'review', usage, plan.id);
 
     // Ensure planId and goal match (the model might hallucinate)
     return {
-      ...object,
       planId: plan.id ?? 'unknown',
       goal: plan.goal,
       outcome,
-      incompleteSteps:
-        object.incompleteSteps.length > 0
-          ? object.incompleteSteps
-          : executionResult.incompleteSteps,
+      acceptedFindings: object.acceptedFindings,
+      rejectedFindings: object.rejectedFindings,
+      incompleteSteps: executionResult.incompleteSteps,
+      finalSummary: object.finalSummary,
+      usage: emptyReviewUsage,
     };
   }
 
@@ -192,6 +199,8 @@ You are producing the final review of a plan execution.
 
 ## User's Goal
 ${plan.goal}
+
+${languageSection(plan.goal)}
 
 ## Execution Summary
 - Plan id: ${plan.id ?? 'unknown'}
@@ -344,7 +353,10 @@ Be honest and specific. Do not invent findings that aren't in the results.
 
   private buildStepSummaries(plan: Plan): StepSummary[] {
     return plan.steps
-      .filter((s) => s.status === 'done' || s.status === 'failed')
+      // R1-05: a superseded step stays in the model-facing review too, so
+      // the record of what was replaced during re-planning is not silently
+      // dropped from the summary the reviewer/model sees.
+      .filter((s) => s.status === 'done' || s.status === 'failed' || s.status === 'superseded')
       .map((s) => ({
         id: s.id,
         description: s.description,

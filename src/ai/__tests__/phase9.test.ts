@@ -19,6 +19,7 @@ import { createReadFileTool } from '../tools/implementations/read-file.js';
 import { createSearchCodeTool } from '../tools/implementations/search-code.js';
 import { createWriteFileTool } from '../tools/implementations/write-file.js';
 import { createGitStatusTool } from '../tools/implementations/git-status.js';
+import { registerLocalToolFixtures } from './helpers/local-tools-fixture.js';
 
 // Phase 18: filesystem tools are factories bound to a workspace root.
 // Tests run from the repo root, so binding to process.cwd() keeps behavior identical.
@@ -73,6 +74,9 @@ function setup(): TestDeps {
   toolRegistry.registerImplementation('search_code', searchCodeTool);
   toolRegistry.registerImplementation('write_file', writeFileTool);
   toolRegistry.registerImplementation('git_status', gitStatusTool);
+  // Phase 33: register the reference filesystem toolset so skill cross-validation
+  // (registry/skills/*) sees the same catalog as production bootstrapTools().
+  registerLocalToolFixtures(toolRegistry, TEST_ROOT);
 
   // Bootstrap catalog tools BEFORE loading skills, because task_decomposition skill depends on them
   const skillRegistry = new SkillRegistry({ toolRegistry });

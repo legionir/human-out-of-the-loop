@@ -4,6 +4,7 @@ import { McpServerConfigSchema, type McpServerConfig } from '../schemas/mcp-serv
 import { McpConnector } from './mcp-connector.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { EnvSource } from '../env.js';
+import { registryLayersFor, type RegistryScope } from '../registries/layout.js';
 
 // ─── Loading MCP configs from disk ───────────────────────────────
 
@@ -91,4 +92,37 @@ export async function bootstrapMcpServers(
     configErrors,
     connectionResults,
   };
+}
+
+/** One MCP server as a project sees it, with the layer it came from. */
+export interface LayeredMcpServer {
+  config: McpServerConfig;
+  scope: RegistryScope;
+}
+
+/**
+ * ARCH-003: the ONE answer to "which MCP servers does project X have" —
+ * every registry layer (package first, project last; a project server with
+ * the same id overrides the packaged one), each tagged with its layer so a
+ * caller can apply the R0-08 trust rule: a `project`-scope server may only be
+ * spawned for a trusted project.  The CLI (`mcp list/test`, `tools --mcp`)
+ * and the server (`/api/mcp`) all read through here.
+ */
+export function loadLayeredMcpServers(
+  projectRoot: string,
+  options: { env?: NodeJS.ProcessEnv } = {},
+): { servers: LayeredMcpServer[]; errors: Array<{ file: string; error: string }> } {
+  const byId = new Map<string, LayeredMcpServer>();
+  const errors: Array<{ file: string; error: string }> = [];
+  for (const layer of registryLayersFor(projectRoot, options.env ? { env: options.env } : {})) {
+    const loaded = loadMcpServerConfigs(path.join(layer.dir, 'mcp-servers'));
+    for (const config of loaded.configs) byId.set(config.id, { config, scope: layer.scope });
+    errors.push(...loaded.errors);
+  }
+  return { servers: [...byId.values()], errors };
+}
+
+/** R0-08: may this server be spawned (connected to) for this project? */
+export function mayConnectMcpServer(server: LayeredMcpServer, trustedProject: boolean): boolean {
+  return server.scope !== 'project' || trustedProject;
 }

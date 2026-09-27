@@ -1,0 +1,66 @@
+id	category	source	line	trigger	handler	workflow	status
+EP-0001	http-route	src/server/routes/registry.ts	31	GET /api/models	async handler registry.ts:31 (listModels)	WF-0021	DONE
+EP-0002	http-route	src/server/routes/registry.ts	46	GET /api/models/remote	async handler registry.ts:46 (listRemoteModels)	WF-0022	DONE
+EP-0003	http-route	src/server/routes/registry.ts	54	GET /api/personas	async handler registry.ts:54 (listPersonas)	WF-0023	DONE
+EP-0004	http-route	src/server/routes/registry.ts	67	GET /api/skills	async handler registry.ts:67 (listSkills)	WF-0024	DONE
+EP-0005	http-route	src/server/routes/registry.ts	80	GET /api/tools	async handler registry.ts:80 (listTools)	WF-0025	DONE
+EP-0006	http-route	src/server/routes/registry.ts	94	GET /api/mcp	async handler registry.ts:94 (listMcp)	WF-0026	DONE
+EP-0007	http-route	src/server/routes/registry.ts	109	POST /api/mcp/:id/test	async handler registry.ts:109 (testMcpServer)	WF-0027	DONE
+EP-0008	http-route	src/server/routes/stream.ts	21	GET /api/stream/:planId	streamHandler stream.ts:21	WF-0013	DONE
+EP-0009	http-route	src/server/routes/sessions.ts	15	GET /api/sessions	handler sessions.ts:15	WF-0014	DONE
+EP-0010	http-route	src/server/routes/sessions.ts	34	GET /api/sessions/:id	handler sessions.ts:34	WF-0015	DONE
+EP-0011	http-route	src/server/routes/sessions.ts	48	PATCH /api/sessions/:id	handler sessions.ts:48 (patch)	WF-0016	DONE
+EP-0012	http-route	src/server/routes/sessions.ts	76	DELETE /api/sessions/:id	handler sessions.ts:76 (delete)	WF-0017	DONE
+EP-0013	http-route	src/server/routes/usage.ts	41	GET /api/usage	handler usage.ts:41	WF-0018	DONE
+EP-0014	http-route	src/server/routes/usage.ts	56	GET /api/runs/:runId/tasks	handler usage.ts:56	WF-0019	DONE
+EP-0015	http-route	src/server/routes/usage.ts	82	POST /api/runs/:runId/tasks/:taskId/cancel	handler usage.ts:82 (cancelTask)	WF-0020	DONE
+EP-0016	http-route	src/server/routes/run.ts	32	POST /api/run	async handler run.ts:32 (postRun)	WF-0002	DONE
+EP-0017	http-route	src/server/routes/run.ts	200	POST /api/runs/:runId/clarification	handler run.ts:200 (clarification)	WF-0003	DONE
+EP-0018	http-route	src/server/routes/run.ts	251	GET /api/runs/:runId	handler run.ts:251 (getRun)	WF-0004	DONE
+EP-0019	http-route	src/server/routes/plans.ts	21	GET /api/plans	handler plans.ts:21	WF-0005	DONE
+EP-0020	http-route	src/server/routes/plans.ts	39	GET /api/plans/:id	handler plans.ts:39	WF-0006	DONE
+EP-0021	http-route	src/server/routes/plans.ts	48	POST /api/plans/:id/cancel	handler plans.ts:48 (cancel)	WF-0007	DONE
+EP-0022	http-route	src/server/routes/plans.ts	57	POST /api/plans/:id/resume	handler plans.ts:57 (resume)	WF-0008	DONE
+EP-0023	http-route	src/server/routes/plans.ts	83	POST /api/plans/:id/confirm	handler plans.ts:83 (confirm)	WF-0009	DONE
+EP-0024	http-route	src/server/routes/plans.ts	107	GET /api/observability	handler plans.ts:107 (observability)	WF-0010	DONE
+EP-0025	http-route	src/server/routes/preview.ts	23	POST /api/preview	handler preview.ts:23 (preview)	WF-0011	DONE
+EP-0026	http-route	src/server/routes/observability-stream.ts	34	GET /api/observability/stream	handler observability-stream.ts:34	WF-0012	DONE
+EP-0027	server-listen	src/server.ts	202	listen const server = app.listen(port, host, () => resolv	startServer (src/server.ts:… app.listen)	WF-0028	DONE
+EP-0028	server-listen	src/mcp/transports.ts	270	listen const listener = app.listen(options.port ?? 3300, 	startServer (src/mcp/transports.ts:… app.listen)	WF-0029	DONE
+EP-0029	cli-command	src/cli.ts	266	CLI run	runCommand src/cli/commands/run.ts	WF-0001	DONE
+EP-0030	cli-command	src/cli.ts	383	CLI sessions (group)	NA (programmatic subgroup of sessions)	NA(subcommand group container in commander; outcomes enumerated as EP-0031..0034)	NA(subcommand group container)
+EP-0031	cli-command	src/cli.ts	386	CLI sessions list	sessionsListCommand src/cli/commands/sessions.ts	WF-0030	DONE
+EP-0032	cli-command	src/cli.ts	394	CLI sessions show	sessionsShowCommand src/cli/commands/sessions.ts	WF-0031	DONE
+EP-0033	cli-command	src/cli.ts	403	CLI sessions delete	sessionsDeleteCommand src/cli/commands/sessions.ts	WF-0032	DONE
+EP-0034	cli-command	src/cli.ts	412	CLI sessions label	sessionsLabelCommand src/cli/commands/sessions.ts	WF-0033	DONE
+EP-0035	cli-command	src/cli.ts	423	CLI plans (group)	NA (programmatic subgroup of plans)	NA(subcommand group container; outcomes enumerated as EP-0036..0039)	NA(subcommand group container)
+EP-0036	cli-command	src/cli.ts	426	CLI plans list	plansListCommand src/cli/commands/plans.ts	WF-0034	DONE
+EP-0037	cli-command	src/cli.ts	434	CLI plans show	plansShowCommand src/cli/commands/plans.ts	WF-0035	DONE
+EP-0038	cli-command	src/cli.ts	447	CLI plans cancel	plansCancelCommand src/cli/commands/plans.ts	WF-0036	DONE
+EP-0039	cli-command	src/cli.ts	456	CLI plans resume	plansResumeCommand src/cli/commands/plans.ts	WF-0037	DONE
+EP-0040	cli-command	src/cli.ts	472	CLI mcp (group)	NA (programmatic subgroup of mcp)	NA(subcommand group container; outcomes enumerated as EP-0041..0042)	NA(subcommand group container)
+EP-0041	cli-command	src/cli.ts	475	CLI mcp list	mcpListCommand src/cli/commands/mcp.ts	WF-0038	DONE
+EP-0042	cli-command	src/cli.ts	483	CLI mcp test	mcpTestCommand src/cli/commands/mcp.ts	WF-0039	DONE
+EP-0043	cli-command	src/cli.ts	494	CLI serve	serveCommand src/cli/commands/serve.ts	WF-0040	DONE
+EP-0044	cli-command	src/cli.ts	567	CLI models	modelsCommand src/cli/commands/registry.ts	WF-0041	DONE
+EP-0045	cli-command	src/cli.ts	579	CLI personas	personasCommand src/cli/commands/registry.ts	WF-0042	DONE
+EP-0046	cli-command	src/cli.ts	589	CLI skills	skillsCommand src/cli/commands/registry.ts	WF-0043	DONE
+EP-0047	cli-command	src/cli.ts	599	CLI tools	toolsCommand src/cli/commands/registry.ts	WF-0044	DONE
+EP-0048	cli-command	src/cli.ts	633	CLI usage	usageCommand src/cli/commands/usage.ts	WF-0045	DONE
+EP-0049	cli-command	src/cli.ts	662	CLI tasks (group)	NA (programmatic subgroup of tasks)	NA(subcommand group container; outcomes enumerated as EP-0050..0051)	NA(subcommand group container)
+EP-0050	cli-command	src/cli.ts	667	CLI tasks list	tasksListCommand src/cli/commands/tasks.ts	WF-0046	DONE
+EP-0051	cli-command	src/cli.ts	682	CLI tasks show	tasksShowCommand src/cli/commands/tasks.ts	WF-0047	DONE
+EP-0052	cli-command	src/cli.ts	693	CLI journal	journalCommand src/cli/commands/journal.ts	WF-0048	DONE
+EP-0053	cli-command	src/cli.ts	721	CLI logs	logsCommand src/cli/commands/logs.ts	WF-0049	DONE
+EP-0054	mcp-method	src/mcp/server.ts	377	MCP tools/call	handleToolsCall src/mcp/server.ts:377	WF-0050	DONE
+EP-0055	mcp-method	src/mcp/server.ts	396	MCP initialize	handleInitialize src/mcp/server.ts:396	WF-0051	DONE
+EP-0056	mcp-method	src/mcp/server.ts	410	MCP ping	ping src/mcp/server.ts:410	WF-0052	DONE
+EP-0057	mcp-method	src/mcp/server.ts	413	MCP tools/list	handleToolsList src/mcp/server.ts:413	WF-0053	DONE
+EP-0058	mcp-method	src/mcp/server.ts	416	MCP resources/list	handleResourcesList src/mcp server.ts:416	WF-0054	DONE
+EP-0059	mcp-method	src/mcp/server.ts	419	MCP resources/read	handleResourcesRead src/mcp/server.ts:419	WF-0055	DONE
+EP-0060	library-api	src/ai/orchestrator.ts	814	Orchestrator.run	Orchestrator.run src/ai/orchestrator.ts:814	WF-0001	DONE
+EP-0061	library-api	src/ai/orchestrator.ts	1389	Orchestrator.previewPlan	Orchestrator.previewPlan :1389	WF-0056	DONE
+EP-0062	library-api	src/ai/orchestrator.ts	1487	Orchestrator.cancelPlan	Orchestrator.cancelPlan :1487	WF-0057	DONE
+EP-0063	library-api	src/ai/orchestrator.ts	1491	Orchestrator.getPlanStatus	Orchestrator.getPlanStatus :1491	WF-0058	DONE
+EP-0064	library-api	src/ai/orchestrator.ts	1502	Orchestrator.getUsageSummary	Orchestrator.getUsageSummary :1502	WF-0059	DONE
+EP-0065	library-api	src/ai/orchestrator.ts	1506	Orchestrator.resumePlan	Orchestrator.resumePlan :1506	WF-0060	DONE

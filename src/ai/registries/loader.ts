@@ -81,11 +81,27 @@ export function loadRegistryFromDirectory<T extends { id: string }>(
     .sort(); // deterministic order
 
   // 3. Process each file
+  const seenIds = new Set<string>();
   for (const file of files) {
     const filePath = path.join(directory, file);
     try {
       const raw = fs.readFileSync(filePath, 'utf-8');
       const data: unknown = JSON.parse(raw);
+      const id =
+        data && typeof data === 'object' && 'id' in data && typeof (data as { id: unknown }).id === 'string'
+          ? (data as { id: string }).id
+          : undefined;
+      // B-17: duplicate ids inside a single layer are an error even when
+      // `override` is set (override is for a later layer replacing an earlier
+      // one, not for two files in the same directory silently colliding).
+      if (id && seenIds.has(id)) {
+        result.errors.push({
+          file: filePath,
+          error: `Duplicate id "${id}" in the same layer`,
+        });
+        continue;
+      }
+      if (id) seenIds.add(id);
       if (override) {
         registry.replace(data);
       } else {

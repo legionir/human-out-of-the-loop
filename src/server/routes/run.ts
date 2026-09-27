@@ -23,13 +23,25 @@ import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import type { Plan } from '../../ai/schemas/plan.js';
 import type { RunOverrides } from '../../ai/orchestrator.js';
+import { parseRunMode, type RunMode } from '../../ai/modes.js';
+import { parseModePrefix, resolveRunMode } from '../../cli/utils/mode-prefix.js';
+import { loadGlobalConfig } from '../../cli/utils/config.js';
+import { getAuthToken } from '../auth.js';
+import {
+  armRunTtl,
+  cancelInFlightRun,
+  claimSession,
+  clearRunTtl,
+  sendOwnerForbidden,
+  sendSessionForbidden,
+} from '../run-control.js';
 import type { ServerContext } from '../types.js';
 
 export function runRouter(ctx: ServerContext): Router {
   const router = Router();
 
   router.post('/api/run', async (req, res) => {
-    const { message, sessionId, confirm, model, timeoutMs, maxSteps, maxReplans } =
+    const { message, sessionId, confirm, model, timeoutMs, maxSteps, maxReplans, mode, previewId } =
       (req.body ?? {}) as {
         message?: unknown;
         sessionId?: unknown;
@@ -39,9 +51,22 @@ export function runRouter(ctx: ServerContext): Router {
         timeoutMs?: unknown;
         maxSteps?: unknown;
         maxReplans?: unknown;
+        /** v27.17.0: auto (default) / chat / plan */
+        mode?: unknown;
+        /** H-08: execute a previously previewed plan. */
+        previewId?: unknown;
       };
     // NOTE (UI security step): `projectRoot` intentionally does NOT come
     // from the request body — it is fixed server-side (config/env).
+    if (previewId != null && typeof previewId !== 'string') {
+      res.status(400).json({ error: '"previewId" must be a string when present.' });
+      return;
+    }
+    const preview = previewId ? ctx.previews.get(previewId) : undefined;
+    if (previewId && !preview) {
+      res.status(404).json({ error: `Preview "${previewId}" not found.` });
+      return;
+    }
     if (typeof message !== 'string' || message.trim() === '') {
       res.status(400).json({ error: 'Body must include a non-empty "message".' });
       return;
@@ -52,7 +77,38 @@ export function runRouter(ctx: ServerContext): Router {
       res.status(400).json({ error: '"sessionId" must be a string when present.' });
       return;
     }
+    if (sessionId) {
+      await ctx.orchestrator.initialize();
+      if (!ctx.orchestrator.sessionStore.getSession(sessionId)) {
+        res.status(404).json({ error: `Session "${sessionId}" not found.` });
+        return;
+      }
+      if (sendSessionForbidden(ctx, req, res, sessionId)) return;
+    }
     const autoConfirm = confirm === true;
+
+    // v27.17.0: an unknown mode is a request error, not a silent fallback.
+    let runMode: RunMode | undefined;
+    if (mode != null) {
+      if (typeof mode !== 'string' || !parseRunMode(mode)) {
+        res.status(400).json({ error: '"mode" must be one of: auto, chat, plan.' });
+        return;
+      }
+      runMode = parseRunMode(mode);
+    }
+
+    // H-09: `@chat` / `@plan` prefixes override body `mode` (same as preview).
+    const prefix = parseModePrefix(message);
+    let runMessage = message;
+    if (prefix.mode) {
+      runMode = prefix.mode;
+      runMessage = prefix.text;
+    } else if (!runMode) {
+      runMode = resolveRunMode({ config: loadGlobalConfig() }).resolved.mode;
+    }
+    if (preview?.mode && !prefix.mode && mode == null) {
+      runMode = preview.mode;
+    }
 
     // U3: per-run overrides — validate now (synchronous) so the UI gets
     // a clean 400 with the list of valid model ids, not a failed run.
@@ -92,11 +148,21 @@ export function runRouter(ctx: ServerContext): Router {
     }
 
     const runId = randomUUID();
+    const abortController = new AbortController();
+    // A-08: with auth on, a run that starts a new session owns it.
+    let runSessionId = sessionId as string | undefined;
+    if (!runSessionId && ctx.authTokens.length > 0) {
+      await ctx.orchestrator.initialize();
+      runSessionId = ctx.orchestrator.sessionStore.createSession();
+      claimSession(ctx, req, runSessionId);
+    }
     ctx.runs.set(runId, {
       runId,
-      sessionId: sessionId as string | undefined,
+      sessionId: runSessionId,
       state: 'planning',
       createdAt: Date.now(),
+      abortController,
+      ownerToken: getAuthToken(req),
     });
     const run = ctx.runs.get(runId)!;
 
@@ -104,8 +170,11 @@ export function runRouter(ctx: ServerContext): Router {
     // lifecycle is observable via GET /api/runs/:runId + SSE.
     void (async () => {
       try {
-        const result = await ctx.orchestrator.run(message.trim(), {
+        const result = await ctx.orchestrator.run(runMessage.trim(), {
           sessionId: run.sessionId,
+          abortSignal: abortController.signal,
+          ...(runMode ? { mode: runMode } : {}),
+          ...(preview ? { preparedPlan: preview.plan } : {}),
           // U3: per-run overrides (validated above)
           ...(Object.keys(runOverrides).length > 0 ? { runOverrides } : {}),
           // U5: interactive clarification.  The planner asks questions during
@@ -122,8 +191,10 @@ export function runRouter(ctx: ServerContext): Router {
               questions,
               attempt: round,
             });
+            armRunTtl(ctx, run);
             return new Promise<Record<string, string> | null>((resolve) => {
               run.clarificationResolver = (answers) => {
+                clearRunTtl(run);
                 run.state = 'planning';
                 run.clarificationQuestions = undefined;
                 run.clarificationResolver = undefined;
@@ -139,14 +210,19 @@ export function runRouter(ctx: ServerContext): Router {
             }
             run.state = 'awaiting-confirmation';
             run.planText = planText;
+            const confirmationPayload = {
+              runId,
+              ...(run.planId ? { planId: run.planId } : {}),
+              planText,
+            };
+            ctx.hub.emit(runId, 'awaiting-confirmation', confirmationPayload);
             if (run.planId) {
-              ctx.hub.emit(run.planId, 'awaiting-confirmation', {
-                planId: run.planId,
-                planText,
-              });
+              ctx.hub.emit(run.planId, 'awaiting-confirmation', confirmationPayload);
             }
+            armRunTtl(ctx, run);
             return new Promise((resolve) => {
               run.confirmResolver = (decision) => {
+                clearRunTtl(run);
                 run.state = 'running';
                 resolve(decision);
               };
@@ -154,17 +230,18 @@ export function runRouter(ctx: ServerContext): Router {
           },
         });
 
+        clearRunTtl(run);
         run.sessionId = result.sessionId;
         run.state = 'done';
         run.outcome = result.review.outcome;
         run.report = result.report;
+        const donePayload = { runId, ...(run.planId ? { planId: run.planId } : {}), outcome: result.review.outcome };
+        ctx.hub.emit(runId, 'run:done', donePayload);
         if (run.planId) {
-          ctx.hub.emit(run.planId, 'run:done', {
-            runId,
-            outcome: result.review.outcome,
-          });
+          ctx.hub.emit(run.planId, 'run:done', donePayload);
         }
       } catch (err) {
+        clearRunTtl(run);
         run.state = 'error';
         run.error = err instanceof Error ? err.message : String(err);
       }
@@ -183,12 +260,31 @@ export function runRouter(ctx: ServerContext): Router {
    * 400 when an answer is missing/empty (every pending question must be
    * answered — a partial answer cannot be fed back to the planner).
    */
+  /**
+   * A-04: cancel a run during planning (no plan id yet) or while it is
+   * waiting for a human. Also aborts in-flight planner LLM calls.
+   */
+  router.post('/api/runs/:runId/cancel', (req, res) => {
+    const run = ctx.runs.get(req.params.runId);
+    if (!run) {
+      res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
+      return;
+    }
+    if (sendOwnerForbidden(ctx, req, res, run.ownerToken)) return;
+    if (!cancelInFlightRun(ctx, run)) {
+      res.status(409).json({ error: `Run "${run.runId}" is already ${run.state}.` });
+      return;
+    }
+    res.json({ ok: true, runId: run.runId, cancelled: true });
+  });
+
   router.post('/api/runs/:runId/clarification', (req, res) => {
     const run = ctx.runs.get(req.params.runId);
     if (!run) {
       res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
       return;
     }
+    if (sendOwnerForbidden(ctx, req, res, run.ownerToken)) return;
     if (run.state !== 'awaiting-clarification' || !run.clarificationResolver) {
       res.status(409).json({
         error: `Run "${run.runId}" is not awaiting clarification (state: ${run.state}).`,
@@ -234,16 +330,43 @@ export function runRouter(ctx: ServerContext): Router {
     res.json({ ok: true, answered: Object.keys(answers).length, round: run.clarificationRound });
   });
 
+  router.get('/api/runs', (req, res) => {
+    const token = getAuthToken(req);
+    const runs = [...ctx.runs.values()]
+      .filter((run) => !ctx.authTokens.length || run.ownerToken === token)
+      .map((run) => ({
+        runId: run.runId,
+        sessionId: run.sessionId,
+        state: run.state,
+        planId: run.planId,
+        outcome: run.outcome,
+        createdAt: run.createdAt,
+        error: run.error,
+      }));
+    res.json({ runs });
+  });
+
   router.get('/api/runs/:runId', (req, res) => {
     const run = ctx.runs.get(req.params.runId);
     if (!run) {
       res.status(404).json({ error: `Run "${req.params.runId}" not found.` });
       return;
     }
-    // Never leak the resolvers to the wire.
-    const { confirmResolver, clarificationResolver, ...publicState } = run;
+    if (sendOwnerForbidden(ctx, req, res, run.ownerToken)) return;
+    // Never leak the resolvers, abort controller, owner token or timer.
+    const {
+      confirmResolver,
+      clarificationResolver,
+      abortController,
+      ownerToken,
+      ttlTimer,
+      ...publicState
+    } = run;
     void confirmResolver;
     void clarificationResolver;
+    void abortController;
+    void ownerToken;
+    void ttlTimer;
     res.json(publicState);
   });
 

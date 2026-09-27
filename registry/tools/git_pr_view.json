@@ -1,0 +1,8 @@
+{
+  "id": "git_pr_view",
+  "name": "Git PR View",
+  "description": "Shows one pull request: state, author, branches, URL and body",
+  "source": "local",
+  "modulePath": "./implementations/git-pr",
+  "category": "git"
+}

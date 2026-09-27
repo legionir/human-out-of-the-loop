@@ -21,14 +21,22 @@
  *   - Credentials live in env vars the provider reads server-side; they
  *     are never serialized to the frontend.
  */
-import { envDefaultModelId } from './cli/utils/registries.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { Server as HttpServer } from 'node:http';
 import express, { type Express } from 'express';
 import { Orchestrator } from './ai/orchestrator.js';
-import { loadDotEnv, loadGlobalConfig } from './cli/utils/config.js';
+import { resolveCliDefaults } from './cli/utils/config.js';
+import { resolveAndMaybePersistTrust } from './cli/utils/trust-project.js';
+import {
+  DEFAULT_BIND_HOST,
+  assertCanBind,
+  createApiAuthMiddleware,
+  resolveServerTokens,
+} from './server/auth.js';
 import { SseHub } from './server/sse.js';
+import { resolveRunMode } from './cli/utils/mode-prefix.js';
 import { sessionsRouter } from './server/routes/sessions.js';
 import { plansRouter } from './server/routes/plans.js';
 import { runRouter } from './server/routes/run.js';
@@ -52,13 +60,35 @@ export interface ServerOptions {
   model?: string;
   /** Extra observability redaction keys (defaults still apply). */
   redactKeys?: string[];
+  /**
+   * A-01: bearer token(s) for `/api/*`. A comma-separated `HOTL_SERVER_TOKEN`
+   * is the env equivalent. When empty, auth is off (loopback-only).
+   */
+  token?: string;
+  authTokens?: string[];
+  /** A-02: persist this project as trusted and bootstrap its mcp-servers. */
+  trustProject?: boolean;
+  /** A-02: treat the project as trusted without persisting (tests). */
+  trustedProject?: boolean;
+  /**
+   * A-05: idle TTL for clarification/confirmation waits.
+   * Default 30 minutes; `0` disables. `HOTL_RUN_TTL_MS` overrides.
+   */
+  runTtlMs?: number;
+  /** F-10: cap on live SSE sockets (default 32, `HOTL_MAX_SSE_CONNECTIONS`). */
+  maxSseConnections?: number;
 }
+
+/** A-05: 30 minutes. Abandoned clarification/confirmation becomes cancelled. */
+export const DEFAULT_RUN_TTL_MS = 30 * 60 * 1000;
 
 export interface CreatedServer {
   app: Express;
   ctx: ServerContext;
   /** Stop the orchestrator (call on server shutdown / in tests). */
   close: () => Promise<void>;
+  /** B-12: the listening HTTP server, when started via startServer(). */
+  server?: HttpServer;
 }
 
 export function createApp(options: ServerOptions = {}): CreatedServer {
@@ -67,14 +97,15 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
   // project (then cwd).  Precedence: explicit option/env > global config
   // > project env > built-in default.  loadDotEnv never overwrites a
   // variable already present in the real environment.
-  const globalCfg = loadGlobalConfig();
-  const projectRoot = path.resolve(
-    options.projectRoot ??
-      process.env.HOTL_PROJECT_ROOT ??
-      (globalCfg.projectRoot ? path.resolve(globalCfg.projectRoot) : process.cwd()),
-  );
-  loadDotEnv([projectRoot, process.cwd()]);
-  const model = options.model ?? envDefaultModelId(projectRoot) ?? globalCfg.defaultModel;
+  const defaults = resolveCliDefaults({
+    projectRoot: options.projectRoot,
+    persistent: options.persistent,
+    model: options.model,
+    defaultPersistent: true,
+  });
+  const globalCfg = defaults.global;
+  const projectRoot = defaults.projectRoot;
+  const model = options.model ?? defaults.model;
   const redactKeys = [
     ...(options.redactKeys ?? []),
     ...(process.env.HOTL_REDACT_KEYS
@@ -82,20 +113,61 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
       : []),
   ];
   const runtimeDir = path.join(projectRoot, '.ai-runtime');
-  const persistent = options.persistent ?? globalCfg.persistent ?? true;
+  const persistent = defaults.persistent;
+
+  const trustedProject =
+    options.trustedProject === true ||
+    resolveAndMaybePersistTrust(projectRoot, options.trustProject === true);
 
   const orchestrator = new Orchestrator({
     projectRoot,
     persistent,
     defaultModelId: model,
     redactKeys,
+    trustedProject,
   });
 
-  const hub = new SseHub();
+  const maxSse =
+    options.maxSseConnections ??
+    (process.env.HOTL_MAX_SSE_CONNECTIONS
+      ? Number.parseInt(process.env.HOTL_MAX_SSE_CONNECTIONS, 10)
+      : undefined);
+  const hub = new SseHub({
+    maxConnections: Number.isFinite(maxSse) && (maxSse as number) > 0 ? maxSse : undefined,
+  });
+
+  const app = express();
+  app.disable('x-powered-by');
+  app.use(express.json({ limit: '1mb' }));
+
+  const authTokens = resolveServerTokens(options);
+  if (authTokens.length > 0) {
+    app.use(createApiAuthMiddleware(authTokens));
+  }
+
+  const runTtlMs = resolveRunTtlMs(options.runTtlMs);
+
+  const ctx: ServerContext = {
+    app,
+    orchestrator,
+    hub,
+    runs: new Map(),
+    previews: new Map(),
+    projectRoot,
+    runtimeDir,
+    logFilePath: path.join(runtimeDir, 'observability.jsonl'),
+    authTokens,
+    runTtlMs,
+    ready: orchestrator.initialize().catch((err) => {
+      // Surface initialization failures on the first request instead of
+      // crashing the process.
+      throw err instanceof Error ? err : new Error(String(err));
+    }),
+  };
 
   // Progress events → SSE (compact payloads only — see stream.ts).
-  // Subscribing to the StreamingManager (post-construction) works
-  // identically to the onProgress config hook.
+  // Dual-emit on runId so a client that subscribed before planId exists
+  // still sees `plan:started` (H-02). `agentLevel` is forwarded (H-04).
   orchestrator.streamingManager.subscribe((event) => {
     const payload: Record<string, unknown> = {
       planId: event.planId,
@@ -104,31 +176,19 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
     };
     if (event.stepId !== undefined) payload.stepId = event.stepId;
     if (event.taskId !== undefined) payload.taskId = event.taskId;
-    // tool-call events carry only the tool NAME (Law 14) — the
-    // ProgressEvent payload itself never contains arguments.
-    if (event.type === 'task:tool-call' && event.payload?.toolName !== undefined) {
-      payload.toolName = event.payload.toolName;
+    if (event.payload) {
+      for (const [key, value] of Object.entries(event.payload)) {
+        if (key === 'args' || key === 'toolArgs') continue;
+        payload[key] = value;
+      }
     }
     hub.emit(event.planId, event.type, payload);
+    for (const run of ctx.runs.values()) {
+      if (run.planId === event.planId && run.runId !== event.planId) {
+        hub.emit(run.runId, event.type, { ...payload, runId: run.runId });
+      }
+    }
   });
-
-  const app = express();
-  app.use(express.json({ limit: '1mb' }));
-
-  const ctx: ServerContext = {
-    app,
-    orchestrator,
-    hub,
-    runs: new Map(),
-    projectRoot,
-    runtimeDir,
-    logFilePath: path.join(runtimeDir, 'observability.jsonl'),
-    ready: orchestrator.initialize().catch((err) => {
-      // Surface initialization failures on the first request instead of
-      // crashing the process.
-      throw err instanceof Error ? err : new Error(String(err));
-    }),
-  };
 
   // Lazy init: the first request awaits a single shared initialization.
   app.use((req, res, next) => {
@@ -153,6 +213,7 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
       ok: true,
       projectRoot,
       model: orchestrator.config.defaultModelId,
+      mode: resolveRunMode({ config: globalCfg }).resolved.mode,
       persistent,
       redactKeysCount: redactKeys.length,
     });
@@ -168,6 +229,12 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
     // before shutting down — otherwise shutdown races initialize's
     // filesystem reads (e.g. SIGINT during startup, or a test removing
     // its temp project while init is in flight).
+    for (const run of ctx.runs.values()) {
+      if (run.ttlTimer) {
+        clearTimeout(run.ttlTimer);
+        run.ttlTimer = undefined;
+      }
+    }
     await ctx.ready.catch(() => {});
     await orchestrator.shutdown();
   };
@@ -193,18 +260,55 @@ export interface ServeOptions extends ServerOptions {
   host?: string;
 }
 
+function resolveRunTtlMs(override?: number): number {
+  if (override !== undefined) return override;
+  const raw = process.env.HOTL_RUN_TTL_MS;
+  if (raw !== undefined && raw.trim() !== '') {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return DEFAULT_RUN_TTL_MS;
+}
+
 export async function startServer(options: ServeOptions = {}): Promise<CreatedServer> {
+  const host = options.host ?? process.env.HOTL_HOST ?? DEFAULT_BIND_HOST;
+  const tokens = resolveServerTokens(options);
+  assertCanBind(host, tokens);
   const { app, ctx, close } = createApp(options);
   const port = options.port ?? Number(process.env.HOTL_PORT ?? 3000);
-  const host = options.host ?? '0.0.0.0';
 
-  await new Promise<void>((resolve, reject) => {
-    const server = app.listen(port, host, () => resolve());
+  const httpServer: HttpServer = await new Promise((resolve, reject) => {
+    const server = app.listen(port, host, () => resolve(server));
     server.on('error', reject);
   });
   // eslint-disable-next-line no-console
-  console.log(`[hotl-ui] http://localhost:${port}  (project root: ${ctx.projectRoot})`);
-  return { app, ctx, close };
+  console.log(`[hotl-ui] http://${host === '0.0.0.0' ? 'localhost' : host}:${port}  (project root: ${ctx.projectRoot})`);
+
+  let shuttingDown = false;
+  const shutdown = async (): Promise<void> => {
+    if (shuttingDown) {
+      process.exit(1);
+    }
+    shuttingDown = true;
+    for (const run of ctx.runs.values()) {
+      if (run.ttlTimer) {
+        clearTimeout(run.ttlTimer);
+        run.ttlTimer = undefined;
+      }
+      run.abortController?.abort();
+      run.confirmResolver?.({ confirmed: false, cancelled: true, feedback: 'server shutting down' });
+      run.clarificationResolver?.(null);
+    }
+    for (const id of ctx.orchestrator.livePlanIds()) {
+      await ctx.orchestrator.cancelPlan(id).catch(() => undefined);
+    }
+    await close();
+    await new Promise<void>((resolve, reject) => {
+      httpServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  };
+
+  return { app, ctx, close: shutdown, server: httpServer };
 }
 
 // ─── Entry point ─────────────────────────────────────────────────
@@ -258,6 +362,10 @@ function parseArgs(argv: string[]): Partial<ServeOptions> {
       options.port = Number(argv[++i]);
     } else if (arg === '--host' && argv[i + 1]) {
       options.host = argv[++i];
+    } else if (arg === '--token' && argv[i + 1]) {
+      options.token = argv[++i];
+    } else if (arg === '--trust-project') {
+      options.trustProject = true;
     }
   }
   return options;
@@ -268,12 +376,11 @@ if (isDirectlyInvoked()) {
   const options = parseArgs(process.argv);
   startServer(options)
     .then(({ close }) => {
-      const shutdown = async (): Promise<void> => {
-        await close();
-        process.exit(0);
+      const onSignal = (): void => {
+        void close().then(() => process.exit(0), () => process.exit(1));
       };
-      process.on('SIGINT', () => void shutdown());
-      process.on('SIGTERM', () => void shutdown());
+      process.on('SIGINT', onSignal);
+      process.on('SIGTERM', onSignal);
     })
     .catch((err) => {
       // eslint-disable-next-line no-console

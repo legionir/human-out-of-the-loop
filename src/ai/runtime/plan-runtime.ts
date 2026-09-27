@@ -4,6 +4,7 @@ import type { Planner } from '../planning/planner.js';
 import { runFeasibilityGate, type FeasibilityGateDeps } from '../planning/feasibility-gate.js';
 import { detectCycles } from '../planning/cycle-detector.js';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
+import { detectLanguage } from '../language.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
@@ -16,7 +17,34 @@ import {
   getReadySteps,
 } from '../schemas/plan.js';
 import type { AcceptanceChecker } from './acceptance-checker.js';
+import { createTaskRecord, type Task } from '../schemas/task.js';
 import { mergeReplannedSteps } from './replan-merge.js';
+import { buildStepPrompt, formatDoneStepSummaries } from './step-prompt.js';
+import { DEFAULT_MODEL_ID } from '../models/defaults.js';
+import { extractHandoff } from './handoff.js';
+import { captureCheckpoint, restoreCheckpoint } from './checkpoint.js';
+import { runProjectTests } from '../tools/implementations/run-command.js';
+import { isReadOnlyTool } from '../tools/read-only.js';
+import { isCommandAllowed, loadCommandPolicy } from '../tools/command-allowlist.js';
+import { resolveModelForRole, roleForPersona, type ModelRoutes } from '../models/model-routes.js';
+
+const ACCEPTANCE_MARK = '[Acceptance:';
+/** F-06: how many acceptance judgments may run at once. */
+const ACCEPTANCE_CONCURRENCY = 4;
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -33,7 +61,7 @@ export interface PlanRuntimeConfig {
   };
   /** Maximum total re-planning attempts across the entire plan (default: 3) */
   maxReplanningAttempts?: number;
-  /** Default model id for dynamically composed agents (default: "gpt-4o") */
+  /** Default model id for dynamically composed agents (DEFAULT_MODEL_ID) */
   defaultModelId?: string;
   /**
    * U3: per-run execution overrides (Orchestrator.run `runOverrides`).
@@ -50,6 +78,16 @@ export interface PlanRuntimeConfig {
    * runtime's own state updates.
    */
   acceptanceChecker?: AcceptanceChecker;
+  /** B-10: persistence failures are reported instead of swallowed. */
+  onPersistError?: (err: unknown) => void;
+  /** Workspace root for checkpoints, self-verify, and command policy. */
+  projectRoot?: string;
+  /** Where checkpoints are stored (default `<projectRoot>/.ai-runtime`). */
+  runtimeDir?: string;
+  /** J-06: persona → model id. */
+  modelRoutes?: ModelRoutes;
+  /** J-03: return a cancel reason to stop dispatching. */
+  budgetExceeded?: () => string | undefined;
 }
 
 export interface PlanExecutionResult {
@@ -66,6 +104,8 @@ export interface PlanExecutionResult {
     failureType?: 'technical' | 'quality';
   }>;
   replanningAttempts: number;
+  /** B-10: at least one persist failed during this run. */
+  persistenceDegraded?: boolean;
 }
 
 // ─── PlanRuntime ─────────────────────────────────────────────────
@@ -95,6 +135,16 @@ export class PlanRuntime {
   private cancelled = false;
   /** Phase 20 (CORR-04): steps already judged — never check twice */
   private readonly acceptanceChecked = new Set<string>();
+  /**
+   * J-05: writable steps in flight, and the ones that ever ran alongside
+   * another writable step.  A snapshot restore reverts the WHOLE tree, so it
+   * is only safe for a step that had the workspace to itself.
+   */
+  private readonly writableRunning = new Set<string>();
+  private readonly writableOverlapped = new Set<string>();
+  /** B-10 */
+  private persistFailures = 0;
+  persistenceDegraded = false;
 
   constructor(config: PlanRuntimeConfig) {
     this.config = config as Required<
@@ -102,7 +152,7 @@ export class PlanRuntime {
     > &
       PlanRuntimeConfig;
     this.maxReplanning = config.maxReplanningAttempts ?? 3;
-    this.defaultModelId = config.defaultModelId ?? 'gpt-4o';
+    this.defaultModelId = config.defaultModelId ?? DEFAULT_MODEL_ID;
   }
 
   // ── Public API ────────────────────────────────────────────────
@@ -119,9 +169,12 @@ export class PlanRuntime {
     plan.status = 'running';
     this.persist(plan);
     this.notify(plan, 'plan:started');
+    // B-08: a crash after a step was stored `done` but before judgment
+    // left it unjudged. Resume must judge, not skip.
+    await this.runAcceptanceChecks(plan);
 
     // 2. Main execution loop
-    while (!this.shouldExit(plan)) {
+    while (!(await this.shouldExitOrReplan(plan))) {
       // Phase 29: cross-process cancellation.  `hootl plans cancel <id>`
       // runs in ANOTHER process and can only persist the new status, so
       // the loop has to re-read the store to notice it — without this the
@@ -130,6 +183,14 @@ export class PlanRuntime {
       // finishes); the loop stops before dispatching more work.
       if (this.persistedStatus(plan) === 'cancelled') {
         plan.status = 'cancelled';
+        this.persist(plan);
+        this.notify(plan, 'plan:cancelled');
+        break;
+      }
+      const budgetReason = this.config.budgetExceeded?.();
+      if (budgetReason) {
+        plan.status = 'cancelled';
+        plan.cancelReason = budgetReason;
         this.persist(plan);
         this.notify(plan, 'plan:cancelled');
         break;
@@ -161,29 +222,21 @@ export class PlanRuntime {
           continue; // Re-evaluate with the patched plan
         }
 
-        // Steps are running — wait for them
-        await this.config.taskRuntime.waitForAll();
-        this.syncStepStatuses(plan);
-        // Phase 20 (CORR-04): explicit acceptance hook (deterministic)
-        await this.runAcceptanceChecks(plan);
-        this.persist(plan);
+        // F-05: wait for ANY running step, then loop so newly-ready
+        // dependents can dispatch without waiting for the rest of the wave.
+        await this.waitForNextCompletion(plan);
         continue;
       }
 
-      // 4. Dispatch ready steps as tasks
+      // 4. Dispatch currently-ready steps as tasks
       const dispatchPromises = ready.map((step) => this.dispatchStep(plan, step));
 
       // Use allSettled so one failure doesn't block others
       await Promise.allSettled(dispatchPromises);
 
-      // 5. Wait for all dispatched tasks to complete
-      await this.config.taskRuntime.waitForAll();
-
-      // 6. Sync statuses from TaskRuntime back to PlanSteps
-      this.syncStepStatuses(plan);
-      // Phase 20 (CORR-04): explicit acceptance hook (deterministic)
-      await this.runAcceptanceChecks(plan);
-      this.persist(plan);
+      // 5–6. Persist + judge the first completion (B-14 / B-08), then
+      // re-evaluate readiness so C can start while B is still running.
+      await this.waitForNextCompletion(plan);
       this.notify(plan, 'plan:steps-updated');
     }
 
@@ -201,7 +254,9 @@ export class PlanRuntime {
       plan.status = 'cancelled';
     }
     if (plan.status === 'running') {
-      const allDone = plan.steps.every((s) => s.status === 'done');
+      // R1-05: a `superseded` step (a failed attempt a successful re-plan
+      // replaced) must not keep the plan at `failed-partial`.
+      const allDone = plan.steps.every((s) => s.status === 'done' || s.status === 'superseded');
       plan.status = allDone ? 'completed' : 'failed-partial';
     }
     if (plan.status === 'cancelled') {
@@ -281,17 +336,36 @@ export class PlanRuntime {
    */
   private async dispatchStep(plan: Plan, step: PlanStep): Promise<void> {
     try {
+      const budgetReason = this.config.budgetExceeded?.();
+      if (budgetReason) {
+        plan.status = 'cancelled';
+        plan.cancelReason = budgetReason;
+        this.persist(plan);
+        this.notify(plan, 'plan:cancelled');
+        return;
+      }
+      const root = this.config.projectRoot;
+      if (root && step.assignedTools.some((id) => !isReadOnlyTool(id))) {
+        if (captureCheckpoint(root, plan.id ?? 'plan', step.id, { runtimeDir: this.config.runtimeDir })) {
+          step.checkpointId = step.id;
+        }
+        if (this.writableRunning.size > 0) {
+          this.writableOverlapped.add(step.id);
+          for (const other of this.writableRunning) this.writableOverlapped.add(other);
+        }
+        this.writableRunning.add(step.id);
+      }
       step.status = 'running';
       this.persist(plan);
       this.notify(plan, `step:${step.id}:running`);
 
       // Build a resolved agent for this step
-      const agent = this.buildAgentForStep(step);
+      const agent = this.buildAgentForStep(step, plan);
 
       // Create the task
       const taskId = this.config.taskRuntime.createTask({
         agent,
-        prompt: step.description,
+        prompt: `${buildStepPrompt(plan, step)}\n\nSummarise your final answer in at most 8 sentences. Do not repeat tool transcripts.`,
         claimedResources: step.claimedResources,
         planStepId: step.id,
         // Phase 20 (CORR-03): plan id so UsageAggregator can bucket
@@ -319,7 +393,10 @@ export class PlanRuntime {
    * Build a ResolvedAgent for a plan step using the step's
    * persona, skills, tools, and the default model.
    */
-  private buildAgentForStep(step: PlanStep): ResolvedAgent {
+  private buildAgentForStep(step: PlanStep, plan?: Plan): ResolvedAgent {
+    // The plan's goal is written in the user's language; the step's summary and
+    // notes must come back in it.
+    const languageHint = plan ? detectLanguage(plan.goal) : undefined;
     return createAgent({
       agentDefinition: {
         id: `plan-step-${step.id}`,
@@ -327,9 +404,10 @@ export class PlanRuntime {
         personaId: step.assignedPersona,
         skillIds: step.assignedSkills,
         toolIds: step.assignedTools,
-        modelId: this.defaultModelId,
+        modelId: resolveModelForRole(roleForPersona(step.assignedPersona), this.config.modelRoutes, this.defaultModelId),
       },
       refs: this.config.refs,
+      ...(languageHint ? { languageHint } : {}),
     });
   }
 
@@ -338,23 +416,28 @@ export class PlanRuntime {
   /**
    * Read task results from TaskRuntime and update PlanStep statuses.
    */
-  private syncStepStatuses(plan: Plan): void {
+  private async syncStepStatuses(plan: Plan): Promise<void> {
     for (const step of plan.steps) {
       if (step.status !== 'running' || !step.taskId) continue;
 
       const task = this.config.taskRuntime.getResult(step.taskId);
       if (!task) continue;
+      const terminal =
+        task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
 
       switch (task.status) {
         case 'completed':
           step.status = 'done';
           step.resultSummary = task.summary;
-          this.notify(plan, `step:${step.id}:done`);
+          step.handoff = extractHandoff(task.summary);
+          await this.selfVerifyCoderStep(plan, step);
+          if (step.status === 'done') this.notify(plan, `step:${step.id}:done`);
           break;
         case 'failed':
           step.status = 'failed';
           step.failureType = task.failureType ?? 'technical';
           step.resultSummary = task.summary;
+          this.rollbackWritableStep(plan, step);
           this.notify(plan, `step:${step.id}:failed`);
           break;
         case 'cancelled':
@@ -364,6 +447,7 @@ export class PlanRuntime {
           break;
         // pending/running — no change yet
       }
+      if (terminal) this.writableRunning.delete(step.id);
     }
   }
 
@@ -371,8 +455,9 @@ export class PlanRuntime {
 
   /**
    * Run the acceptance check for every step that just transitioned
-   * to "done", SEQUENTIALLY and AFTER the status sync — so the checker
-   * always sees current state and parallel tasks can no longer race.
+   * to "done", AFTER the status sync.  F-06: judgments run concurrently
+   * (capped) — verdicts are applied after the wave so persist cannot
+   * race with itself.
    *
    * A rejected verdict marks the step `failed` with `failureType:
    * 'quality'` (distinct from 'technical') and fires the checker's
@@ -382,33 +467,62 @@ export class PlanRuntime {
   private async runAcceptanceChecks(plan: Plan): Promise<void> {
     const checker = this.config.acceptanceChecker;
     if (!checker) return;
+    if (this.cancelled) return;
 
+    const pending: Array<{ step: PlanStep; task: Task }> = [];
     for (const step of plan.steps) {
       if (step.status !== 'done') continue;
       if (this.acceptanceChecked.has(step.id)) continue;
+      if (step.resultSummary?.includes(ACCEPTANCE_MARK)) {
+        this.acceptanceChecked.add(step.id);
+        continue;
+      }
       if (!step.taskId) continue;
+      const live = this.config.taskRuntime.getResult(step.taskId);
+      if (live?.status === 'cancelled') continue;
 
-      const task = this.config.taskRuntime.getResult(step.taskId);
-      if (!task) continue;
+      const task =
+        live ??
+        // B-08: the task record is gone (the process that ran it crashed);
+        // judge the stored summary with a complete, well-formed record.
+        createTaskRecord({
+          id: step.taskId,
+          agentDefinitionOrId: step.assignedPersona,
+          prompt: step.description,
+          planStepId: step.id,
+          ...(plan.id ? { planId: plan.id } : {}),
+        });
+      if (!live) {
+        task.status = 'completed';
+        task.summary = step.resultSummary ?? '';
+        task.result = step.resultSummary ?? '';
+      }
 
-      // Mark as checked BEFORE awaiting so an interleaved re-entry
-      // (e.g. resume) cannot double-judge the same step.
       this.acceptanceChecked.add(step.id);
+      pending.push({ step, task });
+    }
 
+    if (pending.length === 0) return;
+
+    const judged = await mapLimit(pending, ACCEPTANCE_CONCURRENCY, async ({ step, task }) => {
       const judgment = await checker.checkStep(step, task, this.defaultModelId);
+      return { step, judgment };
+    });
 
-      if (judgment.accepted) {
+    for (const { step, judgment } of judged) {
+      if (judgment.checkerError) {
+        step.resultSummary = `${step.resultSummary ?? ''}\n[Acceptance: UNVERIFIED — ${judgment.reason}]`.trim();
+      } else if (judgment.accepted) {
         step.resultSummary = `${step.resultSummary ?? ''}\n[Acceptance: PASSED — ${judgment.reason}]`.trim();
-        this.persist(plan);
       } else {
         step.status = 'failed';
         step.failureType = 'quality';
-        step.resultSummary = `[Acceptance: FAILED — ${judgment.reason}]`;
+        step.resultSummary = `${step.resultSummary ?? ''}\n[Acceptance: FAILED — ${judgment.reason}]`.trim();
         this.notify(plan, `step:${step.id}:failed`);
-        checker.reportQualityFailure(plan.id ?? 'unknown', step.id, judgment.reason);
-        this.persist(plan);
+        checker.reportQualityFailure?.(plan.id ?? 'unknown', step.id, judgment.reason);
       }
     }
+    this.persist(plan);
   }
 
   // ── Private: priority queue ───────────────────────────────────
@@ -529,10 +643,7 @@ FAILED STEPS:
 ${failureContext}
 
 COMPLETED STEPS (do not re-do these):
-${plan.steps
-  .filter((s) => s.status === 'done')
-  .map((s) => `- ${s.id}: ${s.description}`)
-  .join('\n')}
+${formatDoneStepSummaries(plan)}
 
 PENDING STEPS (may need re-ordering):
 ${plan.steps
@@ -543,31 +654,43 @@ ${plan.steps
 Produce a new plan that:
 1. Keeps completed steps as-is (status "done").
 2. Replaces failed steps with new approaches or decomposes them further.
+   Every failed step MUST have a replacement: either reuse its id or set
+   replacesStepId to the failed step's id on the new step so dependants
+   are rewired. A re-plan that leaves a failed step with no replacement
+   is rejected.
 3. Preserves the original goal.
 `.trim();
 
-      const result = await this.config.planner.plan(replanRequest, plan.id, this.defaultModelId);
-
-      if (!result.isClear || !result.plan) {
-        return false; // Planner couldn't produce a valid revision
-      }
-
-      const newPlan = result.plan;
-
-      // Validate the new plan
-      const feasibility = runFeasibilityGate(newPlan, this.config.feasibilityDeps);
-      if (!feasibility.feasible) {
-        return false; // New plan is also infeasible
-      }
-
-      const cycleCheck = detectCycles(newPlan);
-      if (cycleCheck.hasCycle) {
-        return false; // New plan has cycles
+      // F-07: skip the assess() round-trip — a re-plan is always a plan.
+      const newPlan = await this.config.planner.generatePlan(
+        replanRequest,
+        undefined,
+        plan.id,
+        this.defaultModelId,
+      );
+      if (!newPlan?.steps) {
+        return false;
       }
 
       // Phase 30 (P7): keep terminal steps (done AND failed) so an abandoned
       // sub-goal never disappears from the plan; see `replan-merge.ts`.
-      plan.steps = mergeReplannedSteps(plan.steps, newPlan.steps, this.replanningCount);
+      const mergedSteps = mergeReplannedSteps(plan.steps, newPlan.steps, this.replanningCount);
+      const mergedPlan: Plan = { ...plan, steps: mergedSteps };
+
+      // R1-06: validate the MERGED plan, not the raw model output — a
+      // revision that only lists new/changed steps must still see kept
+      // done/failed/pending steps when checking dependsOn and cycles.
+      const feasibility = runFeasibilityGate(mergedPlan, this.config.feasibilityDeps);
+      if (!feasibility.feasible) {
+        return false; // Merged plan is infeasible
+      }
+
+      const cycleCheck = detectCycles(mergedPlan);
+      if (cycleCheck.hasCycle) {
+        return false; // Merged plan has cycles
+      }
+
+      plan.steps = mergedSteps;
 
       this.persist(plan);
       this.notify(plan, 'plan:replanned');
@@ -599,6 +722,41 @@ Produce a new plan that:
   }
 
   /**
+   * R1-02 — `shouldExit()` alone never gives a failed LAST (or only) step a
+   * chance at re-planning: once every step is `done` or `failed`,
+   * `isPlanTerminal()` is already true, so the loop's `while` guard exits
+   * BEFORE the body's `isStuck()` check ever runs (that check only fires
+   * for a step blocked on a still-`pending` dependency). Re-planning was
+   * therefore unreachable for a single-step plan, or any plan whose last
+   * remaining step failed.
+   *
+   * This wraps `shouldExit()`: when it says "terminal" ONLY because of a
+   * failed step (not cancellation, not an externally-set terminal status),
+   * and re-planning budget remains, it attempts one re-plan first and only
+   * reports "exit" if that attempt could not produce a workable revision.
+   */
+  private async shouldExitOrReplan(plan: Plan): Promise<boolean> {
+    if (this.cancelled) return true;
+    if (
+      plan.status === 'completed' ||
+      plan.status === 'failed-partial' ||
+      plan.status === 'cancelled'
+    ) {
+      return true;
+    }
+
+    const hasFailed = plan.steps.some((s) => s.status === 'failed');
+    const hasUnresolved = plan.steps.some((s) => s.status === 'pending' || s.status === 'running');
+    if (isPlanTerminal(plan) && hasFailed && !hasUnresolved) {
+      if (this.replanningCount >= this.maxReplanning) return true;
+      const replanned = await this.attemptReplanning(plan);
+      return !replanned; // replanned → new pending steps exist, keep looping
+    }
+
+    return this.shouldExit(plan);
+  }
+
+  /**
    * Check if the plan is stuck: no steps are running, no steps
    * are ready, and there are still non-terminal steps.
    */
@@ -612,22 +770,86 @@ Produce a new plan that:
 
   // ── Private: helpers ──────────────────────────────────────────
 
+  /**
+   * F-05 / B-14: wait until ANY currently-running step is terminal, then
+   * persist and judge.  The execute loop re-evaluates readiness so a
+   * dependent of A can start while B is still running.
+   */
+  private async waitForNextCompletion(plan: Plan): Promise<void> {
+    const ids = plan.steps
+      .filter((s) => s.status === 'running' && s.taskId)
+      .map((s) => s.taskId!);
+    if (ids.length === 0) return;
+    const waitForAny = this.config.taskRuntime.waitForAny?.bind(this.config.taskRuntime);
+    if (waitForAny) await waitForAny(ids);
+    else await this.config.taskRuntime.waitForAll();
+    await this.syncStepStatuses(plan);
+    await this.runAcceptanceChecks(plan);
+    this.persist(plan);
+  }
+
+  private rollbackWritableStep(plan: Plan, step: PlanStep): void {
+    const root = this.config.projectRoot;
+    if (!root || !step.checkpointId) return;
+    if (this.writableOverlapped.has(step.id)) {
+      // Another writable step ran at the same time; restoring the snapshot
+      // would undo its work too.  Leave the tree and say so.
+      step.resultSummary = `${step.resultSummary ?? ''}\n[Rollback skipped: another writable step ran concurrently — use \`hootl plans rollback\` after review.]`.trim();
+      return;
+    }
+    restoreCheckpoint(root, plan.id ?? 'plan', step.checkpointId, this.config.runtimeDir);
+  }
+
+  private async selfVerifyCoderStep(plan: Plan, step: PlanStep): Promise<void> {
+    if (step.assignedPersona !== 'coder') return;
+    const root = this.config.projectRoot;
+    if (!root) return;
+    const policy = loadCommandPolicy(root);
+    if (policy.testCommand.length === 0) return;
+    if (!isCommandAllowed(policy.testCommand[0]!, [...policy.allow, policy.testCommand[0]!])) return;
+    const result = await runProjectTests(root);
+    if (result.success) return;
+    const output = `${result.stdout}\n${result.stderr}`.trim();
+    step.status = 'failed';
+    step.failureType = 'technical';
+    step.resultSummary = `Self-verify tests failed (exit ${result.exitCode ?? 'n/a'}):\n${output || result.error || ''}`.trim();
+    this.rollbackWritableStep(plan, step);
+    this.notify(plan, `step:${step.id}:failed`);
+  }
+
   private persist(plan: Plan): void {
     try {
       // Phase 29: a cancellation that arrives from ANOTHER process is
       // authoritative.  Without this the loop's own (status 'running')
       // writes raced with `hootl plans cancel` and overwrote it, so the
       // run finished as 'completed' and the human's cancel was lost.
-      if (plan.id) {
-        const stored = this.config.planStore.load(plan.id);
-        if (stored?.status === 'cancelled' && plan.status !== 'cancelled') {
-          plan.status = 'cancelled';
+      if (plan.id && this.config.planStore.update) {
+        const saved = this.config.planStore.update(plan.id, (stored) => {
+          if (stored.status === 'cancelled' && plan.status !== 'cancelled') {
+            plan.status = 'cancelled';
+          }
+          return structuredClone(plan);
+        });
+        if (!saved) this.config.planStore.save(plan);
+      } else {
+        if (plan.id) {
+          const stored = this.config.planStore.load(plan.id);
+          if (stored?.status === 'cancelled' && plan.status !== 'cancelled') {
+            plan.status = 'cancelled';
+          }
         }
+        this.config.planStore.save(plan);
       }
-      this.config.planStore.save(plan);
-    } catch {
-      // Persistence failure should not crash the loop
-      // In production, this goes to the observability log (Phase 14)
+      this.persistFailures = 0;
+    } catch (err) {
+      this.persistFailures += 1;
+      this.persistenceDegraded = true;
+      this.config.onPersistError?.(err);
+      if (this.persistFailures >= 5) {
+        this.config.onPersistError?.(
+          new Error(`[PlanRuntime] ${this.persistFailures} consecutive persist failures`),
+        );
+      }
     }
   }
 
@@ -651,8 +873,11 @@ Produce a new plan that:
   private buildResult(plan: Plan): PlanExecutionResult {
     const doneSteps = plan.steps.filter((s) => s.status === 'done');
     const failedSteps = plan.steps.filter((s) => s.status === 'failed');
+    // R1-05: a `superseded` step is a resolved attempt, not an incomplete
+    // one — it stays visible in `plan.steps` (the review can list it) but
+    // must not count as something the plan left unfinished.
     const incompleteSteps = plan.steps
-      .filter((s) => s.status !== 'done')
+      .filter((s) => s.status !== 'done' && s.status !== 'superseded')
       .map((s) => ({
         stepId: s.id,
         description: s.description,
@@ -672,6 +897,7 @@ Produce a new plan that:
       totalSteps: plan.steps.length,
       incompleteSteps,
       replanningAttempts: this.replanningCount,
+      ...(this.persistenceDegraded ? { persistenceDegraded: true } : {}),
     };
   }
 }

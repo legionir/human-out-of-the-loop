@@ -91,6 +91,7 @@ export { atomicWriteFileSync, cleanupStaleTempFiles } from './atomic-write.js';
 // Phase 27 (PERS-04): cross-process advisory file locking.
 export {
   withFileLockSync,
+  withFileLock,
   lockPathFor,
   isLockHeld,
   readLockInfo,

@@ -1,0 +1,7 @@
+id	mechanism	location	candidates	resolution	status
+DYN-0001	tool-registry dispatch (toolId string -> registered impl map)	src/ai/registries/tool-registry.ts getImplementation/registerImplementation	candidates: all registry/tools/*.json ids + bootstrap registrations	PENDING	TODO
+DYN-0002	agents.json composition (agentId -> AgentDefinition lookup)	src/ai/registries/agent-registry.ts	candidates: registry/agents.json entries	PENDING	TODO
+DYN-0003	registry layering (scope=package|project merge by id)	src/ai/registries/loader.ts loadRegistries	candidates: registry/ + <project>/registry/	PENDING	TODO
+DYN-0004	zod schema dispatch per MCP tool inputSchema	src/mcp/protocol.ts	candidates: schema converter registry	PENDING	TODO
+DYN-0005	persona/skill resolution by id in agent factory	src/ai/agents/agent-factory.ts	candidates: registry/personas, registry/skills	PENDING	TODO
+DYN-0006	cancellation runtime map (planId -> PlanRuntime)	src/ai/runtime/cancellation-manager.ts activeRuntimes	candidates: registerRuntime callers	PENDING	TODO

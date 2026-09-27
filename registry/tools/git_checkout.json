@@ -1,0 +1,8 @@
+{
+  "id": "git_checkout",
+  "name": "Git Checkout",
+  "description": "Switches branch or ref; discarding uncommitted changes requires confirmDestructive",
+  "source": "local",
+  "modulePath": "./implementations/git-branch-write",
+  "category": "git"
+}

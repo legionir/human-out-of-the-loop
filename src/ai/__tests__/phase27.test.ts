@@ -719,11 +719,11 @@ describe('PERS-04: cross-process file locking', () => {
   it('takes over abandoned locks (stale mtime or dead pid)', () => {
     dir = fsSync.mkdtempSync(path.join(os.tmpdir(), 'phase27-lock-stale-'));
 
-    // Stale by mtime (crashed writer that never unlinked).
+    // Stale by mtime of a DEAD writer (a live pid is never stolen — C-10).
     const staleByAge = lockPathFor(path.join(dir, 'old.json'));
     fsSync.writeFileSync(
       staleByAge,
-      JSON.stringify({ pid: process.pid, acquiredAt: Date.now() - 60_000 })
+      JSON.stringify({ pid: 2_147_483_646, acquiredAt: Date.now() - 60_000 })
     );
     const old = new Date(Date.now() - 60_000);
     fsSync.utimesSync(staleByAge, old, old);

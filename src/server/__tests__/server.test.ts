@@ -183,7 +183,7 @@ describe('Phase 24 — API: run (auto-confirm e2e)', () => {
     expect(done.state).toBe('done');
     expect(done.outcome).toBe('success');
     expect(done.report).toContain('All steps completed successfully (UI test).');
-    expect(done.planId).toBe('plan_ui_mock');
+    expect(done.planId).toMatch(/^plan_/);
 
     // The step agent really ran (2 steps)
     expect(mockGenerateText).toHaveBeenCalledTimes(2);
@@ -195,7 +195,7 @@ describe('Phase 24 — API: run (auto-confirm e2e)', () => {
     expect(plans.body[0].stepsDone).toBe(2);
     expect(plans.body[0].stepsTotal).toBe(2);
 
-    const plan = await request(app).get('/api/plans/plan_ui_mock').expect(200);
+    const plan = await request(app).get(`/api/plans/${done.planId}`).expect(200);
     expect(plan.body.goal).toBe('Build a login page');
 
     const sessions = await request(app).get('/api/sessions').expect(200);
@@ -250,7 +250,7 @@ describe('Phase 24 — API: interactive confirmation + SSE', () => {
     const runId = started.body.runId as string;
 
     const awaiting = await pollRun(runId, (s) => s.state === 'awaiting-confirmation');
-    expect(awaiting.planId).toBe('plan_ui_mock');
+    expect(awaiting.planId).toMatch(/^plan_/);
     expect(typeof awaiting.planText).toBe('string');
     expect(awaiting.planText).toContain('Create the login form component');
 
@@ -258,14 +258,14 @@ describe('Phase 24 — API: interactive confirmation + SSE', () => {
     expect(mockGenerateText).not.toHaveBeenCalled();
 
     // Modal data: full plan for the steps table
-    const plan = await request(app).get('/api/plans/plan_ui_mock').expect(200);
+    const plan = await request(app).get(`/api/plans/${awaiting.planId}`).expect(200);
     expect(plan.body.steps).toHaveLength(2);
     expect(plan.body.steps[0].assignedPersona).toBe('coder');
 
     // Reject with feedback
     await request(app)
-      .post('/api/plans/plan_ui_mock/confirm')
-      .send({ confirmed: false, feedback: 'Split the steps further' })
+      .post(`/api/plans/${awaiting.planId}/confirm`)
+      .send({ confirmed: false })
       .expect(200);
 
     const done = await pollRun(runId, (s) => s.state === 'done' || s.state === 'error');
@@ -455,17 +455,18 @@ describe('Phase 24 — API: plans cancel + observability + sessions', () => {
       .post('/api/run')
       .send({ message: 'Build a login page', confirm: true })
       .expect(202);
-    await pollRun(started.body.runId, (s) => s.state === 'done' || s.state === 'error');
+    const done = await pollRun(started.body.runId, (s) => s.state === 'done' || s.state === 'error');
+    const planId = done.planId as string;
 
     const all = await request(app).get('/api/observability').expect(200);
     expect(all.body.entries.length).toBeGreaterThanOrEqual(3);
 
     const filtered = await request(app)
-      .get(`/api/observability?planId=plan_ui_mock&tail=50`)
+      .get(`/api/observability?planId=${encodeURIComponent(planId)}&tail=50`)
       .expect(200);
     expect(filtered.body.entries.length).toBeGreaterThanOrEqual(2);
     for (const e of filtered.body.entries) {
-      expect(e.planId).toBe('plan_ui_mock');
+      expect(e.planId).toBe(planId);
     }
     expect(filtered.body.entries.some((e: { eventType: string }) => e.eventType === 'plan:created')).toBe(true);
 

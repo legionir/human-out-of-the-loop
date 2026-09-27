@@ -3,7 +3,15 @@
   "name": "Code Analysis",
   "version": "1.0.0",
   "instructions": "SKILL.md",
-  "tools": ["read_file", "search_code"],
+  "tools": [
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files",
+    "directory_tree",
+    "get_file_info",
+    "read_media_file"
+  ],
   "priority": 70,
   "description": "Analyses source code for bugs, anti-patterns, and quality issues"
 }

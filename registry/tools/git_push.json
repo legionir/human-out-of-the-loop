@@ -1,0 +1,8 @@
+{
+  "id": "git_push",
+  "name": "Git Push",
+  "description": "Pushes a branch to a remote; no force option exists and protected branches are refused",
+  "source": "local",
+  "modulePath": "./implementations/git-push",
+  "category": "git"
+}

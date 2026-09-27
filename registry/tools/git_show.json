@@ -1,0 +1,8 @@
+{
+  "id": "git_show",
+  "name": "Git Show",
+  "description": "Shows one revision: commit metadata plus the patch it introduced, optionally limited to one path",
+  "source": "local",
+  "modulePath": "./implementations/git-show",
+  "category": "git"
+}

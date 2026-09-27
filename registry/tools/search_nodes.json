@@ -1,0 +1,8 @@
+{
+  "id": "search_nodes",
+  "name": "Search Nodes",
+  "description": "Searches memory by name, type or observation and returns the relations of each hit",
+  "source": "local",
+  "modulePath": "./implementations/memory-tools",
+  "category": "memory"
+}

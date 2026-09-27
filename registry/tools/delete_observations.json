@@ -1,0 +1,8 @@
+{
+  "id": "delete_observations",
+  "name": "Delete Observations",
+  "description": "Removes specific observations from memory entities",
+  "source": "local",
+  "modulePath": "./implementations/memory-tools",
+  "category": "memory"
+}

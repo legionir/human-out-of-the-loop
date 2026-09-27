@@ -140,7 +140,7 @@ describe('U4 — POST /api/preview (plan only, zero side effects)', () => {
 
     expect(res.body.ok).toBe(true);
     expect(res.body.planId).toBeNull();
-    expect(res.body.plan.id).toBe('plan_preview_mock');
+    expect(res.body.plan.id).toMatch(/^plan_/);
     expect(res.body.plan.steps).toHaveLength(1);
     expect(res.body.planText).toContain('[step-1] Create the login form component');
     expect(res.body.feasibility).toMatchObject({ feasible: true });

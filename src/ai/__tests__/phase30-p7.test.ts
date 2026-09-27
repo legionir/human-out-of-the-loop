@@ -57,32 +57,35 @@ describe('Phase 30 / P7 — replaying a revised plan keeps the record', () => {
       step('step-2', { status: 'failed', resultSummary: '[Acceptance: FAILED — ENOENT]' }),
       step('step-3', { status: 'pending', dependsOn: ['step-2'] }),
     ];
-    // The planner works around step-2: step-3 no longer depends on it.
-    const revised = [step('step-3'), step('step-4')];
+    // B-05: the replacement names the failed step via replacesStepId.
+    const revised = [
+      step('step-2b', { replacesStepId: 'step-2', description: 'workaround' }),
+      step('step-3', { dependsOn: ['step-2'] }),
+      step('step-4'),
+    ];
 
     const merged = mergeReplannedSteps(current, revised, 1);
 
-    expect(merged.map((s) => s.id)).toEqual(['step-1', 'step-2', 'step-3', 'step-4']);
+    expect(merged.map((s) => s.id)).toEqual(['step-1', 'step-2', 'step-2b', 'step-3', 'step-4']);
     const abandoned = merged.find((s) => s.id === 'step-2');
-    expect(abandoned?.status).toBe('failed');
+    expect(abandoned?.status).toBe('superseded');
     expect(abandoned?.resultSummary).toContain('ENOENT');
-    // Nothing is left "running": the revised steps are pending again.
+    expect(merged.find((s) => s.id === 'step-3')?.dependsOn).toEqual(['step-2b']);
     expect(merged.filter((s) => s.status === 'pending').map((s) => s.id)).toEqual([
+      'step-2b',
       'step-3',
       'step-4',
     ]);
   });
 
-  it('drops dependencies on a failed step (the deadlock re-planning exists to avoid)', () => {
+  it('rejects a re-plan that does not replace a failed step', () => {
     const current = [
       step('step-1', { status: 'done' }),
       step('step-2', { status: 'failed', resultSummary: 'boom' }),
     ];
     const revised = [step('step-3', { dependsOn: ['step-2'] })];
 
-    const merged = mergeReplannedSteps(current, revised, 1);
-
-    expect(merged.find((s) => s.id === 'step-3')?.dependsOn).toEqual([]);
+    expect(() => mergeReplannedSteps(current, revised, 1)).toThrow(/did not replace failed step/);
   });
 
   it('keeps the replacement when the planner reuses the failed step id', () => {
@@ -100,8 +103,11 @@ describe('Phase 30 / P7 — replaying a revised plan keeps the record', () => {
     const merged = mergeReplannedSteps(current, revised, 2);
 
     // The failed step stays (with its reason) and its replacement is visible.
+    // R1-05: it is now `superseded`, not `failed` — a plan whose only issue
+    // was this step, and whose replacement succeeds, must be able to report
+    // `completed` rather than being stuck at `failed-partial` forever.
     expect(merged.map((s) => s.id)).toEqual(['step-1', 'step-2', 'step-2~replan2', 'step-3']);
-    expect(merged.find((s) => s.id === 'step-2')?.status).toBe('failed');
+    expect(merged.find((s) => s.id === 'step-2')?.status).toBe('superseded');
     expect(merged.find((s) => s.id === 'step-2~replan2')?.status).toBe('pending');
     expect(merged.find((s) => s.id === 'step-2~replan2')?.description).toBe('different approach');
     // …and step-3 now waits for the REPLACEMENT, not the dead step.

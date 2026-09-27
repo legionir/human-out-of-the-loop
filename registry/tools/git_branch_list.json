@@ -1,0 +1,8 @@
+{
+  "id": "git_branch_list",
+  "name": "Git Branch List",
+  "description": "Lists branches as data: current flag, sha, upstream, ahead/behind, last commit \u2014 with contains/notContains filters",
+  "source": "local",
+  "modulePath": "./implementations/git-branch-list",
+  "category": "git"
+}

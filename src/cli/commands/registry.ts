@@ -16,9 +16,10 @@ import path from 'node:path';
 import { loadRegistries } from '../utils/registries.js';
 import { describeRegistryLayers, registryLayersFor } from '../../ai/registries/layout.js';
 import { color, err, out, renderTable } from '../utils/output.js';
-import { loadMcpServerConfigs } from '../../ai/tools/mcp-bootstrap.js';
+import { loadLayeredMcpServers, mayConnectMcpServer } from '../../ai/tools/mcp-bootstrap.js';
 import { listRemoteModels, modelSources } from '../../ai/models/list-models.js';
 import { prepareCliEnvironment } from '../utils/config.js';
+import { resolveAndMaybePersistTrust, untrustedProjectMcpMessage } from '../utils/trust-project.js';
 import { McpConnector } from '../../ai/tools/mcp-connector.js';
 import { ToolRegistry } from '../../ai/registries/tool-registry.js';
 
@@ -36,6 +37,8 @@ export interface ToolsCommandOptions extends RegistryCommandOptions {
    * which made an MCP config impossible to verify from the CLI.
    */
   mcp?: boolean;
+  /** A-02: persist trust so `tools --mcp` may spawn project-layer servers. */
+  trustProject?: boolean;
 }
 
 /** Dim one-line provenance line: which layers these entries came from. */
@@ -94,6 +97,7 @@ export interface ModelsCommandOptions extends RegistryCommandOptions {
 export async function modelsCommand(opts: ModelsCommandOptions): Promise<number> {
   const root = resolveProjectRoot(opts);
   if (!root) return 2;
+  prepareCliEnvironment(root);
   if (opts.remote) return remoteModelsCommand(root, opts);
   const loaded = loadRegistries(root);
   return render(opts, {
@@ -108,6 +112,7 @@ export async function modelsCommand(opts: ModelsCommandOptions): Promise<number>
 export async function personasCommand(opts: RegistryCommandOptions): Promise<number> {
   const root = resolveProjectRoot(opts);
   if (!root) return 2;
+  prepareCliEnvironment(root);
   const loaded = loadRegistries(root);
   return render(opts, {
     kind: 'personas',
@@ -126,6 +131,7 @@ export async function personasCommand(opts: RegistryCommandOptions): Promise<num
 export async function skillsCommand(opts: RegistryCommandOptions): Promise<number> {
   const root = resolveProjectRoot(opts);
   if (!root) return 2;
+  prepareCliEnvironment(root);
   const loaded = loadRegistries(root);
   return render(opts, {
     kind: 'skills',
@@ -139,6 +145,7 @@ export async function skillsCommand(opts: RegistryCommandOptions): Promise<numbe
 export async function toolsCommand(opts: ToolsCommandOptions): Promise<number> {
   const root = resolveProjectRoot(opts);
   if (!root) return 2;
+  prepareCliEnvironment(root);
   const loaded = loadRegistries(root);
   const rows: Array<Array<string | number>> = loaded.tools.map((t) => [
     t.id,
@@ -151,7 +158,8 @@ export async function toolsCommand(opts: ToolsCommandOptions): Promise<number> {
   let failed = 0;
 
   if (opts.mcp) {
-    const mcp = await collectMcpTools(root);
+    const trusted = resolveAndMaybePersistTrust(root, opts.trustProject === true);
+    const mcp = await collectMcpTools(root, trusted);
     failed = mcp.failed;
     // Notes go to stderr when the caller asked for JSON, so the document on
     // stdout stays parseable.
@@ -178,23 +186,29 @@ export async function toolsCommand(opts: ToolsCommandOptions): Promise<number> {
  * A listing must never affect a running plan: it uses its own ToolRegistry
  * and closes every connection (and child process) again.
  */
-async function collectMcpTools(root: string): Promise<{
+async function collectMcpTools(root: string, trusted: boolean): Promise<{
   rows: Array<Array<string | number>>;
   items: unknown[];
   notes: string[];
   failed: number;
 }> {
-  const dir = path.join(root, 'registry', 'mcp-servers');
-  const { configs, errors } = loadMcpServerConfigs(dir);
+  // ARCH-003: the same layered view as `mcp list` and the runtime.
+  const { servers, errors } = loadLayeredMcpServers(root);
   const rows: Array<Array<string | number>> = [];
   const items: unknown[] = [];
   const notes: string[] = errors.map((e) => `Invalid MCP config ${e.file}: ${e.error}`);
   let failed = 0;
 
-  if (configs.length === 0) {
-    notes.push(`No MCP servers configured in ${path.relative(root, dir) || dir}.`);
+  if (servers.length === 0) {
+    notes.push('No MCP servers configured (registry/mcp-servers/*.json).');
     return { rows, items, notes, failed };
   }
+
+  // R0-08: packaged servers always connect; a project server only when the
+  // project is trusted.
+  const configs = servers.filter((s) => mayConnectMcpServer(s, trusted)).map((s) => s.config);
+  if (configs.length < servers.length) notes.push(untrustedProjectMcpMessage());
+  if (configs.length === 0) return { rows, items, notes, failed };
 
   const registry = new ToolRegistry();
   const connector = new McpConnector({ toolRegistry: registry });

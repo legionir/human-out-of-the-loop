@@ -1,5 +1,6 @@
-import { generateObject } from 'ai';
+import { generateObject, NoObjectGeneratedError } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from './llm-timeout.js';
+import { detectLanguage, languageSection } from '../language.js';
 import { reportLlmUsage, type LlmUsageReporter } from './llm-usage.js';
 import { z } from 'zod';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
@@ -7,15 +8,28 @@ import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { ModelRegistry } from '../registries/model-registry.js';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
+import { DEFAULT_MODEL_ID } from '../models/defaults.js';
+import { withGenerationSettings } from '../models/generation-settings.js';
 import type { PlanStep } from '../schemas/plan.js';
 import type { Task } from '../schemas/task.js';
+
+/** F-06: the judge does not need the whole tool transcript. */
+const ACCEPTANCE_RESULT_CHARS = 4_000;
 
 export const AcceptanceResultSchema = z.object({
   accepted: z.boolean(),
   reason: z.string().min(1),
 });
 
-export type AcceptanceResult = z.infer<typeof AcceptanceResultSchema>;
+export type AcceptanceResult = z.infer<typeof AcceptanceResultSchema> & {
+  /**
+   * R1-07: set when the judgment itself could not be obtained (timeout or
+   * reviewer error), as opposed to a real quality verdict. The caller must
+   * NOT fail the step for this — the step's own output is still good; the
+   * judgment is simply unknown.
+   */
+  checkerError?: boolean;
+};
 
 export interface AcceptanceCheckerConfig {
   personaRegistry: PersonaRegistry;
@@ -59,7 +73,7 @@ export class AcceptanceChecker {
 
   constructor(config: AcceptanceCheckerConfig) {
     this.config = config;
-    this.modelId = config.modelId ?? 'gpt-4o';
+    this.modelId = config.modelId ?? DEFAULT_MODEL_ID;
   }
 
   /**
@@ -78,6 +92,8 @@ export class AcceptanceChecker {
     const prompt = `
 You are verifying whether a completed task meets its acceptance criteria.
 
+${languageSection(step.description, detectLanguage(step.description))}
+
 ## Step Description
 ${step.description}
 
@@ -88,42 +104,61 @@ ${step.acceptanceCriteria}
 ${taskResult.summary ?? 'No summary available.'}
 
 ## Task Output (full)
-${taskResult.result ?? 'No result available.'}
+${(taskResult.result ?? 'No result available.').slice(0, ACCEPTANCE_RESULT_CHARS)}
 
 ## Task Errors (if any)
-${taskResult.errors.length > 0 ? taskResult.errors.join('\n') : 'None'}
+${(taskResult.errors ?? []).length > 0 ? (taskResult.errors ?? []).join('\n') : 'None'}
 
 Evaluate the output against the acceptance criteria and respond with
 a JSON object containing "accepted" (boolean) and "reason" (string).
 `.trim();
 
-    try {
-      const { object, usage } = await withStructuredRetry(() =>
-        withLlmTimeout(
-          'Acceptance check',
-          this.config.timeoutMs,
-          (abortSignal) =>
-            generateObject({
-              model: reviewerAgent.model,
-              system: reviewerAgent.systemPrompt,
-              prompt,
-              schema: AcceptanceResultSchema,
-              schemaName: 'AcceptanceJudgment',
-              schemaDescription:
-                'Whether the step output meets its acceptance criteria, with a reason.',
-              abortSignal,
-            })
-        )
+    const attempt = () =>
+      withStructuredRetry(
+        () =>
+          withLlmTimeout(
+            'Acceptance check',
+            this.config.timeoutMs,
+            (abortSignal) =>
+              generateObject(withGenerationSettings({
+                model: reviewerAgent.model,
+                system: reviewerAgent.systemPrompt,
+                prompt,
+                schema: AcceptanceResultSchema,
+                schemaName: 'AcceptanceJudgment',
+                schemaDescription:
+                  'Whether the step output meets its acceptance criteria, with a reason.',
+                abortSignal,
+              }, reviewerAgent.generationSettings))
+          ),
+        2,
+        (err) => {
+          if (NoObjectGeneratedError.isInstance(err)) {
+            reportLlmUsage(this.config.onUsage, 'acceptance', err.usage, taskResult.planId);
+          }
+        }
       );
-      reportLlmUsage(this.config.onUsage, 'acceptance', usage, taskResult.planId);
 
-      return object;
-    } catch (err) {
-      return {
-        accepted: false,
-        reason: `Acceptance check itself failed: ${err instanceof Error ? err.message : String(err)}`,
-      };
+    // R1-07: a timeout or reviewer error is an infrastructure failure, not
+    // a quality verdict — it gets one extra retry (on top of
+    // `withStructuredRetry`'s own schema-parse retry) before being reported
+    // as `checkerError` so the caller leaves the step's own result alone.
+    let lastErr: unknown;
+    for (let i = 0; i < 2; i++) {
+      try {
+        const { object, usage } = await attempt();
+        reportLlmUsage(this.config.onUsage, 'acceptance', usage, taskResult.planId);
+        return object;
+      } catch (err) {
+        lastErr = err;
+      }
     }
+
+    return {
+      accepted: false,
+      reason: `Acceptance check itself failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr)}`,
+      checkerError: true,
+    };
   }
 
   /**
@@ -139,7 +174,7 @@ a JSON object containing "accepted" (boolean) and "reason" (string).
       agentDefinition: {
         id: 'acceptance-reviewer',
         name: 'Acceptance Reviewer',
-        personaId: 'reviewer',
+        personaId: this.config.personaRegistry.get('judge') ? 'judge' : 'reviewer',
         skillIds: ['acceptance_check'],
         modelId: modelId ?? this.modelId,
       },

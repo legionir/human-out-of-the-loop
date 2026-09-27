@@ -18,20 +18,28 @@ import fs from 'node:fs';
 import chalk from 'chalk';
 import { CommanderError } from 'commander';
 import { runCommand } from './commands/run.js';
+import { DEFAULT_RUN_MODE, RUN_MODES, parseRunMode, type RunMode } from '../ai/modes.js';
+import { resolveRunMode } from './utils/mode-prefix.js';
 import { envDefaultModelId, loadRegistries } from './utils/registries.js';
 import {
   globalConfigPath,
   loadDotEnv,
   loadGlobalConfig,
+  resolveCliDefaults,
   saveGlobalConfig,
+  unsetEnvKeys,
   type GlobalCliConfig,
 } from './utils/config.js';
+import { OrchestratorCache } from './utils/orchestrator-cache.js';
+import { resolveAndMaybePersistTrust } from './utils/trust-project.js';
 import { color, err, out, renderTable } from './utils/output.js';
 import type { Command } from 'commander';
 import { readLine, type Suggestion } from './line-editor.js';
+import { stopActiveActivity } from './utils/activity.js';
 import { showSplash } from './splash.js';
 import { listRemoteModels, type RemoteModel } from '../ai/models/list-models.js';
 import { modelIdForSpec } from '../ai/models/env-endpoint.js';
+import { DEFAULT_MODEL_ID } from '../ai/models/defaults.js';
 
 /** The product name as the prompt and banner show it. */
 export const BRAND = 'HOOTL';
@@ -45,6 +53,11 @@ export interface ReplState {
   /** Auto-confirm plans (the `--yes` of every goal). */
   autoConfirm: boolean;
   verbose: boolean;
+  /**
+   * v27.17.0: mode for the goals typed here — `auto` (default) answers a
+   * question and plans real work.  `@chat`/`@plan` in the line still win.
+   */
+  mode: RunMode;
   /** Session the goals are recorded in (persistent mode only). */
   sessionId?: string;
 }
@@ -58,7 +71,7 @@ export interface ReplOptions {
   output?: NodeJS.WritableStream;
 }
 
-const DEFAULT_MODEL = 'gpt-4o';
+const DEFAULT_MODEL = DEFAULT_MODEL_ID;
 
 /** Commands handled by the REPL itself (everything else goes to commander). */
 const BUILTINS: Record<string, string> = {
@@ -68,6 +81,8 @@ const BUILTINS: Record<string, string> = {
   model: 'list models  ·  /model <id> to switch for this session',
   persistent: '/persistent on|off — write plans, sessions and logs to .ai-runtime',
   yes: '/yes on|off — confirm plans automatically',
+  mode: `/mode [${RUN_MODES.join('|')}] — how goals are handled (auto: answer questions, plan work)`,
+  chat: '/chat <message> — answer without planning (same as @chat)',
   verbose: '/verbose on|off — stream tool calls and low-level status',
   cd: '/cd <dir> — change the active directory (project root)',
   pwd: 'print the active directory',
@@ -102,6 +117,11 @@ const CONFIG_KEYS: Record<string, (v: string) => GlobalCliConfig[keyof GlobalCli
   defaultModel: (v) => v,
   persistent: (v) => parseOnOff(v),
   projectRoot: (v) => v,
+  defaultMode: (v) => {
+    const mode = parseRunMode(v);
+    if (!mode) throw new Error(`Unknown mode "${v}". Use ${RUN_MODES.join(', ')}.`);
+    return mode;
+  },
 };
 
 export function parseOnOff(value: string | undefined): boolean {
@@ -161,8 +181,11 @@ export interface InteractiveArgs {
   projectRoot?: string;
   model?: string;
   persistent?: boolean;
+  noPersistent?: boolean;
   yes?: boolean;
   splash?: boolean;
+  /** A-02: persist this directory as a trusted project. */
+  trustProject?: boolean;
 }
 
 /**
@@ -194,11 +217,18 @@ export function parseInteractiveArgs(args: string[]): InteractiveArgs | undefine
       case '--persistent':
         result.persistent = true;
         break;
+      case '--no-persistent':
+        result.persistent = false;
+        result.noPersistent = true;
+        break;
       case '--yes':
         result.yes = true;
         break;
       case '--no-splash':
         result.splash = false;
+        break;
+      case '--trust-project':
+        result.trustProject = true;
         break;
       default:
         return undefined;
@@ -208,25 +238,33 @@ export function parseInteractiveArgs(args: string[]): InteractiveArgs | undefine
 }
 
 export function initialState(cwd: string = process.cwd(), args: InteractiveArgs = {}): ReplState {
-  const config = loadGlobalConfig();
-  const root = args.projectRoot
-    ? path.resolve(cwd, args.projectRoot)
-    : config.projectRoot
-      ? path.resolve(cwd, config.projectRoot)
-      : cwd;
-  // The project's .env may carry HOTL_MODEL / HOTL_BASE_URL.
-  loadDotEnv([root]);
+  const defaults = resolveCliDefaults({
+    projectRoot: args.projectRoot,
+    persistent: args.noPersistent ? false : args.persistent,
+    noPersistent: args.noPersistent,
+    model: args.model,
+    cwd,
+  });
+  const root = defaults.projectRoot;
+  if (args.trustProject) resolveAndMaybePersistTrust(root, true);
   return {
     cwd: root,
-    model: args.model ?? envDefaultModelId(root) ?? config.defaultModel,
-    persistent: args.persistent ?? config.persistent ?? false,
+    model: defaults.model,
+    persistent: defaults.persistent,
     autoConfirm: args.yes ?? false,
     verbose: false,
+    // The env var first (it is per-shell), then the saved config.
+    mode: parseRunMode(process.env.HOTL_MODE) ?? parseRunMode(defaults.global.defaultMode) ?? DEFAULT_RUN_MODE,
   };
 }
 
 export class Repl {
   readonly state: ReplState;
+  readonly orchestrators = new OrchestratorCache();
+  /** Keys applied from the active project's `.env` (dropped on `/cd`). */
+  private projectEnvKeys = new Set<string>();
+  private registriesCache?: ReturnType<typeof loadRegistries>;
+  private registriesCwd?: string;
   private readonly history: string[] = [];
   private pendingExit = false;
   private closed = false;
@@ -237,14 +275,27 @@ export class Repl {
 
   /** Splash, banner, then the prompt loop.  Resolves when the user leaves. */
   async start(opts: { splash?: boolean } = {}): Promise<void> {
-    this.enterDirectory(this.state.cwd);
+    this.enterDirectory(this.state.cwd, { recomputeModel: false });
     const output = (this.opts.output ?? process.stdout) as NodeJS.WriteStream;
     if (opts.splash !== false) {
-      await showSplash(output, { ms: 3000, subtitle: 'plan once, confirm once — then out of the loop' });
+      await showSplash(output, {
+        ms: 3000,
+        subtitle: 'plan once, confirm once — then out of the loop',
+        input: (this.opts.input ?? process.stdin) as NodeJS.ReadStream,
+      });
     }
     void this.refreshRemoteModels();
     this.printBanner();
+    const onTerm = (): void => {
+      this.exit();
+    };
+    process.on('SIGTERM', onTerm);
+    process.on('SIGHUP', onTerm);
+    try {
     while (!this.closed) {
+      // Phase 32: a goal's status line (or a thinking block) must never run
+      // into the prompt the user is about to type into.
+      stopActiveActivity();
       const result = await readLine({
         input: (this.opts.input ?? process.stdin) as NodeJS.ReadStream,
         output,
@@ -265,6 +316,10 @@ export class Repl {
       } else {
         await this.handle(result.line);
       }
+    }
+    } finally {
+      process.removeListener('SIGTERM', onTerm);
+      process.removeListener('SIGHUP', onTerm);
     }
   }
 
@@ -324,7 +379,7 @@ export class Repl {
 
   /** Registered models first, then what the providers serve. */
   private modelChoices(): Array<[string, string?]> {
-    const registry = loadRegistries(this.state.cwd).models;
+    const registry = this.cachedRegistries().models;
     const choices: Array<[string, string?]> = registry.map((m) => [m.id, `${m.provider}:${m.model}`]);
     for (const m of this.remoteModels) {
       if (!choices.some(([v]) => v === m.spec)) choices.push([m.spec, `from ${m.source}`]);
@@ -362,6 +417,7 @@ export class Repl {
   private exit(): void {
     if (this.closed) return;
     this.closed = true;
+    void this.orchestrators.invalidate();
     out(color.dim('Bye.'));
   }
 
@@ -389,17 +445,29 @@ export class Repl {
   }
 
   private async goal(goal: string): Promise<void> {
+    const cached = this.orchestrators.acquire({
+      cwd: this.state.cwd,
+      model: this.state.model,
+      persistent: this.state.persistent,
+    });
     const result = await runCommand(goal, {
       projectRoot: this.state.cwd,
       persistent: this.state.persistent,
       model: this.state.model,
       yes: this.state.autoConfirm,
       verbose: this.state.verbose,
+      // A `@chat`/`@plan` prefix inside the line still wins inside runCommand.
+      mode: this.state.mode,
+      exitOnInterrupt: false,
+      orchestrator: cached.orchestrator,
+      skipShutdown: true,
+      runHooks: cached.hooks,
       // A session only exists on disk in persistent mode; an in-memory
       // run cannot continue one that lived in an earlier orchestrator.
       ...(this.state.persistent && this.state.sessionId ? { session: this.state.sessionId } : {}),
     });
-    if (this.state.persistent && result.sessionId) this.state.sessionId = result.sessionId;
+    if (result.sessionNotFound) this.state.sessionId = undefined;
+    else if (this.state.persistent && result.sessionId) this.state.sessionId = result.sessionId;
   }
 
   private async command(text: string): Promise<void> {
@@ -433,14 +501,45 @@ export class Repl {
       case 'verbose':
         this.state.verbose = parseOnOff(args[0]);
         return out(`verbose: ${this.state.verbose ? 'on' : 'off'}`);
+      case 'mode': {
+        if (args[0] === undefined) return out(`mode: ${this.state.mode}`);
+        const mode = parseRunMode(args[0]);
+        if (!mode) {
+          return err(
+            color.failed(`Unknown mode "${args[0]}".`) +
+              color.dim(`  Use ${RUN_MODES.join(', ')}.`)
+          );
+        }
+        this.state.mode = mode;
+        return out(`mode: ${this.state.mode}`);
+      }
+      case 'chat':
+        // A shortcut for the mode prefix: `/chat what does this repo do?`
+        if (args.length === 0) {
+          return err(color.failed('Nothing to answer.') + color.dim('  Use /chat <message>.'));
+        }
+        return this.goal(`@chat ${args.join(' ')}`);
       case 'model':
         return this.model(args.join(' ') || undefined);
       case 'config':
         return this.config(args);
       default:
+        if (name === 'run') return this.passthroughRun(args);
         if (PASSTHROUGH.includes(name)) return this.passthrough([name, ...args]);
         err(color.failed(`Unknown command /${name}.`) + color.dim('  Type /help for the list.'));
     }
+  }
+
+  /** G-10: `/run` inherits the REPL's model / persistent / yes / session. */
+  private async passthroughRun(args: string[]): Promise<void> {
+    const injected: string[] = [];
+    const has = (flag: string): boolean => args.includes(flag);
+    if (this.state.model && !has('--model')) injected.push('--model', this.state.model);
+    if (this.state.persistent && !has('--persistent')) injected.push('--persistent');
+    if (this.state.autoConfirm && !has('--yes')) injected.push('--yes');
+    if (this.state.sessionId && !has('--session')) injected.push('--session', this.state.sessionId);
+    if (!has('--project-root')) injected.push('--project-root', this.state.cwd);
+    return this.passthrough(['run', ...args, ...injected]);
   }
 
   /** Run a regular subcommand in the active directory. */
@@ -460,12 +559,24 @@ export class Repl {
 
   // ── built-ins ────────────────────────────────────────────────
 
-  private enterDirectory(dir: string): void {
+  private cachedRegistries(): ReturnType<typeof loadRegistries> {
+    if (this.registriesCache && this.registriesCwd === this.state.cwd) return this.registriesCache;
+    this.registriesCache = loadRegistries(this.state.cwd);
+    this.registriesCwd = this.state.cwd;
+    return this.registriesCache;
+  }
+
+  private enterDirectory(dir: string, opts: { recomputeModel?: boolean } = {}): void {
     process.chdir(dir);
     this.state.cwd = process.cwd();
-    // The project's .env (API keys) applies from now on; the real
-    // environment still wins, as everywhere else.
-    loadDotEnv([this.state.cwd]);
+    unsetEnvKeys(this.projectEnvKeys);
+    this.projectEnvKeys = new Set(loadDotEnv([this.state.cwd]));
+    this.registriesCache = undefined;
+    this.registriesCwd = undefined;
+    void this.orchestrators.invalidate();
+    if (opts.recomputeModel !== false) {
+      this.state.model = envDefaultModelId(this.state.cwd) ?? loadGlobalConfig().defaultModel;
+    }
   }
 
   private changeDirectory(target: string | undefined): void {
@@ -487,7 +598,7 @@ export class Repl {
       // A fresh look at what the providers serve.
       await this.refreshRemoteModels();
       const current = this.state.model ?? DEFAULT_MODEL;
-      const registry = loadRegistries(this.state.cwd).models;
+      const registry = this.cachedRegistries().models;
       out(color.bold('Registered'));
       out(renderTable(['', 'MODEL', 'PROVIDER', 'NAME'], registry.map((m) => [m.id === current ? '●' : '', m.id, m.provider, m.model])));
       if (this.remoteModels.length > 0) {
@@ -499,7 +610,7 @@ export class Repl {
       out(color.dim('\nType "/model " and pick with ↑↓, or /model <name>.  /config set defaultModel <name> saves it.'));
       return;
     }
-    const registry = loadRegistries(this.state.cwd).models;
+    const registry = this.cachedRegistries().models;
     this.state.model = spec;
     const known =
       registry.some((m) => m.id === spec) || this.remoteModels.some((m) => m.spec === spec);
@@ -575,14 +686,19 @@ export class Repl {
     out(color.dim(`╭${'─'.repeat(width)}╮`));
     for (const l of lines) out(`${color.dim('│')} ${l}${' '.repeat(width - 1 - stripAnsi(l).length)}${color.dim('│')}`);
     out(color.dim(`╰${'─'.repeat(width)}╯`));
-    out(color.dim('Type a goal to plan and run it, /help for commands, /exit to leave.'));
+    out(
+      color.dim(
+        'Type a goal — questions get answered, real work is planned and run ' +
+          `(mode: ${this.state.mode}).  /help for commands, /exit to leave.'`
+      )
+    );
     out('');
   }
 
   /** `custom (@aur/auto)` — the id, plus the provider model when it differs. */
   private modelLabel(): string {
     const spec = this.state.model ?? DEFAULT_MODEL;
-    const cfg = loadRegistries(this.state.cwd).models.find((m) => m.id === spec || m.id === modelIdForSpec(spec));
+    const cfg = this.cachedRegistries().models.find((m) => m.id === spec || m.id === modelIdForSpec(spec));
     if (!cfg) return spec;
     return cfg.model !== spec && cfg.id === spec ? `${spec} (${cfg.model})` : spec;
   }
@@ -591,6 +707,7 @@ export class Repl {
     out(`${color.dim('directory: ')} ${this.state.cwd}`);
     out(`${color.dim('model:     ')} ${this.modelLabel()}`);
     if (process.env.HOTL_BASE_URL) out(`${color.dim('endpoint:  ')} ${process.env.HOTL_BASE_URL}`);
+    out(`${color.dim('mode:      ')} ${this.state.mode}`);
     out(`${color.dim('persistent:')} ${this.state.persistent ? 'on' : 'off'}   ${color.dim('auto-confirm:')} ${this.state.autoConfirm ? 'on' : 'off'}   ${color.dim('verbose:')} ${this.state.verbose ? 'on' : 'off'}`);
     out(`${color.dim('session:   ')} ${this.state.sessionId ?? (this.state.persistent ? '(new on the next goal)' : '(in-memory)')}`);
     out(`${color.dim('api keys:  ')} ${keyStatus()}`);
@@ -598,8 +715,11 @@ export class Repl {
 
   private printHelp(): void {
     out(color.bold('Goals'));
-    out('  Type what you want done in plain language — it is planned, shown for');
-    out('  confirmation once, then executed in the active directory.');
+    out('  Type what you want done in plain language.  In auto mode (default) a');
+    out('  question or a greeting is answered directly (read-only tools, nothing');
+    out('  executed), and real work is planned, shown for confirmation once, then');
+    out('  executed in the active directory.  Say which you want with /mode, or');
+    out('  inside the line: @chat <question>  ·  @plan <task>.');
     out('');
     out(color.bold('Commands'));
     out(renderTable(['', ''], Object.entries(BUILTINS).map(([k, v]) => [`  /${k}`, v])).split('\n').slice(1).join('\n'));
@@ -624,6 +744,19 @@ function stripAnsi(text: string): string {
 /** Entry point used by `main()` when `hootl` runs with no arguments in a TTY. */
 export async function startRepl(opts: ReplOptions, args: InteractiveArgs = {}): Promise<number> {
   const splash = args.splash ?? !/^(1|true|yes)$/i.test(process.env.HOTL_NO_SPLASH ?? '');
+  const { resolved, invalid: badMode } = resolveRunMode({
+    env: process.env,
+    config: loadGlobalConfig(),
+  });
+  void resolved;
+  if (badMode) {
+    err(
+      color.failed(
+        `Invalid default mode "${badMode.value}" (${badMode.source === 'env' ? 'HOTL_MODE' : 'defaultMode in the global config'}).`,
+      ),
+    );
+    return 2;
+  }
   await new Repl(opts, initialState(process.cwd(), args)).start({ splash });
   return 0;
 }

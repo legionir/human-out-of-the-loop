@@ -1,0 +1,8 @@
+{
+  "id": "delete_relations",
+  "name": "Delete Relations",
+  "description": "Deletes relations from the memory graph",
+  "source": "local",
+  "modulePath": "./implementations/memory-tools",
+  "category": "memory"
+}

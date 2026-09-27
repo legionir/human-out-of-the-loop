@@ -93,9 +93,9 @@ describe('U2 — registry routes', () => {
     fs.rmSync(projectDir, { recursive: true, force: true });
   });
 
-  async function boot(withMcpConfig: boolean): Promise<CreatedServer> {
+  async function boot(withMcpConfig: boolean, trustedProject = false): Promise<CreatedServer> {
     projectDir = makeProject(withMcpConfig);
-    created = createApp({ projectRoot: projectDir, persistent: false });
+    created = createApp({ projectRoot: projectDir, persistent: false, trustedProject });
     return created;
   }
 
@@ -170,17 +170,25 @@ describe('U2 — registry routes', () => {
   });
 
   it('POST /api/mcp/:id/test → {ok:true, toolIds} on success', async () => {
-    const app = (await boot(true)).app;
+    const app = (await boot(true, true)).app;
     mcpMode.mode = 'ok';
     const res = await request(app).post('/api/mcp/demo/test').expect(200);
     expect(res.body).toEqual({ ok: true, toolIds: ['demo_tool_a', 'demo_tool_b'] });
   });
 
   it('POST /api/mcp/:id/test → {ok:false, error} on failure (200, not 500)', async () => {
-    const app = (await boot(true)).app;
+    const app = (await boot(true, true)).app;
     mcpMode.mode = 'fail';
     const res = await request(app).post('/api/mcp/demo/test').expect(200);
     expect(res.body.ok).toBe(false);
     expect(res.body.error).toBe('mocked connection failure');
+  });
+
+  it('POST /api/mcp/:id/test refuses an untrusted project-layer server without connecting', async () => {
+    const app = (await boot(true, false)).app;
+    mcpMode.mode = 'ok';
+    const res = await request(app).post('/api/mcp/demo/test').expect(403);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toMatch(/untrusted project/i);
   });
 });

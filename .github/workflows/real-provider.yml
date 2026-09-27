@@ -7,14 +7,19 @@ name: Real provider (P1)
 #
 # Required secrets (Settings → Secrets and variables → Actions):
 #   HOTL_API_KEY        the provider key                      (required)
+#   HOTL_ANTHROPIC_API_KEY  Anthropic key when using that provider (optional)
 #   HOTL_BASE_URL       OpenAI-compatible base URL, e.g.
 #                       https://api.openai.com/v1            (optional;
 #                       defaults to the official OpenAI API)
+#
+# Repository variables (Settings → Variables) or secrets — either works:
 #   HOTL_MODEL          model id to run, e.g. gpt-4o-mini     (optional;
 #                       defaults to gpt-4o)
-#
-# Optional variables (Settings → Variables):
+#   HOTL_API_STYLE      "chat" or "responses" for a custom base URL
 #   HOTL_RUN_GOAL       the goal handed to `hootl run`
+#
+# A scheduled run without a key **skips** (green) instead of failing, so
+# a fork or a repo that never stored secrets does not red the weekly cron.
 #
 # Run it manually from the Actions tab, or let it run weekly so a provider
 # change is noticed without anyone pressing a button.
@@ -27,7 +32,7 @@ on:
         required: false
         default: ''
       model:
-        description: Model id (overrides the HOTL_MODEL secret/variable)
+        description: Model id (overrides the HOTL_MODEL variable)
         required: false
         default: ''
   schedule:
@@ -47,9 +52,14 @@ jobs:
     timeout-minutes: 25
     env:
       # Secrets reach the shell as environment variables only.
-      OPENAI_API_KEY: ${{ secrets.HOTL_API_KEY }}
+      # A custom HOTL_BASE_URL (gateway) gets the key as HOTL_API_KEY only;
+      # OPENAI_API_KEY is the name for the real OpenAI API, and a gateway key
+      # under that name would also be sent to api.openai.com.
+      OPENAI_API_KEY: ${{ secrets.HOTL_BASE_URL == '' && secrets.HOTL_API_KEY || '' }}
+      HOTL_API_KEY: ${{ secrets.HOTL_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.HOTL_ANTHROPIC_API_KEY }}
       HOTL_BASE_URL: ${{ secrets.HOTL_BASE_URL }}
+      HOTL_API_STYLE: ${{ vars.HOTL_API_STYLE || secrets.HOTL_API_STYLE }}
     steps:
       - uses: actions/checkout@v4
 
@@ -58,40 +68,62 @@ jobs:
           node-version: '22'
           cache: npm
 
-      - name: Refuse to run without a key
+      - name: Skip or fail when no key is configured
+        id: creds
         run: |
-          if [ -z "${OPENAI_API_KEY}" ]; then
-            echo "::error::Secret HOTL_API_KEY is not set — add it under Settings → Secrets and variables → Actions."
+          if [ -z "${HOTL_API_KEY}" ] && [ -z "${ANTHROPIC_API_KEY}" ]; then
+            if [ "${{ github.event_name }}" = "schedule" ]; then
+              echo "skip=1" >> "$GITHUB_OUTPUT"
+              echo "::notice::Scheduled run has no provider secret — skipping (not a failure)."
+              exit 0
+            fi
+            echo "::error::Secret HOTL_API_KEY (or HOTL_ANTHROPIC_API_KEY) is not set — add it under Settings → Secrets and variables → Actions."
             exit 1
           fi
+          echo "skip=0" >> "$GITHUB_OUTPUT"
 
-      - run: npm ci
-      - run: npm run build
-      - run: npm install -g .
+      - if: steps.creds.outputs.skip != '1'
+        run: npm ci
+      - if: steps.creds.outputs.skip != '1'
+        run: npm run build
+      - if: steps.creds.outputs.skip != '1'
+        run: npm install -g .
 
       # A scratch project so nothing in the repo is touched, wired to the
       # endpoint/key from the secrets.  The key is written to .env (never
       # echoed) only because the runtime reads .env for the project.
       - name: Prepare scratch project
+        if: steps.creds.outputs.skip != '1'
         env:
-          # `inputs` / `vars` are resolved here, at step level, where the
-          # contexts are unambiguously available.
-          HOTL_MODEL: ${{ inputs.model || secrets.HOTL_MODEL || 'gpt-4o' }}
+          # Model id comes from a variable (or the dispatch input), never a secret.
+          HOTL_MODEL: ${{ inputs.model || vars.HOTL_MODEL || secrets.HOTL_MODEL || 'gpt-4o' }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/real-provider"
           mkdir -p "$root"
           cp -r registry "$root/"
           {
-            printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
+            if [ -n "${OPENAI_API_KEY:-}" ]; then
+              printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
+            fi
+            # R0-07: a custom HOTL_BASE_URL (gateway) authenticates with HOTL_API_KEY.
+            if [ -n "${HOTL_API_KEY:-}" ]; then
+              printf 'HOTL_API_KEY=%s\n' "$HOTL_API_KEY"
+            fi
             if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
               printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
+            fi
+            if [ -n "${HOTL_API_STYLE:-}" ]; then
+              printf 'HOTL_API_STYLE=%s\n' "$HOTL_API_STYLE"
             fi
           } > "$root/.env"
           chmod 600 "$root/.env"
           python3 - "$root" "$HOTL_MODEL" "${HOTL_BASE_URL:-}" <<'PY'
-          import json, sys
-          root, model_id, base_url = sys.argv[1], sys.argv[2], sys.argv[3]
+          import json, os, re, sys
+          root, model_name, base_url = sys.argv[1], sys.argv[2], sys.argv[3]
+          # Registry ids allow only [a-z0-9_-]; a provider model name such as
+          # "mimo-v2.6-flash-free" keeps its name but gets a safe id.
+          model_id = re.sub(r'[^a-z0-9_-]+', '-', model_name.lower()).strip('-')
           path = f'{root}/registry/models/{model_id}.json'
           try:
               cfg = json.load(open(path))
@@ -99,24 +131,38 @@ jobs:
               # Unknown id: register it on top of the default to keep the run simple.
               cfg = json.load(open(f'{root}/registry/models/gpt-4o.json'))
               cfg['id'] = model_id
-              cfg['model'] = model_id
+              cfg['model'] = model_name
+              cfg['description'] = f'{model_name} (real-provider run)'
+              cfg.pop('pricing', None)
+          with open(os.environ['GITHUB_ENV'], 'a') as env_file:
+              env_file.write(f'HOTL_MODEL_ID={model_id}\n')
           if base_url:
               cfg.setdefault('config', {})['baseURL'] = base_url
           json.dump(cfg, open(path, 'w'), indent=2)
           print(f'model config: {json.dumps(cfg)}')
           PY
           echo "HOTL_PROJECT_ROOT=$root" >> "$GITHUB_ENV"
-          echo "::notice::model=$HOTL_MODEL baseURL=${HOTL_BASE_URL:-<provider default>}"
+          echo "::notice::model=$HOTL_MODEL baseURL=${HOTL_BASE_URL:-<provider default>} style=${HOTL_API_STYLE:-<default>}"
+
+      # Which models does this endpoint serve?  Names only — a wrong
+      # HOTL_MODEL ("model does not exist") is then fixable from the log.
+      - name: List the provider's models
+        if: steps.creds.outputs.skip != '1'
+        continue-on-error: true
+        run: |
+          cd "$HOTL_PROJECT_ROOT"
+          hootl models --remote --project-root "$HOTL_PROJECT_ROOT" || true
 
       - name: hootl run (real provider, auto-confirmed)
+        if: steps.creds.outputs.skip != '1'
         env:
-          HOTL_MODEL: ${{ inputs.model || secrets.HOTL_MODEL || 'gpt-4o' }}
+          HOTL_MODEL: ${{ inputs.model || vars.HOTL_MODEL || secrets.HOTL_MODEL || 'gpt-4o' }}
           HOTL_RUN_GOAL: "${{ inputs.goal || vars.HOTL_RUN_GOAL || 'Create notes/provider-check.txt containing the single line: real provider test' }}"
         run: |
           set -euo pipefail
           hootl run "$HOTL_RUN_GOAL" \
             --yes --persistent --timeout-ms 180000 \
-            --project-root "$HOTL_PROJECT_ROOT" --model "$HOTL_MODEL" \
+            --project-root "$HOTL_PROJECT_ROOT" --model "$HOTL_MODEL_ID" \
             --label "github-actions"
           echo "--- plans ---"
           hootl plans list --project-root "$HOTL_PROJECT_ROOT"
@@ -124,8 +170,9 @@ jobs:
           hootl usage --project-root "$HOTL_PROJECT_ROOT"
 
       - name: The run must have produced a real plan, tokens and no leak
+        if: steps.creds.outputs.skip != '1'
         env:
-          HOTL_MODEL: ${{ inputs.model || secrets.HOTL_MODEL || 'gpt-4o' }}
+          HOTL_MODEL: ${{ inputs.model || vars.HOTL_MODEL || secrets.HOTL_MODEL || 'gpt-4o' }}
           HOTL_RUN_GOAL: "${{ inputs.goal || vars.HOTL_RUN_GOAL || 'Create notes/provider-check.txt containing the single line: real provider test' }}"
         run: |
           set -euo pipefail
@@ -148,15 +195,29 @@ jobs:
               raise SystemExit('::error::The provider reported zero tokens — the model call did not really happen.')
           PY
 
-          # The key must be nowhere in the artifacts the run wrote.
-          if grep -rIl -- "$OPENAI_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
-            echo "::error::The API key leaked into .ai-runtime artifacts."
-            grep -rIl -- "$OPENAI_API_KEY" "$root/.ai-runtime" | sed 's|^|  |'
+          leak=0
+          if [ -n "${OPENAI_API_KEY:-}" ] && grep -rIlF -- "$OPENAI_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
+            echo "::error::The OpenAI API key leaked into .ai-runtime artifacts."
+            grep -rIlF -- "$OPENAI_API_KEY" "$root/.ai-runtime" | sed 's|^|  |'
+            leak=1
+          fi
+          if [ -n "${HOTL_API_KEY:-}" ] && grep -rIlF -- "$HOTL_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
+            echo "::error::The provider key leaked into .ai-runtime artifacts."
+            grep -rIlF -- "$HOTL_API_KEY" "$root/.ai-runtime" | sed 's|^|  |'
+            leak=1
+          fi
+          if [ -n "${ANTHROPIC_API_KEY:-}" ] && grep -rIlF -- "$ANTHROPIC_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
+            echo "::error::The Anthropic API key leaked into .ai-runtime artifacts."
+            grep -rIlF -- "$ANTHROPIC_API_KEY" "$root/.ai-runtime" | sed 's|^|  |'
+            leak=1
+          fi
+          if [ "$leak" -ne 0 ]; then
             exit 1
           fi
           echo "::notice::no credential found in .ai-runtime"
 
       - name: Verify the goal's deliverable exists (if it names a file)
+        if: steps.creds.outputs.skip != '1'
         env:
           HOTL_RUN_GOAL: "${{ inputs.goal || vars.HOTL_RUN_GOAL || 'Create notes/provider-check.txt containing the single line: real provider test' }}"
         run: |
@@ -184,7 +245,7 @@ jobs:
           exit 1
 
       - name: Upload the run log (no secrets — verified above)
-        if: always()
+        if: always() && steps.creds.outputs.skip != '1'
         uses: actions/upload-artifact@v4
         with:
           name: real-provider-run

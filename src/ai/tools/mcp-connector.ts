@@ -154,7 +154,11 @@ function defaultCreateTransport(config: McpServerConfig, env: EnvSource): unknow
     // Phase 30 (P6): stdio is a real transport now — see
     // `mcp-stdio-transport.ts` (newline-delimited JSON-RPC over the
     // child's stdio, no extra dependency).
-    return createStdioTransport({ command: config.command, args: config.args });
+    return createStdioTransport({
+      command: config.command,
+      args: config.args,
+      ...(config.env ? { env: config.env } : {}),
+    });
   }
 
   // http / sse — use plain transport descriptor object accepted by
@@ -308,22 +312,31 @@ export class McpConnector {
     // release it — for stdio that left the spawned child process alive and
     // the CLI hung forever after printing the error.
     let transport: unknown;
+    let client:
+      | { tools: () => Promise<Record<string, Tool>>; close: () => Promise<void> }
+      | undefined;
 
     try {
-      // Race the connection against the configured timeout
+      // Race connect AND tools() against the timeout — a server that accepts
+      // the transport but never answers `tools/list` used to hang forever.
       transport = this.createTransport(config);
-      const client = await Promise.race([
-        this.createClient({
-          transport,
-          name: config.id,
-          onUncaughtError: (err: unknown) => {
-            const message = sanitiseError(err, credentials);
-            state.transportError = message;
-            // A dead stream does not unregister tools, but the operator must
-            // be able to see it — `hootl mcp status` and the log read this.
-            this.onTransportError?.(config.id, message);
-          },
-        }),
+      const connected = await Promise.race([
+        (async () => {
+          client = await this.createClient({
+            transport,
+            name: config.id,
+            onUncaughtError: (err: unknown) => {
+              const message = sanitiseError(err, credentials);
+              state.transportError = message;
+              state.status = 'unavailable';
+              // A dead stream does not unregister tools, but the operator must
+              // be able to see it — `hootl mcp status` and the log read this.
+              this.onTransportError?.(config.id, message);
+            },
+          });
+          const listed = await client.tools();
+          return { client, tools: listed };
+        })(),
         new Promise<never>((_, reject) => {
           timeoutTimer = setTimeout(
             () =>
@@ -335,10 +348,8 @@ export class McpConnector {
         }),
       ]);
 
-      state.client = client;
-
-      // Fetch tools from the server
-      const tools = await client.tools();
+      state.client = connected.client;
+      const tools = connected.tools;
 
       // Register each tool into ToolRegistry with source="mcp"
       const registeredIds: string[] = [];
@@ -371,7 +382,14 @@ export class McpConnector {
     } catch (err) {
       state.status = 'unavailable';
       state.lastError = sanitiseError(err, credentials);
-      if (!state.client) await closeTransport(transport);
+      if (client) {
+        try {
+          await client.close();
+        } catch {
+          /* best-effort */
+        }
+      }
+      await closeTransport(transport);
       return false;
     } finally {
       if (timeoutTimer) clearTimeout(timeoutTimer);

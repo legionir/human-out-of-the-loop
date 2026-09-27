@@ -1,6 +1,6 @@
 {
   "name": "human-out-of-the-loop",
-  "version": "27.4.0",
+  "version": "27.17.16",
   "private": true,
   "type": "module",
   "bin": {
@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "server": "tsx src/server.ts",
+    "setup": "npm install -g .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -22,8 +23,10 @@
     "ai": "7.0.111",
     "chalk": "^6.0.0",
     "commander": "^15.0.0",
+    "diff": "^8.0.4",
     "express": "^5.2.1",
     "inquirer": "^14.2.2",
+    "minimatch": "^10.2.6",
     "ora": "^9.4.1",
     "undici": "^7.29.1",
     "uuid": "^11.0.0",

@@ -20,6 +20,7 @@
  *      built-in tools).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { waitUntil } from '../../test-utils/wait-until.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -277,6 +278,41 @@ describe('Phase 30 / P6 — stdio transport', () => {
     expect(stdioSpawnOptions('linux', { P6_MARKER: 'x' }).env?.P6_MARKER).toBe('x');
   });
 
+  it('R0-04: does not leak the parent process env to a stdio child by default', () => {
+    const previous = process.env.HOTL_R0_04_SECRET;
+    process.env.HOTL_R0_04_SECRET = 'must-not-be-inherited';
+    try {
+      const options = stdioSpawnOptions('linux');
+      expect(options.env?.HOTL_R0_04_SECRET).toBeUndefined();
+      // The base allowlist still carries what a child needs to run at all.
+      expect(options.env?.PATH).toBe(process.env.PATH);
+    } finally {
+      if (previous === undefined) delete process.env.HOTL_R0_04_SECRET;
+      else process.env.HOTL_R0_04_SECRET = previous;
+    }
+  });
+
+  it('R0-04: config.env is added on top of the base allowlist, not process.env', () => {
+    process.env.HOTL_R0_04_OTHER_SECRET = 'still-must-not-leak';
+    try {
+      const options = stdioSpawnOptions('linux', { EXPLICIT: 'yes' });
+      expect(options.env?.EXPLICIT).toBe('yes');
+      expect(options.env?.HOTL_R0_04_OTHER_SECRET).toBeUndefined();
+    } finally {
+      delete process.env.HOTL_R0_04_OTHER_SECRET;
+    }
+  });
+
+  // A real-spawn version of this test (writing a marker file from the child)
+  // would additionally exercise `createStdioTransport`, but on this platform
+  // `shell: true` + a `process.execPath` containing a space (e.g. "C:\Program
+  // Files\nodejs\node.exe") already breaks argument passing regardless of
+  // R0-04 — a pre-existing, unrelated issue also hit by the two failing
+  // baseline tests above (`splits several protocol messages…`, `registers the
+  // server tools…`). `stdioSpawnOptions` is what `createStdioTransport` feeds
+  // to `spawn`, so the two tests above already cover R0-04 end to end for the
+  // part that does not depend on that separate bug.
+
   it('refuses to send after close instead of writing to a dead pipe', async () => {
     const marker = path.join(tmpRoot, 'closed');
     const server = writeTestServer(tmpRoot, marker);
@@ -309,11 +345,17 @@ describe('Phase 30 / P6 — stdio transport', () => {
     transport.onclose = () => {};
 
     await transport.start();
-    await new Promise((r) => setTimeout(r, 200)); // let the child destroy stdin
-
-    await expect(
-      transport.send({ jsonrpc: '2.0', id: 1, method: 'ping', params: {} } as never)
-    ).rejects.toThrow();
+    await waitUntil(
+      async () => {
+        try {
+          await transport.send({ jsonrpc: '2.0', id: 1, method: 'ping', params: {} } as never);
+          return false;
+        } catch {
+          return true;
+        }
+      },
+      { timeoutMs: 5_000, message: 'child never closed stdin (send still succeeds)' },
+    );
     // The failure was REPORTED, not thrown as an unhandled 'error' event.
     // POSIX raises EPIPE on the next write once the child released its read
     // end; Windows anonymous pipes do not, so the transport's 'error'
@@ -472,7 +514,7 @@ describe('Phase 30 / P6 — `mcp test` does not leave the child running', () => 
       })
     );
 
-    const code = await mcpTestCommand('p6-cli', { projectRoot: tmpRoot });
+    const code = await mcpTestCommand('p6-cli', { projectRoot: tmpRoot, trusted: true });
 
     expect(code).toBe(0);
     // No `closeAll()` in the command → no SIGTERM → no marker file

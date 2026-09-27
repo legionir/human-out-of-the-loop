@@ -1,10 +1,12 @@
-import { randomUUID } from 'node:crypto';
 import { generateObject } from 'ai';
-import type { PlannerConfig } from './planner.js';
-import { PlanSchema, type Plan } from '../schemas/plan.js';
+import { finalizePlan, type PlannerConfig } from './planner.js';
+import { PlanModelSchema, type Plan } from '../schemas/plan.js';
 import { createAgent } from '../agents/agent-factory.js';
 import { withLlmTimeout, withStructuredRetry } from '../runtime/llm-timeout.js';
 import { reportLlmUsage } from '../runtime/llm-usage.js';
+import { DEFAULT_MODEL_ID } from '../models/defaults.js';
+import { withGenerationSettings } from '../models/generation-settings.js';
+import { buildCatalogBlock } from './catalog-prompt.js';
 
 /**
  * Generate a Plan using AI SDK's `generateObject` for guaranteed
@@ -19,7 +21,7 @@ export async function generatePlanStructured(
   config: PlannerConfig,
   clarifications?: Record<string, string>
 ): Promise<Plan> {
-  const modelId = config.modelId ?? 'gpt-4o';
+  const modelId = config.modelId ?? DEFAULT_MODEL_ID;
 
   const agent = createAgent({
     agentDefinition: {
@@ -35,10 +37,19 @@ export async function generatePlanStructured(
       toolRegistry: config.toolRegistry,
       modelRegistry: config.modelRegistry,
     },
+    includeEnvironment: false,
+  });
+
+  const catalog = buildCatalogBlock({
+    personaRegistry: config.personaRegistry,
+    skillRegistry: config.skillRegistry,
+    toolRegistry: config.toolRegistry,
   });
 
   let prompt = `
 Decompose the following user request into a detailed execution plan.
+
+${catalog}
 
 USER REQUEST:
 """
@@ -58,27 +69,20 @@ ${userRequest}
       'Plan generation',
       config.timeoutMs,
       (abortSignal) =>
-        generateObject({
+        generateObject(withGenerationSettings({
           model: agent.model,
           system: agent.systemPrompt,
           prompt,
-          schema: PlanSchema,
+          schema: PlanModelSchema,
           schemaName: 'ExecutionPlan',
           schemaDescription:
             'A dependency-aware execution plan with atomic steps, each assigned ' +
             'to a persona with specific skills and tools.',
           abortSignal,
-        })
+        }, agent.generationSettings))
     )
   );
-  const id = object.id ?? `plan_${randomUUID()}`;
-  reportLlmUsage(config.onUsage, 'planning', usage, id);
-
-  return {
-    ...object,
-    id,
-    status: 'draft',
-    createdAt: Date.now(),
-    steps: object.steps.map((s) => ({ ...s, status: 'pending' as const })),
-  };
+  const plan = finalizePlan(object);
+  reportLlmUsage(config.onUsage, 'planning', usage, plan.id);
+  return plan;
 }

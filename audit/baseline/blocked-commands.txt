@@ -1,0 +1,4 @@
+P2 baseline | npm run typecheck | BLOCKED(node_modules not installed; install requires network — outside A4.3-safe reading) | compensation: static import checks in P5/P7
+P2 baseline | npm run test (vitest) | BLOCKED(same) | compensation: test-file inventory + gap analysis in P5 W14
+P2 baseline | npm run build | BLOCKED(same; also writes dist/ — violates read-only rule A4.1)
+P2 baseline | npm run e2e | BLOCKED(spawns built CLI dist/src/cli.js — build missing; also spawns stub server)

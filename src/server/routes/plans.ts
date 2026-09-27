@@ -10,16 +10,26 @@
  *   GET    /api/observability        → observability.jsonl entries
  *                                      (?planId=&tail=)
  */
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import { Router } from 'express';
 import type { LogEntry } from '../../ai/runtime/observability-logger.js';
+import { evaluatePlanResume } from '../../ai/runtime/resume-guard.js';
+import {
+  canAccessPlan,
+  sendObservabilityForbidden,
+  sendOwnerForbidden,
+  sendPlanForbidden,
+} from '../run-control.js';
+import { getAuthToken } from '../auth.js';
 import type { RunState, ServerContext } from '../types.js';
+import { PlanLiveOwnerError } from '../../ai/runtime/plan-owner.js';
 
 export function plansRouter(ctx: ServerContext): Router {
   const router = Router();
 
   router.get('/api/plans', (req, res) => {
-    const ids = ctx.orchestrator.planStore.list();
+    const ids = ctx.orchestrator.planStore.list().filter((id) => canAccessPlan(ctx, req, id));
     res.json(
       ids.map((id) => {
         const plan = ctx.orchestrator.planStore.load(id);
@@ -42,10 +52,12 @@ export function plansRouter(ctx: ServerContext): Router {
       res.status(404).json({ error: `Plan "${req.params.id}" not found.` });
       return;
     }
+    if (sendPlanForbidden(ctx, req, res, req.params.id)) return;
     res.json(plan);
   });
 
   router.post('/api/plans/:id/cancel', async (req, res) => {
+    if (sendPlanForbidden(ctx, req, res, req.params.id)) return;
     const result = await ctx.orchestrator.cancelPlan(req.params.id);
     if (!result.success) {
       res.status(409).json({ error: result.message });
@@ -60,18 +72,51 @@ export function plansRouter(ctx: ServerContext): Router {
       res.status(404).json({ error: `Plan "${req.params.id}" not found.` });
       return;
     }
-    // Fire-and-track: resume executes in the background; progress flows
-    // through the SSE stream for this plan id.
+    if (sendPlanForbidden(ctx, req, res, req.params.id)) return;
+    const decision = evaluatePlanResume({
+      found: true,
+      status: plan.status,
+      liveOwner: ctx.orchestrator.hasLiveOwner(req.params.id),
+    });
+    if (decision.action === 'finalize-cancel') {
+      void ctx.orchestrator.cancelPlan(req.params.id).catch(() => undefined);
+      res.status(decision.httpStatus).json({ error: decision.message, code: decision.code });
+      return;
+    }
+    if (decision.action !== 'resume') {
+      res.status(decision.httpStatus).json({ error: decision.message, code: decision.code });
+      return;
+    }
+    const runId = randomUUID();
+    const run: RunState = {
+      runId,
+      planId: req.params.id,
+      state: 'running',
+      createdAt: Date.now(),
+      ownerToken: getAuthToken(req),
+    };
+    ctx.runs.set(runId, run);
     ctx.orchestrator
       .resumePlan(req.params.id)
+      .then((result) => {
+        run.state = 'done';
+        run.report = result?.report;
+        run.outcome = result?.review.outcome;
+      })
       .catch((err: unknown) => {
+        run.state = 'error';
+        run.error = err instanceof Error ? err.message : String(err);
+        if (err instanceof PlanLiveOwnerError) {
+          ctx.hub.emit(req.params.id, 'plan:error', { message: err.message, code: err.code });
+          return;
+        }
         ctx.hub.emit(
           req.params.id,
           'plan:error',
           { message: err instanceof Error ? err.message : String(err) },
         );
       });
-    res.status(202).json({ ok: true, planId: req.params.id });
+    res.status(202).json({ ok: true, planId: req.params.id, runId });
   });
 
   /**
@@ -96,6 +141,7 @@ export function plansRouter(ctx: ServerContext): Router {
         .json({ error: `Plan "${req.params.id}" is not awaiting confirmation.` });
       return;
     }
+    if (sendOwnerForbidden(ctx, req, res, run.ownerToken)) return;
     run.confirmResolver?.({
       confirmed,
       feedback: typeof feedback === 'string' && feedback.trim() !== '' ? feedback.trim() : undefined,
@@ -106,6 +152,7 @@ export function plansRouter(ctx: ServerContext): Router {
   /** Observability log (jsonl) — filter by plan, tail N lines. */
   router.get('/api/observability', (req, res) => {
     const planId = typeof req.query.planId === 'string' ? req.query.planId : undefined;
+    if (sendObservabilityForbidden(ctx, req, res, planId)) return;
     const tail = Math.max(1, Number(req.query.tail ?? 100) || 100);
 
     let content = '';

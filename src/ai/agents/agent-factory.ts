@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { buildEnvironmentContext } from '../environment-context.js';
+import { languageSection, type DetectedLanguage } from '../language.js';
 import type { Tool, LanguageModel } from 'ai';
 import type { AgentRegistry, CrossRegistryRefs } from '../registries/agent-registry.js';
 import type { AgentDefinition } from '../schemas/agent-definition.js';
@@ -8,6 +10,12 @@ import type { ResolvedSkill } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { ModelRegistry } from '../registries/model-registry.js';
 import type { DelegationGuard } from '../runtime/delegation-guard.js';
+import {
+  generationSettingsFromConfig,
+  type GenerationSettings,
+} from '../models/generation-settings.js';
+import { DEFAULT_MODEL_ID } from '../models/defaults.js';
+import { compactToolDescriptions } from '../tools/compact-descriptions.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -43,6 +51,12 @@ export interface ResolvedAgent {
   trimmingLog: TrimmingRecord[];
   /** Whether the system prompt was trimmed due to context budget */
   contextBudgetExceeded: boolean;
+  /** C-05: depth of this agent in the delegation tree (0 = root). */
+  delegationDepth?: number;
+  /** Provider id of the resolved model (rate limiter / retry). */
+  providerId?: string;
+  /** Sampling / length settings from the model config (E-03). */
+  generationSettings?: GenerationSettings;
 }
 
 export interface CreateAgentOptions {
@@ -58,6 +72,17 @@ export interface CreateAgentOptions {
   delegationDepth?: number;
   /** Delegation guard instance */
   delegationGuard?: DelegationGuard;
+  /**
+   * v27.17.0: the language of the request this agent works for.  The plan's
+   * goal is written in it, so the agent's own prose (summaries, notes) comes
+   * back in it instead of switching to English.
+   */
+  languageHint?: DetectedLanguage;
+  /**
+   * When false, skip the ENVIRONMENT block (the planner already puts it in
+   * PROJECT CONTEXT — E-07). Default true.
+   */
+  includeEnvironment?: boolean;
 }
 
 // ─── Constants ────────────────────────────────────────────────────
@@ -73,10 +98,11 @@ const DEFAULT_CONTEXT_BUDGET_CHARS = 120_000;
  * This is a fallback — in production, ModelConfig should carry this.
  */
 const KNOWN_MODEL_LIMITS: Record<string, number> = {
-  'gpt-4o': 128_000,
+  [DEFAULT_MODEL_ID]: 128_000,
   'gpt-4o-mini': 128_000,
   'claude-sonnet': 200_000,
   'claude-sonnet-4-20250514': 200_000,
+  'claude-sonnet-5': 200_000,
   'local-llama': 8_192,
 };
 
@@ -100,7 +126,14 @@ const KNOWN_MODEL_LIMITS: Record<string, number> = {
  * that the runtime can consume.
  */
 export function createAgent(options: CreateAgentOptions): ResolvedAgent {
-  const { agentDefinition: def, refs, delegationDepth = 0, delegationGuard } = options;
+  const {
+    agentDefinition: def,
+    refs,
+    delegationDepth = 0,
+    delegationGuard,
+    languageHint,
+    includeEnvironment = true,
+  } = options;
 
   // ── 1. Resolve references ───────────────────────────────────
 
@@ -134,17 +167,18 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
   const toolWarnings: ToolFilterWarning[] = [];
   let requestedToolIds = new Set<string>();
 
-  for (const skill of skills) {
-    for (const toolId of skill.resolvedTools) {
-      requestedToolIds.add(toolId);
+  // F-02: a plan step that names `toolIds` means "these tools, not the
+  // union of every skill in the catalog".  Empty/missing toolIds still
+  // fall back to the skill set so ad-hoc agents keep working.
+  const explicitToolIds = def.toolIds ?? [];
+  if (explicitToolIds.length > 0) {
+    for (const toolId of explicitToolIds) requestedToolIds.add(toolId);
+  } else {
+    for (const skill of skills) {
+      for (const toolId of skill.resolvedTools) {
+        requestedToolIds.add(toolId);
+      }
     }
-  }
-
-  // Tools declared directly on the agent definition (plan steps pass
-  // PlanStep.assignedTools here) are requested as well; they still have
-  // to survive the persona allow-list filter below.
-  for (const toolId of def.toolIds ?? []) {
-    requestedToolIds.add(toolId);
   }
 
   // Apply DelegationGuard if provided
@@ -182,14 +216,18 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
   if (allowedToolIds.size > 0) {
     const resolved = refs.toolRegistry.getToolsByIds(Array.from(allowedToolIds));
     Object.assign(tools, resolved);
+    compactToolDescriptions(tools);
   }
 
   // ── 3. Determine context budget ─────────────────────────────
 
-  const modelTokenLimit =
-    KNOWN_MODEL_LIMITS[def.modelId] ??
-    (refs.modelRegistry.getConfig(def.modelId)?.config?.maxContextTokens as number) ??
-    30_000;
+  const modelCfg = refs.modelRegistry.getConfig(def.modelId);
+  const configuredLimit =
+    typeof modelCfg?.config?.maxContextTokens === 'number'
+      ? (modelCfg.config.maxContextTokens as number)
+      : undefined;
+  const modelTokenLimit = configuredLimit ?? KNOWN_MODEL_LIMITS[def.modelId] ?? 30_000;
+  const generationSettings = generationSettingsFromConfig(modelCfg);
 
   const budgetChars = options.contextBudgetChars ?? modelTokenLimit * CHARS_PER_TOKEN;
 
@@ -199,11 +237,26 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
     persona,
     skills,
     budgetChars,
+    allowedToolIds,
   });
+
+  // Phase 36: the agent (not only the planner) is told which machine it is on.
+  // The planner writes plan text; the agent writes the actual commands and
+  // file contents, so it is the one that must not emit `sed -i` on macOS or
+  // `rm -rf` on Windows.  Appended after trimming on purpose: the persona and
+  // the skills stay within budget, and this block is small and never trimmed.
+  // The hint when the caller knows the request's language (a plan step knows
+  // its goal); otherwise the generic rule, which matches whatever request the
+  // agent is handed in its prompt.  Appended with the environment block: after
+  // trimming, so persona and skills stay within budget.
+  const language = languageSection('', languageHint);
+  const systemPromptWithEnvironment = includeEnvironment
+    ? `${systemPrompt}\n\n${buildEnvironmentContext()}\n\n${language}`
+    : `${systemPrompt}\n\n${language}`;
 
   return {
     agentId: def.id,
-    systemPrompt,
+    systemPrompt: systemPromptWithEnvironment,
     tools,
     model,
     persona,
@@ -211,6 +264,9 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
     toolWarnings,
     trimmingLog,
     contextBudgetExceeded,
+    delegationDepth,
+    providerId: modelCfg?.provider,
+    ...(generationSettings ? { generationSettings } : {}),
   };
 }
 
@@ -220,6 +276,26 @@ interface BuildPromptOptions {
   persona: Persona;
   skills: ResolvedSkill[];
   budgetChars: number;
+  allowedToolIds: ReadonlySet<string>;
+}
+
+/**
+ * Drop SKILL.md sections that instruct tools the agent is not allowed to use
+ * (E-06). Sections are split on `## ` headings; a section is kept only when
+ * every skill-declared tool it names is in `allowedTools`.
+ */
+export function filterSkillInstructions(
+  markdown: string,
+  allowedTools: ReadonlySet<string>,
+  skillToolIds: readonly string[]
+): string {
+  const disallowed = skillToolIds.filter((id) => !allowedTools.has(id));
+  if (disallowed.length === 0) return markdown;
+  const patterns = disallowed.map((id) => new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`));
+  const sections = markdown.split(/(?=^## )/m);
+  const kept = sections.filter((section) => !patterns.some((pattern) => pattern.test(section)));
+  const text = kept.join('').trim();
+  return text.length > 0 ? text : markdown;
 }
 
 interface BuildPromptResult {
@@ -241,7 +317,7 @@ interface BuildPromptResult {
  *      a flag is set.
  */
 function buildSystemPrompt(opts: BuildPromptOptions): BuildPromptResult {
-  const { persona, skills, budgetChars } = opts;
+  const { persona, skills, budgetChars, allowedToolIds } = opts;
   const trimmingLog: TrimmingRecord[] = [];
 
   const personaSection = `# Persona: ${persona.name}\n\n${persona.system}`;
@@ -249,9 +325,17 @@ function buildSystemPrompt(opts: BuildPromptOptions): BuildPromptResult {
 
   // If persona alone exceeds budget, include it anyway (never trim persona)
   if (personaLength >= budgetChars) {
+    for (const skill of skills) {
+      trimmingLog.push({
+        skillId: skill.id,
+        originalLength: skill.resolvedInstructions.length,
+        trimmedLength: 0,
+        reason: 'context-budget',
+      });
+    }
     return {
       systemPrompt: personaSection,
-      trimmingLog: [],
+      trimmingLog,
       contextBudgetExceeded: true,
     };
   }
@@ -262,10 +346,17 @@ function buildSystemPrompt(opts: BuildPromptOptions): BuildPromptResult {
   );
 
   // Calculate total length
-  const skillSections = sortedSkills.map((skill) => ({
-    skill,
-    text: `\n\n# Skill: ${skill.name}\n\n${skill.resolvedInstructions}`,
-  }));
+  const skillSections = sortedSkills.map((skill) => {
+    const instructions = filterSkillInstructions(
+      skill.resolvedInstructions,
+      allowedToolIds,
+      skill.resolvedTools
+    );
+    return {
+      skill,
+      text: `\n\n# Skill: ${skill.name}\n\n${instructions}`,
+    };
+  });
 
   let totalLength = personaLength;
   for (const s of skillSections) {

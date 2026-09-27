@@ -9,29 +9,39 @@ export const PlanStepStatusSchema = z.enum([
   'running',
   'done',
   'failed',
+  // R1-05: a `failed` step that a successful re-plan replaced with a new
+  // step. Kept (never deleted — R1-04) so the abandoned attempt stays
+  // visible in the final report, but excluded from both "is the plan
+  // stuck/terminal" checks and the done/failed counts that decide
+  // success — a superseded step must never keep a plan whose replacement
+  // succeeded stuck at `failed-partial`.
+  'superseded',
 ]);
 export type PlanStepStatus = z.infer<typeof PlanStepStatusSchema>;
 
 export const PlanStepSchema = z.object({
   /** Unique step identifier within the plan (e.g. "step-1", "step-2") */
-  id: z.string().min(1),
+  id: z.string().min(1).describe('Unique step id within the plan (e.g. step-1)'),
   /** What exactly should be done — one clear deliverable */
-  description: z.string().min(1),
+  description: z.string().min(1).describe('One clear deliverable this step produces'),
   /** IDs of steps that must complete before this one can start */
-  dependsOn: z.array(z.string()).default([]),
+  dependsOn: z.array(z.string()).default([]).describe('Step ids that must finish first'),
   /** Persona id from PersonaRegistry */
-  assignedPersona: z.string().min(1),
+  assignedPersona: z.string().min(1).describe('Persona id from the catalog'),
   /** Skill ids from SkillRegistry */
-  assignedSkills: z.array(z.string()).default([]),
+  assignedSkills: z.array(z.string()).default([]).describe('Skill ids from the catalog'),
   /** Tool ids — MUST be a subset of persona.allowedTools */
-  assignedTools: z.array(z.string()).default([]),
+  assignedTools: z
+    .array(z.string())
+    .default([])
+    .describe("Tool ids; must be a subset of the persona's allowedTools"),
   /** Resources this step will touch (for lock management) */
-  claimedResources: z.array(z.string()).default([]),
+  claimedResources: z.array(z.string()).default([]).describe('Files or resources this step will modify'),
   /**
    * Testable statement defining when this step is "done".
    * Used by the acceptance check in Phase 11.
    */
-  acceptanceCriteria: z.string().min(1),
+  acceptanceCriteria: z.string().min(1).describe('Testable statement that defines done'),
   /** Current execution status */
   status: PlanStepStatusSchema.default('pending'),
   /** Failure classification (populated on failure) */
@@ -40,6 +50,25 @@ export const PlanStepSchema = z.object({
   resultSummary: z.string().optional(),
   /** Task id from TaskRuntime (populated when dispatched) */
   taskId: z.string().optional(),
+  /**
+   * B-05: when this step is a re-plan replacement, the id of the failed
+   * step it supersedes. Dependants of that id are rewired onto this step.
+   */
+  replacesStepId: z
+    .string()
+    .min(1)
+    .optional()
+    .describe('When this step replaces a failed one, that step id'),
+  /** J-04: compact result passed to dependent steps. */
+  handoff: z
+    .object({
+      changedFiles: z.array(z.string()).default([]),
+      keyResult: z.string().default(''),
+      notes: z.string().default(''),
+    })
+    .optional(),
+  /** J-05: checkpoint directory id captured before a writable step. */
+  checkpointId: z.string().optional(),
 });
 
 export type PlanStep = z.infer<typeof PlanStepSchema>;
@@ -70,6 +99,12 @@ export const PlanSchema = z.object({
    * so a plan can be traced back to the conversation that produced it.
    */
   sessionId: z.string().optional(),
+  /**
+   * R1-10: the model this run's execution (task/reviewer/acceptance) used,
+   * so `resumePlan` calls the reviewer with the SAME model instead of
+   * silently falling back to the server default.
+   */
+  modelId: z.string().optional(),
   /** Clarification questions (populated during ambiguity resolution) */
   clarifications: z.array(z.string()).default([]),
   /** Overall plan status */
@@ -77,9 +112,35 @@ export const PlanSchema = z.object({
   /** Timestamps */
   createdAt: z.number().optional(),
   completedAt: z.number().optional(),
+  /** J-03 / J-05: why a plan was cancelled (e.g. "budget exceeded"). */
+  cancelReason: z.string().optional(),
 });
 
 export type Plan = z.infer<typeof PlanSchema>;
+
+/**
+ * E-10: schema sent to the model — no runtime-owned fields (status, taskId,
+ * resultSummary, failureType, sessionId, modelId, timestamps).
+ */
+export const PlanStepModelSchema = PlanStepSchema.omit({
+  status: true,
+  failureType: true,
+  resultSummary: true,
+  taskId: true,
+  handoff: true,
+  checkpointId: true,
+});
+
+export const PlanModelSchema = z.object({
+  goal: z.string().min(1).describe("The user's goal this plan achieves"),
+  steps: z
+    .array(PlanStepModelSchema)
+    .min(1)
+    .describe('Atomic execution steps; keep descriptions to a few sentences each'),
+  clarifications: z.array(z.string()).default([]).describe('Questions already answered, if any'),
+});
+
+export type PlanModel = z.infer<typeof PlanModelSchema>;
 
 // ─── Clarification Response ───────────────────────────────────────
 
@@ -89,15 +150,76 @@ export type Plan = z.infer<typeof PlanSchema>;
  * clarification questions are returned.
  */
 export const PlannerAssessmentSchema = z.object({
+  /**
+   * What the planner decided to do with the request (v27.17.0):
+   *
+   *   plan     real work — produce a plan (the pre-v27.17 behaviour);
+   *   answer   a greeting, a question, a conversation — reply, never plan;
+   *   clarify  the request is too vague to plan or answer — ask questions.
+   *
+   * Optional on purpose: a provider that does not enforce the schema may omit
+   * it (or name it `intent`), and `normalizeAssessment` then derives it from
+   * `isClear`/`answer`/`plan` so an older answer keeps working.
+   */
+  kind: z.enum(['plan', 'answer', 'clarify']).optional(),
+  /** Tolerated alias for `kind` — the other word models reach for. */
+  intent: z.string().optional(),
   /** True if the request is clear enough to produce a plan */
   isClear: z.boolean(),
   /** Clarification questions (only when isClear=false) */
   needsClarification: z.array(z.string()).default([]),
+  /**
+   * Tolerated aliases for `needsClarification` — the names models actually use.
+   *
+   * The response schema asks for `needsClarification`, but a provider that does
+   * not enforce it lets the model name the field itself.  zod then (correctly)
+   * strips the unknown key, so a real run showed the user
+   * `⚠️ Clarification needed:` with *nothing* under it: the model's three
+   * questions had been silently dropped during parsing.
+   *
+   * Declaring the aliases keeps those questions through the parse; the planner
+   * merges them (`normalizeAssessment`) and never returns "unclear" with an
+   * empty list.
+   */
+  clarificationQuestions: z.array(z.string()).optional(),
+  questions: z.array(z.string()).optional(),
+  /**
+   * The reply itself when `kind` is "answer" (v27.17.0).  A draft is enough:
+   * the orchestrator can re-answer with read-only tools, and this text is used
+   * when the model classified the request as a conversation.
+   */
+  answer: z.string().optional(),
+  /** Tolerated aliases for `answer`. */
+  response: z.string().optional(),
+  reply: z.string().optional(),
   /** The plan (only when isClear=true) */
   plan: PlanSchema.optional(),
 });
 
+/** Assessment schema sent to the model — nested plan has no runtime fields. */
+export const PlannerAssessmentLlmSchema = PlannerAssessmentSchema.extend({
+  plan: PlanModelSchema.optional(),
+});
+
 export type PlannerAssessment = z.infer<typeof PlannerAssessmentSchema>;
+
+/**
+ * The same fields, all of them optional (v27.17.1).
+ *
+ * A provider that does not enforce the response schema can return JSON that is
+ * valid but *incomplete* — a real run came back with the user's exact question
+ * list and `kind: "clarify"`, but without `isClear`, which the schema marks
+ * required.  `generateObject` then refuses the object ("No object generated:
+ * response did not match schema") and the whole run died at the first call,
+ * although everything the runtime needed was in the text.
+ *
+ * The raw text is re-parsed with this schema after such a failure, and
+ * `normalizeAssessment` derives what is missing (the kind from the fields that
+ * were filled, `isClear` from the kind).
+ */
+export const PlannerAssessmentRecoverySchema = PlannerAssessmentSchema.partial();
+
+export type RecoveredAssessment = z.infer<typeof PlannerAssessmentRecoverySchema>;
 
 // ─── Feasibility Gate Result ──────────────────────────────────────
 
@@ -145,7 +267,9 @@ export function isPlanTerminal(plan: Plan): boolean {
   ) {
     return true;
   }
-  return plan.steps.every((s) => s.status === 'done' || s.status === 'failed');
+  return plan.steps.every(
+    (s) => s.status === 'done' || s.status === 'failed' || s.status === 'superseded'
+  );
 }
 
 /**

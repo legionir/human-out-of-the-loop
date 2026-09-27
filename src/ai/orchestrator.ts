@@ -1,6 +1,8 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { z } from 'zod';
-import { registryLayersFor } from './registries/layout.js';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { registryLayersFor, type RegistryScope } from './registries/layout.js';
 import { EventBus } from './runtime/event-bus.js';
 import type { EnvSource } from './env.js';
 import { resolveEnv } from './env.js';
@@ -11,17 +13,26 @@ import { PlanRuntime, type PlanExecutionResult } from './runtime/plan-runtime.js
 import { AcceptanceChecker } from './runtime/acceptance-checker.js';
 import { FinalReviewer } from './runtime/final-reviewer.js';
 import { StreamingManager, type ProgressEvent } from './runtime/streaming-manager.js';
+import type { ThoughtSink } from './runtime/thought-stream.js';
 import { CancellationManager } from './runtime/cancellation-manager.js';
 import { RateLimiter } from './runtime/rate-limiter.js';
 import { UsageAggregator } from './runtime/usage-aggregator.js';
-import { envEndpoint, modelIdForSpec, runtimeModelConfig } from './models/env-endpoint.js';
+import { envEndpoint, modelIdForSpec, parseModelSpec, runtimeModelConfig } from './models/env-endpoint.js';
+import { DEFAULT_MODEL_ID } from './models/defaults.js';
 import { listRemoteModels, type RemoteModelList } from './models/list-models.js';
 import type { LlmUsageReport } from './runtime/llm-usage.js';
 import { MemorySessionStore, FileSessionStore, type SessionStore } from './runtime/session-store.js';
 import { ObservabilityLogger } from './runtime/observability-logger.js';
 import { collectSecretValues } from './runtime/secret-scrub.js';
+import type { ToolCallLogOptions, ToolCallSink } from './runtime/tool-call-log.js';
+import { markRootTrusted } from './registries/trust.js';
 import { ScrubbingPlanStore } from './runtime/secret-scrub.js';
-import { logStepEvent } from './runtime/step-events.js';
+import { logStepEvent, parseStepEvent } from './runtime/step-events.js';
+import { JournalWriter, journalOptionsFromEnv } from './runtime/journal.js';
+import { cleanupStaleTempFiles } from './runtime/atomic-write.js';
+import { pruneCheckpoints } from './runtime/checkpoint.js';
+import { cleanupStaleLockFiles } from './runtime/file-lock.js';
+import { isAbortError, throwIfAborted } from './runtime/abort.js';
 import { formatReviewForUser as formatFinalReview } from './runtime/review-formatter.js';
 import { RetryableAgentRuntime } from './runtime/agent-runtime-retry.js';
 
@@ -31,13 +42,23 @@ import { ToolRegistry } from './registries/tool-registry.js';
 import { ModelRegistry } from './registries/model-registry.js';
 import { AgentRegistry } from './registries/agent-registry.js';
 
-import { Planner } from './planning/planner.js';
+import { Planner, formatSessionHistory } from './planning/planner.js';
+import {
+  PlanLiveOwnerError,
+  tryAcquirePlanOwner,
+  isPlanOwnerAlive,
+  isPidAlive,
+  type PlanOwnerHandle,
+} from './runtime/plan-owner.js';
 import { runFeasibilityGate } from './planning/feasibility-gate.js';
 import { detectCycles, type CycleDetectionResult } from './planning/cycle-detector.js';
 import {
   summarizePlan,
   formatPlanForUser,
 } from './planning/plan-confirmation.js';
+import { BudgetTracker, estimatePlanCost, parseBudget, priceFromModelConfig } from './runtime/budget.js';
+import { resolveModelForRole, type ModelRoutes } from './models/model-routes.js';
+import { planExamplesEnabled, savePlanExample } from './planning/plan-examples.js';
 
 import { bootstrapCatalogTools } from './tools/catalog-bootstrap.js';
 import { bootstrapDelegateTask } from './tools/delegate-bootstrap.js';
@@ -56,7 +77,10 @@ import {
 
 import type { FeasibilityCheckResult, Plan } from './schemas/plan.js';
 import { emptyReviewUsage, type Review } from './schemas/review.js';
-import type { ResolvedAgent } from './agents/agent-factory.js';
+import { createAgent, type ResolvedAgent } from './agents/agent-factory.js';
+import { DEFAULT_RUN_MODE, type RunMode } from './modes.js';
+import { readOnlyToolIds } from './tools/read-only.js';
+import { detectLanguage, languageSection, type DetectedLanguage } from './language.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -79,11 +103,24 @@ export const OrchestratorConfigSchema = z.object({
   maxBackoffMs: z.number().int().min(1000).default(30000),
   maxSteps: z.number().int().min(1).max(100).default(20),
   contextBudgetChars: z.number().int().min(1000).default(120000),
+  // Phase 37: the Journal — automatic, append-only record of what the AI did.
+  // Optional (defaults resolved in code) so existing callers stay valid;
+  // `HOTL_JOURNAL=0` / `HOTL_JOURNAL_RESULTS=full` override per process.
+  journal: z
+    .object({
+      enabled: z.boolean().optional(),
+      includeResults: z.enum(['none', 'summary', 'full']).optional(),
+      maxEntryBytes: z.number().int().min(512).max(1024 * 1024).optional(),
+      retentionDays: z.number().int().min(0).max(3650).optional(),
+    })
+    .optional(),
   connectTimeoutMs: z.number().int().min(1000).default(10000),
-  defaultModelId: z.string().default('gpt-4o'),
+  defaultModelId: z.string().default(DEFAULT_MODEL_ID),
   // U1 (config parity): extra observability redaction keys (defaults
   // still apply when the list is non-empty).
   redactKeys: z.array(z.string().min(1)).default([]),
+  /** J-06: model id per role (classify/judge/review/plan/code). */
+  modelRoutes: z.record(z.string(), z.string()).optional(),
   // C4: max question-and-answer rounds before the run fails.
   maxClarificationRounds: z.number().int().min(0).max(10).default(3),
   // Phase 27 (CFG-08): optional per-Orchestrator environment.  When set,
@@ -100,6 +137,29 @@ export const OrchestratorConfigSchema = z.object({
  */
 export type OrchestratorConfig = z.input<typeof OrchestratorConfigSchema> & {
   onProgress?: (event: ProgressEvent) => void;
+  /**
+   * Phase 32: live model thinking (reasoning) text for every agent turn of
+   * the run.  Absent (the default — and always absent in CI, pipes and
+   * tests) agent turns stay on the non-streaming call.
+   */
+  onThought?: ThoughtSink;
+  /**
+   * v27.17.3: one structured record per tool call — type, name, input,
+   * status — for every agent turn of the run (the CLI renders a line per
+   * call; a UI can consume the same records).  Absent means no records, and
+   * the tool set is handed to the model exactly as it was.
+   */
+  onToolCall?: ToolCallSink;
+  /**
+   * R0-08: whether the operator has explicitly trusted `projectRoot`'s own
+   * `registry/mcp-servers/*.json`.  Untrusted (the default) means the
+   * PROJECT layer of mcp-servers is not bootstrapped at all — no stdio
+   * child is spawned and no `tokenEnvVar`/`keyEnvVar` is read for it — so a
+   * freshly cloned, unreviewed repository cannot get code execution or
+   * exfiltrate env vars just from `initialize()`.  The packaged (global)
+   * layer is unaffected.
+   */
+  trustedProject?: boolean;
 };
 
 /**
@@ -117,6 +177,20 @@ export interface RunOverrides {
   agentTimeoutMs?: number;
   maxSteps?: number;
   maxReplanningAttempts?: number;
+  /** J-03: token count or `$1.50`. */
+  budget?: string;
+}
+
+export { PlanLiveOwnerError } from './runtime/plan-owner.js';
+
+/** C-11: how long plans/sessions are kept (`HOTL_RETENTION_DAYS`, 0 = forever). */
+export function storeRetentionDays(env: Record<string, string | undefined>): number {
+  const raw = env.HOTL_RETENTION_DAYS;
+  if (raw !== undefined && raw.trim() !== '') {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 365;
 }
 
 /** U3: thrown when a per-run `modelId` is not in the ModelRegistry. */
@@ -131,6 +205,12 @@ export class InvalidModelError extends Error {
 
 export interface OrchestratorRunOptions {
   sessionId?: string;
+  /**
+   * v27.17.0: how to treat the request — `auto` (default) lets the planner
+   * decide between planning and answering, `chat` never plans, `plan` never
+   * answers.  See `src/ai/modes.ts`.
+   */
+  mode?: RunMode;
   /** U3: per-run overrides (model, timeout, maxSteps, replan budget). */
   runOverrides?: RunOverrides;
   /**
@@ -160,10 +240,26 @@ export interface OrchestratorRunOptions {
   confirmCallback: (
     planText: string,
     plan?: Plan,
-  ) => Promise<{ confirmed: boolean; feedback?: string }>;
+  ) => Promise<{ confirmed: boolean; feedback?: string; cancelled?: boolean }>;
+  /**
+   * A-04: abort planning (and skip later LLM calls). The web server
+   * `POST /api/runs/:runId/cancel` fires this while state is `planning`.
+   */
+  abortSignal?: AbortSignal;
+  /**
+   * H-08: skip the planner and execute this already-previewed plan.
+   * Feasibility/confirmation still run so the user confirms the same steps.
+   */
+  preparedPlan?: Plan;
 }
 
 export interface OrchestratorResult {
+  /**
+   * What the run produced (v27.17.0): `plan` for a planned run (the only
+   * outcome before this), `answer` for a chat reply.  `planId` is `'none'`
+   * when the run answered instead of planning.
+   */
+  kind: 'plan' | 'answer';
   review: Review;
   report: string;
   planId: string;
@@ -203,6 +299,31 @@ export function createCliConfirmCallback(): (planText: string) => Promise<{ conf
 
 // ─── Orchestrator ────────────────────────────────────────────────
 
+
+/**
+ * The answer prompt (`buildAnswerPrompt`) requires the chat model to end its
+ * reply with an explicit, unambiguous marker — `[[NEEDS_PLAN: true]]` or
+ * `[[NEEDS_PLAN: false]]` — instead of leaving auto mode to guess from the
+ * prose whether the answer "defers to `@plan`".
+ *
+ * A substring match on `@plan` used to do that guessing and broke on any
+ * reply that merely *mentioned* `@plan` as an example (e.g. explaining what
+ * tools are available) — it escalated a perfectly good answer into a plan
+ * for a request that was never plannable, producing a garbage plan.
+ *
+ * A model that ignores the instruction and omits the marker defaults to
+ * `false` (never escalate) — the safe direction, since an answer that really
+ * needed a plan still tells the user so in its own words.
+ */
+export function extractNeedsPlan(text: string): { needsPlan: boolean; answer: string } {
+  const match = /\n?\s*\[\[NEEDS_PLAN:\s*(true|false)\s*\]\]\s*$/i.exec(text);
+  if (!match) return { needsPlan: false, answer: text };
+  return {
+    needsPlan: match[1]!.toLowerCase() === 'true',
+    answer: text.slice(0, match.index).trim(),
+  };
+}
+
 export class Orchestrator {
   /**
    * The validated, defaults-applied config.  Exposed read-only so
@@ -215,7 +336,21 @@ export class Orchestrator {
    * `Required<Omit<…>> & { env: EnvSource }` rather than plain
    * `Required<OrchestratorConfig>`.
    */
-  readonly config: Required<Omit<OrchestratorConfig, 'env'>> & { env: EnvSource };
+  readonly config: Required<Omit<OrchestratorConfig, 'env' | 'onThought' | 'onToolCall'>> & {
+    env: EnvSource;
+    /** Phase 32: absent means "agent turns are not streamed". */
+    onThought?: ThoughtSink;
+    /** v27.17.3: absent means "no tool-call records". */
+    onToolCall?: ToolCallSink;
+  };
+
+  /**
+   * v27.17.3: how a tool-call record resolves its tool's category and which
+   * credential values the shown input must not contain.  Built once from the
+   * registries (a closure, so MCP tools connected later are covered) and the
+   * same secret list the journal and the observability log use.
+   */
+  private toolCallOptions: ToolCallLogOptions = {};
 
   readonly personaRegistry: PersonaRegistry;
   readonly skillRegistry: SkillRegistry;
@@ -227,6 +362,11 @@ export class Orchestrator {
   readonly agentRuntime: AgentRuntime;
   readonly retryableAgentRuntime: RetryableAgentRuntime;
   readonly taskRuntime: TaskRuntime;
+  /**
+   * Phase 37: the project's Journal.  Public so a CLI command or a test can
+   * read the path / close it; the runtime itself only ever appends to it.
+   */
+  readonly journal: JournalWriter;
   readonly planStore: PlanStore;
   /** Phase 30 (P10): literal credential values scrubbed from artifacts. */
   private readonly secretValues: string[];
@@ -235,6 +375,21 @@ export class Orchestrator {
   readonly cancellationManager: CancellationManager;
   readonly rateLimiter: RateLimiter;
   readonly usageAggregator: UsageAggregator;
+  /** J-03: per-run budget; set for the duration of `run()`. */
+  /**
+   * Per-run state for the web server, which runs several goals on one
+   * Orchestrator at once: kept per async call chain, never on the instance.
+   */
+  private readonly runContext = new AsyncLocalStorage<{
+    budget?: BudgetTracker;
+    /** Tokens this run spent (planning calls + chat answer). */
+    usage: { prompt: number; completion: number; total: number };
+  }>();
+
+  /** J-03: the budget of the run this call belongs to (none outside a run). */
+  private get activeBudget(): BudgetTracker | undefined {
+    return this.runContext.getStore()?.budget;
+  }
   readonly observabilityLogger: ObservabilityLogger;
   readonly acceptanceChecker: AcceptanceChecker;
   readonly finalReviewer: FinalReviewer;
@@ -252,6 +407,11 @@ export class Orchestrator {
   private readonly defaultModelSpec: string;
 
   private initialized = false;
+  /** B-01: in-process live plans + on-disk owner handles. */
+  private readonly livePlans = new Set<string>();
+  /** B-06: interactions a run() in this process is still working on. */
+  private readonly liveInteractions = new Set<string>();
+  private readonly planOwnerHandles = new Map<string, PlanOwnerHandle>();
 
   constructor(config: OrchestratorConfig) {
     // Phase 22: validate FIRST — out-of-range config throws a ZodError
@@ -285,8 +445,20 @@ export class Orchestrator {
       contextBudgetChars: data.contextBudgetChars,
       connectTimeoutMs: data.connectTimeoutMs,
       redactKeys: data.redactKeys,
+      journal: {
+        ...journalOptionsFromEnv(data.env ?? process.env),
+        ...(data.journal ?? {}),
+      },
       maxClarificationRounds: data.maxClarificationRounds,
       onProgress: config.onProgress ?? (() => {}),
+      // Phase 32: thinking is optional by design — no sink, no streaming.
+      onThought: config.onThought,
+      // v27.17.3: tool-call records are optional the same way.
+      onToolCall: config.onToolCall,
+      // R0-08: untrusted by default — a project's own mcp-servers layer is
+      // not bootstrapped unless the caller explicitly says it is trusted.
+      trustedProject: config.trustedProject === true,
+      modelRoutes: data.modelRoutes ?? {},
     };
 
     // Phase 27 (CFG-08): resolve the env once, before any registry or
@@ -303,7 +475,23 @@ export class Orchestrator {
     // Phase 19 (SING-01/02): each Orchestrator owns its bus/runtime —
     // no shared singletons, full isolation between instances.
     this.eventBus = new EventBus();
-    this.agentRuntime = new AgentRuntime();
+    // Phase 30 (P10): the persisted plan must not carry a credential the model
+    // echoed into its summary — and v27.17.3 scrubs the tool-call records with
+    // the same list, so a shown argument never prints a key.
+    this.secretValues = collectSecretValues(this.env, this.config.redactKeys);
+    // v27.17.3: the tool's CATEGORY comes from the registry (the same one the
+    // tool list is built from), resolved per call so a tool registered later —
+    // an MCP server that connects during `initialize()` — is classified too.
+    // Both fields are set here because `TaskRuntime` keeps this very object:
+    // nothing about the options may be filled in after it is handed over.
+    this.toolCallOptions = {
+      toolType: (toolName: string) => {
+        const definition = this.toolRegistry.getDefinition(toolName);
+        if (!definition) return undefined;
+        return definition.category ?? (definition.source === 'mcp' ? 'mcp' : undefined);
+      },
+      secrets: this.secretValues,
+    };
     // Phase 19 (CFG-06): RateLimiter constructed from config
     this.rateLimiter = new RateLimiter({
       maxConcurrentPerProvider: this.config.maxConcurrentPerProvider,
@@ -311,6 +499,7 @@ export class Orchestrator {
       baseBackoffMs: this.config.baseBackoffMs,
       maxBackoffMs: this.config.maxBackoffMs,
     });
+    this.agentRuntime = new AgentRuntime({ rateLimiter: this.rateLimiter });
     this.retryableAgentRuntime = new RetryableAgentRuntime(
       this.agentRuntime,
       this.rateLimiter
@@ -324,6 +513,12 @@ export class Orchestrator {
       // U3: wire the configured max tool-call iterations (before U3 this
       // value was set on the config but never reached the runtime).
       maxSteps: this.config.maxSteps,
+      // Phase 32: forward the thinking sink to every agent turn.
+      ...(this.config.onThought ? { onThought: this.config.onThought } : {}),
+      // v27.17.3: forward the tool-call sink with its category resolver and
+      // the credentials its records must never show.
+      ...(this.config.onToolCall ? { onToolCall: this.config.onToolCall } : {}),
+      ...(this.toolCallOptions ? { toolCallOptions: this.toolCallOptions } : {}),
     });
     // Phase 19 (CFG-03/04): DelegationGuard instantiated from config
     // and wired into the delegate_task tool.
@@ -333,9 +528,22 @@ export class Orchestrator {
     });
 
     const runtimeDir = this.config.runtimeDir;
+    // R0-12: `.ai-runtime` (journal, memory, plans, sessions) must never be
+    // picked up by `git add .` in the user's own project — a plain
+    // `.gitignore` next to it is enough, and this is the one place every
+    // Orchestrator creates the directory, so it is written once, here,
+    // best-effort (a read-only filesystem must not fail construction).
+    try {
+      fs.mkdirSync(runtimeDir, { recursive: true });
+      const gitignorePath = path.join(runtimeDir, '.gitignore');
+      if (!fs.existsSync(gitignorePath)) {
+        fs.writeFileSync(gitignorePath, '*\n');
+      }
+    } catch {
+      // best-effort — a failure here must not block the runtime from starting
+    }
     // Phase 30 (P10): the persisted plan must not carry a credential the
     // model echoed into its summary.
-    this.secretValues = collectSecretValues(this.env, this.config.redactKeys);
     const planStore = this.config.persistent
       ? new FilePlanStore(path.join(runtimeDir, 'plans'))
       : new MemoryPlanStore();
@@ -343,6 +551,25 @@ export class Orchestrator {
     this.sessionStore = this.config.persistent
       ? new FileSessionStore(path.join(runtimeDir, 'sessions'))
       : new MemorySessionStore();
+
+    // Phase 37: the Journal is created once per Orchestrator, next to the
+    // observability log, and handed to the AgentRuntime — that is the object
+    // the tool wrapper is attached to, so no tool implementation knows about it.
+    this.journal = new JournalWriter({
+      runtimeDir,
+      enabled: this.config.journal.enabled,
+      includeResults: this.config.journal.includeResults,
+      ...(this.config.journal.maxEntryBytes !== undefined
+        ? { maxEntryBytes: this.config.journal.maxEntryBytes }
+        : {}),
+      ...(this.config.journal.retentionDays !== undefined
+        ? { retentionDays: this.config.journal.retentionDays }
+        : {}),
+      redactKeys: this.config.redactKeys.length > 0 ? this.config.redactKeys : undefined,
+      redactValues: this.secretValues,
+    });
+    this.journal.prune();
+    this.agentRuntime.setJournal(this.journal);
 
     this.streamingManager = new StreamingManager({ eventBus: this.eventBus });
     this.cancellationManager = new CancellationManager(this.planStore, this.taskRuntime);
@@ -377,7 +604,7 @@ export class Orchestrator {
       // The judge runs on the run's model like every other call — without
       // it every acceptance check went to the built-in default (gpt-4o),
       // whatever `--model` / HOTL_MODEL selected.
-      modelId: this.config.defaultModelId,
+      modelId: resolveModelForRole('judge', this.config.modelRoutes as ModelRoutes | undefined, this.config.defaultModelId),
       // Phase 30 (P5): the same deadline `--timeout-ms` gives an agent run
       // now also covers the judgment call.
       timeoutMs: this.config.agentTimeoutMs,
@@ -399,7 +626,7 @@ export class Orchestrator {
       skillRegistry: this.skillRegistry,
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
-      modelId: this.config.defaultModelId,
+      modelId: resolveModelForRole('review', this.config.modelRoutes as ModelRoutes | undefined, this.config.defaultModelId),
       timeoutMs: this.config.agentTimeoutMs,
       onUsage: (report) => this.recordLlmUsage(report),
     });
@@ -409,8 +636,12 @@ export class Orchestrator {
       skillRegistry: this.skillRegistry,
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
-      modelId: this.config.defaultModelId,
+      modelId: resolveModelForRole('plan', this.config.modelRoutes as ModelRoutes | undefined, this.config.defaultModelId),
       timeoutMs: this.config.agentTimeoutMs,
+      // Phase 32: the planner is told WHERE it is working.  Without the
+      // project root it answered "which project?" to a goal like "scan
+      // this project" — the provider has no idea what the cwd is.
+      projectRoot: this.config.projectRoot,
       onUsage: (report) => this.recordLlmUsage(report),
     });
   }
@@ -428,7 +659,13 @@ export class Orchestrator {
       usage: report.usage,
       timestamp: Date.now(),
       llmCall: true,
+      modelId: report.modelId,
     });
+    this.addRunUsage(report.usage);
+    this.activeBudget?.record(
+      report.usage,
+      priceFromModelConfig(report.modelId ? this.modelRegistry.getConfig(report.modelId) : undefined),
+    );
     this.observabilityLogger.logLlmUsage(report.purpose, report.usage, report.planId);
   }
 
@@ -447,11 +684,15 @@ export class Orchestrator {
   private registerModelSpec(spec: string): string {
     const trimmed = spec.trim();
     if (!trimmed) throw new InvalidModelError(spec, this.modelRegistry.listConfigs().map((m) => m.id));
-    if (this.modelRegistry.hasConfig(trimmed)) return trimmed;
-    const id = modelIdForSpec(trimmed);
-    if (!this.modelRegistry.hasConfig(id)) {
-      this.modelRegistry.replaceConfig(runtimeModelConfig(trimmed, this.env));
+    const parsed = parseModelSpec(trimmed);
+    if (!parsed.name.trim()) {
+      throw new InvalidModelError(spec, this.modelRegistry.listConfigs().map((m) => m.id));
     }
+    if (this.modelRegistry.hasConfig(trimmed)) return trimmed;
+    const known = this.modelRegistry.listConfigs();
+    const id = modelIdForSpec(trimmed, known);
+    if (this.modelRegistry.hasConfig(id)) return id;
+    this.modelRegistry.replaceConfig(runtimeModelConfig(trimmed, this.env, known));
     return id;
   }
 
@@ -462,7 +703,7 @@ export class Orchestrator {
 
   /** Usage of one plan only — the aggregator lives as long as the orchestrator. */
   private planUsage(planId: string | undefined): Review['usage'] {
-    if (!planId) return emptyReviewUsage;
+    if (!planId) return this.totalReviewUsage();
     const u = this.usageAggregator.getPlanUsage(planId);
     return {
       totalPromptTokens: u.promptTokens,
@@ -471,10 +712,43 @@ export class Orchestrator {
     };
   }
 
+  /** Tokens of the current run only (not everything this long-lived instance spent). */
+  private totalReviewUsage(): Review['usage'] {
+    const u = this.runContext.getStore()?.usage;
+    return u
+      ? { totalPromptTokens: u.prompt, totalCompletionTokens: u.completion, totalTokens: u.total }
+      : emptyReviewUsage;
+  }
+
+  private addRunUsage(usage: { promptTokens: number; completionTokens: number; totalTokens: number }): void {
+    const u = this.runContext.getStore()?.usage;
+    if (!u) return;
+    u.prompt += usage.promptTokens;
+    u.completion += usage.completionTokens;
+    u.total += usage.totalTokens;
+  }
+
   async initialize(): Promise<void> {
     if (this.initialized) return;
 
     const root = this.config.projectRoot;
+    const runtimeDir = this.config.runtimeDir;
+    try {
+      cleanupStaleTempFiles(runtimeDir);
+      cleanupStaleLockFiles(runtimeDir);
+      cleanupStaleTempFiles(path.join(runtimeDir, 'plans'));
+      cleanupStaleLockFiles(path.join(runtimeDir, 'plans'));
+      cleanupStaleTempFiles(path.join(runtimeDir, 'sessions'));
+      cleanupStaleLockFiles(path.join(runtimeDir, 'sessions'));
+      this.journal.prune();
+      // C-11: HOTL_RETENTION_DAYS (default 365; 0 keeps everything).
+      const retentionDays = storeRetentionDays(this.env);
+      this.planStore.pruneOlderThan?.(retentionDays);
+      this.sessionStore.pruneOlderThan?.(retentionDays);
+      pruneCheckpoints(root, 7, Date.now(), runtimeDir);
+    } catch {
+      // housekeeping must never block startup
+    }
 
     // Phase 28 (registry layering): the packaged registry (global) loads
     // first and the project registry (local) second with override, so a
@@ -483,9 +757,12 @@ export class Orchestrator {
     // disables the packaged layer entirely.
     const layers = registryLayersFor(root, { env: this.env });
     /** Low→high precedence; the last layer overrides the earlier ones. */
-    const forEachLayer = (baseDir: string): Array<{ dir: string; override: boolean; required: boolean }> =>
+    const forEachLayer = (
+      baseDir: string
+    ): Array<{ dir: string; override: boolean; required: boolean; scope: RegistryScope }> =>
       layers.map((layer, index) => ({
         dir: path.join(layer.dir, baseDir),
+        scope: layer.scope,
         override: index > 0,
         required: layer.scope === 'project',
       }));
@@ -534,13 +811,65 @@ export class Orchestrator {
     // server, an HTTP session) must be closed on shutdown, otherwise the
     // child process/socket keeps the Node event loop alive and the CLI
     // never exits after a successful run.
+    //
+    // R0-08: the PROJECT layer's mcp-servers is skipped unless the caller
+    // marked this project trusted — it can spawn arbitrary stdio processes
+    // and send named env vars to arbitrary URLs, so a freshly cloned,
+    // unreviewed repository must not get that on the first `initialize()`.
+    // The packaged (global) layer always loads.
+    // Same decision for `.ai-runtime/commands.json` (run_command / run_tests).
+    if (this.config.trustedProject) markRootTrusted(root);
+    const allMcpServerLayers = forEachLayer('mcp-servers');
+    const mcpServerLayers = allMcpServerLayers.filter(
+      (l) => l.scope === 'package' || this.config.trustedProject
+    );
+    if (mcpServerLayers.length < allMcpServerLayers.length) {
+      this.observabilityLogger.logSystemError(
+        'mcp-trust',
+        `Skipped this project's registry/mcp-servers (untrusted project). ` +
+          'Pass trustedProject:true (CLI: --trust-project) to enable it.'
+      );
+    }
     const mcp = await bootstrapMcpServers(
-      forEachLayer('mcp-servers').map((l) => l.dir),
+      mcpServerLayers.map((l) => l.dir),
       this.toolRegistry,
       undefined,
       this.env
     );
     this.mcpConnector = mcp.connector;
+    // B-16: malformed mcp-servers JSON fails startup; a down server does not.
+    const mcpJsonErrors = mcp.configErrors.filter(
+      (e) => !/Directory (does not exist|not found)/i.test(e.error),
+    );
+    if (mcpJsonErrors.length > 0) {
+      throw new Error(
+        `[Orchestrator] Invalid mcp-servers registry entries: ` +
+          mcpJsonErrors.map((e) => `${e.file}: ${e.error}`).join('; '),
+      );
+    }
+    // B-19: tools of an MCP server that is down — or whose layer was skipped
+    // because the project is untrusted — are missing, and that must not stop
+    // start-up: skills and personas referencing them get a warning instead.
+    const skippedLayerHasServers = allMcpServerLayers
+      .filter((l) => !mcpServerLayers.includes(l))
+      .some((l) => {
+        try {
+          return fs.readdirSync(l.dir).some((f) => f.endsWith('.json'));
+        } catch {
+          return false;
+        }
+      });
+    const mcpToolsMayBeMissing =
+      mcp.connectionResults.some((r) => !r.success) || skippedLayerHasServers;
+    if (mcp.connectionResults.length > 0 || mcpToolsMayBeMissing) {
+      this.skillRegistry.setAllowUnknownTools(true);
+      for (const c of mcp.connectionResults.filter((r) => !r.success)) {
+        this.observabilityLogger.logSystemError(
+          'mcp-connection',
+          `MCP server "${c.id}" unavailable: ${c.error ?? 'connection failed'}`,
+        );
+      }
+    }
 
     // Catalog tools must exist before skills load (skills cross-validate
     // their tool references against the ToolRegistry).
@@ -548,6 +877,7 @@ export class Orchestrator {
       toolRegistry: this.toolRegistry,
       personaRegistry: this.personaRegistry,
       skillRegistry: this.skillRegistry,
+      sessionStore: this.sessionStore,
     });
 
     for (const layer of forEachLayer('skills')) {
@@ -556,12 +886,21 @@ export class Orchestrator {
         'skill'
       );
     }
+    for (const w of this.skillRegistry.unknownToolWarnings) {
+      this.observabilityLogger.logSystemError(
+        'skill-tools',
+        `Skill "${w.skillId}" references unavailable tool(s) [${w.missing.join(', ')}] (MCP server may be down); those tools were dropped.`,
+      );
+    }
 
     this.modelRegistry.registerProvider(openaiProviderFactory);
     this.modelRegistry.registerProvider(anthropicProviderFactory);
     this.modelRegistry.registerProvider(localProviderFactory);
     for (const layer of forEachLayer('models')) {
-      this.modelRegistry.loadConfigsFromDirectory(layer.dir, false, layer.override);
+      assertEntriesValid(
+        this.modelRegistry.loadConfigsFromDirectory(layer.dir, false, layer.override).errors,
+        'model',
+      );
     }
     // HOTL_BASE_URL / HOTL_MODEL: an endpoint from the environment, on top
     // of every registry layer.
@@ -578,9 +917,23 @@ export class Orchestrator {
         `Some models could not be resolved: ${err instanceof Error ? err.message : String(err)}`
       );
     }
+    try {
+      this.modelRegistry.resolve(this.config.defaultModelId);
+    } catch (err) {
+      this.observabilityLogger.logSystemError(
+        'default-model',
+        `Default model "${this.config.defaultModelId}" could not be resolved (missing API key?): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     for (const layer of forEachLayer('agents.json')) {
-      this.agentRegistry.loadFromFile(layer.dir, layer.override);
+      const loaded = this.agentRegistry.loadFromFile(layer.dir, layer.override);
+      const real = loaded.errors.filter((e) => !/File not found/i.test(e));
+      if (real.length > 0) {
+        throw new Error(
+          `[Orchestrator] Invalid agent registry entries: ${real.join('; ')}`,
+        );
+      }
     }
 
     const delegateDeps: DelegateTaskDeps = {
@@ -589,12 +942,15 @@ export class Orchestrator {
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
       // Phase 22: typed (was `any`)
-      onTaskCreated: async (resolved: ResolvedAgent, prompt: string) => {
+      onTaskCreated: async (resolved: ResolvedAgent, prompt: string, meta) => {
         return this.taskRuntime.createTask({
           agent: resolved,
           prompt,
+          ...(meta?.planId ? { planId: meta.planId } : {}),
+          ...(meta?.parentTaskId ? { parentTaskId: meta.parentTaskId } : {}),
         });
       },
+      waitForTask: (taskId, parentTaskId) => this.taskRuntime.waitForTask(taskId, parentTaskId),
       resolveAgentId: (id: string) => this.agentRegistry.get(id),
       // Phase 19 (CFG-04): the guard is actually enforced now
       delegationGuard: this.delegationGuard,
@@ -610,6 +966,28 @@ export class Orchestrator {
       skillRegistry: this.skillRegistry,
       modelRegistry: this.modelRegistry,
     });
+
+    // B-18: after every tool source is registered (local, catalog, MCP,
+    // delegate, task-control). "*" and "mcp:" prefixes are allowed.
+    const unknownPersonaTools: string[] = [];
+    for (const persona of this.personaRegistry.list()) {
+      for (const toolId of persona.allowedTools) {
+        if (toolId === '*' || toolId.startsWith('mcp:')) continue;
+        if (!this.toolRegistry.hasDefinition(toolId)) {
+          unknownPersonaTools.push(`${persona.id}:${toolId}`);
+        }
+      }
+    }
+    if (unknownPersonaTools.length > 0) {
+      this.observabilityLogger.logSystemError(
+        'persona-tools',
+        `Persona allowedTools reference unknown tool(s): ${unknownPersonaTools.join(', ')}` +
+          (mcpToolsMayBeMissing ? ' (an MCP server is unavailable — those tools were dropped).' : ''),
+      );
+      if (!mcpToolsMayBeMissing) throw new Error(
+        `[Orchestrator] Persona allowedTools reference unknown tool(s): ${unknownPersonaTools.join(', ')}`,
+      );
+    }
 
     this.observabilityLogger.subscribeToEventBus(this.eventBus);
 
@@ -634,6 +1012,7 @@ export class Orchestrator {
       );
     }
 
+    this.reconcileAbandonedInteractions();
     this.initialized = true;
     this.observabilityLogger.log({
       eventType: 'system:info',
@@ -664,11 +1043,45 @@ export class Orchestrator {
     const ov = requested?.modelId !== undefined
       ? { ...requested, modelId: this.useModel(requested.modelId) }
       : requested;
+    let budget: BudgetTracker | undefined;
+    if (ov?.budget) {
+      const parsed = parseBudget(ov.budget);
+      if ('error' in parsed) throw new Error(parsed.error);
+      budget = new BudgetTracker(parsed);
+    }
 
+    if (options?.sessionId && !this.sessionStore.getSession(options.sessionId)) {
+      const err = new Error(`Session "${options.sessionId}" not found.`);
+      (err as Error & { status?: number }).status = 404;
+      throw err;
+    }
     const sessionId =
       options?.sessionId ?? this.sessionStore.createSession(options?.sessionLabel);
     const interaction = this.sessionStore.addInteraction(sessionId, userRequest);
     this.observabilityLogger.logSessionCreated(sessionId);
+    const sessionForHistory = this.sessionStore.getSession(sessionId);
+    const historyBlock = sessionForHistory
+      ? formatSessionHistory(sessionForHistory.interactions)
+      : undefined;
+    if (interaction) this.liveInteractions.add(interaction.id);
+    try {
+      return await this.runContext.run({ budget, usage: { prompt: 0, completion: 0, total: 0 } }, () =>
+        this.planner.withSessionHistory(historyBlock, () =>
+          this.runInSession(userRequest, options, ov, sessionId, interaction),
+        ),
+      );
+    } finally {
+      if (interaction) this.liveInteractions.delete(interaction.id);
+    }
+  }
+
+  private async runInSession(
+    userRequest: string,
+    options: OrchestratorRunOptions,
+    ov: RunOverrides | undefined,
+    sessionId: string,
+    interaction: ReturnType<SessionStore['addInteraction']>,
+  ): Promise<OrchestratorResult> {
 
     this.observabilityLogger.log({
       eventType: 'system:info',
@@ -683,7 +1096,112 @@ export class Orchestrator {
     // the legacy failure-with-questions path below is unchanged.
     // The run's model (a per-run override wins) — for EVERY call of the run.
     const runModelId = ov?.modelId ?? this.config.defaultModelId;
-    let planningResult = await this.planner.plan(userRequest, undefined, runModelId);
+    const mode = options?.mode ?? DEFAULT_RUN_MODE;
+    const abortSignal = options?.abortSignal;
+    const cancelledResult = (summary: string, report: string): OrchestratorResult => {
+      if (interaction) {
+        this.sessionStore.updateInteraction(sessionId, interaction.id, {
+          outcome: 'cancelled',
+          reviewSummary: summary,
+          completedAt: Date.now(),
+        });
+      }
+      return {
+        kind: 'plan',
+        review: {
+          planId: 'none',
+          goal: userRequest,
+          outcome: 'cancelled',
+          acceptedFindings: [],
+          rejectedFindings: [],
+          incompleteSteps: [],
+          finalSummary: summary,
+          usage: emptyReviewUsage,
+        },
+        report,
+        planId: 'none',
+        sessionId,
+        executionResult: {
+          planId: 'none',
+          status: 'cancelled',
+          completedSteps: 0,
+          failedSteps: 0,
+          totalSteps: 0,
+          incompleteSteps: [],
+          replanningAttempts: 0,
+        },
+      };
+    };
+    // Set only when auto mode escalated an answer to a plan (see below) — the
+    // answer the model already produced, used as a fallback if the plan this
+    // request escalates into turns out infeasible.
+    let fallbackAnswer: string | undefined;
+    let planningResult;
+    try {
+      throwIfAborted(abortSignal);
+      if (options?.preparedPlan) {
+        planningResult = {
+          kind: 'plan' as const,
+          isClear: true,
+          needsClarification: [] as string[],
+          errors: [] as string[],
+          plan: {
+            ...options.preparedPlan,
+            steps: options.preparedPlan.steps.map((s) => ({ ...s })),
+          },
+        };
+      } else {
+        planningResult = await this.planner.plan(userRequest, undefined, runModelId, mode, abortSignal);
+      }
+    } catch (err) {
+      if (isAbortError(err) || abortSignal?.aborted) {
+        return cancelledResult(
+          'Run cancelled during planning.',
+          '🛑 Run cancelled during planning — no further model calls will be made.',
+        );
+      }
+      throw err;
+    }
+
+    // v27.17.0: the request was a conversation, not work.  Answer it (with the
+    // read-only tools), record it as an answered interaction, and stop — no
+    // plan, no confirmation, no execution.
+    if (planningResult.kind === 'answer') {
+      const answered = await this.answerRun({
+        userRequest,
+        sessionId,
+        ...(interaction ? { interactionId: interaction.id } : {}),
+        modelId: runModelId,
+        ...(planningResult.answer ? { draft: planningResult.answer } : {}),
+        mode,
+        escalateToPlan: mode === 'auto',
+      });
+      if (!('escalate' in answered)) return answered;
+      // Auto mode: the assessment called this a conversation, but the model
+      // explicitly marked its own reply `[[NEEDS_PLAN: true]]` (see
+      // `buildAnswerPrompt` / `extractNeedsPlan`).  Plan the request instead,
+      // keeping the answer as a fallback in case the plan turns out to be
+      // infeasible (e.g. the request was actually just informational).
+      fallbackAnswer = answered.fallbackAnswer;
+      this.observabilityLogger.log({
+        eventType: 'system:info',
+        message: 'Auto mode: the answer said it needs a plan — planning the request instead.',
+        level: 'info',
+      });
+      try {
+        throwIfAborted(abortSignal);
+        planningResult = await this.planner.plan(userRequest, undefined, runModelId, 'plan', abortSignal);
+      } catch (err) {
+        if (isAbortError(err) || abortSignal?.aborted) {
+          return cancelledResult(
+            'Run cancelled during planning.',
+            '🛑 Run cancelled during planning — no further model calls will be made.',
+          );
+        }
+        throw err;
+      }
+    }
+
     let clarifyRound = 0;
     let clarificationDeclined = false;
     while (!planningResult.isClear) {
@@ -710,11 +1228,45 @@ export class Orchestrator {
       const block = Object.entries(answers)
         .map(([q, a]) => `Q: ${q}\nA: ${a}`)
         .join('\n');
-      planningResult = await this.planner.plan(
-        `${userRequest}\n\nCLARIFICATIONS FROM USER:\n${block}`,
-        undefined,
-        runModelId,
-      );
+      try {
+        throwIfAborted(abortSignal);
+        planningResult = await this.planner.plan(
+          `${userRequest}\n\nCLARIFICATIONS FROM USER:\n${block}`,
+          undefined,
+          runModelId,
+          mode,
+          abortSignal,
+        );
+      } catch (err) {
+        if (isAbortError(err) || abortSignal?.aborted) {
+          return cancelledResult(
+            'Run cancelled during planning.',
+            '🛑 Run cancelled during planning — no further model calls will be made.',
+          );
+        }
+        throw err;
+      }
+    }
+
+    // R1-01: a re-plan INSIDE the clarification loop can come back as
+    // `kind:'answer'` (isClear:true, but `plan` is never set) — e.g. the
+    // user's answers turned "do X" into a question that is better answered
+    // directly. The initial call above already routes 'answer' to
+    // `answerRun`; a later one, from inside the loop, did not, so
+    // `const plan = planningResult.plan!` crashed with "Cannot set
+    // properties of undefined (setting 'sessionId')" and the interaction
+    // was left 'pending' forever.
+    if (planningResult.kind === 'answer') {
+      const answered = await this.answerRun({
+        userRequest,
+        sessionId,
+        ...(interaction ? { interactionId: interaction.id } : {}),
+        modelId: runModelId,
+        ...(planningResult.answer ? { draft: planningResult.answer } : {}),
+        mode,
+      });
+      // No escalation requested here, so this is always a result.
+      return answered as OrchestratorResult;
     }
 
     if (clarificationDeclined) {
@@ -727,6 +1279,7 @@ export class Orchestrator {
         });
       }
       return {
+        kind: 'plan',
         review: {
           planId: 'none',
           goal: userRequest,
@@ -735,7 +1288,7 @@ export class Orchestrator {
           rejectedFindings: [],
           incompleteSteps: [],
           finalSummary: `The planner asked for clarification, but the user chose not to answer (round ${clarifyRound}).\nQuestions:\n${clarMsg}`,
-          usage: emptyReviewUsage,
+          usage: this.totalReviewUsage(),
         },
         report: `🛑 Run cancelled — clarification questions were not answered.\nQuestions that were asked:\n${clarMsg}`,
         planId: 'none',
@@ -767,6 +1320,7 @@ export class Orchestrator {
           });
         }
         return {
+          kind: 'plan',
           review: {
             planId: 'none',
             goal: userRequest,
@@ -805,6 +1359,7 @@ export class Orchestrator {
           ? `\n(No plan could be produced after ${clarifyRound} clarification round(s).)`
           : '';
       return {
+        kind: 'plan',
         review: {
           planId: 'none',
           goal: userRequest,
@@ -813,7 +1368,7 @@ export class Orchestrator {
           rejectedFindings: [],
           incompleteSteps: [],
           finalSummary: `The request needs clarification before a plan can be produced:\n${clarificationMsg}${roundNote}`,
-          usage: emptyReviewUsage,
+          usage: this.totalReviewUsage(),
         },
         report: `⚠️ Clarification needed:\n${clarificationMsg}${roundNote}`,
         planId: 'none',
@@ -836,6 +1391,9 @@ export class Orchestrator {
     // an interaction that is 'pending' forever with no plan id, and nothing
     // (user or `plans resume`) can tell how to finish the run.
     plan.sessionId = sessionId;
+    // R1-10: remember this run's model so a later `resumePlan` reviews
+    // with the same model instead of the server default.
+    plan.modelId = runModelId;
     this.observabilityLogger.logPlanCreated(plan);
     // Phase 24 (UI): persist at creation so the plan is visible to the
     // user WHILE the confirmation is pending (UI modal / plans list).
@@ -861,9 +1419,66 @@ export class Orchestrator {
       const errorMsg = feasibility.errors
         .map((e) => `[${e.stepId}] ${e.field}: ${e.message}`)
         .join('\n');
+      // Auto mode escalated a chat answer into this plan (the model said it
+      // needed one), but the plan the model then produced for it doesn't
+      // hold up — most often because the request was actually informational
+      // and there was nothing real to plan.  The user already has a good
+      // answer; show that instead of a raw feasibility-gate error.
+      if (fallbackAnswer) {
+        this.observabilityLogger.log({
+          eventType: 'system:info',
+          message: 'Escalated plan failed the feasibility gate — falling back to the chat answer.',
+          level: 'info',
+          payload: { errorMsg },
+        });
+        const body = fallbackAnswer;
+        const report = `💬 Answer\n\n${body}`;
+        if (interaction) {
+          this.sessionStore.updateInteraction(sessionId, interaction.id, {
+            outcome: 'success',
+            reviewSummary: body,
+            planIds: plan.id ? [plan.id] : interaction.planIds,
+            completedAt: Date.now(),
+          });
+        }
+        return {
+          kind: 'answer',
+          review: {
+            planId: 'none',
+            goal: userRequest,
+            outcome: 'success',
+            acceptedFindings: [],
+            rejectedFindings: [],
+            incompleteSteps: [],
+            finalSummary: body,
+            usage: this.totalReviewUsage(),
+          },
+          report,
+          planId: 'none',
+          sessionId,
+          executionResult: {
+            planId: 'none',
+            status: 'completed',
+            completedSteps: 0,
+            failedSteps: 0,
+            totalSteps: 0,
+            incompleteSteps: [],
+            replanningAttempts: 0,
+          },
+        };
+      }
       this.observabilityLogger.logPlanFailed(plan, `Feasibility gate failed:\n${errorMsg}`);
+      if (interaction) {
+        this.sessionStore.updateInteraction(sessionId, interaction.id, {
+          outcome: 'failure',
+          reviewSummary: `Plan failed feasibility check:\n${errorMsg}`,
+          planIds: plan.id ? [plan.id] : interaction.planIds,
+          completedAt: Date.now(),
+        });
+      }
 
       return {
+        kind: 'plan',
         review: {
           planId: plan.id ?? 'unknown',
           goal: plan.goal,
@@ -897,8 +1512,17 @@ export class Orchestrator {
     if (cycleCheck.hasCycle) {
       const cycleMsg = `Circular dependency detected: ${cycleCheck.cyclePath?.join(' → ')}`;
       this.observabilityLogger.logPlanFailed(plan, cycleMsg);
+      if (interaction) {
+        this.sessionStore.updateInteraction(sessionId, interaction.id, {
+          outcome: 'failure',
+          reviewSummary: cycleMsg,
+          planIds: plan.id ? [plan.id] : interaction.planIds,
+          completedAt: Date.now(),
+        });
+      }
 
       return {
+        kind: 'plan',
         review: {
           planId: plan.id ?? 'unknown',
           goal: plan.goal,
@@ -925,34 +1549,113 @@ export class Orchestrator {
     }
 
     const summary = summarizePlan(plan);
-    const planText = formatPlanForUser(summary);
+    let planText = formatPlanForUser(summary);
+    if (this.activeBudget?.budget) {
+      const used = this.usageAggregator.getSummary();
+      const estimate = estimatePlanCost(plan.steps.length, {
+        promptTokens: used.totalPromptTokens,
+        completionTokens: used.totalCompletionTokens,
+        totalTokens: used.totalTokens,
+      });
+      planText += `\n\nBudget: ${this.activeBudget.budget.raw} — estimate ${estimate.tokens} tokens / $${estimate.usd.toFixed(4)} for ${estimate.steps} steps.`;
+    }
 
-    const confirmation = await options.confirmCallback(planText, plan);
-    if (!confirmation.confirmed) {
-      return {
-        review: {
+    if (abortSignal?.aborted) {
+      return cancelledResult(
+        'Run cancelled during planning.',
+        '🛑 Run cancelled during planning — no further model calls will be made.',
+      );
+    }
+    let confirmation = await options.confirmCallback(planText, plan);
+    let feedbackRound = 0;
+    while (!confirmation.confirmed) {
+      const fb = confirmation.feedback?.trim();
+      // A cancel (Ctrl-C, shutdown, TTL, operator cancel) or a rejection
+      // without real feedback ends the run; only feedback text re-plans.
+      const hardReject =
+        confirmation.cancelled === true ||
+        abortSignal?.aborted === true ||
+        !fb ||
+        /^user rejected the plan\.?$/i.test(fb);
+      if (hardReject || feedbackRound >= this.config.maxClarificationRounds) {
+        if (interaction) {
+          this.sessionStore.updateInteraction(sessionId, interaction.id, {
+            outcome: 'cancelled',
+            reviewSummary: `Plan was not confirmed by user. Feedback: ${confirmation.feedback ?? 'none'}`,
+            planIds: [plan.id ?? 'unknown'],
+            completedAt: Date.now(),
+          });
+        }
+        return {
+          kind: 'plan',
+          review: {
+            planId: plan.id ?? 'unknown',
+            goal: plan.goal,
+            outcome: 'cancelled',
+            acceptedFindings: [],
+            rejectedFindings: [],
+            incompleteSteps: [],
+            finalSummary: `Plan was not confirmed by user. Feedback: ${confirmation.feedback ?? 'none'}`,
+            usage: emptyReviewUsage,
+          },
+          report: `🛑 Plan cancelled by user.\nFeedback: ${confirmation.feedback ?? 'none'}`,
           planId: plan.id ?? 'unknown',
-          goal: plan.goal,
-          outcome: 'cancelled',
-          acceptedFindings: [],
-          rejectedFindings: [],
-          incompleteSteps: [],
-          finalSummary: `Plan was not confirmed by user. Feedback: ${confirmation.feedback ?? 'none'}`,
-          usage: emptyReviewUsage,
-        },
-        report: `🛑 Plan cancelled by user.\nFeedback: ${confirmation.feedback ?? 'none'}`,
-        planId: plan.id ?? 'unknown',
-        sessionId,
-        executionResult: {
-          planId: plan.id ?? 'unknown',
-          status: 'cancelled',
-          completedSteps: 0,
-          failedSteps: 0,
-          totalSteps: plan.steps.length,
-          incompleteSteps: [],
-          replanningAttempts: 0,
-        },
-      };
+          sessionId,
+          executionResult: {
+            planId: plan.id ?? 'unknown',
+            status: 'cancelled',
+            completedSteps: 0,
+            failedSteps: 0,
+            totalSteps: plan.steps.length,
+            incompleteSteps: [],
+            replanningAttempts: 0,
+          },
+        };
+      }
+      feedbackRound++;
+      let revised;
+      try {
+        revised = await this.planner.plan(
+          `${userRequest}\n\nPLANNER FEEDBACK FROM USER (revise the plan accordingly):\n${fb}`,
+          plan.id,
+          runModelId,
+          'plan',
+          abortSignal,
+        );
+      } catch (err) {
+        if (isAbortError(err) || abortSignal?.aborted) {
+          confirmation = { confirmed: false, cancelled: true, feedback: 'Run cancelled while re-planning.' };
+          continue;
+        }
+        throw err;
+      }
+      if (!revised.isClear || !revised.plan) {
+        confirmation = { confirmed: false, feedback: fb };
+        continue;
+      }
+      const keepId: string | undefined = plan.id;
+      const keepSession: string | undefined = plan.sessionId;
+      Object.assign(plan, revised.plan);
+      plan.id = keepId;
+      plan.sessionId = keepSession;
+      plan.status = 'draft';
+      this.planStore.save(plan);
+      const reFeas = runFeasibilityGate(plan, {
+        personaRegistry: this.personaRegistry,
+        skillRegistry: this.skillRegistry,
+        toolRegistry: this.toolRegistry,
+      });
+      if (!reFeas.feasible) {
+        confirmation = { confirmed: false, feedback: fb };
+        continue;
+      }
+      const reCycle = detectCycles(plan);
+      if (reCycle.hasCycle) {
+        confirmation = { confirmed: false, feedback: fb };
+        continue;
+      }
+      const nextText = formatPlanForUser(summarizePlan(plan));
+      confirmation = await options.confirmCallback(nextText, plan);
     }
 
     plan.status = 'confirmed';
@@ -961,6 +1664,13 @@ export class Orchestrator {
       eventType: 'plan:confirmed',
       message: 'Plan confirmed by user. Starting execution.',
       level: 'info',
+    });
+    this.journal.log({
+      ts: new Date().toISOString(),
+      kind: 'plan',
+      planId: plan.id,
+      ok: true,
+      summary: `plan ${plan.id} started (${plan.steps.length} steps)`,
     });
 
     const planRuntime = new PlanRuntime({
@@ -983,6 +1693,10 @@ export class Orchestrator {
       defaultModelId: ov?.modelId ?? this.config.defaultModelId,
       ...(ov?.agentTimeoutMs !== undefined ? { agentTimeoutMs: ov.agentTimeoutMs } : {}),
       ...(ov?.maxSteps !== undefined ? { maxSteps: ov.maxSteps } : {}),
+      projectRoot: this.config.projectRoot,
+      runtimeDir: this.config.runtimeDir,
+      modelRoutes: this.config.modelRoutes as ModelRoutes | undefined,
+      budgetExceeded: () => (this.activeBudget?.exceeded() ? 'budget exceeded' : undefined),
       onStatusChange: (p, event) => {
         // Phase 30 (P7): re-planning was invisible — the runtime emits
         // `plan:replanning-attempt-N` / `plan:replanned`, and nothing
@@ -996,29 +1710,66 @@ export class Orchestrator {
         // Phase 30 (P10 follow-up): step:started/completed/failed were
         // emitted by the runtime but never translated into the log.
         logStepEvent(this.observabilityLogger, p, event);
+
+        // Phase 37: plan/step transitions belong in the Journal too — the
+        // Journal answers "what did the AI do", and a run's structure is part
+        // of that answer.  Tool calls carry the plan/step ids already, so
+        // these records are what makes a journal line traceable to its step.
+        const stepEvent = parseStepEvent(event);
+        if (stepEvent) {
+          const step = p.steps.find((candidate) => candidate.id === stepEvent.stepId);
+          this.journal.log({
+            ts: new Date().toISOString(),
+            kind: 'step',
+            planId: p.id,
+            planStepId: stepEvent.stepId,
+            ok: stepEvent.phase !== 'failed',
+            summary:
+              stepEvent.phase === 'running'
+                ? `step ${stepEvent.stepId} started: ${step?.description ?? ''}`.slice(0, 300)
+                : stepEvent.phase === 'done'
+                  ? `step ${stepEvent.stepId} completed`
+                  : `step ${stepEvent.stepId} failed${step?.failureType ? ` (${step.failureType})` : ''}`,
+            ...(stepEvent.phase === 'failed' && step?.resultSummary
+              ? { error: step.resultSummary }
+              : {}),
+          });
+        }
         this.streamingManager.handlePlanStatusChange(p, event);
       },
       // Phase 20 (CORR-04): explicit acceptance hook instead of the old
       // EventBus-subscription wiring (wireAcceptanceChecker removed).
       acceptanceChecker: this.acceptanceChecker,
+      onPersistError: (err) => {
+        this.observabilityLogger.logSystemError(
+          'plan-persist',
+          err instanceof Error ? err.message : String(err),
+        );
+      },
     });
 
     this.cancellationManager.registerRuntime(plan.id!, planRuntime);
+    this.claimPlan(plan.id!);
 
     let executionResult: PlanExecutionResult;
     try {
       executionResult = await planRuntime.execute(plan);
     } finally {
       this.cancellationManager.unregisterRuntime(plan.id!);
+      this.releasePlan(plan.id!);
     }
 
     this.observabilityLogger.logPlanCompleted(plan);
+    if (executionResult.status === 'completed' && planExamplesEnabled()) {
+      savePlanExample(this.config.projectRoot, plan);
+    }
 
     const review = await this.finalReviewer.review(plan, executionResult, runModelId);
 
     // Per plan: a long-lived orchestrator (the web server) would otherwise
     // report the sum of every run it has ever made.
     review.usage = this.planUsage(plan.id);
+    if (executionResult.persistenceDegraded) review.persistenceDegraded = true;
 
     const report = formatFinalReview(review);
 
@@ -1032,6 +1783,7 @@ export class Orchestrator {
     }
 
     return {
+      kind: 'plan',
       review,
       report,
       planId: plan.id ?? 'unknown',
@@ -1049,10 +1801,141 @@ export class Orchestrator {
    * could not be planned).  Nothing is persisted, confirmed, or
    * executed; no session interaction is recorded.
    */
-  async previewPlan(userRequest: string, modelSpec?: string): Promise<{
+  /**
+   * v27.17.0: answer a request conversationally — the `chat` persona, the
+   * read-only half of the catalog, and the SAME AgentRuntime a plan step uses
+   * (so a chat that reads a file is journalled, counted, and streamed exactly
+   * like any other tool call).
+   *
+   * The answer is the model's own text, in the user's language.  Nothing is
+   * planned, confirmed or executed; `planId` stays `'none'` and the run's
+   * outcome is `success`, because the question was answered.
+   */
+  private async answerRun(params: {
+    userRequest: string;
+    sessionId: string;
+    interactionId?: string;
+    modelId?: string;
+    /** The model's draft from the assessment — used if the answer call fails. */
+    draft?: string;
+    mode: RunMode;
+    /**
+     * Return an `escalate` result (before recording anything) when the model
+     * explicitly marked its reply `[[NEEDS_PLAN: true]]` — auto mode then
+     * plans the request instead.  The already-produced answer text travels
+     * along as `fallbackAnswer`, so if the resulting plan turns out to be
+     * infeasible (a purely informational request has no real plan), the
+     * caller can fall back to this answer instead of showing a raw
+     * feasibility-gate error.
+     */
+    escalateToPlan?: boolean;
+  }): Promise<OrchestratorResult | { escalate: true; fallbackAnswer: string }> {
+    const { userRequest, sessionId, interactionId, modelId, draft, mode } = params;
+    const language = detectLanguage(userRequest);
+    const toolIds = readOnlyToolIds();
+    let text: string | undefined;
+    let errors: string[] = [];
+
+    try {
+      const agent = this.planner.buildChatAgent(modelId, mode === 'chat' ? toolIds : undefined, language);
+      const run = await this.agentRuntime.run({
+        agent,
+        taskId: `chat:${interactionId ?? sessionId}`,
+        prompt: this.planner.buildAnswerPrompt(userRequest),
+        eventBus: this.eventBus,
+        maxSteps: this.config.maxSteps,
+        timeoutMs: this.config.agentTimeoutMs,
+        ...(this.config.onThought ? { onThought: this.config.onThought } : {}),
+        ...(this.config.onToolCall ? { onToolCall: this.config.onToolCall } : {}),
+        ...(this.toolCallOptions ? { toolCallOptions: this.toolCallOptions } : {}),
+      });
+      // The aggregator already counts this turn from the run's own
+      // agent:completed / agent:error event; only the per-run tally is added.
+      if (run.usage) this.addRunUsage(run.usage);
+      if (run.success && run.result.trim().length > 0) {
+        text = run.result.trim();
+      } else {
+        errors = run.errors.length > 0 ? run.errors : ['The chat agent produced no answer.'];
+      }
+    } catch (err) {
+      errors = [err instanceof Error ? err.message : String(err)];
+    }
+
+    // A failed answer call is not a failed conversation when the assessment
+    // already wrote the reply (auto mode) — the user still gets an answer.
+    if (!text && draft) text = draft;
+
+    let needsPlan = false;
+    if (text) {
+      const extracted = extractNeedsPlan(text);
+      needsPlan = extracted.needsPlan;
+      text = extracted.answer;
+    }
+    if (params.escalateToPlan && text && needsPlan) {
+      return { escalate: true, fallbackAnswer: text };
+    }
+
+    const body = text ?? `The request could not be answered: ${errors.join('; ')}`;
+    const report = `💬 Answer\n\n${body}`;
+
+    this.observabilityLogger.log({
+      eventType: 'system:info',
+      message: text
+        ? `Answered in ${mode === 'chat' ? 'chat' : 'auto'} mode (no plan).`
+        : `Chat answer failed: ${errors.join('; ')}`,
+      level: text ? 'info' : 'error',
+      ...(text ? {} : { payload: { errors } }),
+    });
+    if (interactionId) {
+      this.sessionStore.updateInteraction(sessionId, interactionId, {
+        outcome: text ? 'success' : 'failure',
+        reviewSummary: body,
+        completedAt: Date.now(),
+      });
+    }
+
+    return {
+      kind: 'answer',
+      review: {
+        planId: 'none',
+        goal: userRequest,
+        outcome: text ? 'success' : 'failure',
+        acceptedFindings: [],
+        rejectedFindings: [],
+        incompleteSteps: [],
+        finalSummary: body,
+        usage: this.totalReviewUsage(),
+      },
+      report,
+      planId: 'none',
+      sessionId,
+      executionResult: {
+        planId: 'none',
+        status: text ? 'completed' : 'failed-partial',
+        completedSteps: 0,
+        failedSteps: 0,
+        totalSteps: 0,
+        incompleteSteps: [],
+        replanningAttempts: 0,
+      },
+    };
+  }
+
+  async previewPlan(
+    userRequest: string,
+    modelSpec?: string,
+    mode: RunMode = DEFAULT_RUN_MODE
+  ): Promise<{
     ok: boolean;
     plan?: Plan;
     planText?: string;
+    /**
+     * v27.17.0: the chat reply, when the request was a conversation.  A
+     * preview answers WITHOUT tools and without touching the project — it is
+     * a preview — so the text comes from the model's own knowledge plus the
+     * project context.
+     */
+    answer?: string;
     error?: string;
     /**
      * U4: the planner's clarification questions when the request was
@@ -1070,21 +1953,30 @@ export class Orchestrator {
     }
 
     const modelId = modelSpec ? this.useModel(modelSpec) : undefined;
-    const planningResult = await this.planner.plan(userRequest, undefined, modelId);
+    const planningResult = await this.planner.plan(userRequest, undefined, modelId, mode);
+
+    // A conversation has no steps to preview: show the answer as it is.
+    if (planningResult.kind === 'answer') {
+      return {
+        ok: true,
+        answer:
+          planningResult.answer ??
+          'This request would be answered in chat mode (nothing to preview).',
+      };
+    }
 
     if (!planningResult.isClear) {
-      const clarificationMsg =
-        planningResult.needsClarification.length > 0
-          ? planningResult.needsClarification.join('\n')
-          : planningResult.errors.join('\n');
-      return {
-        ok: false,
-        needsClarification:
-          planningResult.needsClarification.length > 0
-            ? planningResult.needsClarification
-            : planningResult.errors,
-        error: `The request needs clarification before a plan can be produced:\n${clarificationMsg}`,
-      };
+      if (planningResult.needsClarification.length > 0) {
+        const clarificationMsg = planningResult.needsClarification.join('\n');
+        return {
+          ok: false,
+          needsClarification: planningResult.needsClarification,
+          error: `The request needs clarification before a plan can be produced:\n${clarificationMsg}`,
+        };
+      }
+      const errorMsg =
+        planningResult.errors.join('\n') || 'The request could not be planned.';
+      return { ok: false, error: errorMsg };
     }
 
     const plan = planningResult.plan!;
@@ -1126,6 +2018,22 @@ export class Orchestrator {
     };
   }
 
+  /**
+   * J-07: plan only, then report step count and an estimated token/USD cost.
+   * Nothing is executed.
+   */
+  async estimatePlan(userRequest: string, modelSpec?: string, mode: RunMode = DEFAULT_RUN_MODE) {
+    const preview = await this.previewPlan(userRequest, modelSpec, mode);
+    const usage = this.usageAggregator.getSummary();
+    const steps = preview.plan?.steps.length ?? 0;
+    const estimate = estimatePlanCost(steps, {
+      promptTokens: usage.totalPromptTokens,
+      completionTokens: usage.totalCompletionTokens,
+      totalTokens: usage.totalTokens,
+    });
+    return { ...preview, estimate, usage };
+  }
+
   async cancelPlan(planId: string) {
     return this.cancellationManager.cancelPlan(planId);
   }
@@ -1145,6 +2053,84 @@ export class Orchestrator {
     return this.usageAggregator.getSummary();
   }
 
+  /** B-01: true when this process or another live owner holds the plan. */
+  hasLiveOwner(planId: string): boolean {
+    if (this.livePlans.has(planId)) return true;
+    if (!this.config.persistent) return false;
+    return isPlanOwnerAlive(path.join(this.config.runtimeDir, 'plans'), planId);
+  }
+
+  livePlanIds(): string[] {
+    return [...this.livePlans];
+  }
+
+  claimPlan(planId: string): void {
+    if (this.livePlans.has(planId)) {
+      throw new PlanLiveOwnerError(planId, process.pid);
+    }
+    if (this.config.persistent) {
+      const handle = tryAcquirePlanOwner(path.join(this.config.runtimeDir, 'plans'), planId);
+      if (!handle) {
+        throw new PlanLiveOwnerError(planId);
+      }
+      this.planOwnerHandles.set(planId, handle);
+    }
+    this.livePlans.add(planId);
+  }
+
+  releasePlan(planId: string): void {
+    this.livePlans.delete(planId);
+    this.planOwnerHandles.get(planId)?.release();
+    this.planOwnerHandles.delete(planId);
+  }
+
+  /**
+   * B-06: close pending interactions whose plans are already terminal / draft.
+   */
+  reconcileAbandonedInteractions(): void {
+    const terminal = new Set(['completed', 'cancelled', 'failed-partial', 'draft']);
+    for (const sessionId of this.sessionStore.listSessions()) {
+      const session = this.sessionStore.getSession(sessionId);
+      if (!session) continue;
+      for (const interaction of session.interactions) {
+        if (interaction.completedAt) continue;
+        // B-06: only an interaction whose process is gone is abandoned.  One
+        // this process is running, or another live process owns (a CLI at
+        // its confirmation prompt, a server run still planning), is not.
+        if (this.liveInteractions.has(interaction.id)) continue;
+        const owner = interaction.ownerPid;
+        if (owner !== undefined && owner !== process.pid && isPidAlive(owner)) continue;
+        const ids = interaction.planIds ?? [];
+        if (ids.length === 0) {
+          // C-13: chat/answer turns never get a planId; a killed process
+          // left them pending forever.
+          this.sessionStore.updateInteraction(sessionId, interaction.id, {
+            outcome: 'cancelled',
+            reviewSummary: interaction.reviewSummary ?? 'Reconciled abandoned chat turn.',
+            completedAt: Date.now(),
+          });
+          continue;
+        }
+        const plans = ids.map((id) => this.planStore.load(id)).filter((p): p is NonNullable<typeof p> => Boolean(p));
+        if (plans.length === 0) continue;
+        if (!plans.every((p) => terminal.has(p.status))) continue;
+        const cancelled = plans.every((p) => p.status === 'cancelled' || p.status === 'draft');
+        for (const p of plans) {
+          if (p.status === 'draft' && p.id) {
+            p.status = 'cancelled';
+            p.completedAt = p.completedAt ?? Date.now();
+            this.planStore.save(p);
+          }
+        }
+        this.sessionStore.updateInteraction(sessionId, interaction.id, {
+          outcome: cancelled ? 'cancelled' : plans.some((p) => p.status === 'failed-partial') ? 'failure' : 'success',
+          reviewSummary: interaction.reviewSummary ?? 'Reconciled after the owning process exited.',
+          completedAt: Date.now(),
+        });
+      }
+    }
+  }
+
   async resumePlan(planId: string): Promise<OrchestratorResult | undefined> {
     const plan = this.planStore.load(planId);
     if (!plan) return undefined;
@@ -1152,6 +2138,11 @@ export class Orchestrator {
     // at plan time, rejected before execution) must not become
     // resumable without confirmation.
     if (plan.status === 'draft') return undefined;
+    // B-01: a live owner still executing this plan — never re-dispatch.
+    if (this.hasLiveOwner(planId)) {
+      throw new PlanLiveOwnerError(planId, process.pid);
+    }
+    this.claimPlan(planId);
 
     const planRuntime = new PlanRuntime({
       taskRuntime: this.taskRuntime,
@@ -1170,8 +2161,18 @@ export class Orchestrator {
       },
       maxReplanningAttempts: this.config.maxReplanningAttempts,
       defaultModelId: this.config.defaultModelId,
+      projectRoot: this.config.projectRoot,
+      runtimeDir: this.config.runtimeDir,
+      modelRoutes: this.config.modelRoutes as ModelRoutes | undefined,
+      budgetExceeded: () => (this.activeBudget?.exceeded() ? 'budget exceeded' : undefined),
       // Phase 20 (CORR-04): same explicit acceptance hook on resume
       acceptanceChecker: this.acceptanceChecker,
+      onPersistError: (err) => {
+        this.observabilityLogger.logSystemError(
+          'plan-persist',
+          err instanceof Error ? err.message : String(err),
+        );
+      },
     });
 
     // Phase 30 (P2 follow-up): a step that is still 'running' on disk belongs
@@ -1183,8 +2184,17 @@ export class Orchestrator {
       .filter((step) => step.status === 'running' && step.taskId !== undefined)
       .map((step) => ({ stepId: step.id, taskId: step.taskId! }));
 
-    const executionResult = await planRuntime.resume(planId);
-    const review = await this.finalReviewer.review(plan, executionResult);
+    let executionResult: PlanExecutionResult;
+    try {
+      executionResult = await planRuntime.resume(planId);
+    } finally {
+      this.releasePlan(planId);
+    }
+    // R1-10: `resume()` persists its own freshly-loaded plan object, which
+    // is NOT the same reference as `plan` above — reload so the review sees
+    // the post-resume step statuses instead of the pre-resume snapshot.
+    const resumedPlan = this.planStore.load(planId) ?? plan;
+    const review = await this.finalReviewer.review(resumedPlan, executionResult, resumedPlan.modelId);
     review.usage = this.planUsage(plan.id);
     const report = formatFinalReview(review);
 
@@ -1194,9 +2204,12 @@ export class Orchestrator {
     // one whose request is this plan's goal).
     if (plan.sessionId) {
       const session = this.sessionStore.getSession(plan.sessionId);
+      const openList = (session?.interactions ?? []).filter((i) => !i.completedAt);
+      // B-02: match the interaction that already lists this planId first;
+      // never close another plan's open interaction.
       const open =
-        session?.interactions.find((i) => !i.completedAt && i.userRequest === plan.goal) ??
-        [...(session?.interactions ?? [])].reverse().find((i) => !i.completedAt);
+        openList.find((i) => (i.planIds ?? []).includes(planId)) ??
+        openList.find((i) => i.userRequest === plan.goal && (i.planIds ?? []).length === 0);
       if (open) {
         const known = open.planIds ?? [];
         this.sessionStore.updateInteraction(plan.sessionId, open.id, {
@@ -1221,6 +2234,7 @@ export class Orchestrator {
     }
 
     return {
+      kind: 'plan',
       review,
       report,
       planId,
@@ -1230,6 +2244,14 @@ export class Orchestrator {
   }
 
   async shutdown(): Promise<void> {
+    for (const id of [...this.livePlans]) {
+      try {
+        await this.cancelPlan(id);
+      } catch {
+        // best-effort
+      }
+      this.releasePlan(id);
+    }
     // Phase 20 (CORR-02): let in-flight tasks finish BEFORE
     // unsubscribing — otherwise their completion events are lost.
     await this.taskRuntime.waitForAll();

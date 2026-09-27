@@ -21,6 +21,7 @@ export interface ProgressEvent {
     | 'plan:completed'
     | 'plan:cancelled'
     | 'plan:failed'
+    | 'plan:error'
     | 'task:tool-call'
     | 'task:tool-error'
     | 'task:status';
@@ -60,6 +61,8 @@ export class StreamingManager {
   private readonly eventBus: EventBus;
   private readonly subscribers = new Set<ProgressSubscriber>();
   private unsubscribes: Array<() => void> = [];
+  /** H-03: `plan:cancelled` is notified twice by the runtime; emit once. */
+  private readonly emittedCancelled = new Set<string>();
 
   constructor(config: StreamingManagerConfig) {
     this.eventBus = config.eventBus;
@@ -149,7 +152,18 @@ export class StreamingManager {
         payload: { totalSteps: plan.steps.length },
       };
     }
+    if (event === 'plan:cancelled') {
+      const id = plan.id ?? 'unknown';
+      if (this.emittedCancelled.has(id)) return null;
+      this.emittedCancelled.add(id);
+      return {
+        ...base,
+        type: 'plan:cancelled',
+        message: `Plan cancelled.`,
+      };
+    }
     if (event === 'plan:finished') {
+      if (plan.status === 'cancelled') return null;
       const done = plan.steps.filter((s) => s.status === 'done').length;
       return {
         ...base,

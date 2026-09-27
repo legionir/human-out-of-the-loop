@@ -1,4 +1,6 @@
-import { NoObjectGeneratedError } from 'ai';
+import { APICallError, NoObjectGeneratedError } from 'ai';
+import { abortReason } from './abort.js';
+import { collectSecretValues, scrubSecretValues } from './secret-scrub.js';
 /**
  * Phase 30 (P5): bounded LLM calls.
  *
@@ -36,27 +38,50 @@ export class LlmTimeoutError extends Error {
 export async function withLlmTimeout<T>(
   label: string,
   ms: number | undefined,
-  call: (signal: AbortSignal) => Promise<T>
+  call: (signal: AbortSignal) => Promise<T>,
+  /** A-04: operator cancel (run abort) races the timeout and the call. */
+  external?: AbortSignal,
 ): Promise<T> {
+  if (external?.aborted) throw abortReason(external, label);
   const timeoutMs = ms && ms > 0 ? ms : DEFAULT_LLM_TIMEOUT_MS;
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
+  const onExternalAbort = (): void => {
+    controller.abort(abortReason(external, label));
+  };
+  external?.addEventListener('abort', onExternalAbort, { once: true });
 
   try {
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        const error = new LlmTimeoutError(label, timeoutMs);
+        // Abort, then reject: the request is cancelled at the socket,
+        // so nothing keeps the process alive after the failure.
+        controller.abort(error);
+        reject(error);
+      }, timeoutMs);
+    });
+    const cancelled = external
+      ? new Promise<never>((_resolve, reject) => {
+          if (external.aborted) {
+            reject(abortReason(external, label));
+            return;
+          }
+          external.addEventListener(
+            'abort',
+            () => reject(abortReason(external, label)),
+            { once: true },
+          );
+        })
+      : undefined;
     return await Promise.race([
       call(controller.signal),
-      new Promise<never>((_resolve, reject) => {
-        timer = setTimeout(() => {
-          const error = new LlmTimeoutError(label, timeoutMs);
-          // Abort, then reject: the request is cancelled at the socket,
-          // so nothing keeps the process alive after the failure.
-          controller.abort(error);
-          reject(error);
-        }, timeoutMs);
-      }),
+      timeout,
+      ...(cancelled ? [cancelled] : []),
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+    external?.removeEventListener('abort', onExternalAbort);
   }
 }
 
@@ -66,17 +91,60 @@ export async function withLlmTimeout<T>(
  * this occasionally; without a retry a single malformed answer ended the
  * whole run at planning, or failed a finished step and forced a re-plan.
  * Transport errors are NOT retried here — the provider SDK already retries
- * those (429/5xx) with backoff.
+ * those (429/5xx) with backoff — except an unreadable 200 body, which it
+ * does not retry.
  */
+/**
+ * A 200 whose body the provider SDK could not read as its response
+ * ("Invalid JSON response"): a gateway glitch, not a bad request.  The SDK
+ * retries only 429/5xx, so without this one garbled body ended the run.
+ */
+export function isUnreadableResponse(err: unknown): boolean {
+  return APICallError.isInstance(err) && err.message === 'Invalid JSON response';
+}
+
+/**
+ * The error's message, plus — for an unreadable response — what the
+ * provider actually sent (status and the start of the body, secrets
+ * scrubbed), so "Invalid JSON response" is diagnosable from the log.
+ */
+export function describeLlmError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  if (!isUnreadableResponse(err)) return message;
+  const body = String((err as { responseBody?: unknown }).responseBody ?? '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const shown = scrubSecretValues(body.slice(0, 200), collectSecretValues(process.env));
+  const status = (err as { statusCode?: number }).statusCode;
+  return `${message} (HTTP ${status ?? '?'}, body: ${shown ? `"${shown}${body.length > 200 ? '…' : ''}"` : 'empty'})`;
+}
+
+function unreadableRetryDelayMs(): number {
+  const raw = Number(process.env.HOTL_UNREADABLE_RETRY_MS);
+  return Number.isFinite(raw) && raw >= 0 ? raw : 2_000;
+}
+
+function sleep(ms: number): Promise<void> {
+  return ms > 0 ? new Promise((resolve) => setTimeout(resolve, ms)) : Promise.resolve();
+}
+
 export async function withStructuredRetry<T>(
   call: () => Promise<T>,
-  attempts = 2
+  attempts = 2,
+  onAttemptError?: (err: unknown) => void
 ): Promise<T> {
   for (let attempt = 1; ; attempt++) {
     try {
       return await call();
     } catch (err) {
-      if (attempt >= attempts || !NoObjectGeneratedError.isInstance(err)) throw err;
+      const unreadable = isUnreadableResponse(err);
+      const retryable = NoObjectGeneratedError.isInstance(err) || unreadable;
+      // A gateway that is "temporarily unavailable" needs a moment, not an
+      // immediate identical request: up to 3 attempts, 2s then 4s apart.
+      const limit = unreadable ? Math.max(attempts, 3) : attempts;
+      if (attempt >= limit || !retryable) throw err;
+      onAttemptError?.(err);
+      if (unreadable) await sleep(unreadableRetryDelayMs() * attempt);
     }
   }
 }

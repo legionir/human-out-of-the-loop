@@ -27,7 +27,14 @@ let stderr: string;
 function repl(overrides: Partial<ReplState> = {}): Repl {
   return new Repl(
     { binName: 'hootl', createProgram },
-    { cwd: project, persistent: false, autoConfirm: false, verbose: false, ...overrides },
+    {
+      cwd: project,
+      persistent: false,
+      autoConfirm: false,
+      verbose: false,
+      mode: 'auto',
+      ...overrides,
+    },
   );
 }
 
@@ -213,7 +220,7 @@ describe('interactive mode — the / menu', () => {
     const r = repl();
     const all = r.suggest('/').map((s) => s.value);
     expect(all).toEqual(expect.arrayContaining(['/help', '/model', '/config', '/plans', '/exit']));
-    expect(r.suggest('/mo').map((s) => s.value)).toEqual(['/model', '/models']);
+    expect(r.suggest('/mo').map((s) => s.value)).toEqual(['/model', '/mode', '/models']);
     expect(r.suggest('hello')).toEqual([]);
   });
 

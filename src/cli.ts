@@ -35,9 +35,12 @@ import {
   plansShowCommand,
   plansCancelCommand,
   plansResumeCommand,
+  plansRollbackCommand,
 } from './cli/commands/plans.js';
 import { mcpListCommand, mcpTestCommand } from './cli/commands/mcp.js';
+import { serveCommand } from './cli/commands/serve.js';
 import { logsCommand } from './cli/commands/logs.js';
+import { journalCommand } from './cli/commands/journal.js';
 import {
   modelsCommand,
   personasCommand,
@@ -46,6 +49,7 @@ import {
 } from './cli/commands/registry.js';
 import { usageCommand } from './cli/commands/usage.js';
 import { tasksListCommand, tasksShowCommand } from './cli/commands/tasks.js';
+import { indexCommand } from './cli/commands/index-project.js';
 import { err } from './cli/utils/output.js';
 import { startRepl, parseInteractiveArgs } from './cli/repl.js';
 
@@ -223,13 +227,15 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '  models / personas / skills / tools',
         '               list what the runtime can use (registry introspection)',
         '  mcp          list configured MCP servers and test a connection',
+        '  index        project tree for agent context (structure.json + files.json)',
+        '  serve        expose THESE tools to an MCP client (--mcp; --read-only for untrusted clients)',
         '',
         'CONFIGURATION PRECEDENCE (highest first)',
         '  1. CLI flags                e.g. --model, --project-root, --persistent',
         '  2. Environment variables    real env plus .env files in the project root',
         '                              and in the current directory (API keys live here)',
         '  3. Global config file       ~/.human-out-of-the-loop/config.json, e.g.',
-        '                              { "persistent": true, "defaultModel": "gpt-4o" }',
+        '                              { "persistent": true, "defaultModel": "<DEFAULT_MODEL_ID>" }',
         '',
         'REGISTRY LAYERS (global + local, merged)',
         '  Every command reads registries from two layers and merges them by id:',
@@ -265,32 +271,61 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .argument('<goal>', 'the goal to achieve, in plain language')
     .option('--project-root <dir>', 'project root (default: current directory)')
     .option('--persistent', 'persist plans/sessions in .ai-runtime (default: global config or off)')
+    .option('--no-persistent', 'do not persist, even if the global config has persistent:true')
     .option('--model <name>', 'model: registered id, provider model name, or provider:name')
     .option('--session <id>', 'continue an existing session')
     .option('--yes', 'auto-confirm the plan without prompting (CI mode)')
     .option('--verbose', 'show tool calls and low-level status')
     .option('--dry-run', 'show the plan without executing anything')
+    .option('--estimate', 'plan only and print step count, token and cost estimates')
+    .option('--budget <limit>', 'cancel the plan if tokens or USD exceed this (e.g. 10000 or $1.50)')
+    .option(
+      '--mode <mode>',
+      'auto|chat|plan — auto (default) answers a question and plans real work; chat never plans; plan never answers. An @chat/@plan prefix in the goal wins',
+    )
     .option('--timeout-ms <ms>', 'per-agent timeout in milliseconds (1000-600000)', (v: string) => Number(v))
     .option('--max-steps <n>', 'max tool-call iterations per agent run (1-100)', (v: string) => Number(v))
     .option('--max-replans <n>', 'automatic re-planning attempts on failure (0-10)', (v: string) => Number(v))
     .option('--max-delegation-depth <n>', 'max agent-to-subagent delegation depth (0-5)', (v: string) => Number(v))
     .option('--label <text>', 'label for the NEW session (max 64 chars)')
+    // Phase 32: the model's own thinking text, streamed as it is produced.
+    .option(
+      '--thinking <mode>',
+      "show the model's live thinking text: auto|on|off (default: auto = on in a terminal)",
+    )
+    // v27.17.3: the tool-call log — one line per call, with its type, name,
+    // input and status.
+    .option(
+      '--tool-log <mode>',
+      'log every AI tool call with type, name, input and status: auto|on|off (default: auto — on unless HOTL_TOOL_LOG says otherwise)',
+    )
+    .option(
+      '--trust-project',
+      "trust this project's registry/mcp-servers (persisted in ~/.human-out-of-the-loop/config.json)",
+    )
     .action(async (goal: string, opts: Record<string, string | boolean | undefined>) => {
       // `persistent` stays undefined when the flag is absent so
       // runCommand can fall back to the global config default.
       const result = await runCommand(goal, {
         projectRoot: opts.projectRoot as string | undefined,
         persistent: opts.persistent as boolean | undefined,
+        noPersistent: opts.noPersistent === true,
         model: opts.model as string | undefined,
         session: opts.session as string | undefined,
         yes: opts.yes === true,
         verbose: opts.verbose === true,
         dryRun: opts.dryRun === true,
+        estimate: opts.estimate === true,
+        budget: opts.budget as string | undefined,
+        mode: opts.mode as string | undefined,
         timeoutMs: opts.timeoutMs as number | undefined,
         maxSteps: opts.maxSteps as number | undefined,
         maxReplans: opts.maxReplans as number | undefined,
         maxDelegationDepth: opts.maxDelegationDepth as number | undefined,
         label: opts.label as string | undefined,
+        thinking: opts.thinking as string | undefined,
+        toolLog: opts.toolLog as string | undefined,
+        trustProject: opts.trustProject === true,
       });
       process.exitCode = result.exitCode;
     })
@@ -298,6 +333,12 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
       'after',
       helpBlock(
         'HOW A RUN PROCEEDS',
+        '  0. Mode           auto (default) decides: a greeting, a question or a',
+        '                    conversation is ANSWERED (read-only tools, no plan,',
+        '                    nothing executed); real work becomes a plan.  Force it',
+        '                    with --mode chat|plan or inside the goal: "@chat hello",',
+        '                    "@plan tidy the fixtures".  The prefix wins over the flag,',
+        '                    the flag over HOTL_MODE, that over the config default.',
         '  1. Clarification  If the goal is ambiguous the planner asks questions and',
         '                    waits for your answers (at most --max-replans below and',
         '                    the configured clarification-round ceiling).',
@@ -317,7 +358,10 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '',
         'NOTES ON THE FLAGS',
         '  --dry-run        plans and prints the steps, executes nothing, persists',
-        '                   nothing (a preview has no plan id) and exits 0.',
+        '                   nothing (a preview has no plan id) and exits 0.  In chat',
+        '                   mode it prints the answer instead (still nothing executed).',
+        '  --mode           auto|chat|plan — see step 0 above.  The reply to a chat',
+        '                   request is written in the language of the request.',
         '  --persistent     writes .ai-runtime (plans, sessions, observability log);',
         '                   without it (and without config) the run is in-memory and',
         '                   plans/sessions/usage/logs will have nothing to show.',
@@ -330,11 +374,18 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '  --max-replans    caps automatic re-planning of failed steps;',
         '  --max-delegation-depth caps agent -> sub-agent nesting (0 = no delegation).',
         '  --verbose        additionally streams tool calls and low-level status.',
+        '  --thinking       auto|on|off — stream the model\'s own thinking text while it',
+        '                   answers, in italic and a colour of its own (auto: only in a',
+        '                   terminal).  While no result is available the CLI shows a',
+        '                   rotating status line (its message changes every 3 seconds);',
+        '                   HOTL_NO_ACTIVITY=1 silences it and HOTL_THINKING=on|off sets',
+        '                   the default for --thinking.',
         '',
         'EXIT CODES',
-        '  0  the review outcome is success or partial-success',
+        '  0  the review outcome is success or partial-success (an answered chat',
+        '     request counts as success — nothing was executed, nothing failed)',
         '  1  failure, rejected plan, unanswered clarification, or a runtime error',
-        '  2  invalid usage (unknown model, out-of-range flag value, bad timeout)',
+        '  2  invalid usage (out-of-range flag value, bad timeout, empty goal)',
         '',
         'AFTER THE RUN',
         '  The printed summary includes the session id and plan id; use them with',
@@ -416,6 +467,14 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
       process.exitCode = await plansCancelCommand(id, { projectRoot: opts.projectRoot });
     });
   plans
+    .command('rollback')
+    .description('Restore the working tree from the last writable-step checkpoint')
+    .argument('<planId>')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .action(async (id: string, opts: Record<string, string | undefined>) => {
+      process.exitCode = await plansRollbackCommand(id, { projectRoot: opts.projectRoot });
+    });
+  plans
     .command('resume')
     .description('Re-execute the unfinished steps of a plan')
     .addHelpText('after', PLANS_HELP)
@@ -448,8 +507,60 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .addHelpText('after', MCP_HELP)
     .argument('<serverId>', 'MCP server id from the registry')
     .option('--project-root <dir>', 'project root (default: current directory)')
-    .action(async (id: string, opts: Record<string, string | undefined>) => {
-      process.exitCode = await mcpTestCommand(id, { projectRoot: opts.projectRoot });
+    .option('--trust-project', "trust this project's registry/mcp-servers (required to spawn a project-layer server)")
+    .action(async (id: string, opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await mcpTestCommand(id, {
+        projectRoot: opts.projectRoot as string | undefined,
+        trustProject: opts.trustProject === true,
+      });
+    });
+
+  // ── serve (phase 43: this runtime AS an MCP server) ───────────
+  program
+    .command('serve')
+    .description('Expose these tools to an MCP client (Claude, Cursor, an IDE)')
+    .option('--mcp', 'serve the Model Context Protocol (required — the only mode)')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .option('--http', 'serve over HTTP on 127.0.0.1 instead of stdio (requires --token)')
+    .option('--port <n>', 'HTTP port (default 3300; 0 = pick a free one)', (v: string) => Number(v))
+    .option('--token <t>', 'bearer token for HTTP mode (or HOTL_MCP_TOKEN)')
+    .option('--read-only', 'expose only tools that cannot change anything')
+    .option('--allow-tools <ids>', 'expose only these tool ids (comma-separated)')
+    .option('--prefix <p>', 'name tools "<p>_<id>" (for clients that merge servers)')
+    .option('--trust-project', "trust this project's registry/mcp-servers (persisted for later run/repl)")
+    .addHelpText(
+      'after',
+      helpBlock(
+        'EXPOSING THIS RUNTIME AS AN MCP SERVER',
+        '  Point any MCP client at:',
+        `    ${binName} serve --mcp --project-root /path/to/project`,
+        '  stdio is the default and the transport clients expect; stdout carries the',
+        '  protocol only, so every message from this command goes to stderr.',
+        '',
+        '  HTTP mode binds 127.0.0.1 and REQUIRES a bearer token — this endpoint can',
+        '  read and write files inside the project:',
+        `    ${binName} serve --mcp --http --port 3300 --token "$(openssl rand -hex 16)"`,
+        '',
+        '  Least privilege (recommended for a client you do not fully trust):',
+        `    ${binName} serve --mcp --read-only                    # reads, listings, searches, git reads`,
+        `    ${binName} serve --mcp --allow-tools read_file,git_status`,
+        '',
+        '  Every call is sandboxed to the project and recorded in its Journal',
+        '  (.ai-runtime/journal) exactly like the agent\'s own calls.'
+      ),
+    )
+    .action(async (opts: Record<string, string | boolean | number | undefined>) => {
+      process.exitCode = await serveCommand({
+        mcp: opts.mcp === true,
+        projectRoot: opts.projectRoot as string | undefined,
+        http: opts.http === true,
+        port: opts.port as number | undefined,
+        token: opts.token as string | undefined,
+        readOnly: opts.readOnly === true,
+        allowTools: opts.allowTools as string | undefined,
+        prefix: opts.prefix as string | undefined,
+        trustProject: opts.trustProject === true,
+      });
     });
 
   // ── logs ─────────────────────────────────────────────────────
@@ -519,11 +630,13 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
       '--mcp',
       'also connect to registry/mcp-servers and list the tools they expose (slower: starts stdio servers)',
     )
+    .option('--trust-project', "trust this project's registry/mcp-servers (required for --mcp to spawn them)")
     .action(async (opts: Record<string, string | boolean | undefined>) => {
       process.exitCode = await toolsCommand({
         projectRoot: opts.projectRoot as string | undefined,
         json: opts.json === true,
         mcp: opts.mcp === true,
+        trustProject: opts.trustProject === true,
       });
     })
     .addHelpText(
@@ -607,6 +720,34 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     });
 
   program
+    .command('journal')
+    .description('Read the Journal — what the AI actually did (.ai-runtime/journal/)')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .option('--day <YYYY-MM-DD>', 'only this day (default: every day on disk)')
+    .option('--tool <name>', 'only entries for this tool')
+    .option('--plan <planId>', 'only entries for this plan')
+    .option('--failed', 'only entries that failed')
+    .option('--since <when>', 'only entries newer than this (30m, 12h, 7d or a timestamp)')
+    .option('--limit <n>', 'trailing entries (0 = all)', (v: string) => Number(v), 50)
+    .option('--stats', 'per-tool call/failure/time summary')
+    .option('--json', 'one JSON object per line (no decoration)')
+    .option('--paths', 'print the journal directory and files, then exit')
+    .action(async (opts: Record<string, string | number | boolean | undefined>) => {
+      process.exitCode = await journalCommand({
+        projectRoot: opts.projectRoot as string | undefined,
+        day: opts.day as string | undefined,
+        tool: opts.tool as string | undefined,
+        plan: opts.plan as string | undefined,
+        failed: opts.failed === true,
+        since: opts.since as string | undefined,
+        limit: opts.limit as number | undefined,
+        stats: opts.stats === true,
+        json: opts.json === true,
+        paths: opts.paths === true,
+      });
+    });
+
+    program
     .command('logs')
     .description('Read the observability log (.ai-runtime/observability.jsonl)')
     .option('--project-root <dir>', 'project root (default: current directory)')
@@ -638,6 +779,45 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         'SOURCE',
         '  <project-root>/.ai-runtime/observability.jsonl; a project without persistent',
         '  runs has no log, which is reported as an empty result (not an error).',
+      ),
+    );
+
+  program
+    .command('index')
+    .description('Build the project tree index (directory counts + on-demand file metadata)')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .option(
+      '--write [dir]',
+      'write structure.json and files.json (default: <root>/.ai-runtime/project-index)',
+    )
+    .option('--files <path>', 'list_files: names + size + lines for one directory')
+    .option('--find <pattern>', 'find_files: glob against indexed names')
+    .option('--search <query>', 'search: regex/text over file contents')
+    .option('--path <dir>', 'limit --find / --search to this directory')
+    .action(async (opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await indexCommand({
+        projectRoot: opts.projectRoot as string | undefined,
+        write: opts.write as boolean | string | undefined,
+        files: opts.files as string | undefined,
+        find: opts.find as string | undefined,
+        search: opts.search as string | undefined,
+        path: opts.path as string | undefined,
+      });
+    })
+    .addHelpText(
+      'after',
+      helpBlock(
+        'WHAT THIS IS',
+        '  Two indexes, never mixed: structure.json is directories + direct file',
+        '  counts (static agent context). files.json is per-folder name → size/lines',
+        '  and is loaded only when a path is inspected.  See docs/PROJECT_INDEX.md.',
+        '',
+        'EXAMPLES',
+        `  ${binName} index                         print the tree (list_tree)`,
+        `  ${binName} index --files src/ai          list_files for one folder`,
+        `  ${binName} index --find "*.ts" --path src`,
+        `  ${binName} index --search TODO`,
+        `  ${binName} index --write                 write both JSON files`,
       ),
     );
 

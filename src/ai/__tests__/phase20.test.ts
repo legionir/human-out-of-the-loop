@@ -605,10 +605,10 @@ describe('Phase 20 — create_task tool discriminator (CORR-08)', () => {
       agentId: 'coder',
       prompt: 'p',
       claimedResources: [],
-    })) as { success: boolean; taskId: string };
+    })) as { success: boolean; code?: string };
 
-    expect(result.success).toBe(true);
-    expect(result.taskId).toContain('pending_');
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('USE_DELEGATE_TASK');
     taskRuntime.destroy();
   });
 

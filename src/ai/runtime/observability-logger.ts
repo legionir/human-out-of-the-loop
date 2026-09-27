@@ -79,7 +79,12 @@ export interface ObservabilityLoggerConfig {
    * summary is written to the log — so values must be scrubbed too.
    */
   redactValues?: string[];
+  /** C-11: rotate the JSONL file when it exceeds this many bytes (default 10 MiB). */
+  maxLogBytes?: number;
 }
+
+/** C-11: rotated `observability.jsonl.<stamp>` files kept on disk. */
+export const ROTATED_LOGS_KEPT = 5;
 
 // ─── Default redaction keys ──────────────────────────────────────
 
@@ -112,6 +117,7 @@ export class ObservabilityLogger {
   /** Phase 30 (P10): literal secret values scrubbed from entries. */
   private readonly redactValues: string[];
   private unsubscribeFn?: () => void;
+  private readonly maxLogBytes: number;
   /**
    * Phase 21 (PERF-04): the log file descriptor, opened ONCE and
    * reused for every entry.  `fs.appendFileSync` does open+write+close
@@ -131,12 +137,13 @@ export class ObservabilityLogger {
     this.redactValues = (config.redactValues ?? [])
       .filter((v) => typeof v === 'string' && v.length >= MIN_REDACT_VALUE_LENGTH)
       .sort((a, b) => b.length - a.length);
+    this.maxLogBytes = config.maxLogBytes ?? 10 * 1024 * 1024;
 
     // Ensure the log directory exists
     fs.mkdirSync(path.dirname(this.logFilePath), { recursive: true });
   }
 
-  private ensureFd(): number {
+  private ensureFd(current?: fs.Stats | null): number {
     if (this.logFd !== null) {
       // Phase 30 (P9): the log file can be deleted (or replaced) under a
       // long-running process — e.g. `rm -rf .ai-runtime` while the web
@@ -145,10 +152,14 @@ export class ObservabilityLogger {
       // points at the same file.  One `stat` per entry buys durability;
       // the file is still opened once per file (PERF-04).
       let ino: number | undefined;
-      try {
-        ino = fs.statSync(this.logFilePath).ino;
-      } catch {
-        ino = undefined; // deleted, or the whole directory is gone
+      if (current !== undefined) {
+        ino = current?.ino;
+      } else {
+        try {
+          ino = fs.statSync(this.logFilePath).ino;
+        } catch {
+          ino = undefined; // deleted, or the whole directory is gone
+        }
       }
       if (ino !== undefined && ino === this.logIno) return this.logFd;
       this.close();
@@ -164,6 +175,52 @@ export class ObservabilityLogger {
    * Close the underlying file descriptor (flush + release the fd).
    * Safe to call multiple times; call during Orchestrator shutdown.
    */
+  get isOpen(): boolean {
+    return this.logFd !== null;
+  }
+
+  /**
+   * C-11: rotate when the file is over the size cap.  Takes the stat the
+   * write path already did (one stat per entry, as before rotation existed)
+   * and keeps only the newest `ROTATED_LOGS_KEPT` rotated files.
+   */
+  private rotateIfNeeded(current: fs.Stats | null): boolean {
+    if (this.maxLogBytes <= 0 || !current || current.size < this.maxLogBytes) return false;
+    this.close();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    // Two rotations in one millisecond must not overwrite each other.
+    let rotated = `${this.logFilePath}.${stamp}`;
+    for (let n = 1; fs.existsSync(rotated); n++) {
+      rotated = `${this.logFilePath}.${stamp}-${String(n).padStart(3, '0')}`;
+    }
+    try {
+      fs.renameSync(this.logFilePath, rotated);
+    } catch {
+      return false; // if rename fails, keep appending
+    }
+    this.pruneRotated();
+    return true;
+  }
+
+  private pruneRotated(): void {
+    const dir = path.dirname(this.logFilePath);
+    const base = `${path.basename(this.logFilePath)}.`;
+    let rotated: string[];
+    try {
+      rotated = fs.readdirSync(dir).filter((f) => f.startsWith(base)).sort();
+    } catch {
+      return;
+    }
+    // ISO stamps sort chronologically; drop all but the newest few.
+    for (const f of rotated.slice(0, Math.max(0, rotated.length - ROTATED_LOGS_KEPT))) {
+      try {
+        fs.unlinkSync(path.join(dir, f));
+      } catch {
+        // ignore
+      }
+    }
+  }
+
   close(): void {
     if (this.logFd !== null) {
       try {
@@ -196,8 +253,15 @@ export class ObservabilityLogger {
     const line = JSON.stringify(fullEntry) + '\n';
 
     try {
+      let current: fs.Stats | null;
+      try {
+        current = fs.statSync(this.logFilePath);
+      } catch {
+        current = null;
+      }
+      if (this.rotateIfNeeded(current)) current = null;
       // Phase 21 (PERF-04): single write syscall on a reused fd
-      fs.writeSync(this.ensureFd(), line, null, 'utf-8');
+      fs.writeSync(this.ensureFd(current), line, null, 'utf-8');
     } catch {
       // Phase 22: best-effort and SILENT — the log file is the only
       // durable sink and a write failure must never crash the run.

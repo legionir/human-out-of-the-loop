@@ -11,6 +11,7 @@
  * (Law 14), no credentials (step 4).
  */
 import { Router } from 'express';
+import { canAccessStream } from '../run-control.js';
 import type { ServerContext } from '../types.js';
 
 const HEARTBEAT_MS = 15_000;
@@ -20,6 +21,15 @@ export function streamRouter(ctx: ServerContext): Router {
 
   router.get('/api/stream/:planId', (req, res) => {
     const planId = req.params.planId;
+    if (!canAccessStream(ctx, req, planId)) {
+      res.status(403).json({ error: 'Forbidden: this resource belongs to another client.' });
+      return;
+    }
+
+    if (ctx.hub.atCapacity()) {
+      res.status(503).json({ error: 'SSE connection limit reached' });
+      return;
+    }
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
@@ -29,7 +39,23 @@ export function streamRouter(ctx: ServerContext): Router {
     // Initial comment frame — lets clients (and proxies) see the stream open.
     res.write(': stream-open\n\n');
 
-    const unsubscribe = ctx.hub.subscribe(planId, res);
+    const rawLast =
+      req.get('last-event-id') ??
+      (typeof req.query.lastEventId === 'string' ? req.query.lastEventId : undefined);
+    const lastEventId =
+      rawLast !== undefined && rawLast !== '' && Number.isFinite(Number(rawLast))
+        ? Number(rawLast)
+        : undefined;
+
+    const unsubscribe = ctx.hub.subscribe(planId, res, lastEventId);
+    if (!unsubscribe) {
+      try {
+        res.end();
+      } catch {
+        /* already closed */
+      }
+      return;
+    }
 
     // Heartbeat keeps idle connections (proxies) from timing out.
     const heartbeat = setInterval(() => {

@@ -137,34 +137,90 @@ export async function logsCommand(opts: LogsCommandOptions): Promise<number> {
 export function followLog(
   file: string,
   planId: string | undefined,
-  tail: number,
+  _tail: number,
   onEntry: (entry: NonNullable<ReturnType<typeof parseLine>>) => void,
-  startAt = 0,
+  _startAt = 0,
 ): () => void {
-  let lastShown = startAt;
-  let size = 0;
+  const dir = path.dirname(file);
+  let offset = 0;
+  let inode: number | undefined;
   try {
-    size = fs.statSync(file).size;
+    const initial = fs.statSync(file);
+    offset = initial.size;
+    inode = initial.ino;
   } catch {
-    size = 0;
+    offset = 0;
   }
+  let leftover = '';
   let stopped = false;
 
-  const watcher = fs.watch(file, () => {
+  const consume = (): void => {
     if (stopped) return;
-    const { entries: all, size: newSize } = readEntries(file, planId);
-    if (newSize < size) {
-      // Truncated/rotated — resync to the current tail
-      lastShown = Math.max(0, all.length - tail);
+    let stats: fs.Stats;
+    try {
+      stats = fs.statSync(file);
+    } catch {
+      return;
     }
-    size = newSize;
-    for (const entry of all.slice(lastShown)) onEntry(entry);
-    lastShown = all.length;
-  });
+    if (inode !== undefined && stats.ino !== inode) {
+      // Rotated onto a new file at the same path.
+      offset = 0;
+      leftover = '';
+    }
+    inode = stats.ino;
+    if (stats.size < offset) {
+      // Truncated in place.
+      offset = 0;
+      leftover = '';
+    }
+    if (stats.size === offset) return;
+    const length = stats.size - offset;
+    const buf = Buffer.alloc(length);
+    const fd = fs.openSync(file, 'r');
+    try {
+      fs.readSync(fd, buf, 0, length, offset);
+    } finally {
+      fs.closeSync(fd);
+    }
+    offset = stats.size;
+    const chunk = leftover + buf.toString('utf-8');
+    const lines = chunk.split('\n');
+    leftover = lines.pop() ?? '';
+    for (const line of lines) {
+      const entry = parseLine(line);
+      if (entry && (!planId || entry.planId === planId)) onEntry(entry);
+    }
+  };
+
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch {
+    /* already there */
+  }
+
+  let watcher: fs.FSWatcher | undefined;
+  try {
+    watcher = fs.watch(dir, () => {
+      // Do not filter on `filename`: a rotate is `rename(log, log.1)` plus
+      // a create, and some hosts only report the `.1` name.
+      consume();
+    });
+  } catch {
+    try {
+      watcher = fs.watch(file, () => consume());
+    } catch {
+      watcher = undefined;
+    }
+  }
+
+  // `watchFile` polls the path itself, so a rotate (unlink + recreate) is
+  // visible even when the directory watcher swallows the rename.
+  fs.watchFile(file, { interval: 150, persistent: true }, consume);
 
   return (): void => {
     if (stopped) return;
     stopped = true;
-    watcher.close();
+    fs.unwatchFile(file, consume);
+    watcher?.close();
   };
 }

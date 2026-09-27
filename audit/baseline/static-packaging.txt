@@ -1,0 +1,3 @@
+P2 static check | bin target dist/src/cli.js missing until build (expected: dist is build output) | NA(build-artifact)
+P2 static check | package.json scripts reference existing files (build=tsc, test=vitest, e2e=e2e/scenarios/run.mjs EXISTS, server=tsx src/server.ts EXISTS) | PASS
+P2 static check | .github/workflows/ci.yml + real-provider.yml exist | PASS

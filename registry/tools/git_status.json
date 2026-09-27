@@ -1,7 +1,7 @@
 {
   "id": "git_status",
   "name": "Git Status",
-  "description": "Runs git status in the specified directory",
+  "description": "Reports the state of the working tree: raw status text plus parsed branch (upstream, ahead/behind) and entries/counts in porcelain v1 or v2",
   "source": "local",
   "modulePath": "./implementations/git-status",
   "category": "git"

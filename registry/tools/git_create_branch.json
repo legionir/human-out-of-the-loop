@@ -1,0 +1,8 @@
+{
+  "id": "git_create_branch",
+  "name": "Git Create Branch",
+  "description": "Creates a branch from the current HEAD or a base ref and switches to it (no confirmation needed)",
+  "source": "local",
+  "modulePath": "./implementations/git-branch-write",
+  "category": "git"
+}

@@ -5,6 +5,1159 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.17] — 2026-09-27 — Real provider runs and a green CI matrix
+
+Found by running the CLI against a real OpenAI-compatible gateway (`real-provider.yml`) and by the first real Actions runs of the CI matrix. Suite: **vitest 1693/1693** (also with `TMPDIR` behind a symlink), **e2e 209/209**; CI green on ubuntu/macos/windows × node 22/24/26.
+
+**Security**
+- Checkpoints copied the project's `.env` into `.ai-runtime/checkpoints` — the provider key ended up in run artifacts. Credential files (`.env`, `.env.*` except `.env.example`) are never snapshotted.
+
+**Fixed**
+- File tools refused every path when the project root was reached through a symlink (macOS `/var`, Windows 8.3 `RUNNER~1`): allowed roots now include their real paths, and a checked path is returned under the root as the caller spelled it (relative paths and `.git`/`.ai-runtime` protection stay right). git's `--show-toplevel` is expressed the same way.
+- A gateway answering HTTP 200 with a body that is not a response (`upstream_error: temporarily unavailable`) ended the run at planning. Structured calls retry it up to 3 times with backoff (`HOTL_UNREADABLE_RETRY_MS`), and the error names the status and the start of the body.
+- Auto mode: a request whose chat answer only points at `@plan` (a Persian "create a file" request did this) is now planned instead of asking the user to retype it.
+- Checkpoint rollback decided "new file" by mtime (a file written in the capture's millisecond survived); the manifest lists the files present at capture.
+- `hootl usage --json` printed prose on an empty project; it prints `{ plans: [], totals }`.
+- Windows: a rename onto a file briefly held open (EPERM/EACCES/EBUSY) is retried.
+- `real-provider.yml`: reads `HOTL_MODEL`/`HOTL_API_STYLE` from secrets too; accepts model names with dots; the leak check matches keys literally and names the file.
+
+**Tests**
+- A CLI command matrix runs every read-only command on a fresh project, plus the unknown-id paths.
+- The suite is portable to Windows (POSIX-path assumptions removed).
+
+## [27.17.16] — 2026-09-27 — Code review of phases A–K: fixes
+
+A review of the A–K fixes (tracked as phase **R** in `docs/UNIFIED_EXECUTION_PLAN.md`) found defects the fixes introduced or left open. All are fixed with regression tests (`src/ai/__tests__/review-fixes.test.ts` plus the phase test files named below). Suite: tsc clean, **vitest 1670/1670** (also under three shuffled orders), **e2e 209/209**.
+
+**Security**
+- **E-03** `ANTHROPIC_API_KEY` is never sent to a custom `baseURL`, and neither provider accepts an `apiKeyEnv` that names the real key for a custom endpoint (R0-07 regression).
+- **J-01/J-02** `run_command`/`run_tests`: `.ai-runtime/commands.json` is honoured only for a trusted project; argv[0] must equal an allowlist entry exactly (no `./scripts/npm`); an empty allowlist no longer admits any test binary; children run without credential variables.
+- **J-04** plan files scrub every string (a step `handoff` carried an echoed key into the plan file — found once the e2e credential trap really ran).
+- **A-01** the web UI sends the token (fetch header; `?access_token=` for the two GET SSE routes only).
+- **A-08** sessions, their plans, both SSE streams and the plan/session lists are bound to the owning token.
+
+**Correctness**
+- **F-04** trimmed tool results keep the SDK `ToolResultOutput` shape (providers sent tool messages without content from the 4th tool call on).
+- **C-01** an agent timeout returns even when the call ignores its abort; the task keeps its lock/slot until the work settles (max 30 s).
+- **B-07/G-07** Ctrl-C, shutdown and operator cancel end the run; only real feedback text re-plans.
+- **B-15/J-03** session history and the budget are per run (concurrent web runs shared them).
+- **B-06** reconciliation never closes an interaction a live process (this one or another) is working on.
+- **B-08** resuming a plan with an unjudged `done` step no longer crashes the acceptance check.
+- **C-07** a parent waiting in `delegate_task` lends its concurrency slot to the child (no deadlock).
+- **B-01** plan ownership is claimed atomically; **C-10** breaking a stale lock never steals a fresh one.
+- **B-18/B-19** tools of an unavailable or untrusted-skipped MCP server warn instead of failing start-up.
+- **J-05** checkpoints: no rollback over a concurrent writable step, stored under `runtimeDir`, restore removes only files created after the snapshot, bounded size and retention.
+- **E-07** chat answers get the detected language; **E-08** Persian requests quoting code stay Persian.
+- **E-01** the planner catalog lists every tool a persona may use (was cut at 16).
+- **D-07** git/command runners read output to the end; **D-03** mixed CRLF/LF files keep each line's ending.
+- **Usage** a chat turn is counted once; chat/clarification reviews report their own run only.
+- **C-02 / v27.17.2** a stream that fails before any output is re-asked without streaming; after output it fails.
+- **G-02** the no-TTY check runs after the free pre-flight and not in chat mode.
+
+**Performance / housekeeping**
+- **F-03** the tool-result cap trims to the budget instead of to 2 000 chars.
+- **C-11** one `stat` per log write; the newest 5 rotated logs kept; `HOTL_RETENTION_DAYS` (default 365) for plans/sessions; unique rotated names.
+- TaskRuntime waits are event-driven (no 10–15 ms polling).
+
+**Audit items**
+- **ARCH-003** one layered MCP-server loader (`loadLayeredMcpServers`) for CLI, server and runtime.
+- **OPS-001** the suite passes in shuffled order (phase11 mock queue reset; phase42 is an ordered scenario by design).
+- **Appendix B-1** `.env.example`.
+- `registry/models/local-llama.json` restored (a personal config had replaced it); e2e runs with an isolated `HOME`.
+
+## [27.17.15] — 2026-09-27 — Phase K (partial): XSS encoder, R0 re-verify, baseline
+
+Does **not** close K-01 (real provider), K-02 (Windows Actions), K-03 (full-green suite), K-05 (deploy bind), or K-07 (live SIGKILL).
+
+- **K-08 — XSS.** `escapeHtml` / `renderMarkdown` live only in `public/ui-logic.js`; `app.js` interpolations must go through them. Tests in `phase-k-xss.test.ts`.
+- **K-09 — R0-07/09/10.** Re-run via `phase-k-r0-reverify.test.ts` plus the original hardening files.
+- **K-04 / K-06.** SSE connection/ring-buffer caps and MCP `bodyTimeout: 0` locked in `phase-k-sse-scale.test.ts` (idle-stream crash still covered by `phase30-p10-fetch.test.ts`).
+- **K-07 (partial).** Cancel unblocks `waitForAll` (`phase-k-shutdown.test.ts`).
+- **K-03.** Baseline recorded in `audit/baseline/k03-SUMMARY.md` (tsc clean; vitest 1607/19; e2e 144/194).
+- Owner checklists: `audit/baseline/K01_OWNER_CHECKLIST.md`, `K02_CI_WINDOWS.md`, `K05_BIND_OWNER.md`.
+- **Tracker.** `docs/UNIFIED_EXECUTION_PLAN.md` §1–§7 refreshed after `b2a8acb` / v27.17.15; Phase K test inventory registered. Open rows remain K-01/K-02/K-03/K-05/K-07.
+
+## [27.17.14] — 2026-09-27 — Phase J: new capabilities
+
+Closes every open row of **Phase J** in `docs/UNIFIED_EXECUTION_PLAN.md` (J-01…J-09). Independent tests live in `src/ai/__tests__/phase-j-*.test.ts`.
+
+- **J-01 — `run_command` / `run_tests`.** Allowlist (`.ai-runtime/commands.json`, `HOTL_ALLOWED_COMMANDS`); argv spawn (no shell); timeout kills the process group; output cap + `truncated`; journalled; not read-only.
+- **J-02 — self-verify.** After a coder step, if `testCommand` / `HOTL_TEST_COMMAND` is set, tests run automatically. Failure is technical and re-plan sees the output.
+- **J-03 — `--budget`.** Token count or `$1.50`. Exceeding cancels with `budget exceeded` and blocks further model calls. Model registry `pricing`.
+- **J-04 — step handoff.** `{changedFiles,keyResult,notes}` in dependent prompts (`DEPENDENCY HANDOFF`), not the full transcript.
+- **J-05 — checkpoint / rollback.** File-copy snapshot before a writable step; restore on failure; `hootl plans rollback <id>`.
+- **J-06 — model routes.** Cheap classify/judge/review vs plan/code; usage `byModel`.
+- **J-07 — `--estimate`.** Plan only; print steps, tokens, and USD; nothing executes.
+- **J-08 — plan examples.** Successful plans in `.ai-runtime/plan-examples.jsonl`; `HOTL_PLAN_EXAMPLES=0` disables; size cap; overlap selection.
+- **J-09 — extras.** `delete_file` (sandbox + journal); `read_graph` `offset`; `GET /api/runs`.
+
+## [27.17.13] — 2026-09-27 — Phase I: tests, CI, docs
+
+Closes every open row of **Phase I** in `docs/UNIFIED_EXECUTION_PLAN.md` (I-01…I-08).
+
+- **I-01 — catalog-aware stub.** `e2e/fake-llm.mjs` parses `AVAILABLE CATALOG` and assigns only listed personas; missing catalog or `PERSONA:ghost` errors. Scenario `catalog` covers E-01/E-02.
+- **I-02 — coverage map.** One directed `it` per closed A–H UNIFIED row pointing at the regression file.
+- **I-03 — no fixed sleeps.** `waitUntil` poll with a cap in followLog, stdio MCP, and EPIPE tests.
+- **I-04 — CI once per PR.** `push` only `main`; concurrency `workflow-PR|sha`; npm cache kept.
+- **I-05 — annotations.** Cap 40 GitHub `::error` lines, each with `line=`.
+- **I-06 — real-provider.** Anthropic leak grep; model from `vars.HOTL_MODEL`; `HOTL_API_STYLE`; cron without a secret skips.
+- **I-07 — docs.** `HOTL_*` ↔ `CONFIGURATION.md`; `HOTL_NO_SPLASH`; planner `skillIds: ["task_decomposition"]`; README/`CHANGELOG` suite notes.
+- **I-08 — comments.** Semantic comments on files touched this phase.
+
+## [27.17.12] — 2026-09-27 — Project index for agent context
+
+Adds `hootl index` and `docs/PROJECT_INDEX.md`: a static `structure.json` (directories + direct file counts) separate from on-demand `files.json` (`size` + `lines`). Traversal is parallel `readdir({ withFileTypes })`; metadata is one `readFile` per file (no extra `stat`). Tools: `list_tree`, `list_files`, `find_files`, `search`, `read_file_range`.
+
+## [27.17.11] — 2026-09-27 — Phase H: web UI ↔ server
+
+Closes every open row of **Phase H** in `docs/UNIFIED_EXECUTION_PLAN.md` (H-01…H-14).
+
+- **H-01 — plan modal.** Open once per `planId`; a preview stays up while a run is executing; feedback is not wiped by the poller.
+- **H-02 — SSE replay.** Ring buffer with `id:` frames, `Last-Event-ID` / `lastEventId`, and dual-emit onto the runId channel so auto-confirm still sees `plan:started`.
+- **H-03 — `plan:cancelled`.** Streaming manager translates it once and does not emit `plan:failed` for a cancelled plan.
+- **H-04 — event names / `agentLevel`.** UI listens for `task:tool-error`, `plan:replanned`, `plan:error`; SSE forwards `agentLevel` so agent lines are not a second step row.
+- **H-05 — session continuity.** `finishRun` keeps `result.sessionId`; two goals in one session.
+- **H-06 — run errors.** Failures render in the assistant bubble (`error: …`), not only a toast.
+- **H-07 — preview chat vs errors.** Preview shows `answer`; provider failures are errors, not clarification questions.
+- **H-08 — previewId.** `POST /api/preview` returns an in-memory `previewId`; `POST /api/run { previewId }` executes those steps without planning again.
+- **H-09 — mode.** `@plan` / `@chat` prefixes, `HOTL_MODE` / `defaultMode`, and a Mode control; preview accepts `mode`.
+- **H-10 — follow without a log file.** `followLog` stays open and shows the first write.
+- **H-11 — unknown session.** `POST /api/run { sessionId: "nope" }` → 404, no model call.
+- **H-12 — task table.** `finishRunUi` loads tasks before dropping the run.
+- **H-13 — truncated chat.** Clipped session text carries `… [truncated]`.
+- **H-14 — clarification rounds.** Submitted rounds are not reopened by the poller.
+
+## [27.17.10] — 2026-09-27 — Phase G: CLI, REPL, and server
+
+Closes every open row of **Phase G** in `docs/UNIFIED_EXECUTION_PLAN.md` (G-01…G-18).
+
+- **G-01 — Ctrl-C while planning.** REPL aborts only the current goal; `hootl run` still exits 130.
+- **G-02 — non-TTY without `--yes`.** Fail before any LLM call.
+- **G-03 — `/cd`.** Drop the previous project's `.env` keys, load the next, recompute the model.
+- **G-04 — deleted session.** Clear `sessionId` after "Session not found".
+- **G-05 — bracketed paste.** A multi-line paste is one goal.
+- **G-06 — grapheme cursor.** Emoji width 2; ZWNJ / Persian diacritics 0; backspace deletes a cluster.
+- **G-07 — confirm Ctrl-C.** `ExitPromptError` → `{confirmed:false}`.
+- **G-08 — resume.** Shared `evaluatePlanResume`; the server builds a `RunState`.
+- **G-09 — Orchestrator cache.** One instance per `(cwd, model, persistent)` in the REPL.
+- **G-10 — `/run`.** Inherits the REPL model, persistent, yes, and session.
+- **G-11 — JSON-RPC.** Batches return arrays; object `id` is `-32600`.
+- **G-12 — validation.** `plans resume --timeout-ms abc` exits 2; `/config set defaultMode` uses `parseRunMode`.
+- **G-13 — splash.** Any key dismisses it; registry files are cached in the REPL.
+- **G-14 — `/api/usage`.** Numbers come from `observability.jsonl`, same as `hootl usage`.
+- **G-15 — session files.** Compact JSON, per-interaction caps, shared 64-char label limit.
+- **G-16 — `.env`.** `export`, inline comments, quotes, `\n`.
+- **G-17 — config resolve.** One helper for run/REPL/plans/server; `--no-persistent`.
+- **G-18 — baseURL.** Run output prints the provider name, never a custom URL.
+
+## [27.17.9] — 2026-09-27 — Phase F: efficiency and token use
+
+Closes every open row of **Phase F** in `docs/UNIFIED_EXECUTION_PLAN.md` (F-01…F-10).
+
+- **F-01 — prompt cache.** Environment clock is the date (not seconds); every SDK call stamps Anthropic `cacheControl`; `TokenUsage` / `hootl usage` record cache read/write tokens.
+- **F-02 — step tools.** Non-empty `toolIds` are the requested set (then ∩ persona `allowedTools`); four long tool descriptions are shortened; coder-step catalog ≤3500 tokens.
+- **F-03 — tool output caps.** `directory_tree` skips build dirs, stops at 500 entries, drops `formatted`; `read_file` pages with offset/maxBytes; git diff/show drop the absolute `repository` and truncate huge patches; runtime wrapper caps ~30k.
+- **F-04 — conversation budget.** `prepareStep` replaces older tool results so 20 steps fit `contextBudgetChars`.
+- **F-05 — event-driven dispatch.** After each completion the loop re-evaluates readiness so C (depends on A) starts while B is still running.
+- **F-06 — concurrent acceptance.** Judgments run with a concurrency cap; the judge sees a clipped result.
+- **F-07 — slim review / re-plan.** `ReviewModelSchema` is findings+summary; re-plan calls `generatePlan` (no assess round-trip).
+- **F-08 — cheaper writes.** Journal redacts then stringifies once; plan files are compact JSON.
+- **F-09 — followLog.** Byte-offset reads, directory watch, resume after rotate (CLI and `/api/observability/stream`).
+- **F-10 — SSE cap.** Per-process connection limit (`HOTL_MAX_SSE_CONNECTIONS`, default 32).
+
+## [27.17.8] — 2026-09-27 — Phase E: context, prompts, and models
+
+Closes every open row of **Phase E** in `docs/UNIFIED_EXECUTION_PLAN.md` (E-01…E-12).
+
+- **E-01 — catalog in the planner.** Assess/plan prompts list registered persona, skill and tool ids; `task_decomposition` no longer calls `list_personas`.
+- **E-02 — step context.** Each step gets the plan goal, its acceptance criteria, and clipped dependency `resultSummary`s; re-plan uses done-step summaries.
+- **E-03 — generation settings.** `temperature` / `maxOutputTokens` reach every SDK call; Anthropic honours `baseURL` and `apiKeyEnv`.
+- **E-04 — coder persona.** Verification no longer claims a test run the persona has no tool for.
+- **E-05 — judge.** Neutral `judge` persona (no tools) scores acceptance; `code_analysis` no longer forbids a coder from editing.
+- **E-06 — skill filter.** SKILL.md sections that name disallowed tools are dropped (researcher no longer sees `git_push`).
+- **E-07 — one ENVIRONMENT, one Language.** Planner system prompt skips the env block already in PROJECT CONTEXT; user prompts drop the duplicate Language section.
+- **E-08 — dominant script.** Language detection ignores digits, requires the script to beat Latin, maps Urdu markers and any kana to Japanese.
+- **E-09 — reasoning clock.** The skill uses the ENVIRONMENT date; `get_current_time` is only for other zones.
+- **E-10 — model Plan schema.** `PlanModelSchema` omits runtime fields; `finalizePlan` fills them; steps are asked to summarise in ≤8 sentences.
+- **E-11 — `DEFAULT_MODEL_ID`.** Production fallbacks use the constant; catalog `maxContextTokens` wins; `claude-sonnet` ships as `claude-sonnet-5`.
+- **E-12 — clarification.** The nested Persian `if` in `fallbackClarificationQuestion` is gone.
+
+## [27.17.7] — 2026-09-27 — Phase D: tools and journal
+
+Closes every open row of **Phase D** in `docs/UNIFIED_EXECUTION_PLAN.md` (D-01…D-18).
+
+- **D-01 — ambiguous edit.** More than one `oldText` match is `AMBIGUOUS_MATCH` with a count; the file is left untouched.
+- **D-02 — tabs.** Whitespace-tolerant edits keep the original indent characters (Makefile recipes stay tab-indented).
+- **D-03 — CRLF.** Unedited lines are rewritten with the file's original EOL.
+- **D-04 — empty `oldText`.** Schema and `applyFileEdits` reject empty search text (`EMPTY_OLD_TEXT`).
+- **D-05 — encoding.** Non-UTF-8 files are `ENCODING_UNSUPPORTED`; `write_file` accepts `encoding: "base64"`.
+- **D-06 — MCP connect.** `client.tools()` is inside the connect timeout race; timeout closes the client and transport.
+- **D-07 — git process group.** `runGit` spawns a detached group, kills it on timeout, and settles on `exit`. Commits allow 120s.
+- **D-08 — `gitEnv` allowlist.** SSH, proxy, `XDG_CONFIG_HOME`, `GIT_AUTHOR_*`/`COMMITTER_*`, and `USERPROFILE` pass through; secrets do not.
+- **D-09 — detached HEAD / no-op push.** Commits on a detached HEAD are `DETACHED_HEAD`; an up-to-date push reports `pushed: false`.
+- **D-10 — PR head/base.** `git_pr_create` sends current head, default base, and `gh --repo`; unpushed branches are `BRANCH_NOT_PUSHED`.
+- **D-11 — sequentialthinking.** Default session is per plan/task; TTL prunes old files; thoughts are secret-scrubbed.
+- **D-12 — fetch.** Truncation is `truncated`/`nextStartIndex` only; non-text is `UNSUPPORTED_CONTENT_TYPE`.
+- **D-13 — commit body.** Multiline messages go to `git commit -F -`.
+- **D-14 — calendar dates.** Impossible days such as `2026-02-31` are `INVALID_DATE`.
+- **D-15 — create_task.** A bare TaskRuntime handle returns `USE_DELEGATE_TASK` instead of a fake success.
+- **D-16 — read-only PRs.** `git_pr_list` and `git_pr_view` are in `readOnlyToolIds()`.
+- **D-17 — previous plan summary.** `get_previous_plan_summary` is registered with the session store.
+- **D-18 — journal summary.** Default `summary` omits full tool results; key redaction is substring-based; secret values redact from length 6.
+
+## [27.17.6] — 2026-09-27 — Phase C: runtime, task, agent
+
+Closes every open row of **Phase C** in `docs/UNIFIED_EXECUTION_PLAN.md` (C-01…C-14).
+
+- **C-01 — lock until settle.** Timeout/cancel abort the run but hold resource locks until `executionPromise` finishes; `abortSignal` is forwarded to fs/git/fetch tools.
+- **C-02 — stream errors fail.** `pipeThoughts` treats `error` parts as failure; `finishReason === 'error'` fails the run.
+- **C-03 — cancel running work.** `cancelPlan` aborts running tasks and children; acceptance is skipped after cancel.
+- **C-04 — model-call retry.** `wrapModelForRetry` + status-code 429/5xx/network retry with per-provider concurrency; backoff releases the slot. Whole-agent `RetryableAgentRuntime` is no longer on the TaskRuntime path.
+- **C-05 — delegation depth.** Child agents are created at `depth+1`; `delegate_task` checks the **caller** persona via async run context.
+- **C-06 — partial usage.** `onStepFinish` accumulates tokens; failed/timed-out runs still report usage.
+- **C-07 — delegated results.** Children inherit `planId`/`parentTaskId`; `delegate_task` waits and returns status/result/usage.
+- **C-08 — waitFor.** `waitFor(planId)` is plan-scoped; a throwing `run()` cannot hot-loop `waitForAll`.
+- **C-09 — map pruning.** Agents/overrides are dropped on completion; task records cap at `maxTaskRecords`.
+- **C-10 — file-lock CAS.** Stale locks are renamed atomically; a live pid is never stolen; `withFileLock` is the async server path.
+- **C-11 — journal/log hygiene.** `journal.close()` on shutdown; size-based observability rotation; stale temp/lock cleanup and store retention on initialize.
+- **C-12 — live `agent:tool_call`.** Events fire when a tool starts (with a post-run fallback for mocks).
+- **C-13 — chat task ids.** Answer turns use `chat:${interactionId}`; abandoned chat interactions reconcile on initialize.
+- **C-14 — review.usage.** Clarification/answer paths use aggregator totals; `withStructuredRetry` reports the failed first attempt.
+
+## [27.17.5] — 2026-09-27 — Phase B: orchestration, stores, registry
+
+Closes every open row of **Phase B** in `docs/UNIFIED_EXECUTION_PLAN.md` (B-01…B-22).
+
+- **B-01 — resume vs live owner.** In-process live-plan set plus a pid/heartbeat owner file. A second `resume` (API 409, CLI error) is refused until the owner dies or the heartbeat goes stale.
+- **B-02 — resume closes the right interaction.** Match `planIds.includes(planId)` first; never close another plan's open turn.
+- **B-03 — store load validates.** `PlanSchema`/`SessionSchema.safeParse`; corrupt files skipped with warnings; API list stays 200.
+- **B-04 — duplicate step ids.** Feasibility gate already rejected them; regression test kept.
+- **B-05 — re-plan `replacesStepId`.** Dependants are rewired onto the replacement; a failed step with no replacement rejects the merge.
+- **B-06 — reconcile.** `initialize` and `plans resume` close pending interactions whose plans are already terminal/draft.
+- **B-07 — failed plan paths update the session.** Feasibility, cycles, and reject all complete the interaction; textual confirmation feedback triggers a re-plan up to the clarification ceiling.
+- **B-08 / B-14 — persist per completion, judge before the next write.** `waitForAny` drains a wave one task at a time; resume judges `done` steps that never got an `[Acceptance:` mark.
+- **B-09 — `PlanStore.update(id, fn)`** locked read-modify-write (File + Memory + scrubbing wrapper).
+- **B-10 — persist failures.** Logged via `logSystemError`; `persistenceDegraded` on the review after consecutive failures.
+- **B-11 — pre-hash filenames.** `list()`/`load()`/`delete()` migrate `plan_foo.json` onto the sha256 name.
+- **B-12 — web server shutdown.** HTTP `server.close()`, cancel live plans, resolve waits as cancelled; a second signal hard-exits.
+- **B-13 — CLI SIGTERM/SIGHUP.** `hootl run` and the REPL treat them like the first Ctrl-C.
+- **B-15 — session history.** Last 5 completed turns injected into planner prompts.
+- **B-16 — corrupt registry JSON fails `initialize`.** Missing default-model keys are reported, not swallowed.
+- **B-17 — duplicate ids inside one layer** error even with `override`.
+- **B-18 — persona `allowedTools`** must name a real tool (`*` / `mcp:` allowed).
+- **B-19 — MCP down does not fail skill load.** Missing tools are dropped with a warning when MCP servers are configured.
+- **B-20 — CLI/runtime loader parity.** Registry commands call `prepareCliEnvironment`; `/api/mcp` uses the same layer merge as the CLI.
+- **B-21 — model slug collisions** get a hash suffix; empty specs stay `InvalidModelError`.
+- **B-22 — `HOTL_BASE_URL` alone** no longer displaces global `defaultModel`.
+
+## [27.17.4] — 2026-09-27 — Phase A: web-server auth, project trust, cancel-during-planning
+
+Closes every open row of **Phase A** in `docs/UNIFIED_EXECUTION_PLAN.md` (A-01…A-08).
+
+- **A-01 — web server bind + auth.** Default listen address is `127.0.0.1` (was `0.0.0.0`). A non-loopback bind without `--token` / `HOTL_SERVER_TOKEN` is refused at startup. When a token is configured, every `/api/*` route requires `Authorization: Bearer <token>` (401 otherwise). `HOTL_HOST` selects the bind address.
+- **A-02 — `--trust-project`.** The R0-08 gate is now wired on `run`, the REPL, `serve`, `mcp test` and `tools --mcp`. The flag persists the project root in `~/.human-out-of-the-loop/config.json` (`trustedProjects`) so later invocations see it.
+- **A-03 — no trust-gate bypass.** `tools --mcp`, `mcp test <id>` and `POST /api/mcp/:id/test` refuse to spawn a project-layer MCP server until the project is trusted.
+- **A-04 — cancel during planning.** `POST /api/runs/:runId/cancel` aborts the planner's in-flight LLM call (`AbortSignal`); no further `generateObject` runs.
+- **A-05 — idle TTL.** Clarification and confirmation waits time out after 30 minutes (`HOTL_RUN_TTL_MS`, `0` disables). The run ends `cancelled` and the session interaction is closed.
+- **A-06 — MCP `env`.** `McpServerConfigSchema.env` is a `Record<string,string>` passed through to the stdio child (on top of the R0-04 allowlist).
+- **A-07 — MCP URL / env-var names.** `http`/`sse` URLs must be `http:` or `https:` (`file://` is rejected). `tokenEnvVar` / `keyEnvVar` must match `^[A-Za-z_][A-Za-z0-9_]*$`.
+- **A-08 — ownership.** A run is bound to the presenting bearer token. A second valid token gets 403 on that run (and on confirm/cancel of its plan).
+
+## [27.17.3] — 2026-09-25 — every tool call on one line, and the records behind it
+
+Asked for in the CLI: each AI tool call logged with the tool's type, its name,
+the input it was given and how it ended — and the capability placed at the
+runtime, not in the CLI, so a UI (or anything else) can consume the same
+records.
+
+    🔧 tool: write_file  type: filesystem  input: {"filePath":"notes/a.txt","content":"…"}  status: ✅ success
+    🔧 tool: read_file  type: filesystem  input: {"filePath":"notes/missing.txt","encoding":"utf-8"}  status: ❌ failed — ENOENT: no such file or directory
+    🔧 tool: git_push  type: git  input: {"directory":".","branch":"main","setUpstream":false}  status: ❌ failed — PROTECTED_BRANCH: Refusing to push "main" …
+
+- **The record is a runtime type, not a CLI string.**  `ToolCallSink` in
+  `src/ai/runtime/tool-call-log.ts` receives
+  `{ phase: 'start' | 'end', status: 'running' | 'success' | 'failure',
+  toolType, toolName, input, taskId?, agentId?, planId?, planStepId?, callId?,
+  durationMs?, error?, code? }`, wired where tools actually execute — the same
+  place the Journal hooks in, one wrapper outside it, so a call that fails
+  before or inside the Journal is still reported.  `withToolCallLog` returns
+  the tools untouched when no sink is configured, and the orchestrator passes
+  the sink down through `TaskRuntime` (including the chat path); a UI, a JSON
+  consumer or a test can register one and get the same objects the CLI renders.
+- **The type comes from the registry, not from guessing.**  A tool's type is
+  its registry `category` (git, filesystem, memory, time, web, reasoning;
+  `mcp` for MCP-sourced tools), with a static map and a name-prefix fallback
+  for tools built outside the registry; unknown names are `other`.
+- **The input is the real arguments, with secrets taken out.**  Credential-ish
+  keys are redacted (`DEFAULT_REDACT_KEYS`, now shared with the Journal) and
+  every process secret value is scrubbed from the serialized text; the result
+  is capped at 400 characters.  Successful and failed calls both carry it, so
+  a refusal can be read without digging through logs.
+- **Failure is the runtime's own verdict.**  The status uses the same contract
+  the Journal uses (`success: false`, an SDK error output, an MCP `isError`),
+  and an exception thrown by a tool is re-thrown after the `end` record — the
+  call is logged *and* the error still reaches the runtime's error handling.
+- **The CLI line, and how to turn it off.**  `--tool-log <auto|on|off>`
+  (`HOTL_TOOL_LOG=0`/`off` also works, and `auto` defers to it) prints one line
+  per finished call, after the status line is cleared; `on` also prints when a
+  call starts.  Failures carry the error message and its code (never the code
+  twice).  Default: on.
+
+Verification: `src/ai/__tests__/v27173-tool-call-log.test.ts` (18 tests — type
+resolution, input redaction and capping, the success/failure contract, the
+identity path without a sink, a throwing sink that must not break a call, the
+runtime wiring, and the options the Orchestrator hands to it — complete, secrets
+included, from the moment of the hand-over) and `src/cli/__tests__/v27173-tool-log.test.ts` (13 tests —
+the line and its status, the renderer's start/end/off behaviour, and the
+flag/environment matrix), plus 5 e2e checks: `success` renders a line and
+`HOTL_TOOL_LOG=0` silences it while the run still happens, and `gitwrite`
+shows all seven calls — the two documented refusals included — in the four
+requested fields.  1218 tests, 194 e2e checks.
+
+## [27.17.2] — 2026-09-25 — the thinking text, and the prompt that was sent twice
+
+Two more findings from the same Windows gateway as 27.17.1, both visible in one
+session's logs:
+
+    HOOTL test-projects › @chat الان توی چه مسیری هستی؟
+    Mode: chat (prefix)
+    💭
+    💬 Answer
+
+The `💭` opened and never filled.  That gateway streams reasoning as
+`response.reasoning_text.delta` and inside the finished reasoning item — and the
+AI SDK maps **only** `response.reasoning_summary_text.delta` to a reasoning
+part, so the text was dropped before any callback could see it.
+
+- **The wire shapes the SDK does not map are read from the raw chunk.**
+  `response.reasoning_text.delta`/`.done` and the `reasoning` item's
+  `content[]`/`summary[]` (from `output_item.added`/`.done`) now reach the
+  terminal.  The SDK-mapped `reasoning_summary_text.*` events are deliberately
+  NOT read there — the provider sends the raw chunk *before* the part it maps,
+  and reading both printed every summary delta twice (which the e2e caught:
+  `checkingchecking the project files`).  If a turn streams no reasoning at all
+  but the SDK collected some, it is shown once at the end rather than lost.
+- **A recoverable answer is no longer asked for twice.**  The reporter's
+  provider omits `isClear` on *every* assessment; 27.17.1 learned to read the
+  answer anyway, but only after the retry had already sent the identical prompt
+  again.  Recovery now happens inside the retry: the JSON is used as it is, and
+  a call that CAN be read is never repeated.  Unreadable answers are still
+  retried once, exactly as before.
+- **A provider that cannot stream is asked once more, without streaming.**  The
+  gateway answers a `stream: true` Responses request with a non-streamed body
+  (`{"choices":[{"message":{"role":"assistant","content":""}}]}`), which the SDK
+  turns into an empty turn — the run then showed the *assessment's draft* as if
+  it were the answer, with nothing to indicate it.  When the streaming attempt
+  yields nothing (or fails outright), the same prompt goes out once more with
+  `generateText`; cancellation and timeouts never trigger it, and the run
+  summary records `The provider streamed no answer; the turn was repeated
+  without streaming.`  A stream that produced an answer is never repeated.
+- `streamText`'s result is awaited before its fields are read, so a provider
+  shim that returns a promise is handled like the SDK's own result object.
+
+Verification: `src/ai/__tests__/v27172-provider-wire.test.ts` (8 tests — the raw
+wire shapes, the block that used to stay empty, no double printing, the
+non-streaming re-ask on an empty stream and on a failed stream, and no re-ask
+when the stream worked) plus 3 e2e checks in the `thinking` scenario whose stub
+streams reasoning exactly the way the reported gateway does
+(`RAWTEXTWIRE`).  1187 tests, 189 e2e checks.
+
+## [27.17.1] — 2026-09-25 — a nearly-correct answer is no longer a failed run
+
+Reported from a real run (same Windows machine as 27.16.1):
+
+    HOOTL test-projects › @chat سلام
+    Mode: chat (prefix)
+    🛑 Planning failed: The planner was unable to process the request:
+       No object generated: response did not match schema.
+
+The provider *had* answered — the run's own log shows the reply arriving with
+`kind: "clarify"` and the user's language, five questions and all.  It just left
+out `isClear`, which the response schema marks required and that provider does
+not enforce.  The SDK refused the object, the planner rethrew, and a greeting
+became a crash — with the answer sitting in the response text the whole time.
+
+- **Recover instead of refusing.**  When a structured call fails because the
+  object did not match the schema (`NoObjectGeneratedError`), the raw text is
+  re-read: the first complete JSON object is extracted (a brace scan that
+  respects strings and escapes, so `}` inside a string does not end it early),
+  validated against the same schema with every field optional, and handed to
+  the normalizer — which already derives what the model left implicit (the kind
+  from the fields it filled, `isClear` from the kind).  Errors that carry no
+  text (a timeout, a 401, a socket that died) are re-thrown untouched, so a real
+  failure is still a failure.  The plan-generation call recovers the same way.
+- **Questions without a verdict are a clarification.**  A provider that drops
+  `isClear` *and* `kind` used to read as "clear" — and its question list was
+  silently ignored on the way to a plan.  Now the questions decide.
+- **Chat cannot be killed by its classifier.**  In chat mode the user asked for
+  a conversation, so if the assessment call fails outright the run answers
+  anyway (the answer call does the work; if that fails too, the report says so).
+  Auto mode is unchanged: a broken provider is still reported as a failure.
+- **A greeting is never a clarification.**  The auto-mode prompt now names
+  greetings and small talk (`hello`, `سلام`) as `answer`, and chat mode says
+  explicitly that a conversation is never answered with `kind: "clarify"` — the
+  reported model had reasoned its way to "this is a greeting, therefore
+  unclear".
+
+Verification: `src/ai/__tests__/v27171-assessment-recovery.test.ts` (13 tests:
+the JSON extractor, the reported payload recovered field-by-field, the chat and
+auto-mode outcomes, and the plan recovery) plus four new e2e checks in the
+`faults` scenario whose stub omits `isClear` exactly as the provider did.
+1178 tests, 186 e2e checks.
+
+## [27.17.0] — 2026-09-25 — it answers when talking, plans when working
+
+Until now *every* request became a plan — `hootl run "hello"` planned, confirmed
+and "executed" a greeting.  A run now decides what the request actually needs:
+
+    auto (default)   a question, a greeting or a conversation is ANSWERED
+                     (read-only tools, nothing executed, exit 0);
+                     real work becomes a plan, exactly as before;
+                     "this is too vague" still asks first.
+    chat             never plan — answer, even if the request sounds like work.
+    plan             never answer — plan, even a greeting.
+
+- **Choose it where you think of it:** `@chat <message>` / `@plan <task>`
+  inside the request (the prefix is stripped before anything else sees it), or
+  `--mode auto|chat|plan`, or `HOTL_MODE`, or `defaultMode` in the config.
+  Precedence: prefix > flag > env > config > auto.  A bad value is a usage
+  error (exit 2) naming its source, never a silent fallback.  `@aur/auto …`
+  and every other `@word` are left alone — only the three mode words followed
+  by a space count.  In the REPL: `/mode [auto|chat|plan]` and `/chat <msg>`.
+  The run says `Mode: chat (prefix)` when the choice did not come from the
+  default.
+- **Chat reads, but cannot write:** the answer runs through the same
+  AgentRuntime a plan step uses, with the `chat` persona and exactly the
+  read-only tool set `hootl serve --mcp --read-only` exposes — so "what does
+  this project do?" can actually look at the files.  A tool call in a chat
+  turn lands in the Journal like any other (`agentId: "chat-runtime"`), and a
+  chat run writes no plan id, no plan file, no step.
+- **The answer is in the user's language.**  A script detector names the
+  request's language; when it can (Persian, Russian, Greek, Hebrew, Hindi,
+  Bengali, Thai, Japanese, Korean, Chinese) the prompt says so in those words,
+  and when the Arabic script cannot distinguish Persian from Arabic the
+  instruction names the script and tells the model to match the request rather
+  than guessing.  Latin requests get the generic rule.  The rule travels with
+  the assessment prompt, the plan prompt, every agent's system prompt, the
+  acceptance judgment and the review — and the one question the runtime writes
+  itself (the fallback clarification) has a Persian template too.
+- **Over HTTP:** `POST /api/run { mode }` (validated, 400 on a bad value);
+  a chat run ends `done`, `outcome: "success"`, the answer as its report and
+  **no plan id**; `POST /api/preview` returns `{ ok, answer }` instead of a
+  plan, still touching nothing.
+- **`--dry-run` follows the mode:** in chat mode it prints the answer and
+  executes nothing (there is nothing to preview).
+- Verification: `src/ai/__tests__/chat-mode.test.ts` (25 tests: modes,
+  prefixes, precedence, prompt content, language detection, the read-only
+  catalog, and the orchestrator's chat/plan/clarify branches),
+  `src/server/__tests__/v2717-chat-mode.test.ts` (4 tests), the CLI suite
+  (+10 tests) and the e2e scenario `chat` (13 checks) — a chat turn that reads
+  the README, is journalled, answers in Persian, and the same request planned
+  again under `@plan`. 1165 tests, 182 e2e checks.
+
+## [27.16.1] — 2026-09-25 — an unclear verdict can no longer arrive empty
+
+A real run (reported from a Windows machine, `I:\structured-ai\last\test-projects`)
+ended like this:
+
+```
+⚠️ Clarification needed:
+
+```
+
+Nothing under the heading — even though the model *had* answered with three
+questions. It had used the key `clarificationQuestions`; the response schema
+only declared `needsClarification`, and zod drops what a schema does not
+declare, so the questions were gone by the time the orchestrator looked at
+them. With an empty list the clarification loop breaks out immediately, so the
+refusal printed with no body (and nothing to answer). The end-to-end stub always
+answered `isClear: true`, which is why no test caught it.
+
+- **The schema now keeps the answers the model actually sends:** the
+  (`clarificationQuestions`, `questions`) spellings are optional, additive
+  fields, and the planner merges all three, trims them and drops duplicates
+  (case-insensitively) before anything else looks at them.
+- **"Unclear" always carries at least one question.** If a provider omits them
+  entirely, the planner asks a question built from what the runtime already
+  knows — the project root and the entries it can see — instead of asking for
+  the project location (`PROJECT CONTEXT` already supplies it). A clear verdict
+  is passed through untouched, so nothing extra is ever asked for a plan.
+- **The prompt names the field:** "put 1-5 specific, answerable questions in the
+  `needsClarification` array — never an empty list".
+- Verification: `src/ai/__tests__/clarification-fidelity.test.ts` (13 tests, the
+  aliased payload from the reported run included) and a new `clarify` e2e
+  scenario that answers the assessment the way the provider did and asserts the
+  questions reach the terminal, that the heading is never followed by a blank
+  line, that no plan is written, and that the session record keeps the
+  questions. The U5 server test now expects the fallback question to open a
+  round (previously it asserted the empty refusal) — 1125 tests, 169 e2e checks.
+
+## [27.16.0] — 2026-09-25 — this runtime *as* an MCP server
+
+`hootl serve --mcp`: the reverse of `hootl mcp list`. Until now the runtime was
+always an MCP *client* — `McpConnector` pulls other servers' tools in; now any
+MCP client (Claude Desktop, Cursor, an IDE agent) can list and call the same 45
+local tools the agent uses. That closes the tools-expansion plan
+(`docs/history/TOOLS_EXPANSION_PLAN.md`, phases 37–43).
+
+**One execution path, not a second API** (`src/mcp/server.ts`)
+- A `tools/call` reaches the *same* tool object the runtime uses: the workspace
+  sandbox, the zod `inputSchema` (so a bad argument is `-32602` with the field
+  named), the same structured `{ success: false, code }` results. A tool refusal
+  is returned **in-band** as `isError` with its code — a client shows it to the
+  model instead of losing the connection.
+- **Audited from outside.** Calls are wrapped by phase 37's `withJournal`, so an
+  MCP client's edit lands in `.ai-runtime/journal/` exactly like the agent's own
+  (`agentId: "mcp"`) — successes *and* refusals, codes included.
+
+**Least privilege is a flag, not a hope**
+- `--read-only` exposes only tools that cannot change anything: `read_*`,
+  `list_*`, `search_*`, `get_*`, the five git reads, `fetch`, the time tools and
+  the memory reads — an **allowlist**, so a future write tool is private until
+  someone decides otherwise. (`sequentialthinking` is deliberately out: it
+  persists a session file.)
+- `--allow-tools a,b` narrows further, `--prefix m` renames tools to `m_<id>`
+  for clients that merge servers. Both filters apply to `tools/list` **and**
+  `tools/call`.
+- Read-only tools carry `readOnlyHint` in their annotations, which is what lets
+  a client auto-approve them without trusting the rest.
+
+**Protocol and transports** (`src/mcp/protocol.ts`, `src/mcp/transports.ts`)
+- JSON-RPC 2.0: `initialize` (2025-06-18, falling back to 2025-03-26 /
+  2024-11-05 — an unknown version is answered with ours and said once, as the
+  spec requires), `ping`, `tools/list`, `tools/call`, `resources/list`,
+  `resources/read`, `prompts/list` (empty), plus `notifications/initialized`
+  (which, being a notification, is answered with silence).
+- Codes that mean something: `-32700` (unparseable frame — even for a malformed
+  HTTP body), `-32600`, `-32601` (unknown method *or* tool, listing what is
+  visible), `-32602` (invalid params), `-32002` (unknown resource).
+- **stdio** is the default and the transport clients spawn; stdout carries
+  protocol only, the banner goes to stderr, frames are answered in order, and a
+  parse failure is answered in-band rather than dropped.
+- **HTTP** binds 127.0.0.1, requires a bearer token (`--token`/`HOTL_MCP_TOKEN`)
+  and refuses to start without one; `GET /health` is the only unauthenticated
+  route and says nothing but "alive". A notification gets `202`.
+- Tool schemas come from the tools' own zod definitions (`z.toJSONSchema`,
+  draft 2020-12, `io: input`) — one source of truth; `describe()` text survives
+  the conversion, so a client's model sees the same help the agent does.
+- Resources are read-only and shape-validated before lookup: `plan://{id}` (via
+  the real plan store — ids, not filenames), `journal://{YYYY-MM-DD}` and
+  `memory://graph`.
+
+**CLI**: `hootl serve --mcp [--project-root DIR] [--http [--port 3300] --token
+<t>] [--read-only] [--allow-tools a,b] [--prefix m]`, listed in `--help` next to
+`mcp`, and warned about where the client is configured
+(`registry/mcp-servers/README.md`): this endpoint reads and writes project files,
+so `--read-only` is the recommendation for a client you do not fully trust.
+
+**Tests**: 1078 → **1112** (66 files; 34 new). Framing (`-32700`/`-32600`),
+negotiation (supported, unsupported, missing), `tools/list` equal to
+`LOCAL_TOOL_IDS` with real JSON Schemas and annotations, `tools/call` success /
+`-32602` / `-32601` / in-band sandbox refusal, both filters (including that a
+filtered tool cannot be *called*), the Journal line for an external call, the
+three resources plus six path-traversal attempts on resource uris, stdio framing
+(order, silence on notifications, banner on stderr) and HTTP (401 without a
+token, 202 for a notification, `-32700` for a malformed body, refusal to start
+tokenless) — and, the acceptance's real interop test: **`@ai-sdk/mcp`'s own
+client** connecting to the real CLI over stdio, listing 45 tools and calling one.
+e2e **153 → 161**: the new `mcpserve` scenario points our own client at our own
+server through a project registry entry, then speaks raw stdio to prove what a
+call does — the file comes back through the sandbox, a path outside the project
+is refused in-band, and both outcomes are in the Journal.
+
+## [27.15.0] — 2026-09-25 — git, writing (and pull requests)
+
+Eleven new tools, so the same agent that could *read* a repository can now do
+the work — on a branch, with the destructive half fenced off. The reference
+server's `git_add` / `git_commit` / `git_create_branch` / `git_checkout` /
+`git_reset` / `git_push` / `git_stash` are here, plus the pull-request set the
+plan asked for (`git_pr_create` / `git_pr_list` / `git_pr_view` /
+`git_pr_comment`).
+
+**The safety model (`src/ai/tools/git/git-safe.ts`)**
+- **Protected branches** (`main`, `master`, or `HOTL_PROTECTED_BRANCHES`): no
+  push, no `reset --hard`, no `commit --amend` — `PROTECTED_BRANCH`, with the
+  alternative in the message ("work on a feature branch and open a pull
+  request"). Creating a branch *from* `main` and standing on `main` are
+  deliberately allowed; the guards are on rewriting.
+- **Nothing irreversible happens without `confirmDestructive: true`**, and the
+  refusal *names every file that would be lost* — `reset --hard`, a checkout
+  with `discardChanges`, `stash drop`/`clear`, `commit --amend`.
+- **No force, anywhere**: `--force`, `--force-with-lease`, `--mirror` and
+  `--no-verify` do not exist in any schema, so no prompt, context or file can
+  conjure one. A rejected push is git's answer.
+- **Every write reports `before`/`after`** — HEAD, short sha, branch and
+  porcelain — plus `changed` / `headChanged` / `branchChanged`, so "what did
+  that call actually do?" is in the result itself (and in the Journal).
+- `gitExitOk` was added to the runner: `allowFailure` means "git ran", not "git
+  worked", so every caller that wants a *value* now checks the exit code too.
+
+**The local writes**
+- `git_add` — paths resolved inside the workspace (the phase-33 check), `--`
+  before them, repo-relative, `["."]` for everything.
+- `git_commit` — staged only, or `paths` to stage-and-commit; message required;
+  an empty index is `NOTHING_TO_COMMIT`; the author identity is **read** from
+  `git config` and never written (`MISSING_IDENTITY` tells the user to set it).
+- `git_create_branch` — validated by git itself (`check-ref-format --branch`),
+  switches to the new branch by default, needs no confirmation: it is the safe
+  thing to do.
+- `git_checkout` — `create` for `-b`; uncommitted work makes it fail the way git
+  intends unless `discardChanges: true` is confirmed.
+- `git_reset` — the reference's behaviour is the default (unstage everything,
+  safe); `soft` moves HEAD; `hard` is gated and refused on a protected branch.
+- `git_push` — `origin` + current branch by default, `setUpstream` for the first
+  push, a local bare remote in the tests; protected branches refused before git
+  runs.
+- `git_stash` — push (`-u` for untracked), list, pop, apply, and a gated
+  drop/clear: the tidy-up that is *not* a hard reset.
+
+**Pull requests — both backends the plan locked in (`src/ai/tools/git/pr-backend.ts`)**
+- `gh` first (probed with `gh --version`, `GH_PROMPT_DISABLED=1`, 30 s, 4 MB),
+  then the GitHub REST API with `GITHUB_TOKEN`/`GH_TOKEN`, else
+  `PR_UNAVAILABLE` with both fixes named. A non-GitHub remote is
+  `NOT_GITHUB_REMOTE`, a missing PR is `PR_NOT_FOUND`, an unauthenticated `gh`
+  is `PR_UNAVAILABLE` — not a stack trace.
+- Owner/name come from the remote URL git actually has (`https`, `git@host:`,
+  `ssh://`), so a PR always targets the repository the branch is connected to,
+  and GitHub Enterprise gets `https://<host>/api/v3`.
+- One shape from both backends (`normalizePr`), and the token is read per call,
+  used, and never echoed into a result — the phase-37 Journal check still
+  asserts it.
+
+**Wiring**: local catalog 34 → **45 tools**; the `git_operations` skill is
+v1.2.0 (17 tools, priority 55) with a "Making a change" workflow and the new
+error codes; personas coder 45 / architect 29 / reviewer 27 (the reviewers may
+read and comment on PRs, never push or commit).
+
+**Tests**: 1034 → **1078** (65 files; 44 new) against a real repository with a
+**bare remote in the same temp directory** — the SHA changes and the message
+lands, `reset --hard` without the flag is refused with *zero* disk change and
+with it succeeds, `--hard` on `main` is `PROTECTED_BRANCH`, the push reaches the
+bare repo and a rewritten history is rejected with no way to force it, the force
+option is asserted **absent from the schema**, `drop` keeps the stash until
+confirmed. The PR tools run against an injected `gh` runner and an injected
+`fetch` — so no test can reach GitHub — including the logged-out, no-gh-no-token
+and 404 paths, plus a stub `gh` **on `PATH`** for the real runner. e2e **140 → 153**: a new `gitwrite` scenario commits a real change
+on a branch, pushes it to a bare remote, and then proves both guards by their
+side effects (the remote's only ref is the feature branch; the refused hard
+reset leaves HEAD and the tree untouched).
+
+## [27.14.0] — 2026-09-25 — git, read-only
+
+Five new tools and a new `git_status`, so an agent can understand a repository
+before it is allowed to change one (the write half is 27.15.0).
+
+**A shared core, not six copies of `execFile`** (`src/ai/tools/git/`)
+- **No shell, ever**: `spawn('git', argv)` with an argument list, and any
+  caller-supplied ref, path or filter that starts with `-` is refused
+  (`BAD_ARGUMENT`) — a branch named `--upload-pack=…` stays a name, never an
+  option. Paths are passed after `--`.
+- **No prompts**: `GIT_TERMINAL_PROMPT=0`, `GIT_ASKPASS=echo`, `SSH_ASKPASS=echo`,
+  `GIT_PAGER=cat`, `GIT_OPTIONAL_LOCKS=0` — a call can never hang on a password
+  prompt or a pager, and a read never takes a lock out from under the user's
+  editor.
+- **Bounded output**: 256 KB per command, and the cap *kills the child*
+  (`OUTPUT_TOO_LARGE`), so a 40 MB `git show` costs 256 KB.
+- Codes a model can act on: `NOT_A_REPO`, `GIT_MISSING`, `TIMEOUT`,
+  `PATH_TRAVERSAL_BLOCKED`, `BAD_ARGUMENT`, `OUTPUT_TOO_LARGE`, `GIT_FAILED`.
+
+**`git_status` grew up (backward compatible)**
+- Still `directory` + `short` + `output`; new: `porcelain: 'v1' | 'v2'` parsed
+  into `entries` (index/worktree characters, renames with their `from`,
+  untracked, unmerged) and `counts`; `branch: true` for `{ name, upstream,
+  ahead, behind, detached }`; `path` to focus on one file.
+- The error code is the plan's `NOT_A_REPO` (phase 18's `NOT_A_GIT_REPO` is
+  gone) and `PATH_TRAVERSAL_BLOCKED` still comes from the ported phase-33 path
+  check.
+
+**The five reads**
+- `git_diff` — one tool for the reference's three: the working tree by default
+  (`git_diff_unstaged`), `staged: true` for the index (`git_diff_staged`), or
+  `target: 'HEAD~1'` (`git_diff`). `statOnly`/`nameOnly`, `path`,
+  `contextLines`, and a parsed file list with per-file `+`/`-` counts.
+- `git_log` — parsed entries (sha, short sha, author, ISO date, parents, refs,
+  subject, body) with `path`/`author`/`since`/`until` filters and
+  `oneline`/`short`/`json` rendering. A repository with no commits is an empty
+  log, not an error.
+- `git_show` — the commit object plus its patch, `path` to narrow it,
+  `statOnly` to keep a merge from flooding the context. (Two git subtleties are
+  encoded here: options must precede the revision, and `--unified=N` implies
+  `--patch` — so a stat-only run passes `--stat` and no `--unified`.)
+- `git_branch_list` — `for-each-ref` with an explicit field list, so the answer
+  is data (current flag, sha, upstream, ahead/behind, last commit), with the
+  reference's `contains`/`notContains`, and a detached HEAD reported as
+  detached *with its sha*.
+- `git_remote_list` — name, fetch URL and push URL (they differ more often than
+  people expect); configuration only, no network. Checked before anything is
+  pushed in 27.15.0.
+
+**Wiring**: local catalog 29 → **34 tools**; the `git_operations` skill now
+teaches the read set (priority 30, extended, not replaced); personas coder 34 /
+architect 26 / reviewer 25.
+
+**Tests**: 1034 (64 files; 46 new). The suite builds a real repository in a temp
+directory — two commits, a second branch, a staged file, an unstaged change,
+an untracked file, two remotes with differing push URLs — and asserts parsed
+fields, not substrings: porcelain v1 and v2, the branch block, flag-injection
+refusals, `PATH_TRAVERSAL_BLOCKED` outside the workspace, `NOT_A_REPO` inside a
+plain directory, the byte ceiling with its SIGKILL, the neutral environment, the
+detached-HEAD report and the empty-repository cases. e2e **127 → 140**: a new
+`gitread` scenario runs all six tools against a repository the scenario itself
+initialises, and asserts the repository is byte-for-byte unchanged afterwards.
+
+## [27.13.0] — 2026-09-25 — the web, read as Markdown
+
+`fetch`, the reference `fetch` server's tool, ported natively — with the
+question the reference does not ask: *which URLs may an agent reach on its own?*
+
+**One tool, the reference's contract**
+- `url`, `maxLength` (default 5000, max 100 000), `startIndex` (paging), `raw`
+  (HTML instead of Markdown) — and the reference's truncation affordance, spelled
+  out: a paged result carries `nextStartIndex`, `remainingChars` and a
+  `<error>Content truncated. Call fetch with startIndex N…</error>` tail.
+- HTML → Markdown in-tree (no dependency): headings, paragraphs, **absolute**
+  links, lists, fenced code, tables, quotes, emphasis, images; `script`,
+  `style`, `nav`, `footer`, `form` … are dropped *with their contents*, so a
+  page's noise never becomes prompt tokens. Non-HTML text (JSON, plain text,
+  XML) passes through untouched; a binary content type comes back as metadata
+  only, body not downloaded.
+
+**What it will not do**
+- **SSRF defence (the deliberate difference).** Loopback, private, link-local,
+  CGNAT, multicast and reserved addresses are refused **by default**
+  (`BLOCKED_PRIVATE_ADDRESS` with the reason and the address), because a URL
+  reaches the agent from the model's context — a fetched page or a README — not
+  from a human at a keyboard. The check runs on what the host *resolves to* (so
+  `localhost`, alternative IPv4 spellings, IPv4-mapped IPv6 and a public name
+  with a private A record are all caught) and again on **every redirect hop**.
+  `allowPrivate: true` is the documented override, and its use is reported back
+  as `privateAllowed`.
+- **Bounded everything**: 10 s per request, ≤ 5 redirects, ≤ 2 MB read from the
+  wire (the stream is *cancelled* at the cap — a 2 GB download costs 2 MB), and
+  a 2 MB body that was cut is an error, not silent truncation.
+- **No credentials, ever**: one header set for every request — our own
+  User-Agent (`human-out-of-the-loop/<version>`) and a plain `Accept`. Nothing
+  from the environment is forwarded.
+- **robots.txt is honoured** (default `respectRobots: true`), per host with a
+  10-minute cache; the longest matching rule wins with Allow taking ties, an
+  exact product-token group beats `*`. 401/403 is a refusal, an unreadable
+  robots.txt (5xx, network error) is a refusal too — *"we could not find out
+  whether we are welcome" is not permission* — and the rule is reported so the
+  model can explain why. `respectRobots: false` is the override.
+
+**Wiring**: local catalog 28 → **29 tools**; new `web_research` skill (priority
+65); personas coder 29 / architect 21 / reviewer 20 (not the planner — planning
+is not research). Every fetch is journalled like any other tool call.
+
+**Tests**: 988 (63 files; 51 new for phase 40 — the address classes, the
+redirect-hop re-check, the paging window, the byte cap, the timeout, robots
+modes 200/403/404/5xx, the cache, the HTML→Markdown rules, and the header set a
+request actually carries). e2e **116 → 127** checks: a new `fetch` scenario runs
+four fetches against a throwaway loopback server — Markdown with absolute links,
+`raw: true`, a robots refusal with its rule, and the SSRF refusal — and asserts
+the raw page's junk never reached the model.
+
+## [27.12.0] — 2026-09-25 — project memory
+
+The nine tools of the reference `memory` server, ported natively: what a run
+learns is still there in the next one. The Journal (27.10.0) is the history of
+what happened; this is the current state of what the project knows.
+
+**Nine tools, the reference's semantics**
+- `create_entities` · `create_relations` · `add_observations` ·
+  `delete_entities` · `delete_observations` · `delete_relations` ·
+  `read_graph` · `search_nodes` · `open_nodes`.
+- An existing entity is **left alone** (no silent merge, no error), duplicate
+  observations are skipped, and a relation whose endpoint does not exist is
+  refused with `ENTITY_NOT_FOUND` — nobody invents the other end of an edge.
+- Deleting an entity cascades its relations and reports both what went and what
+  was not there (`deleted` / `notFound`); `open_nodes` reports `notFound` for
+  the names it does not have instead of returning a short list.
+
+**Per project, locked, atomic — and honest about the file**
+- One graph per project: `<project>/.ai-runtime/memory.json`; every write goes
+  through the phase-27 file lock and a temp file + `rename`, so parallel agents
+  cannot lose an update, and no `.lock`/`.tmp` file outlives the call.
+- A corrupt file is reported as `GRAPH_CORRUPT` and is **never overwritten** —
+  losing months of accumulated context to one bad byte would be worse than
+  failing the call. Every result names the file it used (`memoryFile`).
+- Reads are paged (`read_graph` 200 entities, `search_nodes` 100) with `total`,
+  `truncated` and the names of neighbours that fell outside the page, so a graph
+  that grew for months cannot blow up a prompt.
+
+**Wiring**
+- Local catalog 19 → **28 tools**; `project_memory` skill (priority 75);
+  personas: `coder` 28 (the full set, deletes included), `architect` 20 and
+  `reviewer` 19 (read + capture, no deletes). Every write is journalled
+  automatically — memory has an audit trail for free.
+- Tests 921 → **937** (62 files); e2e **103 → 116** checks, with a new `memory`
+  scenario that walks all nine tools in one run and then proves persistence: a
+  *second process* searches the graph the first one wrote, and a relation to a
+  ghost entity comes back `ENTITY_NOT_FOUND` with the file unchanged.
+
+## [27.11.0] — 2026-09-25 — the clock, time zones, and persisted reasoning
+
+Three tools ported from the reference `time` and `sequentialthinking` servers.
+
+**`get_current_time` — the reference's four fields, plus the ones a prompt uses**
+- timezone, datetime (ISO with offset), day_of_week, is_dst — and additionally
+  the wall-clock `formatted`, the `utcOffset` in both forms, the epoch and the
+  **machine's** zone (so "the user's time" is never confused with UTC).
+- `date: 'YYYY-MM-DD'` asks about another day; an offset is date-dependent, and
+  a January question about Berlin is not the same as a July one.
+- An unknown zone is refused with close matches
+  (`INVALID_TIMEZONE`: *did you mean Asia/Tehran?*) — the reference answers with
+  a protocol error, and a model that typed `Asia/Tehrn` deserves better than a
+  silent UTC.
+
+**`convert_time` — one call, several zones**
+- `sourceTimeZone`, `time` (HH:MM), and either `targetTimeZone` or
+  `targetTimeZones` (the reference's list), each target carrying its own
+  `utcOffset`, `isDST` and `timeDifference` (`+5.5h`, `-1.5h`).
+- The wall clock → instant conversion resolves the zone offset **for the target
+  day**, which is what makes it correct across a DST switch; `date` makes that
+  day explicit instead of "today, silently".
+
+**`sequentialthinking` — reasoning that survives the turn**
+- Every field of the reference tool (`thought`, `nextThoughtNeeded`,
+  `thoughtNumber`, `totalThoughts`, `isRevision`/`revisesThought`,
+  `branchFromThought`/`branchId`, `needsMoreThoughts`), the same
+  `thoughtNumber > totalThoughts` adjustment, branch bookkeeping and bordered
+  rendering.
+- The chain is **persisted** in `<project>/.ai-runtime/thinking/<sessionId>.json`
+  (atomic write), so a resumed plan or a fresh process continues the same
+  session — that is the difference between a reasoning trace and a paragraph.
+- 50 steps / 256 KB per session (`THINKING_LIMIT`), session ids sanitised so one
+  can never name a path outside the directory, a corrupt session file starts a
+  fresh chain instead of failing the step, and warnings for a dangling
+  `revisesThought` or a branch without an id.
+- Because it is a normal tool, every step also lands in the Journal (phase 37)
+  with its arguments — the reasoning trail is auditable for free.
+
+**The clock in the environment block (phase 36 follow-up):** `PROJECT CONTEXT`
+and every agent system prompt now carry `current time: 2026-09-25 04:12:33
+(Asia/Tehran, GMT+03:30)`, so a plan that says "the release from last week"
+starts from a real date instead of a guess.
+
+**Verification:** 28 new unit tests (fixed instants, so DST is deterministic in
+both hemispheres; fractional offsets like Kathmandu's +05:45; midnight and
+day-boundary crossings; typo suggestions; session persistence across instances,
+isolation between sessions, the step ceiling, corrupt-file recovery and id
+sanitisation) and a new `time` e2e scenario. Also: `local-tools` catalog 19,
+persona allow-lists and a new `reasoning` skill.
+
+## [27.10.0] — 2026-09-25 — the Journal: what the AI did, recorded automatically
+
+`<project>/.ai-runtime/journal/YYYY-MM-DD.jsonl` — one append-only line per
+action, written where the runtime hands its tools to the model.
+
+**The hook** (`AgentRuntime`)
+- `withJournal(tools, context, writer)` wraps every tool's `execute` **once**,
+  just before the tool set is passed to `generateText`/`streamText`: local
+  tools, MCP tools, `delegate_task` and anything added later are covered with
+  no change to their implementations, and the live-thinking (`streamText`)
+  branch is covered by the same wiring as `generateText` — not by a second
+  code path that can quietly drift.
+- The wrapper is transparent: return values and thrown errors pass through
+  untouched (the SDK and `describeToolFailure` see exactly what they saw
+  before), and `callId` comes from the SDK's own `toolCallId`, so a journal
+  line and the `agent:tool_call` event can be joined.
+
+**What a line carries**
+- tool name, input, summary, duration, `ok`, error + code, and the
+  `taskId`/`agentId`/`planId`/`planStepId` of the run;
+- `artifacts` for written files: path, byte count and a **sha256 of the content
+  the model asked to write** — the line proves *what* was written, not merely
+  that something was;
+- plan and step transitions (`kind: 'plan' | 'step'`), so a tool call is
+  traceable to the step that caused it.
+
+**Safety and hygiene**
+- credentials are redacted twice: by key name (`apiKey`, `token`, …) and by the
+  literal secret **values** this process holds (`secret-scrub`);
+- `maxEntryBytes` (8 KB) keeps metadata and a preview instead of flooding the
+  file; `includeResults: 'none' | 'summary' | 'full'`;
+- daily rotation, `retentionDays` pruning (30 days), descriptor reuse with
+  inode detection (the phase-21 lesson: `rm -rf .ai-runtime` under a running
+  process must not lose the journal), and a write failure is a warning, never a
+  broken run;
+- `HOTL_JOURNAL=0` / `HOTL_JOURNAL_RESULTS=…` override per process.
+
+**Reading it**
+- `hootl journal [--day] [--tool] [--plan] [--failed] [--since 24h] [--limit]`
+  `[--stats] [--json] [--paths]` — filters, a per-tool summary, and raw JSONL
+  for machines.
+
+**Verification:** 27 new unit tests (writer semantics, redaction of keys and
+values, size capping, retention, re-creation after deletion, the wrapper for
+success/failure/throw/artifacts/batch, and both SDK branches of the runtime
+hook: `generateText` and `streamText`), a new `journal` e2e scenario, and the
+`credential` scenario now also asserts that a second credential shape never
+reaches any runtime artifact — the Journal included.
+
+## [27.9.0] — 2026-09-25 — the glob scan at editor level, and the machine the model writes for
+
+Two answers to "the tool works, but the model still has to guess": `search_files`
+was thinner than `search_code`, and nothing told a model *which* machine its
+commands would run on.
+
+**`search_files` — level with `search_code`**
+- **A bare name matches at any depth**: `*.ts` finds `src/lib/util.ts` and
+  `top.test.ts`, the way an editor's file finder and `search_code`'s defaults do,
+  instead of matching only what sits directly under the search root (the
+  reference's rule, kept behind `matchBaseName: false`).
+- **Build/vendor directories are skipped by default** — the same list
+  `search_code` uses (`node_modules`, `.git`, `dist`, `build`, `out`, `coverage`,
+  `.next`, `target`, `vendor`, `.ai-runtime`, …), now shared from `fs/lib.ts`
+  instead of living in two places; `skipBuildDirs: false` searches them on
+  purpose, and `ignoredDirectories` says what was skipped.
+- **`!` re-includes in `excludePatterns`** (`['**/*.js', '!**/keep.js']`), read
+  the way a glob list is read; the first entry that governs a path wins.
+- **Type filters and real metadata**: `includeFiles` / `includeDirectories`,
+  per-entry `type`, `size` and `modified` (via `lstat` — a symlink is reported as
+  itself, never followed), and `counts`, `filesScanned`, `directoriesScanned`,
+  `skippedExcluded`, `skippedSymlinks` so an empty result can say *why* it is
+  empty.
+- **A Windows bug in the port is fixed**: the relative path was matched with
+  native separators, and `minimatch` treats `\` as an escape character, so a
+  path pattern like `src/**` + `/*.ts` matched nothing on Windows. Matching now
+  happens on POSIX separators on every host (asserted by a test that runs the
+  same patterns everywhere).
+
+**The environment block — the machine, not just its name**
+- New `src/ai/environment-context.ts` turns `node:os` and the process
+  environment into a short bullet list: operating system **and version**, arch,
+  node version, the shell a command will actually run in, the path separator,
+  the line ending, and whether the filesystem is case-sensitive.
+- `PROJECT CONTEXT` (planner assessment + plan prompts) now carries it — the
+  planner writes the commands, so it is the first place a wrong shell shows up —
+  and the **agent system prompt** does too (persona + skills stay budgeted; the
+  block is appended untrimmed and small).
+- Platform-specific guidance is generated per host, not hard-coded: POSIX
+  userland vs `dir`/`type`/`findstr`, **GNU vs BSD** (`sed -i ''`, no `grep -P`
+  on macOS), Windows reserved names, macOS NFD + case-insensitive lookups, WSL
+  (`/mnt/c`) — so "format the disk" style instruction sets stop being a coin
+  flip.
+- Facts are collected through an injectable `collectEnvironmentFacts(env,
+  platform)`, so the Windows/PowerShell/macOS/WSL branches are all tested from a
+  Linux CI runner.
+
+**Verification:** 21 new unit tests (glob semantics, excludes with re-include,
+type filters, truncation vs `totalMatches`, symlink refusal, POSIX matching, and
+the environment facts for every platform) and a new `search` end-to-end scenario
+plus an extended `context` one.
+
+## [27.8.0] — 2026-09-25 — the filesystem set is complete
+
+The last two tools of the MCP reference filesystem server
+(`servers-main/src/filesystem/`) now exist natively, so **every tool that server
+registers has a counterpart here**. Nothing about the port's safety properties
+changed: both go through the same path validation as the rest of the set.
+
+**`read_media_file` — the read that is not text**
+- Images (png, jpg/jpeg, gif, webp, bmp, svg) and audio (mp3, wav, ogg, flac)
+  come back as base64 with their MIME type, and are **attached to the model
+  call** as a real content part (`toModelOutput`: `input_text` + `input_image`
+  on the Responses API), so a vision model can actually look at the file. Every
+  other extension is `application/octet-stream`.
+- Two deliberate deviations from the reference, both about not flooding a run:
+  `maxBytes` (default 10 MiB) refuses an oversized file with `FILE_TOO_LARGE`
+  rather than pushing tens of megabytes into every following model call, and a
+  non-media binary is reported with its metadata but **not attached**
+  (`attachedToModel: false`) — the model sees the type, the size and the path,
+  not the payload.
+- Failures keep the project's contract: `{ success: false, error, code }` on the
+  runtime side (so `describeToolFailure` still sees them) and the same JSON for
+  the model.
+
+**`list_directory_with_sizes` — where the bytes are**
+- Per-entry size and mtime, `sortBy: 'name' | 'size'` (size orders largest
+  first), and the reference's footer: `Total: N files, M directories` plus
+  `Combined size: …`, with a `[DIR]`/`[FILE]` padded rendering in `formatted`.
+- Still `lstat`: a symlink is reported as `[LINK]` and never followed, an
+  unreadable entry carries `unreadable: true` instead of failing the listing —
+  and only regular files carry a size, so the totals and the ordering talk about
+  bytes on disk rather than directory inode sizes.
+
+**Also**
+- `read_file` now refuses `head` together with `tail`
+  (`Cannot specify both head and tail parameters simultaneously.`), matching the
+  reference's `read_text_file` instead of silently returning the head.
+- 17 new unit tests (a parity map asserting every tool the reference registers
+  has a local counterpart, and the reverse — no dead entries) and a new `media`
+  end-to-end scenario that asserts on the wire body the stub received.
+
+## [27.7.0] — 2026-09-25 — batch writing and VS Code-style search
+
+Two tools the filesystem set was still missing: writing a *set* of files in one
+call (scaffolding) and searching content the way an editor does — a pattern for
+the content, a pattern for the paths, every hit on every line.
+
+**`write_multiple_files` — one call, a whole scaffold**
+- `files: [{ path, content }]` (up to 200), parent directories created, every
+  file written through the ported atomic core.
+- **Path problems abort the batch** — if any path escapes the workspace or is
+  listed twice, *nothing* is written and each problem is reported. A
+  half-applied scaffold is worse than none.
+- **Content problems do not** — a file that exists with different content is
+  reported as a `conflict` (with its line of the summary) while the rest of the
+  batch is still written, the way `read_multiple_files` returns what it could
+  read. `overwrite: true` replaces instead.
+- **Identical content is `unchanged`, never a conflict**, so re-running a
+  scaffold is a clean no-op (mtime included). `dryRun: true` previews the same
+  statuses without touching the disk, and the result lists every directory the
+  batch created.
+
+**`search_code` — VS Code "find in files", not a single-pattern grep**
+- A **content** pattern and a **path** pattern: `pathPattern` (regex over the
+  workspace-relative path) plus glob `excludePatterns` answer VS Code's *files
+  to include / exclude*. Both patterns go through the same ReDoS guard
+  (`UNSAFE_REGEX`, `PATTERN_TOO_LONG`, `INVALID_REGEX`).
+- The three toggles: `caseSensitive` (default **false** — the search now ignores
+  case unless asked), `wholeWord` (lookarounds, so a punctuation-led pattern
+  like `\(foo\)` still works — a `\b` guard would silently fail on it) and
+  `literal` (pattern as plain text).
+- **Every occurrence, with its column.** `call(fooBar, fooBar)` is two matches
+  on one line, and the result reports both — a per-line grep reports one.
+- `contextLines` adds the surrounding lines; `maxMatchesPerFile` (default 20)
+  stops one generated file from consuming the budget; the result carries the
+  matched `files` list, a `formatted` `file:line:column: text` rendering (what
+  models read best) and `filesScanned`.
+- Safety unchanged: paths are validated by the ported core, **symlinks are never
+  followed** (counted in `skippedSymlinks`), binary files (`skippedBinary`) and
+  files over `maxFileSizeBytes` (`skippedTooLarge`) are counted instead of
+  polluting the phase-27 `skipped` contract, build/vendor directories are
+  skipped by default, and the engine lives in `src/ai/tools/fs/content-search.ts`
+  next to the other filesystem primitives. `directory_tree`'s excludes now use
+  the same `isExcludedPath` helper, so "exclude node_modules" means one thing.
+
+Authorisation: `write_multiple_files` is in `coder` and `file_management`; the
+new `search_code` surface is available to every persona that already had the
+tool, and the read-only personas still cannot write.
+
+**Tests & docs:** 828 tests green (57 files), 0 tsc errors, and a new `batch` e2e
+scenario (74 committed checks) that scaffolds two files with one call and then
+finds their marker with the path-filtered, context-carrying search — asserting
+the result really reached the next model turn.
+
+## [27.6.0] — 2026-09-25 — the filesystem toolset, ported from the MCP reference server
+
+The runtime could read a file, rewrite it whole, grep it and ask git about it.
+That is not enough to work on a real project: renaming a file, fixing one line
+without re-emitting the file, seeing what a directory contains, or reading five
+files to compare them each had no tool. The **filesystem** capabilities of the
+vendored MCP reference server (`servers-main/src/filesystem/`) are now native
+tools — not a registered MCP server — and the existing three filesystem tools
+were rewritten on the same core, because the point of using that code was its
+path safety.
+
+**Nine new tools** (`registry/tools/*.json`, bound to `--project-root`)
+
+- `edit_file` — line-based edits (`oldText`/`newText`), returning a git-style
+  diff. Exact match first, then a whitespace-tolerant match that shifts the
+  whole replacement by the indentation difference; a non-matching edit is an
+  error, never a silent no-op. `dryRun: true` previews without writing.
+- `read_multiple_files` — one call, per-file results: what could be read is
+  returned, what could not carries its error (a failed file no longer fails the
+  batch).
+- `list_directory` — `[DIR]`/`[FILE]` entries; a symlink is reported as
+  `symlink`, never silently followed.
+- `directory_tree` — recursive JSON tree with glob `excludePatterns` and a
+  `maxDepth` (a `node_modules`-sized tree cannot flood the context).
+- `move_file` — move/rename; both ends validated before anything moves and an
+  existing destination is refused instead of overwritten.
+- `get_file_info`, `create_directory` (idempotent), `search_files` (glob
+  counterpart of `search_code`), `list_allowed_directories`.
+- `read_file` gained `head`/`tail`; every path is now checked by the ported
+  implementation and every tool answers `{ success: false, code }` on refusal.
+
+**The path safety is the reason this port exists** (`src/ai/tools/fs/`)
+
+- Every existing component of a path is resolved through its symlinks and
+  re-checked, so `<root>/link-to-outside/new.txt` is refused *before* anything is
+  created — the previous lexical check plus a best-effort realpath let that
+  through.
+- A Windows drive path on a POSIX host is refused instead of being written as a
+  literal `C:\Users\...` file inside the workspace, and Unicode-equivalent
+  (NFC/NFD) names resolve to the file that exists (ambiguous matches refused).
+- New files are created with `O_EXCL` (a pre-existing symlink is never written
+  through); existing files are replaced through a temp file + `rename` with the
+  original permission bits restored; `move_file` uses `lstat` so an existing
+  symlink at the destination counts as occupied.
+- Allowed directories are a parameter, not module state — two Orchestrators in
+  one process still cannot share a sandbox.
+
+**Authorisation stays explicit:** `coder` gets all 13 tools, `architect` and
+`reviewer` get the read-only subset, and the `file_management`/`code_analysis`
+skills were extended to match — a write tool that a persona does not allow is
+filtered by the Factory and logged as a warning, as before.
+
+**Tests & docs:** 801 tests green (56 files), 0 tsc errors, and a new `files`
+e2e scenario (68 committed checks) that drives `edit_file`, `directory_tree` and
+`move_file` through the real CLI — the edit is asserted to leave the rest of the
+file byte-identical and the tree's JSON result is asserted to reach the next
+model request.
+
+## [27.5.0] — 2026-09-24 — the run says it is working, and the model thinks out loud
+
+Two complaints from a real session, both about **not being able to see what is
+happening**: a long planning call printed nothing at all (three model requests
+went out and the terminal stayed empty — "is it hung?"), and the planner did
+not know where it was running, so it asked *"Which project should be scanned?"*
+until the run gave up with "No plan could be produced after 2 clarification
+round(s)".
+
+**The terminal is never blank while a result is pending**
+- One self-overwriting status line shows a spinner and a message that changes
+  every **3 seconds**, picked at random from the twelve requested texts
+  (*dreaming…*, *Crunching the numbers…*, *Analyzing the data…*,
+  *Generating insights…*, *Processing your request…*, *Thinking deeply…*,
+  *Working on it…*, *Hold tight, almost there…*, *Just a moment, please…*,
+  *Loading the magic…*, *Preparing the response…*, *Hang tight, we're on it…*),
+  never the same one twice in a row. It covers the whole run: planning,
+  clarification, agent turns, acceptance, final review.
+- Every line of real output erases the status line first (one capture point:
+  `out()`), and it pauses for prompts — nothing is ever mangled or duplicated.
+- Terminal-only: without a TTY (pipes, CI, tests, `--json`) nothing is written.
+  `HOTL_NO_ACTIVITY=1` / `HOTL_ACTIVITY=off` turn it off, and
+  `HOTL_ACTIVITY_INTERVAL_MS` changes the rotation (minimum 250 ms).
+
+**The model's thinking, streamed**
+- When thinking is shown, an agent turn is executed with `streamText` and every
+  reasoning part the provider emits is rendered live: italic, violet
+  (`#a78bfa`), prefixed with 💭, indented on the model's own line breaks, and
+  capped at 4000 characters per block so a chatty model cannot flood the
+  terminal. Blocks close on the first answer token, tool call, or step
+  boundary — and always close at the end of the run, so the spinner is never
+  left paused.
+- Providers that answer reasoning in `choices[0].delta.reasoning_content`
+  (OpenAI-compatible gateways; the SDK's chat schema drops the field) are
+  covered through `includeRawChunks`, and native reasoning parts win when both
+  exist, so nothing is printed twice. A failing renderer can never fail a run.
+- `--thinking <auto|on|off>` (default `auto` = only in a terminal),
+  `HOTL_THINKING` / `HOTL_SHOW_THINKING`, and **nothing is persisted** —
+  thinking text never reaches a plan, the observability log or a report, and
+  without a sink the runtime keeps its non-streaming `generateText` path
+  byte-for-byte.
+
+**The planner knows the project it is planning for**
+- Both planning prompts (`assess` and `generatePlan`) now carry a
+  `PROJECT CONTEXT` block: the absolute project root, the platform, that paths
+  are relative to that root and stay inside it, the top-level entries (directories
+  first, heavy ones like `node_modules`/`dist`/`.git` skipped, max 40) and
+  whether a `package.json` is present. A request that only lacks the project,
+  its location or its stack is now explicitly *clear*, so the model no longer
+  spends a clarification round asking for what the CLI already knows.
+
+The e2e stub answers streaming requests with real SSE now (Responses:
+`response.reasoning_summary_text.delta`; Chat Completions:
+`delta.reasoning_content`), and a `THINK:<text>` marker makes it think out loud.
+Two new scenarios: `thinking` proves the reasoning reaches the terminal, is
+styled, is never persisted, stays off outside a terminal, and that a stream
+killed mid-flight still ends the run; `context` reads the planner request the
+stub actually received and proves the PROJECT CONTEXT block is in it.
+758 tests (55 files), e2e 60/60.
+
 ## [27.4.0] — 2026-09-24 — start screen, the `/` menu, and models chosen at runtime
 
 **Interactive mode**

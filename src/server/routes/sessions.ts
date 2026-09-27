@@ -7,13 +7,17 @@
  *   DELETE /api/sessions/:id    → delete
  */
 import { Router } from 'express';
+import { SESSION_LABEL_MAX_CHARS } from '../../ai/runtime/session-limits.js';
+import { canAccessSession, sendSessionForbidden } from '../run-control.js';
 import type { ServerContext } from '../types.js';
 
 export function sessionsRouter(ctx: ServerContext): Router {
   const router = Router();
 
   router.get('/api/sessions', (req, res) => {
-    const ids = ctx.orchestrator.sessionStore.listSessions();
+    const ids = ctx.orchestrator.sessionStore
+      .listSessions()
+      .filter((id) => canAccessSession(ctx, req, id));
     res.json(
       ids.map((id) => {
         const s = ctx.orchestrator.sessionStore.getSession(id);
@@ -37,6 +41,7 @@ export function sessionsRouter(ctx: ServerContext): Router {
       res.status(404).json({ error: `Session "${req.params.id}" not found.` });
       return;
     }
+    if (sendSessionForbidden(ctx, req, res, req.params.id)) return;
     res.json(session);
   });
 
@@ -51,6 +56,7 @@ export function sessionsRouter(ctx: ServerContext): Router {
       res.status(404).json({ error: `Session "${req.params.id}" not found.` });
       return;
     }
+    if (sendSessionForbidden(ctx, req, res, req.params.id)) return;
     const { label } = (req.body ?? {}) as { label?: unknown };
     if (label === undefined || label === null) {
       res.status(400).json({ error: 'Body must include a "label" string (empty clears it).' });
@@ -61,8 +67,8 @@ export function sessionsRouter(ctx: ServerContext): Router {
       return;
     }
     const trimmed = label.trim();
-    if (trimmed.length > 120) {
-      res.status(400).json({ error: '"label" must be at most 120 characters.' });
+    if (trimmed.length > SESSION_LABEL_MAX_CHARS) {
+      res.status(400).json({ error: `"label" must be at most ${SESSION_LABEL_MAX_CHARS} characters.` });
       return;
     }
     const updated = ctx.orchestrator.sessionStore.setLabel(req.params.id, trimmed);
@@ -78,6 +84,7 @@ export function sessionsRouter(ctx: ServerContext): Router {
       res.status(404).json({ error: `Session "${req.params.id}" not found.` });
       return;
     }
+    if (sendSessionForbidden(ctx, req, res, req.params.id)) return;
     ctx.orchestrator.sessionStore.deleteSession(req.params.id);
     // U7 regression: after a delete there is no session (and therefore no
     // label) left behind — the store removes the file, so a re-created id

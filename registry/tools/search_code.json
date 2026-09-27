@@ -1,7 +1,7 @@
 {
   "id": "search_code",
   "name": "Search Code",
-  "description": "Searches for a regex pattern across files in a directory",
+  "description": "Searches file contents VS Code style: content regex + path regex/glob filters, case/word/literal toggles, returns file, line and column",
   "source": "local",
   "modulePath": "./implementations/search-code",
   "category": "filesystem"

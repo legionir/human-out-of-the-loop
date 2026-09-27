@@ -21,8 +21,9 @@
 import path from 'node:path';
 import { Router } from 'express';
 import { McpConnector } from '../../ai/tools/mcp-connector.js';
-import { loadMcpServerConfigs } from '../../ai/tools/mcp-bootstrap.js';
+import { loadLayeredMcpServers, mayConnectMcpServer } from '../../ai/tools/mcp-bootstrap.js';
 import { ToolRegistry } from '../../ai/registries/tool-registry.js';
+import { untrustedProjectMcpMessage } from '../../cli/utils/trust-project.js';
 import type { ServerContext } from '../types.js';
 
 export function registryRouter(ctx: ServerContext): Router {
@@ -92,10 +93,11 @@ export function registryRouter(ctx: ServerContext): Router {
   });
 
   router.get('/api/mcp', (req, res) => {
-    const dir = path.join(ctx.projectRoot, 'registry', 'mcp-servers');
-    const { configs, errors } = loadMcpServerConfigs(dir);
+    // Listing is read-only — include the project layer even when untrusted.
+    // Spawning stays gated on POST /api/mcp/:id/test (A-03).
+    const { servers, errors } = loadLayeredMcpServers(ctx.projectRoot);
     res.json({
-      servers: configs.map((c) => ({
+      servers: servers.map(({ config: c }) => ({
         id: c.id,
         name: c.name,
         transport: c.transport,
@@ -107,11 +109,20 @@ export function registryRouter(ctx: ServerContext): Router {
   });
 
   router.post('/api/mcp/:id/test', async (req, res) => {
-    const dir = path.join(ctx.projectRoot, 'registry', 'mcp-servers');
-    const { configs } = loadMcpServerConfigs(dir);
-    const config = configs.find((c) => c.id === req.params.id);
-    if (!config) {
+    const trusted = ctx.orchestrator.config.trustedProject === true;
+    const found = loadLayeredMcpServers(ctx.projectRoot).servers.find(
+      (s) => s.config.id === req.params.id,
+    );
+    if (!found) {
       res.status(404).json({ ok: false, error: `MCP server "${req.params.id}" not found in registry/mcp-servers.` });
+      return;
+    }
+    const config = found.config;
+    if (!mayConnectMcpServer(found, trusted)) {
+      res.status(403).json({
+        ok: false,
+        error: untrustedProjectMcpMessage(req.params.id),
+      });
       return;
     }
     try {

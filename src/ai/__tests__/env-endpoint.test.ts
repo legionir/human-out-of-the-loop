@@ -51,9 +51,9 @@ describe('envEndpoint', () => {
     });
   });
 
-  it('a base URL alone uses the default model name', () => {
+  it('a base URL alone does not displace the global defaultModel', () => {
     const r = envEndpoint({ HOTL_BASE_URL: 'http://x/v1' }, known);
-    expect(r.config).toMatchObject({ id: 'custom', model: 'gpt-4o' });
+    expect(r).toEqual({});
   });
 });
 
@@ -78,7 +78,7 @@ describe('openai provider — key lookup', () => {
   });
 
   it('says which variables to set when there is no key', () => {
-    expect(() => openaiProviderFactory.create(cfg(), {})).toThrow(/OPENAI_API_KEY \(or HOTL_API_KEY\)/);
+    expect(() => openaiProviderFactory.create(cfg(), {})).toThrow(/HOTL_API_KEY \(OPENAI_API_KEY is not sent to a custom baseURL\)/);
   });
 
   it('builds a Chat Completions model when api=chat', () => {

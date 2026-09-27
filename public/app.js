@@ -3,14 +3,89 @@
  * /api/stream/:planId (SSE).  Upgrade path to React/Next: each
  * function below maps to a component/hook 1:1.
  */
-'use strict';
+import {
+  SSE_EVENT_TYPES,
+  shouldOpenPlanModal,
+  shouldClosePlanModalOnRunning,
+  shouldOpenClarifyModal,
+  isAgentLevelPayload,
+  nextSessionId,
+  formatReviewSummary,
+  errorBubbleText,
+  escapeHtml,
+  renderMarkdown,
+} from './ui-logic.js';
+
+// ─── Auth token (A-01) ───────────────────────────────────────────
+//
+// When the server runs with --token / HOTL_SERVER_TOKEN every /api call needs
+// it.  Open the UI once as `/?token=<t>`: the token moves to sessionStorage
+// and out of the address bar.  A 401 asks for it.
+
+const TOKEN_KEY = 'hotl.token';
+
+function readStoredToken() {
+  try {
+    return sessionStorage.getItem(TOKEN_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function storeToken(token) {
+  try {
+    if (token) sessionStorage.setItem(TOKEN_KEY, token);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* storage unavailable — the token lives for this page only */
+  }
+}
+
+let authToken = readStoredToken();
+{
+  const params = new URLSearchParams(location.search);
+  const fromUrl = params.get('token');
+  if (fromUrl) {
+    authToken = fromUrl;
+    storeToken(fromUrl);
+    params.delete('token');
+    const rest = params.toString();
+    history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`);
+  }
+}
+
+function authHeaders(extra = {}) {
+  return authToken ? { ...extra, Authorization: `Bearer ${authToken}` } : extra;
+}
+
+/** fetch with the bearer token; one prompt-and-retry on 401. */
+async function authedFetch(path, options = {}) {
+  const send = () =>
+    fetch(path, { ...options, headers: authHeaders(options.headers || {}) });
+  let res = await send();
+  if (res.status === 401) {
+    const entered = window.prompt('This server needs an access token:');
+    if (entered && entered.trim()) {
+      authToken = entered.trim();
+      storeToken(authToken);
+      res = await send();
+    }
+  }
+  return res;
+}
+
+/** EventSource URL with the token (EventSource cannot send headers). */
+function streamUrl(url) {
+  if (!authToken) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(authToken)}`;
+}
 
 // ─── Tiny API helper ─────────────────────────────────────────────
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
+  const res = await authedFetch(path, {
     ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
   });
   let body = null;
   try {
@@ -33,6 +108,7 @@ const goalInput = $('#goal-input');
 const runBtn = $('#run-btn');
 const autoConfirmEl = $('#auto-confirm');
 // U3: per-run model and advanced execution options
+const runModeEl = $('#run-mode');
 const runModelEl = $('#run-model');
 const runTimeoutEl = $('#run-timeout');
 const runMaxStepsEl = $('#run-max-steps');
@@ -54,6 +130,7 @@ const planFeasibilityEl = $('#plan-feasibility');
 const planDecisionRow = $('#plan-decision-row');
 const planPreviewRow = $('#plan-preview-row');
 const previewCloseBtn = $('#preview-close-btn');
+const previewRunBtn = $('#preview-run-btn');
 // U5: clarification modal (planner questions during planning)
 const clarifyModalEl = $('#clarify-modal');
 const clarifyQuestionsEl = $('#clarify-questions');
@@ -86,57 +163,12 @@ const state = {
   modalClarify: false,
   usageTimer: null,
   logEs: null,
+  lastPreviewId: null,
+  lastPreviewMessage: null,
 };
 
 // ─── Utilities ───────────────────────────────────────────────────
-
-function escapeHtml(text) {
-  return String(text)
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#39;');
-}
-
-/**
- * Minimal, safe markdown rendering (HTML is escaped FIRST, then a
- * small subset is applied): fenced code, inline code, bold, italic,
- * headings, lists, paragraphs.
- */
-function renderMarkdown(text) {
-  const escaped = escapeHtml(text);
-  const parts = escaped.split(/```/);
-  let html = '';
-  for (let i = 0; i < parts.length; i++) {
-    if (i % 2 === 1) {
-      html += `<pre class="code-block"><code>${parts[i].replace(/^\n/, '').replace(/\n$/, '')}</code></pre>`;
-      continue;
-    }
-    const lines = parts[i].split('\n');
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed === '') continue;
-      const inline = (s) =>
-        s
-          .replaceAll(/`([^`]+)`/g, '<code>$1</code>')
-          .replaceAll(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-          .replaceAll(/\*([^*]+)\*/g, '<em>$1</em>');
-      const h = /^(#{1,4})\s+(.*)$/.exec(trimmed);
-      if (h) {
-        const level = Math.min(h[1].length + 2, 6); // # → h3 in this context
-        html += `<h${level}>${inline(h[2])}</h${level}>`;
-      } else if (/^[-*]\s+/.test(trimmed)) {
-        html += `<li>${inline(trimmed.replace(/^[-*]\s+/, ''))}</li>`;
-      } else if (/^─+\s*$/.test(trimmed) || /^═+\s*$/.test(trimmed)) {
-        html += '<hr />';
-      } else {
-        html += `<p>${inline(line)}</p>`;
-      }
-    }
-  }
-  return html;
-}
+// escapeHtml / renderMarkdown live in ui-logic.js (K-08: one encoder).
 
 function showToast(message, isError = true) {
   toastEl.textContent = message;
@@ -248,7 +280,9 @@ async function renderInteractions() {
     const outcome = interaction.outcome === 'pending' ? 'working…' : interaction.outcome;
     assistantEl.querySelector('.bubble-meta').textContent = outcome;
     if (interaction.reviewSummary) {
-      assistantEl.querySelector('.bubble-body').innerHTML = renderMarkdown(interaction.reviewSummary);
+      assistantEl.querySelector('.bubble-body').innerHTML = renderMarkdown(
+        formatReviewSummary(interaction.reviewSummary),
+      );
     }
   }
   scrollChat();
@@ -270,7 +304,7 @@ function appendAssistantBubble(kind) {
   div.className = 'msg assistant';
   div.innerHTML = `
     <div class="bubble">
-      <div class="bubble-meta">${kind || 'working…'}</div>
+      <div class="bubble-meta">${escapeHtml(kind || 'working…')}</div>
       <div class="bubble-body"></div>
       <div class="timeline"></div>
     </div>`;
@@ -285,14 +319,14 @@ function scrollChat() {
 
 // ─── Run lifecycle ───────────────────────────────────────────────
 
-async function startRun() {
-  const message = goalInput.value.trim();
+async function startRun(overrides = {}) {
+  const message = (overrides.message ?? goalInput.value).trim();
   if (!message) {
     showToast('Type a goal first.');
     return;
   }
   runBtn.disabled = true;
-  goalInput.value = '';
+  if (!overrides.message) goalInput.value = '';
   appendUserBubble(message);
   const assistantEl = appendAssistantBubble('planning…');
   assistantEl.querySelector('.bubble-meta').textContent = 'planning…';
@@ -302,6 +336,7 @@ async function startRun() {
   const timeoutMs = runTimeoutEl.value === '' ? undefined : Number(runTimeoutEl.value);
   const maxSteps = runMaxStepsEl.value === '' ? undefined : Number(runMaxStepsEl.value);
   const maxReplans = runMaxReplansEl.value === '' ? undefined : Number(runMaxReplansEl.value);
+  const mode = runModeEl && runModeEl.value ? runModeEl.value : 'auto';
 
   let accepted;
   try {
@@ -313,12 +348,16 @@ async function startRun() {
         ...(state.sessionId ? { sessionId: state.sessionId } : {}),
         confirm: autoConfirmEl.checked,
         ...(model ? { model } : {}),
+        ...(mode ? { mode } : {}),
+        ...(overrides.previewId ? { previewId: overrides.previewId } : {}),
         ...(timeoutMs !== undefined ? { timeoutMs } : {}),
         ...(maxSteps !== undefined ? { maxSteps } : {}),
         ...(maxReplans !== undefined ? { maxReplans } : {}),
       }),
     });
   } catch (err) {
+    assistantEl.querySelector('.bubble-meta').textContent = 'error';
+    assistantEl.querySelector('.bubble-body').textContent = errorBubbleText(err.message);
     finishRunUi();
     showToast(`Run failed: ${err.message}`);
     return;
@@ -335,6 +374,8 @@ async function startRun() {
     model,
     state: 'planning',
     clarifyOpenFor: null,
+    clarifySubmittedFor: null,
+    planModalOpenFor: null,
     done: false,
   };
   showRunControls('planning…');
@@ -370,12 +411,25 @@ function pollRun() {
         showRunControls('awaiting your confirmation');
         openPlanModal(run);
       } else if (s.state === 'running') {
-        closePlanModal();
+        if (
+          shouldClosePlanModalOnRunning({
+            modalPreview: state.modalPreview,
+            modalPlanId: state.modalPlanId,
+            runPlanId: run.planId,
+          })
+        ) {
+          closePlanModal();
+        }
         showRunControls('running…');
       } else if (s.state === 'done') {
         finishRun(s, assistantElFor(run));
       } else if (s.state === 'error') {
-        finishRunUi();
+        const el = assistantElFor(run);
+        if (el) {
+          el.querySelector('.bubble-meta').textContent = 'error';
+          el.querySelector('.bubble-body').textContent = errorBubbleText(s.error || 'run failed');
+        }
+        finishRunUi({ clearRun: false });
         showToast(`Run error: ${s.error}`);
         run.done = true;
         return;
@@ -492,24 +546,99 @@ async function loadServerUsage() {
   }
 }
 
-/** U5: run-scoped SSE channel — clarification arrives before any plan exists. */
-function connectRunStream(run) {
-  if (run.runEs) return;
-  const es = new EventSource(`/api/stream/${encodeURIComponent(run.runId)}`);
-  run.runEs = es;
-  es.addEventListener('clarification', (e) => {
-    if (state.run !== run) return;
-    let d = {};
-    try {
-      d = JSON.parse(e.data);
-    } catch {
-      /* ignore malformed frame */
-    }
-    openClarifyModal(run, d.questions || [], d.attempt || 1);
-  });
+function parseSseData(e) {
+  try {
+    return JSON.parse(e.data);
+  } catch {
+    return { message: e.data };
+  }
+}
+
+/** H-04: every server event name has a listener; agent-level step rows are skipped. */
+function attachProgressListeners(es, run) {
+  const timeline = run.assistantEl.querySelector('.timeline');
+  const addLine = (cls, text) => {
+    const div = document.createElement('div');
+    div.className = `tl ${cls}`;
+    div.textContent = text;
+    timeline.appendChild(div);
+    scrollChat();
+  };
+
+  for (const type of SSE_EVENT_TYPES) {
+    es.addEventListener(type, (e) => {
+      if (state.run && state.run.runId !== run.runId) return;
+      const d = parseSseData(e);
+      if (type === 'clarification') {
+        openClarifyModal(run, d.questions || [], d.attempt || 1);
+        return;
+      }
+      if (type === 'awaiting-confirmation') {
+        if (d.planId) run.planId = d.planId;
+        openPlanModal(run);
+        return;
+      }
+      if (type === 'run:done') return;
+      if (isAgentLevelPayload(d) && String(type).startsWith('plan:step-')) return;
+      const msg = d.message ?? e.data;
+      if (type === 'plan:started') {
+        run.assistantEl.querySelector('.bubble-meta').textContent = 'running…';
+        addLine('started', '▶ plan started');
+        if (d.message) addLine('info', d.message);
+        return;
+      }
+      if (type === 'task:tool-call') {
+        addLine('tool', `· tool: ${d.toolName || 'call'}`);
+        return;
+      }
+      if (type === 'task:tool-error') {
+        addLine('failed', `✖ tool error: ${msg}`);
+        return;
+      }
+      if (type === 'plan:replanning' || type === 'plan:replanned') {
+        addLine('replan', `↻ ${msg}`);
+        return;
+      }
+      if (type === 'plan:cancelled') {
+        addLine('cancelled', `🛑 ${msg}`);
+        return;
+      }
+      if (type === 'plan:completed') {
+        addLine('done', `✅ ${msg}`);
+        return;
+      }
+      if (type === 'plan:failed' || type === 'plan:error') {
+        addLine('failed', `❌ ${msg}`);
+        return;
+      }
+      if (type === 'plan:step-completed') {
+        addLine('done', `✔ ${msg}`);
+        return;
+      }
+      if (type === 'plan:step-failed') {
+        addLine('failed', `✖ ${msg}`);
+        return;
+      }
+      if (type === 'plan:step-started') {
+        addLine('started', `▶ ${msg}`);
+        return;
+      }
+      if (type === 'task:status') {
+        addLine('info', msg);
+      }
+    });
+  }
   es.onerror = () => {
     // EventSource retries; the poller converges on the run state regardless.
   };
+}
+
+/** U5: run-scoped SSE channel — clarification arrives before any plan exists. */
+function connectRunStream(run) {
+  if (run.runEs) return;
+  const es = new EventSource(streamUrl(`/api/stream/${encodeURIComponent(run.runId)}`));
+  run.runEs = es;
+  attachProgressListeners(es, run);
 }
 
 /**
@@ -519,8 +648,7 @@ function connectRunStream(run) {
  */
 function openClarifyModal(run, questions, round) {
   if (!questions.length) return;
-  // One modal per round: ignore duplicate SSE + polling notifications.
-  if (run.clarifyOpenFor === round && !clarifyModalEl.classList.contains('hidden')) return;
+  if (!shouldOpenClarifyModal(run, round)) return;
   run.clarifyOpenFor = round;
   state.modalClarify = true;
   clarifyRoundEl.textContent = `Round ${round}`;
@@ -564,6 +692,7 @@ async function submitClarification(decline) {
       method: 'POST',
       body: JSON.stringify(decline ? { decline: true } : { answers }),
     });
+    run.clarifySubmittedFor = roundFromRun(run);
     closeClarifyModal();
     const timeline = run.assistantEl.querySelector('.timeline');
     if (timeline) {
@@ -584,83 +713,35 @@ async function submitClarification(decline) {
   }
 }
 
+function roundFromRun(run) {
+  return run.clarifyOpenFor ?? null;
+}
+
 function connectStream(run) {
   if (run.es || !run.planId) return;
-  const es = new EventSource(`/api/stream/${encodeURIComponent(run.planId)}`);
+  // Dual-emit already fans plan events onto the run channel (H-02).
+  if (run.runEs) return;
+  const es = new EventSource(streamUrl(`/api/stream/${encodeURIComponent(run.planId)}`));
   run.es = es;
-
-  const timeline = run.assistantEl.querySelector('.timeline');
-  const addLine = (cls, text) => {
-    const div = document.createElement('div');
-    div.className = `tl ${cls}`;
-    div.textContent = text;
-    timeline.appendChild(div);
-    scrollChat();
-  };
-
-  es.addEventListener('plan:started', (e) => {
-    run.assistantEl.querySelector('.bubble-meta').textContent = 'running…';
-    addLine('started', `▶ plan started`);
-    try {
-      const d = JSON.parse(e.data);
-      if (d.message) addLine('info', d.message);
-    } catch { /* ignore */ }
-  });
-  es.addEventListener('plan:step-started', (e) => {
-    let msg = e.data;
-    try { msg = JSON.parse(e.data).message ?? e.data; } catch { /* raw */ }
-    addLine('started', `▶ ${msg}`);
-  });
-  es.addEventListener('plan:step-completed', (e) => {
-    let msg = e.data;
-    try { msg = JSON.parse(e.data).message ?? e.data; } catch { /* raw */ }
-    addLine('done', `✔ ${msg}`);
-  });
-  es.addEventListener('plan:step-failed', (e) => {
-    let msg = e.data;
-    try { msg = JSON.parse(e.data).message ?? e.data; } catch { /* raw */ }
-    addLine('failed', `✖ ${msg}`);
-  });
-  es.addEventListener('plan:replanning', (e) => {
-    let msg = e.data;
-    try { msg = JSON.parse(e.data).message ?? e.data; } catch { /* raw */ }
-    addLine('replan', `↻ ${msg}`);
-  });
-  es.addEventListener('task:tool-call', (e) => {
-    let tool = '';
-    try { tool = JSON.parse(e.data).toolName ?? ''; } catch { /* raw */ }
-    addLine('tool', `· tool: ${tool || 'call'}`);
-  });
-  es.addEventListener('plan:completed', (e) => {
-    let msg = e.data;
-    try { msg = JSON.parse(e.data).message ?? e.data; } catch { /* raw */ }
-    addLine('done', `✅ ${msg}`);
-  });
-  es.addEventListener('plan:failed', (e) => {
-    let msg = e.data;
-    try { msg = JSON.parse(e.data).message ?? e.data; } catch { /* raw */ }
-    addLine('failed', `❌ ${msg}`);
-  });
-  es.addEventListener('plan:cancelled', (e) => {
-    let msg = e.data;
-    try { msg = JSON.parse(e.data).message ?? e.data; } catch { /* raw */ }
-    addLine('cancelled', `🛑 ${msg}`);
-  });
-  es.addEventListener('run:done', () => {
-    // The poller picks up the final report; nothing to do here.
-  });
-  es.onerror = () => {
-    // EventSource retries automatically; if the stream is gone the
-    // poller still converges on the run's terminal state.
-  };
+  attachProgressListeners(es, run);
 }
 
 async function finishRun(s, assistantEl) {
   const run = state.run;
   if (run && run.done) return;
   if (run) run.done = true;
-  finishRunUi();
-  closePlanModal();
+  state.sessionId = nextSessionId(s, state.sessionId);
+  // H-12: load the final task table while `state.run` is still this run.
+  finishRunUi({ clearRun: false });
+  if (
+    shouldClosePlanModalOnRunning({
+      modalPreview: state.modalPreview,
+      modalPlanId: state.modalPlanId,
+      runPlanId: run && run.planId,
+    })
+  ) {
+    closePlanModal();
+  }
 
   const meta = assistantEl.querySelector('.bubble-meta');
   const body = assistantEl.querySelector('.bubble-body');
@@ -671,19 +752,26 @@ async function finishRun(s, assistantEl) {
   loadSessions(state.sessionId);
 }
 
-function finishRunUi() {
+function finishRunUi({ clearRun = true } = {}) {
   runBtn.disabled = false;
   hideRunControls();
   closeClarifyModal();
-  // U6: final task table stays on screen; the server-wide counter refreshes.
-  void loadTasks();
-  void loadServerUsage();
   if (state.run) {
     clearTimeout(state.run.pollTimer);
-    if (state.run.es) state.run.es.close();
-    if (state.run.runEs) state.run.runEs.close();
-    state.run = null;
+    state.run.pollTimer = null;
+    if (state.run.es) {
+      state.run.es.close();
+      state.run.es = null;
+    }
+    if (state.run.runEs) {
+      state.run.runEs.close();
+      state.run.runEs = null;
+    }
   }
+  // U6 / H-12: final task table stays on screen; fetch before dropping run.
+  void loadTasks();
+  void loadServerUsage();
+  if (clearRun) state.run = null;
 }
 
 function stopRun() {
@@ -713,7 +801,12 @@ async function cancelRun() {
     return;
   }
   if (!run.planId) {
-    showToast('Nothing to cancel yet.');
+    try {
+      await api(`/api/runs/${encodeURIComponent(run.runId)}/cancel`, { method: 'POST' });
+      showRunControls('cancelling…');
+    } catch (err) {
+      showToast(`Cancel failed: ${err.message}`);
+    }
     return;
   }
   try {
@@ -731,6 +824,8 @@ async function openPlanModal(run) {
   // rendered directly (there is no stored plan id to fetch) and the modal
   // is read-only.
   const isPreview = run.preview === true;
+  if (!isPreview && !shouldOpenPlanModal(run)) return;
+  if (!isPreview) run.planModalOpenFor = run.planId;
   state.modalPreview = isPreview;
   state.modalPlanId = isPreview ? null : run.planId;
   planModelEl.textContent = run.model
@@ -805,10 +900,14 @@ async function startPreview() {
   }
   previewBtn.disabled = true;
   try {
-    const res = await fetch('/api/preview', {
+    const res = await authedFetch('/api/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, ...(runModelEl.value ? { model: runModelEl.value } : {}) }),
+      body: JSON.stringify({
+        message,
+        ...(runModelEl.value ? { model: runModelEl.value } : {}),
+        ...(runModeEl && runModeEl.value ? { mode: runModeEl.value } : {}),
+      }),
     });
     const body = await res.json().catch(() => null);
     // 400 + questions: the planner needs clarification before planning.
@@ -822,9 +921,22 @@ async function startPreview() {
       showToast('Preview: clarification needed — see chat.');
       return;
     }
-    if (!res.ok || !body) {
-      throw new Error((body && body.error) || `${res.status} ${res.statusText}`);
+    if (body && body.answer) {
+      const el = appendAssistantBubble('chat');
+      el.querySelector('.bubble-meta').textContent = 'answer';
+      el.querySelector('.bubble-body').innerHTML = renderMarkdown(body.answer);
+      showToast('Preview: chat answer — nothing was planned.', false);
+      return;
     }
+    if (!res.ok || !body) {
+      const errText = (body && body.error) || `${res.status} ${res.statusText}`;
+      const el = appendAssistantBubble('error');
+      el.querySelector('.bubble-body').textContent = errorBubbleText(errText);
+      throw new Error(errText);
+    }
+    state.lastPreviewId = body.previewId || null;
+    state.lastPreviewMessage = message;
+    if (previewRunBtn) previewRunBtn.disabled = !state.lastPreviewId;
     openPlanModal({
       preview: true,
       plan: body.plan || null,
@@ -907,6 +1019,16 @@ async function decidePlan(confirmed) {
 runBtn.addEventListener('click', () => void startRun());
 previewBtn.addEventListener('click', () => void startPreview());
 previewCloseBtn.addEventListener('click', closePlanModal);
+if (previewRunBtn) {
+  previewRunBtn.addEventListener('click', () => {
+    if (!state.lastPreviewId || !state.lastPreviewMessage) {
+      showToast('Preview this plan first.');
+      return;
+    }
+    closePlanModal();
+    void startRun({ message: state.lastPreviewMessage, previewId: state.lastPreviewId });
+  });
+}
 goalInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
     e.preventDefault();
@@ -961,7 +1083,7 @@ function toggleLogFollow() {
   const url = planFilter
     ? `/api/observability/stream?planId=${encodeURIComponent(planFilter)}`
     : '/api/observability/stream';
-  const es = new EventSource(url);
+  const es = new EventSource(streamUrl(url));
   state.logEs = es;
   logFollowBtn.textContent = 'Stop';
   logBodyEl.textContent = planFilter ? `— following ${planFilter} —\n` : '— following —\n';
@@ -1191,6 +1313,9 @@ api('/api/health')
     // registry's first item is the default. Preserve a user's selection
     // if they changed it before this request completed.
     state.defaultModel = h.model;
+    if (runModeEl && h.mode && !runModeEl.dataset.userSet) {
+      runModeEl.value = h.mode;
+    }
     renderModelPicker();
   })
   .catch(() => {

@@ -6,5 +6,6 @@
     "temperature": 0.2,
     "maxTokens": 4096
   },
-  "description": "OpenAI GPT-4o — primary model for complex reasoning"
+  "description": "OpenAI GPT-4o — primary model for complex reasoning",
+  "pricing": { "inputUsdPerMTok": 2.5, "outputUsdPerMTok": 10 }
 }

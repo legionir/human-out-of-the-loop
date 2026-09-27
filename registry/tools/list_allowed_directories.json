@@ -1,0 +1,8 @@
+{
+  "id": "list_allowed_directories",
+  "name": "List Allowed Directories",
+  "description": "Lists the directories the filesystem tools may access",
+  "source": "local",
+  "modulePath": "./implementations/list-allowed-directories",
+  "category": "filesystem"
+}

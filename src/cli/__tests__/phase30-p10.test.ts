@@ -93,7 +93,7 @@ describe('Phase 30 / P10 — hootl tools --mcp', () => {
       JSON.stringify({ id: 'broken', name: 'Broken', transport: 'stdio', command: 'node', args: ['/nonexistent/path.mjs'], connectTimeoutMs: 1500 })
     );
 
-    const { code, out } = await runCli(['tools', '--mcp', '--project-root', projectRoot]);
+    const { code, out } = await runCli(['tools', '--mcp', '--trust-project', '--project-root', projectRoot]);
 
     expect(code).toBe(1); // one server failed
     expect(out).toContain('✖ broken (stdio)');
@@ -124,7 +124,7 @@ describe('Phase 30 / P10 — hootl tools --mcp', () => {
       JSON.stringify({ id: 'broken', name: 'Broken', transport: 'stdio', command: 'definitely-not-a-real-binary', connectTimeoutMs: 1500 })
     );
 
-    const { out } = await runCli(['tools', '--mcp', '--json', '--project-root', projectRoot]);
+    const { out } = await runCli(['tools', '--mcp', '--json', '--trust-project', '--project-root', projectRoot]);
 
     const parsed = JSON.parse(out) as Array<{ id: string }>;
     expect(parsed.some((t) => t.id === 'read_file')).toBe(true);

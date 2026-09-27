@@ -27,7 +27,7 @@
     "id": "planner",
     "name": "Planner Agent",
     "personaId": "planner",
-    "skillIds": [],
+    "skillIds": ["task_decomposition"],
     "modelId": "gpt-4o",
     "description": "Task decomposition and planning agent"
   }

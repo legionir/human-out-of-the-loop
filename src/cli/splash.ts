@@ -52,13 +52,42 @@ export function renderSplash(opts: SplashOptions = {}): string {
   return '\x1b[2J\x1b[3J\x1b[H' + '\n'.repeat(top) + body.join('\n') + '\n';
 }
 
-/** Show the splash for `ms`, then clear the screen again. */
+/** Show the splash for `ms` (or until any key), then clear the screen again. */
 export async function showSplash(
   output: NodeJS.WriteStream,
-  opts: { ms?: number; subtitle?: string } = {},
+  opts: { ms?: number; subtitle?: string; input?: NodeJS.ReadStream } = {},
 ): Promise<void> {
   output.write('\x1b[?25l'); // hide the cursor while the splash is up
   output.write(renderSplash({ columns: output.columns, rows: output.rows, subtitle: opts.subtitle }));
-  await new Promise((resolve) => setTimeout(resolve, opts.ms ?? 3000));
+  const input = opts.input ?? (process.stdin as NodeJS.ReadStream);
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      input.removeListener('data', finish);
+      if (wasRaw === false && input.isTTY) {
+        try {
+          input.setRawMode(false);
+        } catch {
+          // ignore
+        }
+      }
+      resolve();
+    };
+    const timer = setTimeout(finish, opts.ms ?? 3000);
+    let wasRaw: boolean | undefined;
+    if (typeof input.setRawMode === 'function' && input.isTTY) {
+      wasRaw = input.isRaw;
+      try {
+        input.setRawMode(true);
+      } catch {
+        wasRaw = undefined;
+      }
+      input.resume();
+    }
+    input.once('data', finish);
+  });
   output.write('\x1b[2J\x1b[3J\x1b[H\x1b[?25h');
 }

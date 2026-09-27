@@ -1,0 +1,526 @@
+id	path	lines	type	lang	module	tier	generated	test	role	depth_required	depth_done	ranges_read	status	workflows	notes
+FILE-00329	src/ai/agents/agent-factory.ts	452	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00330	src/ai/agents/index.ts	10	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00331	src/ai/env.ts	31	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00332	src/ai/environment-context.ts	227	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00333	src/ai/index.ts	10	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00334	src/ai/language.ts	152	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00335	src/ai/models/env-endpoint.ts	141	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00336	src/ai/models/index.ts	6	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00337	src/ai/models/list-models.ts	139	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3	L2+L3	1-139	DONE	WF-0022,WF-0041	B01
+FILE-00338	src/ai/models/providers/anthropic-provider.ts	53	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00339	src/ai/models/providers/index.ts	3	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00340	src/ai/models/providers/local-provider.ts	56	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00341	src/ai/models/providers/openai-provider.ts	87	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00342	src/ai/modes.ts	42	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00343	src/ai/orchestrator.ts	1609	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3	L2+L3	1389-1609 (+1-1209 prior session)	DONE	WF-0001,WF-0056..0060	B01
+FILE-00344	src/ai/personas/index.ts	1	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00345	src/ai/planning/cycle-detector.ts	118	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00346	src/ai/planning/feasibility-gate.ts	123	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00347	src/ai/planning/index.ts	15	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00348	src/ai/planning/plan-confirmation.ts	127	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00349	src/ai/planning/plan-generator.ts	84	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00350	src/ai/planning/planner.ts	791	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00351	src/ai/registries/agent-registry.ts	195	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00352	src/ai/registries/base-registry.ts	155	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00353	src/ai/registries/index.ts	32	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00354	src/ai/registries/layout.ts	130	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00355	src/ai/registries/loader.ts	124	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00356	src/ai/registries/model-registry.ts	231	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00357	src/ai/registries/persona-registry.ts	72	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00358	src/ai/registries/skill-registry.ts	224	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00359	src/ai/registries/tool-registry.ts	150	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00360	src/ai/registries/trust.ts	48	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00361	src/ai/runtime/acceptance-checker.ts	177	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00362	src/ai/runtime/agent-runtime-retry.ts	103	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00363	src/ai/runtime/agent-runtime.ts	899	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00364	src/ai/runtime/atomic-write.ts	70	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00365	src/ai/runtime/cancellation-manager.ts	137	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00366	src/ai/runtime/delegation-guard.ts	97	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00367	src/ai/runtime/event-bus.ts	245	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00368	src/ai/runtime/file-lock.ts	257	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00369	src/ai/runtime/final-reviewer.ts	364	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00370	src/ai/runtime/index.ts	101	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00371	src/ai/runtime/journal.ts	563	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00372	src/ai/runtime/llm-timeout.ts	82	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00373	src/ai/runtime/llm-usage.ts	57	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00374	src/ai/runtime/observability-logger.ts	564	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00375	src/ai/runtime/plan-runtime.ts	741	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00376	src/ai/runtime/plan-store.ts	182	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00377	src/ai/runtime/rate-limiter.ts	175	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00378	src/ai/runtime/replan-merge.ts	89	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B01
+FILE-00379	src/ai/runtime/review-formatter.ts	106	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00380	src/ai/runtime/secret-scrub.ts	114	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00381	src/ai/runtime/session-store.ts	298	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3	L2+L3	1-240 symbols	DONE	ENT-0002	B02
+FILE-00382	src/ai/runtime/step-events.ts	49	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00383	src/ai/runtime/streaming-manager.ts	277	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00384	src/ai/runtime/task-runtime.ts	496	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3	L2+L3	155-470 symbols	DONE	ENT-0004	B02
+FILE-00385	src/ai/runtime/thought-stream.ts	202	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00386	src/ai/runtime/tool-call-log.ts	322	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00387	src/ai/runtime/usage-aggregator.ts	181	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00388	src/ai/schemas/agent-definition.ts	25	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00389	src/ai/schemas/index.ts	50	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00390	src/ai/schemas/mcp-server.ts	48	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00391	src/ai/schemas/model-config.ts	18	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00392	src/ai/schemas/persona.ts	36	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00393	src/ai/schemas/plan.ts	235	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3	L2+L3	1-110	DONE	entities ENT-0001	B02
+FILE-00394	src/ai/schemas/review.ts	89	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00395	src/ai/schemas/session.ts	70	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00396	src/ai/schemas/skill.ts	29	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00397	src/ai/schemas/task.ts	82	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00398	src/ai/schemas/tool-definition.ts	35	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00399	src/ai/skills/index.ts	7	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00400	src/ai/tools/bootstrap.ts	86	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00401	src/ai/tools/catalog-bootstrap.ts	66	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00402	src/ai/tools/delegate-bootstrap.ts	29	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00403	src/ai/tools/fs/content-search.ts	313	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00404	src/ai/tools/fs/index.ts	47	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00405	src/ai/tools/fs/lib.ts	847	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00406	src/ai/tools/fs/path-utils.ts	115	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00407	src/ai/tools/fs/path-validation.ts	90	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00408	src/ai/tools/fs/roots.ts	74	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00409	src/ai/tools/git/git-runner.ts	454	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00410	src/ai/tools/git/git-safe.ts	218	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00411	src/ai/tools/git/parse.ts	472	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00412	src/ai/tools/git/pr-backend.ts	550	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00413	src/ai/tools/implementations/convert-time.ts	138	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00414	src/ai/tools/implementations/create-directory.ts	68	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00415	src/ai/tools/implementations/delegate-task.ts	250	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00416	src/ai/tools/implementations/directory-tree.ts	120	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00417	src/ai/tools/implementations/edit-file.ts	86	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00418	src/ai/tools/implementations/fetch.ts	706	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00419	src/ai/tools/implementations/get-current-time.ts	138	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00420	src/ai/tools/implementations/get-file-info.ts	62	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00421	src/ai/tools/implementations/git-add.ts	149	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00422	src/ai/tools/implementations/git-branch-list.ts	177	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00423	src/ai/tools/implementations/git-branch-write.ts	288	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00424	src/ai/tools/implementations/git-commit.ts	292	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00425	src/ai/tools/implementations/git-diff.ts	192	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00426	src/ai/tools/implementations/git-log.ts	202	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00427	src/ai/tools/implementations/git-pr.ts	362	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00428	src/ai/tools/implementations/git-push.ts	203	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B02
+FILE-00429	src/ai/tools/implementations/git-remote-list.ts	98	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00430	src/ai/tools/implementations/git-reset.ts	228	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00431	src/ai/tools/implementations/git-show.ts	172	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00432	src/ai/tools/implementations/git-stash.ts	185	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00433	src/ai/tools/implementations/git-status.ts	153	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00434	src/ai/tools/implementations/index.ts	75	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00435	src/ai/tools/implementations/list-allowed-directories.ts	49	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00436	src/ai/tools/implementations/list-directory-with-sizes.ts	164	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00437	src/ai/tools/implementations/list-directory.ts	88	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00438	src/ai/tools/implementations/list-personas.ts	32	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00439	src/ai/tools/implementations/list-skills.ts	34	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00440	src/ai/tools/implementations/list-tools.ts	44	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00441	src/ai/tools/implementations/memory-tools.ts	368	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00442	src/ai/tools/implementations/move-file.ts	88	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00443	src/ai/tools/implementations/path-security.ts	211	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00444	src/ai/tools/implementations/read-file.ts	107	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00445	src/ai/tools/implementations/read-media-file.ts	179	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00446	src/ai/tools/implementations/read-multiple-files.ts	73	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00447	src/ai/tools/implementations/regex-guard.ts	113	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00448	src/ai/tools/implementations/search-code.ts	219	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00449	src/ai/tools/implementations/search-files.ts	206	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00450	src/ai/tools/implementations/sequential-thinking.ts	287	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00451	src/ai/tools/implementations/session-tools.ts	41	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00452	src/ai/tools/implementations/task-control-tools.ts	244	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00453	src/ai/tools/implementations/write-file.ts	91	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00454	src/ai/tools/implementations/write-multiple-files.ts	292	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00455	src/ai/tools/index.ts	23	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00456	src/ai/tools/local-tools.ts	128	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00457	src/ai/tools/mcp-bootstrap.ts	94	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3	L2+L3	1-100	DONE	WF-0026,WF-0038	B03
+FILE-00458	src/ai/tools/mcp-connector.ts	437	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3	L2+L3	140-200,283-340 (+ prior full read)	DONE	WF-0027,WF-0039,WF-0044	B03
+FILE-00459	src/ai/tools/mcp-fetch.ts	122	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00460	src/ai/tools/mcp-stdio-transport.ts	249	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00461	src/ai/tools/memory/graph.ts	332	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00462	src/ai/tools/net/html-to-markdown.ts	524	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00463	src/ai/tools/net/robots.ts	209	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00464	src/ai/tools/net/url-safety.ts	275	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00465	src/ai/tools/read-only.ts	47	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00466	src/ai/tools/task-control-bootstrap.ts	96	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00467	src/ai/tools/time/tz.ts	253	ts	ts	ai-runtime	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00478	src/cli/commands/journal.ts	257	ts	ts	cli	T1	no	no	runtime-source	L2+L3	L2+L3	1-257	DONE	WF-0048	B03
+FILE-00479	src/cli/commands/logs.ts	170	ts	ts	cli	T1	no	no	runtime-source	L2+L3	L2+L3	1-170	DONE	WF-0049,WF-0012	B03
+FILE-00480	src/cli/commands/mcp.ts	105	ts	ts	cli	T1	no	no	runtime-source	L2+L3	L2+L3	1-105	DONE	WF-0038,WF-0039	B03
+FILE-00481	src/cli/commands/plans.ts	206	ts	ts	cli	T1	no	no	runtime-source	L2+L3	L2+L3	1-206	DONE	WF-0034..0037	B03
+FILE-00482	src/cli/commands/registry.ts	245	ts	ts	cli	T1	no	no	runtime-source	L2+L3	L2+L3	1-245	DONE	WF-0041..0044	B03
+FILE-00483	src/cli/commands/run.ts	453	ts	ts	cli	T1	no	no	runtime-source	L2+L3	L2+L3	1-453	DONE	WF-0001	B03
+FILE-00484	src/cli/commands/serve.ts	185	ts	ts	cli	T1	no	no	runtime-source	L2+L3	L2+L3	1-185	DONE	WF-0040	B03
+FILE-00485	src/cli/commands/sessions.ts	122	ts	ts	cli	T1	no	no	runtime-source	L2+L3	L2+L3	1-122	DONE	WF-0030..0033	B03
+FILE-00486	src/cli/commands/tasks.ts	232	ts	ts	cli	T1	no	no	runtime-source	L2+L3	L2+L3	1-232	DONE	WF-0046,WF-0047	B03
+FILE-00487	src/cli/commands/usage.ts	177	ts	ts	cli	T1	no	no	runtime-source	L2+L3	L2+L3	1-177	DONE	WF-0045	B03
+FILE-00488	src/cli/line-editor.ts	269	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B03
+FILE-00489	src/cli/repl.ts	673	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00490	src/cli/splash.ts	64	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00491	src/cli/utils/activity.ts	252	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00492	src/cli/utils/config.ts	105	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00493	src/cli/utils/confirm.ts	123	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00494	src/cli/utils/log-reader.ts	91	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00495	src/cli/utils/mode-prefix.ts	102	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00496	src/cli/utils/output.ts	61	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00497	src/cli/utils/reasoning.ts	151	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00498	src/cli/utils/registries.ts	171	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00499	src/cli/utils/streaming.ts	133	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00500	src/cli/utils/tool-log.ts	109	ts	ts	cli	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00501	src/mcp/protocol.ts	225	ts	ts	mcp-server-expose	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00502	src/mcp/server.ts	512	ts	ts	mcp-server-expose	T1	no	no	runtime-source	L2+L3	L2+L3	240-470	DONE	WF-0050..0055	B04
+FILE-00503	src/mcp/transports.ts	287	ts	ts	mcp-server-expose	T1	no	no	runtime-source	L2+L3	L2+L3	1-290	DONE	WF-0029,WF-0050..0055	B04
+FILE-00468	src/cli.ts	831	ts	ts	root-src	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00523	src/test-utils/isolated-home.ts	49	ts	ts	root-src	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00504	src/server.ts	283	ts	ts	web-server	T1	no	no	runtime-source	L2+L3	L2+L3	1-283	DONE	WF-0028 + mounting	B04
+FILE-00513	src/server/routes/observability-stream.ts	98	ts	ts	web-server	T1	no	no	runtime-source	L2+L3	L2+L3	1-120	DONE	WF-0012	B04
+FILE-00514	src/server/routes/plans.ts	145	ts	ts	web-server	T1	no	no	runtime-source	L2+L3	L2+L3	1-146	DONE	WF-0005..0010	B04
+FILE-00515	src/server/routes/preview.ts	67	ts	ts	web-server	T1	no	no	runtime-source	L2+L3	L2+L3	1-76	DONE	WF-0011	B04
+FILE-00516	src/server/routes/registry.ts	140	ts	ts	web-server	T1	no	no	runtime-source	L2+L3	L2+L3	1-140	DONE	WF-0021..0027	B04
+FILE-00517	src/server/routes/run.ts	265	ts	ts	web-server	T1	no	no	runtime-source	L2+L3	L2+L3	1-253	DONE	WF-0002,WF-0003,WF-0004	B04
+FILE-00518	src/server/routes/sessions.ts	93	ts	ts	web-server	T1	no	no	runtime-source	L2+L3	L2+L3	1-122	DONE	WF-0014..0017	B04
+FILE-00519	src/server/routes/stream.ts	57	ts	ts	web-server	T1	no	no	runtime-source	L2+L3	L2+L3	1-63	DONE	WF-0013	B04
+FILE-00520	src/server/routes/usage.ts	108	ts	ts	web-server	T1	no	no	runtime-source	L2+L3	L2+L3	1-119	DONE	WF-0018..0020	B04
+FILE-00521	src/server/sse.ts	58	ts	ts	web-server	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00522	src/server/types.ts	53	ts	ts	web-server	T1	no	no	runtime-source	L2+L3			TODO		B04
+FILE-00027	public/app.js	1198	js	frontend	web-frontend	T2	no	no	runtime-source	L2			TODO		B04
+FILE-00028	public/index.html	178	html	frontend	web-frontend	T2	no	no	runtime-source	L2			TODO		B04
+FILE-00029	public/style.css	467	css	frontend	web-frontend	T2	no	no	runtime-source	L2			TODO		B04
+FILE-00259	src/ai/README.md	140	md	ts	ai-runtime	T3	no	no		L1			TODO		B04
+FILE-00260	src/ai/__tests__/c4-clarification.test.ts	244	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00261	src/ai/__tests__/chat-mode.test.ts	538	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00262	src/ai/__tests__/clarification-fidelity.test.ts	280	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00263	src/ai/__tests__/env-endpoint.test.ts	90	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00264	src/ai/__tests__/hardening-cross-registry.test.ts	295	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00265	src/ai/__tests__/hardening-edge-cases.test.ts	198	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00266	src/ai/__tests__/hardening-multi-perspective.test.ts	196	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00267	src/ai/__tests__/hardening-security.test.ts	230	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00268	src/ai/__tests__/helpers/local-tools-fixture.ts	32	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00269	src/ai/__tests__/list-models.test.ts	100	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00270	src/ai/__tests__/phase1.test.ts	290	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00271	src/ai/__tests__/phase10.test.ts	695	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00272	src/ai/__tests__/phase11.test.ts	660	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00273	src/ai/__tests__/phase12.test.ts	532	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00274	src/ai/__tests__/phase13.test.ts	480	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00275	src/ai/__tests__/phase14.test.ts	520	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00276	src/ai/__tests__/phase15.test.ts	414	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00277	src/ai/__tests__/phase18.test.ts	325	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B04
+FILE-00278	src/ai/__tests__/phase19.test.ts	422	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00279	src/ai/__tests__/phase2-mcp.test.ts	462	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00280	src/ai/__tests__/phase2.test.ts	254	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00281	src/ai/__tests__/phase20.test.ts	635	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00282	src/ai/__tests__/phase21.test.ts	561	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00283	src/ai/__tests__/phase22.test.ts	371	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00284	src/ai/__tests__/phase26.test.ts	96	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00285	src/ai/__tests__/phase27.test.ts	751	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00286	src/ai/__tests__/phase3.test.ts	289	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00287	src/ai/__tests__/phase30-p10-fetch.test.ts	160	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00288	src/ai/__tests__/phase30-p10-resume.test.ts	221	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00289	src/ai/__tests__/phase30-p10.test.ts	260	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00290	src/ai/__tests__/phase30-p3.test.ts	295	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00291	src/ai/__tests__/phase30-p5.test.ts	232	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00292	src/ai/__tests__/phase30-p6.test.ts	518	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00293	src/ai/__tests__/phase30-p7.test.ts	222	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00294	src/ai/__tests__/phase30-p9.test.ts	188	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00295	src/ai/__tests__/phase31-faults.test.ts	290	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00296	src/ai/__tests__/phase32-thinking.test.ts	371	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00297	src/ai/__tests__/phase33-fs.test.ts	613	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00298	src/ai/__tests__/phase34-tools.test.ts	554	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00299	src/ai/__tests__/phase35-fs-complete.test.ts	394	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00300	src/ai/__tests__/phase36-search-and-environment.test.ts	404	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00301	src/ai/__tests__/phase37-journal.test.ts	612	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00302	src/ai/__tests__/phase38-time-and-thinking.test.ts	566	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00303	src/ai/__tests__/phase39-memory.test.ts	475	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00304	src/ai/__tests__/phase4.test.ts	226	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00305	src/ai/__tests__/phase40-fetch.test.ts	755	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00306	src/ai/__tests__/phase41-git-read.test.ts	626	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00307	src/ai/__tests__/phase42-git-write.test.ts	970	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00308	src/ai/__tests__/phase43-mcp-server.test.ts	679	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00309	src/ai/__tests__/phase5.test.ts	474	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00310	src/ai/__tests__/phase6.test.ts	372	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00311	src/ai/__tests__/phase7.test.ts	472	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00312	src/ai/__tests__/phase8.test.ts	584	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00313	src/ai/__tests__/phase9.test.ts	420	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00314	src/ai/__tests__/r0-07-key-leak.test.ts	75	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00315	src/ai/__tests__/r0-08-project-trust.test.ts	92	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00316	src/ai/__tests__/r0-09-protected-paths.test.ts	107	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00317	src/ai/__tests__/r0-10-outside-workspace.test.ts	91	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00318	src/ai/__tests__/r0-11-commit-only-paths.test.ts	71	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00319	src/ai/__tests__/r0-12-ai-runtime-gitignore.test.ts	40	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00320	src/ai/__tests__/r1-01-answer-after-clarify.test.ts	83	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00321	src/ai/__tests__/r1-02-last-step-replan.test.ts	206	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00322	src/ai/__tests__/r1-04-merge-new-work.test.ts	49	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00323	src/ai/__tests__/r1-06-08-merge-validation.test.ts	77	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00324	src/ai/__tests__/r1-10-resume-model-and-state.test.ts	120	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00325	src/ai/__tests__/u3-run-options.test.ts	101	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00326	src/ai/__tests__/v27171-assessment-recovery.test.ts	268	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00327	src/ai/__tests__/v27172-provider-wire.test.ts	312	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B05
+FILE-00328	src/ai/__tests__/v27173-tool-call-log.test.ts	360	ts	ts	ai-runtime	T3	no	yes		L1			TODO		B06
+FILE-00001	.github/workflows/ci.yml	100	yml	yml	ci	T3	no	no		L1			TODO		B06
+FILE-00002	.github/workflows/real-provider.yml	193	yml	yml	ci	T3	no	no		L1			TODO		B06
+FILE-00469	src/cli/__tests__/cli.test.ts	1237	ts	ts	cli	T3	no	yes		L1			TODO		B06
+FILE-00470	src/cli/__tests__/phase28.test.ts	550	ts	ts	cli	T3	no	yes		L1			TODO		B06
+FILE-00471	src/cli/__tests__/phase29.test.ts	566	ts	ts	cli	T3	no	yes		L1			TODO		B06
+FILE-00472	src/cli/__tests__/phase30-p10.test.ts	243	ts	ts	cli	T3	no	yes		L1			TODO		B06
+FILE-00473	src/cli/__tests__/phase30.test.ts	355	ts	ts	cli	T3	no	yes		L1			TODO		B06
+FILE-00474	src/cli/__tests__/phase32-feedback.test.ts	447	ts	ts	cli	T3	no	yes		L1			TODO		B06
+FILE-00475	src/cli/__tests__/r0-06-allow-tools.test.ts	46	ts	ts	cli	T3	no	yes		L1			TODO		B06
+FILE-00476	src/cli/__tests__/repl.test.ts	298	ts	ts	cli	T3	no	yes		L1			TODO		B06
+FILE-00477	src/cli/__tests__/v27173-tool-log.test.ts	160	ts	ts	cli	T3	no	yes		L1			TODO		B06
+FILE-00007	docs/CONFIGURATION.md	649	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00008	docs/FORENSIC_AUDIT_REPORT.md	891	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00009	docs/READINESS_AUDIT.md	514	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00010	docs/README.md	10	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00011	docs/REVIEW_EXECUTION_PLAN.md	834	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00012	docs/history/CLI_COMPLETION_PLAN.md	169	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00013	docs/history/CODE_QUALITY_AUDIT.md	349	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00014	docs/history/CODE_QUALITY_AUDIT_DEEP_DIVE.md	229	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00015	docs/history/DEEP_AUDIT_PATH_BUGS.md	258	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00016	docs/history/EXECUTION_PLAN_V2.md	819	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00017	docs/history/PLAN.md	982	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00018	docs/history/TOOLS_EXPANSION_PLAN.md	332	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00019	docs/history/UI_COMPLETION_PLAN.md	356	md	md	docs	T3	no	no		L1			TODO		B06
+FILE-00020	e2e/README.md	127	md	mjs	e2e	T3	no	yes		L1			TODO		B06
+FILE-00021	e2e/fake-llm.mjs	1045	mjs	mjs	e2e	T3	no	yes		L1			TODO		B06
+FILE-00022	e2e/scenarios/fixtures/stdio-server.mjs	53	mjs	mjs	e2e	T3	no	yes		L1			TODO		B06
+FILE-00023	e2e/scenarios/run.mjs	2106	mjs	mjs	e2e	T3	no	yes		L1			TODO		B06
+FILE-00024	e2e/start-stub.sh	17	sh	mjs	e2e	T3	no	yes		L1			TODO		B06
+FILE-00030	registry/agents.json	34	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00031	registry/mcp-servers/.gitkeep	0	gitkeep	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00032	registry/mcp-servers/README.md	45	md	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00033	registry/models/claude-sonnet.json	10	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00034	registry/models/gpt-4o.json	10	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00035	registry/models/local-llama.json	11	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00036	registry/personas/architect.json	37	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00037	registry/personas/chat.json	30	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00038	registry/personas/coder.json	53	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00039	registry/personas/planner.json	15	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00040	registry/personas/reviewer.json	35	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00041	registry/skills/acceptance_check/SKILL.md	35	md	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00042	registry/skills/acceptance_check/skill.json	9	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00043	registry/skills/code_analysis/SKILL.md	35	md	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00044	registry/skills/code_analysis/skill.json	17	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00045	registry/skills/file_management/SKILL.md	39	md	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00046	registry/skills/file_management/skill.json	25	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00047	registry/skills/git_operations/SKILL.md	96	md	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00048	registry/skills/git_operations/skill.json	27	json	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00049	registry/skills/project_memory/SKILL.md	39	md	json/md	registry-data	T3	no	no		L1			TODO		B06
+FILE-00050	registry/skills/project_memory/skill.json	16	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00051	registry/skills/reasoning/SKILL.md	35	md	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00052	registry/skills/reasoning/skill.json	9	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00053	registry/skills/task_decomposition/SKILL.md	50	md	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00054	registry/skills/task_decomposition/skill.json	9	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00055	registry/skills/web_research/SKILL.md	39	md	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00056	registry/skills/web_research/skill.json	9	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00057	registry/tools/add_observations.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00058	registry/tools/convert_time.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00059	registry/tools/create_directory.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00060	registry/tools/create_entities.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00061	registry/tools/create_relations.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00062	registry/tools/delete_entities.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00063	registry/tools/delete_observations.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00064	registry/tools/delete_relations.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00065	registry/tools/directory_tree.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00066	registry/tools/edit_file.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00067	registry/tools/fetch.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00068	registry/tools/get_current_time.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00069	registry/tools/get_file_info.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00070	registry/tools/git_add.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00071	registry/tools/git_branch_list.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00072	registry/tools/git_checkout.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00073	registry/tools/git_commit.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00074	registry/tools/git_create_branch.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00075	registry/tools/git_diff.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00076	registry/tools/git_log.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00077	registry/tools/git_pr_comment.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00078	registry/tools/git_pr_create.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00079	registry/tools/git_pr_list.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00080	registry/tools/git_pr_view.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00081	registry/tools/git_push.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00082	registry/tools/git_remote_list.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00083	registry/tools/git_reset.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00084	registry/tools/git_show.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00085	registry/tools/git_stash.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00086	registry/tools/git_status.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00087	registry/tools/list_allowed_directories.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00088	registry/tools/list_directory.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00089	registry/tools/list_directory_with_sizes.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00090	registry/tools/move_file.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00091	registry/tools/open_nodes.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00092	registry/tools/read_file.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00093	registry/tools/read_graph.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00094	registry/tools/read_media_file.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00095	registry/tools/read_multiple_files.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00096	registry/tools/search_code.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00097	registry/tools/search_files.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00098	registry/tools/search_nodes.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00099	registry/tools/sequentialthinking.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B07
+FILE-00100	registry/tools/write_file.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B08
+FILE-00101	registry/tools/write_multiple_files.json	8	json	json/md	registry-data	T3	no	no		L1			TODO		B08
+FILE-00003	.gitignore	17	gitignore	gitignore	root	T3	no	no		L1			TODO		B08
+FILE-00004	CHANGELOG.md	1670	md	md	root	T3	no	no		L1			TODO		B08
+FILE-00005	CONTRIBUTING.md	292	md	md	root	T3	no	no		L1			TODO		B08
+FILE-00006	README.md	864	md	md	root	T3	no	no		L1			TODO		B08
+FILE-00026	package.json	49	json	json	root	T3	no	no		L1			TODO		B08
+FILE-00102	scripts/ci-test.mjs	81	mjs	mjs	root	T3	no	no		L1			TODO		B08
+FILE-00524	tsconfig.json	21	json	json	root	T3	no	no		L1			TODO		B08
+FILE-00525	vitest.config.ts	9	ts	ts	root	T3	no	no		L1			TODO		B08
+FILE-00505	src/server/__tests__/server.test.ts	637	ts	ts	web-server	T3	no	yes		L1			TODO		B08
+FILE-00506	src/server/__tests__/u2-registry.test.ts	186	ts	ts	web-server	T3	no	yes		L1			TODO		B08
+FILE-00507	src/server/__tests__/u3-run-options.test.ts	266	ts	ts	web-server	T3	no	yes		L1			TODO		B08
+FILE-00508	src/server/__tests__/u4-preview.test.ts	205	ts	ts	web-server	T3	no	yes		L1			TODO		B08
+FILE-00509	src/server/__tests__/u5-clarification.test.ts	459	ts	ts	web-server	T3	no	yes		L1			TODO		B08
+FILE-00510	src/server/__tests__/u6-usage-tasks.test.ts	312	ts	ts	web-server	T3	no	yes		L1			TODO		B08
+FILE-00511	src/server/__tests__/u7-label-follow.test.ts	225	ts	ts	web-server	T3	no	yes		L1			TODO		B08
+FILE-00512	src/server/__tests__/v2717-chat-mode.test.ts	143	ts	ts	web-server	T3	no	yes		L1			TODO		B08
+FILE-00025	package-lock.json	4288	json	json	root	T4	generated(package-manager)	no		L0			TODO		B08
+FILE-00103	servers-main/.gitattributes	1	gitattributes	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00104	servers-main/.github/dependabot.yml	6	yml	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00105	servers-main/.github/pull_request_template.md	44	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00106	servers-main/.github/workflows/claude.yml	49	yml	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00107	servers-main/.github/workflows/python.yml	99	yml	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00108	servers-main/.github/workflows/readme-pr-check.yml	114	yml	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00109	servers-main/.github/workflows/release.yml	243	yml	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00110	servers-main/.github/workflows/typescript.yml	72	yml	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00111	servers-main/.gitignore	305	gitignore	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00112	servers-main/.mcp.json	8	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00113	servers-main/.npmrc	2	npmrc	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00114	servers-main/ADDITIONAL.md	94	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00115	servers-main/CLAUDE.md	104	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00116	servers-main/CODE_OF_CONDUCT.md	128	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00117	servers-main/CONTRIBUTING.md	39	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00118	servers-main/LICENSE	216	none	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00119	servers-main/README.md	170	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00120	servers-main/RELEASING.md	49	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00121	servers-main/SECURITY.md	21	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00122	servers-main/package-lock.json	3927	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00123	servers-main/package.json	31	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00124	servers-main/scripts/release.py	215	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00125	servers-main/src/everything/.prettierignore	4	prettierignore	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00126	servers-main/src/everything/AGENTS.md	52	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00127	servers-main/src/everything/Dockerfile	21	none	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00128	servers-main/src/everything/README.md	140	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00129	servers-main/src/everything/__tests__/prompts.test.ts	179	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B08
+FILE-00130	servers-main/src/everything/__tests__/registrations.test.ts	155	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B08
+FILE-00131	servers-main/src/everything/__tests__/resources.test.ts	408	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B08
+FILE-00132	servers-main/src/everything/__tests__/server.test.ts	41	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B08
+FILE-00133	servers-main/src/everything/__tests__/tools.test.ts	1221	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B08
+FILE-00134	servers-main/src/everything/docs/architecture.md	44	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00135	servers-main/src/everything/docs/extension.md	23	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00136	servers-main/src/everything/docs/features.md	105	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00137	servers-main/src/everything/docs/how-it-works.md	45	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00138	servers-main/src/everything/docs/instructions.md	28	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00139	servers-main/src/everything/docs/startup.md	73	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00140	servers-main/src/everything/docs/structure.md	204	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00141	servers-main/src/everything/index.ts	42	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00142	servers-main/src/everything/package.json	48	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00143	servers-main/src/everything/prompts/args.ts	41	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00144	servers-main/src/everything/prompts/completions.ts	64	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00145	servers-main/src/everything/prompts/index.ts	17	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00146	servers-main/src/everything/prompts/resource.ts	93	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00147	servers-main/src/everything/prompts/simple.ts	29	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00148	servers-main/src/everything/resources/files.ts	89	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00149	servers-main/src/everything/resources/index.ts	36	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00150	servers-main/src/everything/resources/session.ts	80	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00151	servers-main/src/everything/resources/subscriptions.ts	187	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00152	servers-main/src/everything/resources/templates.ts	206	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00153	servers-main/src/everything/server/index.ts	120	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00154	servers-main/src/everything/server/logging.ts	82	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00155	servers-main/src/everything/server/roots.ts	90	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00156	servers-main/src/everything/tools/echo.ts	40	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00157	servers-main/src/everything/tools/get-annotated-message.ts	95	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00158	servers-main/src/everything/tools/get-env.ts	39	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00159	servers-main/src/everything/tools/get-resource-links.ts	86	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00160	servers-main/src/everything/tools/get-resource-reference.ts	104	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00161	servers-main/src/everything/tools/get-roots-list.ts	98	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B08
+FILE-00162	servers-main/src/everything/tools/get-structured-content.ts	92	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00163	servers-main/src/everything/tools/get-sum.ts	51	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00164	servers-main/src/everything/tools/get-tiny-image.ts	53	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00165	servers-main/src/everything/tools/gzip-file-as-resource.ts	248	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00166	servers-main/src/everything/tools/index.ts	55	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00167	servers-main/src/everything/tools/simulate-research-query.ts	345	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00168	servers-main/src/everything/tools/toggle-simulated-logging.ts	60	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00169	servers-main/src/everything/tools/toggle-subscriber-updates.ts	63	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00170	servers-main/src/everything/tools/trigger-elicitation-request-async.ts	269	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00171	servers-main/src/everything/tools/trigger-elicitation-request.ts	235	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00172	servers-main/src/everything/tools/trigger-long-running-operation.ts	82	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00173	servers-main/src/everything/tools/trigger-sampling-request-async.ts	234	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00174	servers-main/src/everything/tools/trigger-sampling-request.ts	97	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00175	servers-main/src/everything/tools/trigger-url-elicitation.ts	215	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00176	servers-main/src/everything/transports/sse.ts	77	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00177	servers-main/src/everything/transports/stdio.ts	33	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00178	servers-main/src/everything/transports/streamableHttp.ts	240	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00179	servers-main/src/everything/tsconfig.json	8	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00180	servers-main/src/everything/vitest.config.ts	14	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00181	servers-main/src/fetch/.python-version	1	python-version	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00182	servers-main/src/fetch/Dockerfile	39	none	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00183	servers-main/src/fetch/LICENSE	7	none	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00184	servers-main/src/fetch/README.md	245	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00185	servers-main/src/fetch/pyproject.toml	44	toml	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00186	servers-main/src/fetch/src/mcp_server_fetch/__init__.py	25	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00187	servers-main/src/fetch/src/mcp_server_fetch/__main__.py	5	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00188	servers-main/src/fetch/src/mcp_server_fetch/server.py	288	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00189	servers-main/src/fetch/tests/__init__.py	0	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00190	servers-main/src/fetch/tests/test_server.py	326	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00191	servers-main/src/fetch/uv.lock	1327	lock	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00192	servers-main/src/filesystem/Dockerfile	24	none	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00193	servers-main/src/filesystem/README.md	365	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00194	servers-main/src/filesystem/__tests__/directory-tree.mcp-sdk.test.ts	57	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B09
+FILE-00195	servers-main/src/filesystem/__tests__/directory-tree.test.ts	146	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B09
+FILE-00196	servers-main/src/filesystem/__tests__/lib.test.ts	890	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B09
+FILE-00197	servers-main/src/filesystem/__tests__/nested-parents.test.ts	35	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B09
+FILE-00198	servers-main/src/filesystem/__tests__/path-utils.test.ts	382	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B09
+FILE-00199	servers-main/src/filesystem/__tests__/path-validation.test.ts	1000	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B09
+FILE-00200	servers-main/src/filesystem/__tests__/roots-utils.test.ts	83	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B09
+FILE-00201	servers-main/src/filesystem/__tests__/startup-validation.test.ts	100	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B09
+FILE-00202	servers-main/src/filesystem/__tests__/structured-content.test.ts	283	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B09
+FILE-00203	servers-main/src/filesystem/__tests__/unicode-paths.test.ts	49	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B09
+FILE-00204	servers-main/src/filesystem/index.ts	786	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00205	servers-main/src/filesystem/lib.ts	483	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00206	servers-main/src/filesystem/package.json	43	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00207	servers-main/src/filesystem/path-utils.ts	125	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00208	servers-main/src/filesystem/path-validation.ts	86	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00209	servers-main/src/filesystem/roots-utils.ts	76	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00210	servers-main/src/filesystem/tsconfig.json	18	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00211	servers-main/src/filesystem/vitest.config.ts	14	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00212	servers-main/src/git/.gitignore	2	gitignore	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00213	servers-main/src/git/.python-version	1	python-version	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00214	servers-main/src/git/Dockerfile	42	none	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00215	servers-main/src/git/LICENSE	7	none	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00216	servers-main/src/git/README.md	348	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00217	servers-main/src/git/pyproject.toml	43	toml	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00218	servers-main/src/git/src/mcp_server_git/__init__.py	24	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00219	servers-main/src/git/src/mcp_server_git/__main__.py	5	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00220	servers-main/src/git/src/mcp_server_git/py.typed	0	typed	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00221	servers-main/src/git/src/mcp_server_git/server.py	585	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B09
+FILE-00222	servers-main/src/git/tests/test_server.py	590	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00223	servers-main/src/git/uv.lock	954	lock	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00224	servers-main/src/memory/Dockerfile	23	none	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00225	servers-main/src/memory/README.md	351	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00226	servers-main/src/memory/__tests__/atomic-save.test.ts	133	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B10
+FILE-00227	servers-main/src/memory/__tests__/delete-reporting.test.ts	99	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B10
+FILE-00228	servers-main/src/memory/__tests__/file-path.test.ts	192	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B10
+FILE-00229	servers-main/src/memory/__tests__/knowledge-graph.test.ts	774	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B10
+FILE-00230	servers-main/src/memory/__tests__/resource.test.ts	97	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B10
+FILE-00231	servers-main/src/memory/__tests__/search-nodes-schema.test.ts	25	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B10
+FILE-00232	servers-main/src/memory/__tests__/server-version.test.ts	25	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B10
+FILE-00233	servers-main/src/memory/index.ts	745	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00234	servers-main/src/memory/package.json	37	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00235	servers-main/src/memory/tsconfig.json	14	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00236	servers-main/src/memory/version.ts	27	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00237	servers-main/src/memory/vitest.config.ts	14	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00238	servers-main/src/sequentialthinking/Dockerfile	24	none	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00239	servers-main/src/sequentialthinking/README.md	222	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00240	servers-main/src/sequentialthinking/__tests__/input-schema.test.ts	66	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B10
+FILE-00241	servers-main/src/sequentialthinking/__tests__/lib.test.ts	308	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B10
+FILE-00242	servers-main/src/sequentialthinking/__tests__/server-version.test.ts	57	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	yes		L0			TODO		B10
+FILE-00243	servers-main/src/sequentialthinking/index.ts	135	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00244	servers-main/src/sequentialthinking/lib.ts	99	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00245	servers-main/src/sequentialthinking/package.json	41	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00246	servers-main/src/sequentialthinking/tsconfig.json	14	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00247	servers-main/src/sequentialthinking/version.ts	33	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00248	servers-main/src/sequentialthinking/vitest.config.ts	14	ts	ts	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00249	servers-main/src/time/.python-version	1	python-version	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00250	servers-main/src/time/Dockerfile	42	none	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00251	servers-main/src/time/README.md	297	md	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00252	servers-main/src/time/pyproject.toml	43	toml	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00253	servers-main/src/time/src/mcp_server_time/__init__.py	19	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00254	servers-main/src/time/src/mcp_server_time/__main__.py	3	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00255	servers-main/src/time/src/mcp_server_time/server.py	220	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00256	servers-main/src/time/test/time_server_test.py	528	py	py	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00257	servers-main/src/time/uv.lock	976	lock	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10
+FILE-00258	servers-main/tsconfig.json	14	json	other	vendored-mcp-servers	T4	vendored(upstream modelcontextprotocol/servers)	no		L0			TODO		B10

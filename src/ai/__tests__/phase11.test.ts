@@ -47,6 +47,7 @@ const mockGenerateText = vi.mocked(generateText);
 import { PlanRuntime } from '../runtime/plan-runtime.js';
 import { TaskRuntime } from '../runtime/task-runtime.js';
 import type { Planner } from '../planning/planner.js';
+import { registerLocalToolFixtures } from './helpers/local-tools-fixture.js';
 
 // ─── Test infrastructure ─────────────────────────────────────────
 
@@ -97,6 +98,9 @@ function setup(): TestEnv {
   toolRegistry.registerImplementation('search_code', searchCodeTool);
   toolRegistry.registerImplementation('write_file', writeFileTool);
   toolRegistry.registerImplementation('git_status', gitStatusTool);
+  // Phase 33: register the reference filesystem toolset so skill cross-validation
+  // (registry/skills/*) sees the same catalog as production bootstrapTools().
+  registerLocalToolFixtures(toolRegistry, TEST_ROOT);
 
   const skillRegistry = new SkillRegistry({ toolRegistry });
   // Minimal fix: bootstrap catalog BEFORE loading skills because task_decomposition and acceptance_check depend on catalog tools
@@ -249,6 +253,10 @@ describe('AcceptanceChecker — checkStep', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Queued mockResolvedValueOnce answers survive clearAllMocks — a test run
+    // after another that left one unconsumed would read it (OPS-001).
+    mockGenerateObject.mockReset();
+    mockGenerateText.mockReset();
     env = setup();
     checker = new AcceptanceChecker(createCheckerConfig(env));
   });
@@ -328,6 +336,10 @@ describe('AcceptanceChecker — PlanRuntime hook (Phase 20)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // Queued mockResolvedValueOnce answers survive clearAllMocks — a test run
+    // after another that left one unconsumed would read it (OPS-001).
+    mockGenerateObject.mockReset();
+    mockGenerateText.mockReset();
     env = setup();
   });
 
@@ -415,6 +427,39 @@ describe('AcceptanceChecker — PlanRuntime hook (Phase 20)', () => {
     expect(plan.steps[0].resultSummary).toContain('Acceptance: PASSED');
     expect(result.status).toBe('completed');
     expect(mockGenerateObject).toHaveBeenCalledTimes(1);
+  });
+
+  it('R1-07: a checker error keeps the step done and appends UNVERIFIED, not FAILED', async () => {
+    const { runtime } = makeHookHarness(env);
+
+    const plan = createPlan('Hook checker-error test', [
+      {
+        id: 'step-1',
+        description: 'Create a user model',
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: ['file_management'],
+        assignedTools: ['read_file'],
+        claimedResources: [],
+        acceptanceCriteria: 'User type with name and email.',
+        status: 'pending',
+      },
+    ]);
+
+    mockGenerateText.mockResolvedValue({
+      text: 'Created user model with name and email fields.',
+      usage: { promptTokens: 5, completionTokens: 5, totalTokens: 10 },
+      steps: [],
+    } as any);
+    // The reviewer itself errors out on every attempt (not a real verdict).
+    mockGenerateObject.mockRejectedValue(new Error('reviewer provider down'));
+
+    const result = await runtime.execute(plan);
+
+    expect(plan.steps[0].status).toBe('done');
+    expect(plan.steps[0].failureType).toBeUndefined();
+    expect(plan.steps[0].resultSummary).toContain('Acceptance: UNVERIFIED');
+    expect(result.status).toBe('completed');
   });
 
   it('does NOT check steps that failed technically', async () => {
@@ -542,6 +587,10 @@ describe('Failure type distinction', () => {
 
   it('quality failure comes from AcceptanceChecker', async () => {
     vi.clearAllMocks();
+    // Queued mockResolvedValueOnce answers survive clearAllMocks — a test run
+    // after another that left one unconsumed would read it (OPS-001).
+    mockGenerateObject.mockReset();
+    mockGenerateText.mockReset();
     const env = setup();
     const checker = new AcceptanceChecker(createCheckerConfig(env));
 
@@ -580,6 +629,10 @@ describe('Failure type distinction', () => {
 describe('Quality failure → re-planning integration', () => {
   it('onQualityFailure callback is invoked with correct args (Phase 20 hook)', async () => {
     vi.clearAllMocks();
+    // Queued mockResolvedValueOnce answers survive clearAllMocks — a test run
+    // after another that left one unconsumed would read it (OPS-001).
+    mockGenerateObject.mockReset();
+    mockGenerateText.mockReset();
     const env = setup();
     const failures: any[] = [];
 

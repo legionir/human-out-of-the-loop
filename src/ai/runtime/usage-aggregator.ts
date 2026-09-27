@@ -1,6 +1,6 @@
 import type { TokenUsage } from './event-bus.js';
 import type { Task } from '../schemas/task.js';
-import type { EventBus, UnsubscribeFn, AgentCompletedEvent } from './event-bus.js';
+import type { EventBus, UnsubscribeFn } from './event-bus.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -17,17 +17,23 @@ export interface UsageRecord {
    * a task, so it does not count toward `taskCount`.
    */
   llmCall?: boolean;
+  /** J-06: model that produced the tokens. */
+  modelId?: string;
 }
 
 export interface UsageSummary {
   totalPromptTokens: number;
   totalCompletionTokens: number;
   totalTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheWriteTokens: number;
   taskCount: number;
   /** Breakdown by agent/persona */
   byAgent: Record<string, TokenUsage & { count: number }>;
   /** Breakdown by plan */
   byPlan: Record<string, TokenUsage & { count: number }>;
+  /** J-06: breakdown by model id. */
+  byModel: Record<string, TokenUsage & { count: number }>;
 }
 
 // ─── UsageAggregator ─────────────────────────────────────────────
@@ -54,15 +60,22 @@ export class UsageAggregator {
    * from the task), so per-plan breakdowns are no longer "unassigned".
    */
   subscribeToEventBus(eventBus: EventBus): void {
-    this.unsubscribeFn = eventBus.subscribe('agent:completed', (event) => {
-      const completedEvent = event as AgentCompletedEvent;
-      if (completedEvent.usage) {
+    this.unsubscribeFn = eventBus.subscribe('*', (event) => {
+      if (event.type === 'agent:completed' && event.usage) {
         this.recordDirect({
-          taskId: completedEvent.taskId,
-          planId: completedEvent.planId,
-          agentId: completedEvent.agentId,
-          usage: completedEvent.usage,
-          timestamp: completedEvent.timestamp,
+          taskId: event.taskId,
+          planId: event.planId,
+          agentId: event.agentId,
+          usage: event.usage,
+          timestamp: event.timestamp,
+        });
+      } else if (event.type === 'agent:error' && event.usage) {
+        this.recordDirect({
+          taskId: event.taskId,
+          planId: event.planId,
+          agentId: event.agentId,
+          usage: event.usage,
+          timestamp: event.timestamp,
         });
       }
     });
@@ -107,15 +120,20 @@ export class UsageAggregator {
       totalPromptTokens: 0,
       totalCompletionTokens: 0,
       totalTokens: 0,
+      totalCacheReadTokens: 0,
+      totalCacheWriteTokens: 0,
       taskCount: this.records.filter((r) => !r.llmCall).length,
       byAgent: {},
       byPlan: {},
+      byModel: {},
     };
 
     for (const r of this.records) {
       summary.totalPromptTokens += r.usage.promptTokens;
       summary.totalCompletionTokens += r.usage.completionTokens;
       summary.totalTokens += r.usage.totalTokens;
+      summary.totalCacheReadTokens += r.usage.cacheReadTokens ?? 0;
+      summary.totalCacheWriteTokens += r.usage.cacheWriteTokens ?? 0;
 
       // By agent
       if (!summary.byAgent[r.agentId]) {
@@ -147,6 +165,21 @@ export class UsageAggregator {
       planUsage.completionTokens += r.usage.completionTokens;
       planUsage.totalTokens += r.usage.totalTokens;
       planUsage.count++;
+
+      const modelKey = r.modelId ?? 'unassigned';
+      if (!summary.byModel[modelKey]) {
+        summary.byModel[modelKey] = {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          count: 0,
+        };
+      }
+      const modelUsage = summary.byModel[modelKey]!;
+      modelUsage.promptTokens += r.usage.promptTokens;
+      modelUsage.completionTokens += r.usage.completionTokens;
+      modelUsage.totalTokens += r.usage.totalTokens;
+      modelUsage.count++;
     }
 
     return summary;

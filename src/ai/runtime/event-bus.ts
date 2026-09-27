@@ -75,6 +75,8 @@ export interface AgentErrorEvent extends AgentEventBase {
   status: 'error';
   error: string;
   code: string;
+  /** C-06: partial token usage collected before the failure. */
+  usage?: TokenUsage;
 }
 
 export type AgentEvent =
@@ -88,6 +90,10 @@ export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** F-01: tokens served from the provider prompt cache. */
+  cacheReadTokens?: number;
+  /** F-01: tokens written into the provider prompt cache. */
+  cacheWriteTokens?: number;
 }
 
 // ─── Subscriber type ─────────────────────────────────────────────

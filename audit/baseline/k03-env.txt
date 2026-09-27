@@ -1,0 +1,10 @@
+date=2026-09-27T15:27:32+00:00
+node=v22.22.3
+npm=10.9.8
+cwd=/home/user/human-out-of-the-loop
+head=5a4b51e
+note=node_modules already present; skipped npm ci (network + time). Equivalent: npx tsc --noEmit && npx vitest run && npm run build && npm run e2e
+tsc_exit=0
+vitest_exit=1
+build_exit=0
+e2e_exit=1
