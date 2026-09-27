@@ -16,7 +16,7 @@ import path from 'node:path';
 import { loadRegistries } from '../utils/registries.js';
 import { describeRegistryLayers, registryLayersFor } from '../../ai/registries/layout.js';
 import { color, err, out, renderTable } from '../utils/output.js';
-import { loadMcpServerConfigs } from '../../ai/tools/mcp-bootstrap.js';
+import { loadLayeredMcpServers, mayConnectMcpServer } from '../../ai/tools/mcp-bootstrap.js';
 import { listRemoteModels, modelSources } from '../../ai/models/list-models.js';
 import { prepareCliEnvironment } from '../utils/config.js';
 import { resolveAndMaybePersistTrust, untrustedProjectMcpMessage } from '../utils/trust-project.js';
@@ -192,22 +192,23 @@ async function collectMcpTools(root: string, trusted: boolean): Promise<{
   notes: string[];
   failed: number;
 }> {
-  const dir = path.join(root, 'registry', 'mcp-servers');
-  const { configs, errors } = loadMcpServerConfigs(dir);
+  // ARCH-003: the same layered view as `mcp list` and the runtime.
+  const { servers, errors } = loadLayeredMcpServers(root);
   const rows: Array<Array<string | number>> = [];
   const items: unknown[] = [];
   const notes: string[] = errors.map((e) => `Invalid MCP config ${e.file}: ${e.error}`);
   let failed = 0;
 
-  if (configs.length === 0) {
-    notes.push(`No MCP servers configured in ${path.relative(root, dir) || dir}.`);
+  if (servers.length === 0) {
+    notes.push('No MCP servers configured (registry/mcp-servers/*.json).');
     return { rows, items, notes, failed };
   }
 
-  if (!trusted) {
-    notes.push(untrustedProjectMcpMessage());
-    return { rows, items, notes, failed };
-  }
+  // R0-08: packaged servers always connect; a project server only when the
+  // project is trusted.
+  const configs = servers.filter((s) => mayConnectMcpServer(s, trusted)).map((s) => s.config);
+  if (configs.length < servers.length) notes.push(untrustedProjectMcpMessage());
+  if (configs.length === 0) return { rows, items, notes, failed };
 
   const registry = new ToolRegistry();
   const connector = new McpConnector({ toolRegistry: registry });

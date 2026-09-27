@@ -453,3 +453,25 @@ describe('R-23 — edit_file keeps each line\'s own line ending', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('ARCH-003 — one layered MCP-server view for CLI, server and runtime', () => {
+  it('merges layers by id (project wins), tags the layer, and applies the trust rule', async () => {
+    const { loadLayeredMcpServers, mayConnectMcpServer } = await import('../tools/mcp-bootstrap.js');
+    const project = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-arch3-'));
+    const dir = path.join(project, 'registry', 'mcp-servers');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'mine.json'),
+      JSON.stringify({ id: 'mine', name: 'Mine', transport: 'stdio', command: 'node' }),
+    );
+    const { servers } = loadLayeredMcpServers(project);
+    const mine = servers.find((s) => s.config.id === 'mine')!;
+    expect(mine.scope).toBe('project');
+    expect(mayConnectMcpServer(mine, false)).toBe(false);
+    expect(mayConnectMcpServer(mine, true)).toBe(true);
+    for (const s of servers.filter((x) => x.scope === 'package')) {
+      expect(mayConnectMcpServer(s, false)).toBe(true);
+    }
+    fs.rmSync(project, { recursive: true, force: true });
+  });
+});

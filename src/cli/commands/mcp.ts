@@ -9,14 +9,11 @@
  */
 import path from 'node:path';
 import { McpConnector } from '../../ai/tools/mcp-connector.js';
-import { loadMcpServerConfigs } from '../../ai/tools/mcp-bootstrap.js';
-import { registryLayersFor } from '../../ai/registries/layout.js';
-import type { McpServerConfig } from '../../ai/schemas/mcp-server.js';
+import { loadLayeredMcpServers, mayConnectMcpServer } from '../../ai/tools/mcp-bootstrap.js';
 import { ToolRegistry } from '../../ai/registries/tool-registry.js';
 import { prepareCliEnvironment } from '../utils/config.js';
 import { resolveAndMaybePersistTrust, untrustedProjectMcpMessage } from '../utils/trust-project.js';
 import { color, err, out, renderTable } from '../utils/output.js';
-import type { RegistryScope } from '../../ai/registries/layout.js';
 
 export interface McpCommandOptions {
   projectRoot?: string;
@@ -26,37 +23,15 @@ export interface McpCommandOptions {
   trusted?: boolean;
 }
 
-/**
- * Phase 28: MCP servers come from every active layer (package first,
- * project last); a project server with the same id overrides the
- * packaged one.
- */
-function mcpDirsFor(opts: McpCommandOptions): Array<{ dir: string; scope: RegistryScope }> {
+/** ARCH-003: the shared layered loader, after the CLI environment is prepared. */
+function loadLayeredMcpConfigs(opts: McpCommandOptions): ReturnType<typeof loadLayeredMcpServers> {
   const projectRoot = path.resolve(opts.projectRoot ?? process.cwd());
   prepareCliEnvironment(projectRoot);
-  return registryLayersFor(projectRoot).map((layer) => ({
-    dir: path.join(layer.dir, 'mcp-servers'),
-    scope: layer.scope,
-  }));
-}
-
-/** Merge per-layer configs by id — later layers win. Tracks the winning scope. */
-function loadLayeredMcpConfigs(dirs: Array<{ dir: string; scope: RegistryScope }>): {
-  configs: Array<{ config: McpServerConfig; scope: RegistryScope }>;
-  errors: Array<{ file: string; error: string }>;
-} {
-  const byId = new Map<string, { config: McpServerConfig; scope: RegistryScope }>();
-  const errors: Array<{ file: string; error: string }> = [];
-  for (const { dir, scope } of dirs) {
-    const { configs, errors: layerErrors } = loadMcpServerConfigs(dir);
-    for (const cfg of configs) byId.set(cfg.id, { config: cfg, scope });
-    errors.push(...layerErrors);
-  }
-  return { configs: Array.from(byId.values()), errors };
+  return loadLayeredMcpServers(projectRoot);
 }
 
 export async function mcpListCommand(opts: McpCommandOptions): Promise<number> {
-  const { configs, errors } = loadLayeredMcpConfigs(mcpDirsFor(opts));
+  const { servers: configs, errors } = loadLayeredMcpConfigs(opts);
 
   if (configs.length === 0) {
     out(color.dim('No MCP servers configured (registry/mcp-servers/*.json).'));
@@ -81,13 +56,13 @@ export async function mcpTestCommand(serverId: string, opts: McpCommandOptions):
   const projectRoot = path.resolve(opts.projectRoot ?? process.cwd());
   const trusted =
     opts.trusted === true || resolveAndMaybePersistTrust(projectRoot, opts.trustProject === true);
-  const { configs } = loadLayeredMcpConfigs(mcpDirsFor(opts));
+  const { servers: configs } = loadLayeredMcpConfigs(opts);
   const found = configs.find((c) => c.config.id === serverId);
   if (!found) {
     err(color.failed(`MCP server "${serverId}" not found in registry/mcp-servers.`));
     return 1;
   }
-  if (found.scope === 'project' && !trusted) {
+  if (!mayConnectMcpServer(found, trusted)) {
     err(color.failed(untrustedProjectMcpMessage(serverId)));
     return 1;
   }

@@ -21,23 +21,10 @@
 import path from 'node:path';
 import { Router } from 'express';
 import { McpConnector } from '../../ai/tools/mcp-connector.js';
-import { loadMcpServerConfigs } from '../../ai/tools/mcp-bootstrap.js';
+import { loadLayeredMcpServers, mayConnectMcpServer } from '../../ai/tools/mcp-bootstrap.js';
 import { ToolRegistry } from '../../ai/registries/tool-registry.js';
-import { registryLayersFor } from '../../ai/registries/layout.js';
 import { untrustedProjectMcpMessage } from '../../cli/utils/trust-project.js';
 import type { ServerContext } from '../types.js';
-
-function loadLayeredMcpConfigs(projectRoot: string, trustedProject: boolean) {
-  const merged = new Map<string, ReturnType<typeof loadMcpServerConfigs>['configs'][number]>();
-  const errors: Array<{ file: string; error: string }> = [];
-  for (const layer of registryLayersFor(projectRoot)) {
-    if (layer.scope === 'project' && !trustedProject) continue;
-    const loaded = loadMcpServerConfigs(path.join(layer.dir, 'mcp-servers'));
-    for (const c of loaded.configs) merged.set(c.id, c);
-    errors.push(...loaded.errors);
-  }
-  return { configs: [...merged.values()], errors };
-}
 
 export function registryRouter(ctx: ServerContext): Router {
   const router = Router();
@@ -108,9 +95,9 @@ export function registryRouter(ctx: ServerContext): Router {
   router.get('/api/mcp', (req, res) => {
     // Listing is read-only — include the project layer even when untrusted.
     // Spawning stays gated on POST /api/mcp/:id/test (A-03).
-    const { configs, errors } = loadLayeredMcpConfigs(ctx.projectRoot, true);
+    const { servers, errors } = loadLayeredMcpServers(ctx.projectRoot);
     res.json({
-      servers: configs.map((c) => ({
+      servers: servers.map(({ config: c }) => ({
         id: c.id,
         name: c.name,
         transport: c.transport,
@@ -123,16 +110,15 @@ export function registryRouter(ctx: ServerContext): Router {
 
   router.post('/api/mcp/:id/test', async (req, res) => {
     const trusted = ctx.orchestrator.config.trustedProject === true;
-    const { configs } = loadLayeredMcpConfigs(ctx.projectRoot, true);
-    const config = configs.find((c) => c.id === req.params.id);
-    if (!config) {
+    const found = loadLayeredMcpServers(ctx.projectRoot).servers.find(
+      (s) => s.config.id === req.params.id,
+    );
+    if (!found) {
       res.status(404).json({ ok: false, error: `MCP server "${req.params.id}" not found in registry/mcp-servers.` });
       return;
     }
-    const { configs: projectOnly } = loadMcpServerConfigs(
-      path.join(ctx.projectRoot, 'registry', 'mcp-servers'),
-    );
-    if (!trusted && projectOnly.some((c) => c.id === req.params.id)) {
+    const config = found.config;
+    if (!mayConnectMcpServer(found, trusted)) {
       res.status(403).json({
         ok: false,
         error: untrustedProjectMcpMessage(req.params.id),
