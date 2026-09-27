@@ -133,6 +133,13 @@ export class PlanRuntime {
   private cancelled = false;
   /** Phase 20 (CORR-04): steps already judged — never check twice */
   private readonly acceptanceChecked = new Set<string>();
+  /**
+   * J-05: writable steps in flight, and the ones that ever ran alongside
+   * another writable step.  A snapshot restore reverts the WHOLE tree, so it
+   * is only safe for a step that had the workspace to itself.
+   */
+  private readonly writableRunning = new Set<string>();
+  private readonly writableOverlapped = new Set<string>();
   /** B-10 */
   private persistFailures = 0;
   persistenceDegraded = false;
@@ -337,8 +344,14 @@ export class PlanRuntime {
       }
       const root = this.config.projectRoot;
       if (root && step.assignedTools.some((id) => !isReadOnlyTool(id))) {
-        captureCheckpoint(root, plan.id ?? 'plan', step.id);
-        step.checkpointId = step.id;
+        if (captureCheckpoint(root, plan.id ?? 'plan', step.id)) {
+          step.checkpointId = step.id;
+        }
+        if (this.writableRunning.size > 0) {
+          this.writableOverlapped.add(step.id);
+          for (const other of this.writableRunning) this.writableOverlapped.add(other);
+        }
+        this.writableRunning.add(step.id);
       }
       step.status = 'running';
       this.persist(plan);
@@ -407,6 +420,8 @@ export class PlanRuntime {
 
       const task = this.config.taskRuntime.getResult(step.taskId);
       if (!task) continue;
+      const terminal =
+        task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled';
 
       switch (task.status) {
         case 'completed':
@@ -430,6 +445,7 @@ export class PlanRuntime {
           break;
         // pending/running — no change yet
       }
+      if (terminal) this.writableRunning.delete(step.id);
     }
   }
 
@@ -765,6 +781,12 @@ Produce a new plan that:
   private rollbackWritableStep(plan: Plan, step: PlanStep): void {
     const root = this.config.projectRoot;
     if (!root || !step.checkpointId) return;
+    if (this.writableOverlapped.has(step.id)) {
+      // Another writable step ran at the same time; restoring the snapshot
+      // would undo its work too.  Leave the tree and say so.
+      step.resultSummary = `${step.resultSummary ?? ''}\n[Rollback skipped: another writable step ran concurrently — use \`hootl plans rollback\` after review.]`.trim();
+      return;
+    }
     restoreCheckpoint(root, plan.id ?? 'plan', step.checkpointId);
   }
 

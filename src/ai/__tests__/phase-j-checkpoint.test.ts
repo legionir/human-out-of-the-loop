@@ -8,7 +8,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { LanguageModel } from 'ai';
-import { captureCheckpoint, restoreCheckpoint, listProjectFiles } from '../runtime/checkpoint.js';
+import {
+  captureCheckpoint,
+  restoreCheckpoint,
+  listProjectFiles,
+  pruneCheckpoints,
+  checkpointDir,
+} from '../runtime/checkpoint.js';
 import { plansRollbackCommand } from '../../cli/commands/plans.js';
 import { FilePlanStore } from '../runtime/plan-store.js';
 import { createPlan } from '../schemas/plan.js';
@@ -151,6 +157,75 @@ describe('J-05 — checkpoint / rollback', () => {
     await runtime.execute(plan);
     expect(fs.readFileSync(path.join(root, 'keep.txt'), 'utf8')).toBe('original\n');
     expect(fs.existsSync(path.join(root, 'new-from-step.txt'))).toBe(false);
+    taskRuntime.destroy();
+  });
+
+  it('does not snapshot a tree over the size limits', () => {
+    expect(captureCheckpoint(root, 'plan_big', 'step-1', { maxFiles: 0 })).toBeUndefined();
+    expect(fs.existsSync(checkpointDir(root, 'plan_big', 'step-1'))).toBe(false);
+    expect(captureCheckpoint(root, 'plan_big', 'step-1', { maxBytes: 1 })).toBeUndefined();
+  });
+
+  it('keeps only the newest snapshots of a plan and prunes old plans', () => {
+    captureCheckpoint(root, 'plan_k', 's1');
+    captureCheckpoint(root, 'plan_k', 's2');
+    captureCheckpoint(root, 'plan_k', 's3');
+    const left = fs.readdirSync(path.join(root, '.ai-runtime', 'checkpoints', 'plan_k'));
+    expect(left.length).toBe(2);
+    expect(left).toContain('s3');
+    expect(pruneCheckpoints(root, 7, Date.now() + 30 * 86_400_000)).toBe(1);
+    expect(fs.existsSync(path.join(root, '.ai-runtime', 'checkpoints', 'plan_k'))).toBe(false);
+  });
+
+  it('a failed step does not roll back the work of a concurrent writable step', async () => {
+    const eventBus = new EventBus();
+    const agentRuntime = new AgentRuntime();
+    const taskRuntime = new TaskRuntime({ maxConcurrentTasks: 2, eventBus, agentRuntime });
+    const personaRegistry = new PersonaRegistry();
+    personaRegistry.loadFromDirectory(PERSONAS_DIR);
+    const toolRegistry = new ToolRegistry();
+    registerLocalToolFixtures(toolRegistry, root);
+    const skillRegistry = new SkillRegistry({ toolRegistry });
+    bootstrapCatalogTools({ toolRegistry, personaRegistry, skillRegistry });
+    loadSkillsFromDirectory(SKILLS_DIR, skillRegistry);
+    const modelRegistry = new ModelRegistry();
+    modelRegistry.registerProvider(createMockProvider('openai'));
+    modelRegistry.registerConfig({ id: 'gpt-4o', provider: 'openai', model: 'gpt-4o' });
+
+    mockGenerateText.mockReset();
+    mockGenerateText.mockImplementation((async (opts: { prompt?: string }) => {
+      if (String(opts.prompt).includes('step-ok')) {
+        fs.writeFileSync(path.join(root, 'from-ok.txt'), 'kept\n');
+        return { text: 'wrote it', steps: [], usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 } };
+      }
+      await new Promise((r) => setTimeout(r, 30));
+      throw new Error('step blew up');
+    }) as never);
+
+    const runtime = new PlanRuntime({
+      taskRuntime,
+      planStore: new MemoryPlanStore(),
+      planner: { generatePlan: vi.fn().mockResolvedValue(null) } as unknown as Planner,
+      feasibilityDeps: { personaRegistry, skillRegistry, toolRegistry },
+      refs: { personaRegistry, skillRegistry, toolRegistry, modelRegistry },
+      maxReplanningAttempts: 0,
+      defaultModelId: 'gpt-4o',
+      projectRoot: root,
+    });
+    const step = (id: string) => ({
+      id,
+      description: id,
+      dependsOn: [],
+      assignedPersona: 'coder',
+      assignedSkills: ['file_management'],
+      assignedTools: ['write_file'],
+      claimedResources: [],
+      acceptanceCriteria: 'ok',
+    });
+    const plan = createPlan('two writers', [step('step-ok'), step('step-bad')]);
+    await runtime.execute(plan);
+    expect(fs.readFileSync(path.join(root, 'from-ok.txt'), 'utf8')).toBe('kept\n');
+    expect(plan.steps.find((s) => s.id === 'step-bad')?.resultSummary).toMatch(/Rollback skipped/);
     taskRuntime.destroy();
   });
 });

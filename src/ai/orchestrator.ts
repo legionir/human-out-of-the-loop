@@ -29,6 +29,7 @@ import { ScrubbingPlanStore } from './runtime/secret-scrub.js';
 import { logStepEvent, parseStepEvent } from './runtime/step-events.js';
 import { JournalWriter, journalOptionsFromEnv } from './runtime/journal.js';
 import { cleanupStaleTempFiles } from './runtime/atomic-write.js';
+import { pruneCheckpoints } from './runtime/checkpoint.js';
 import { cleanupStaleLockFiles } from './runtime/file-lock.js';
 import { isAbortError, throwIfAborted } from './runtime/abort.js';
 import { formatReviewForUser as formatFinalReview } from './runtime/review-formatter.js';
@@ -682,6 +683,7 @@ export class Orchestrator {
       this.journal.prune();
       this.planStore.pruneOlderThan?.(365);
       this.sessionStore.pruneOlderThan?.(365);
+      pruneCheckpoints(root, 7);
     } catch {
       // housekeeping must never block startup
     }
