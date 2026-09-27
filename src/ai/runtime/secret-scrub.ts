@@ -42,16 +42,14 @@ export class ScrubbingPlanStore implements PlanStore {
     private readonly secrets: readonly string[]
   ) {}
 
+  /**
+   * Scrub every string in the plan, not a list of known fields: a field added
+   * later (J-04's `handoff` copies the step summary) must not become a
+   * credential leak just because nobody remembered to list it here.
+   */
   private clean(plan: Plan): Plan {
     if (this.secrets.length === 0) return plan;
-    return {
-      ...plan,
-      steps: plan.steps.map((step) =>
-        typeof step.resultSummary === 'string'
-          ? { ...step, resultSummary: scrubSecretValues(step.resultSummary, this.secrets) }
-          : step
-      ),
-    };
+    return scrubDeep(plan, this.secrets) as Plan;
   }
 
   save(plan: Plan): void {
@@ -81,6 +79,19 @@ export class ScrubbingPlanStore implements PlanStore {
   pruneOlderThan(days: number): number {
     return this.inner.pruneOlderThan?.(days) ?? 0;
   }
+}
+
+function scrubDeep(value: unknown, secrets: readonly string[]): unknown {
+  if (typeof value === 'string') return scrubSecretValues(value, secrets);
+  if (Array.isArray(value)) return value.map((item) => scrubDeep(item, secrets));
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = scrubDeep(item, secrets);
+    }
+    return out;
+  }
+  return value;
 }
 
 /** Env var NAMES that mark their value as a credential. */

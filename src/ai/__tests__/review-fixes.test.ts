@@ -514,3 +514,18 @@ describe('E-07 — a chat answer keeps the user\'s language', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 });
+
+describe('J-04 — a credential in a step handoff never reaches the plan file', () => {
+  it('ScrubbingPlanStore scrubs every string, including handoff', async () => {
+    const { ScrubbingPlanStore } = await import('../runtime/secret-scrub.js');
+    const { MemoryPlanStore } = await import('../runtime/plan-store.js');
+    const secret = 'sk-live-handoff-123456';
+    const inner = new MemoryPlanStore();
+    const store = new ScrubbingPlanStore(inner, [secret]);
+    const plan = planResult('goal').plan;
+    plan.steps[0]!.resultSummary = `key is ${secret}`;
+    plan.steps[0]!.handoff = { changedFiles: [], keyResult: `key is ${secret}`, notes: secret };
+    store.save(plan);
+    expect(JSON.stringify(inner.load(plan.id!))).not.toContain(secret);
+  });
+});
