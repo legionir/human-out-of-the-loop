@@ -52,7 +52,11 @@ jobs:
     timeout-minutes: 25
     env:
       # Secrets reach the shell as environment variables only.
-      OPENAI_API_KEY: ${{ secrets.HOTL_API_KEY }}
+      # A custom HOTL_BASE_URL (gateway) gets the key as HOTL_API_KEY only;
+      # OPENAI_API_KEY is the name for the real OpenAI API, and a gateway key
+      # under that name would also be sent to api.openai.com.
+      OPENAI_API_KEY: ${{ secrets.HOTL_BASE_URL == '' && secrets.HOTL_API_KEY || '' }}
+      HOTL_API_KEY: ${{ secrets.HOTL_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.HOTL_ANTHROPIC_API_KEY }}
       HOTL_BASE_URL: ${{ secrets.HOTL_BASE_URL }}
       HOTL_API_STYLE: ${{ vars.HOTL_API_STYLE }}
@@ -67,7 +71,7 @@ jobs:
       - name: Skip or fail when no key is configured
         id: creds
         run: |
-          if [ -z "${OPENAI_API_KEY}" ] && [ -z "${ANTHROPIC_API_KEY}" ]; then
+          if [ -z "${HOTL_API_KEY}" ] && [ -z "${ANTHROPIC_API_KEY}" ]; then
             if [ "${{ github.event_name }}" = "schedule" ]; then
               echo "skip=1" >> "$GITHUB_OUTPUT"
               echo "::notice::Scheduled run has no provider secret — skipping (not a failure)."
@@ -101,9 +105,10 @@ jobs:
           {
             if [ -n "${OPENAI_API_KEY:-}" ]; then
               printf 'OPENAI_API_KEY=%s\n' "$OPENAI_API_KEY"
-              # R0-07: OPENAI_API_KEY only ever goes to api.openai.com; a
-              # custom HOTL_BASE_URL (gateway) authenticates with HOTL_API_KEY.
-              printf 'HOTL_API_KEY=%s\n' "$OPENAI_API_KEY"
+            fi
+            # R0-07: a custom HOTL_BASE_URL (gateway) authenticates with HOTL_API_KEY.
+            if [ -n "${HOTL_API_KEY:-}" ]; then
+              printf 'HOTL_API_KEY=%s\n' "$HOTL_API_KEY"
             fi
             if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
               printf 'ANTHROPIC_API_KEY=%s\n' "$ANTHROPIC_API_KEY"
@@ -187,6 +192,10 @@ jobs:
           if [ -n "${OPENAI_API_KEY:-}" ] && grep -rIl -- "$OPENAI_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
             echo "::error::The OpenAI API key leaked into .ai-runtime artifacts."
             grep -rIl -- "$OPENAI_API_KEY" "$root/.ai-runtime" | sed 's|^|  |'
+            leak=1
+          fi
+          if [ -n "${HOTL_API_KEY:-}" ] && grep -rIl -- "$HOTL_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
+            echo "::error::The provider key leaked into .ai-runtime artifacts."
             leak=1
           fi
           if [ -n "${ANTHROPIC_API_KEY:-}" ] && grep -rIl -- "$ANTHROPIC_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
