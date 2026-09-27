@@ -8,7 +8,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Orchestrator } from '../orchestrator.js';
 import { finalizePlan } from '../planning/planner.js';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -254,17 +254,21 @@ describe('R-14 — plan ownership is claimed atomically across processes', () =>
     const { spawn } = await import('node:child_process');
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-owner-'));
     const script = `
-      import { tryAcquirePlanOwner } from ${JSON.stringify(path.resolve(__dirname, '../runtime/plan-owner.ts'))};
+      import { tryAcquirePlanOwner } from ${JSON.stringify(pathToFileURL(path.resolve(__dirname, '../runtime/plan-owner.ts')).href)};
       const h = tryAcquirePlanOwner(${JSON.stringify(dir)}, 'plan_race');
       process.stdout.write(h ? 'WON' : 'LOST');
       setTimeout(() => process.exit(0), 300);
     `;
-    const tsx = path.resolve(__dirname, '../../../node_modules/.bin/tsx');
+    // `node --import tsx`, not node_modules/.bin/tsx: on Windows that is a
+    // shell script spawn() cannot run.
     const runOne = () =>
       new Promise<string>((resolve) => {
-        const child = spawn(tsx, ['--input-type=module', '-e', script]);
+        const child = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', script], {
+          cwd: path.resolve(__dirname, '../../..'),
+        });
         let out = '';
         child.stdout.on('data', (d) => (out += d));
+        child.on('error', (err) => resolve(`ERROR ${err.message}`));
         child.on('close', () => resolve(out.trim()));
       });
     const results = await Promise.all([runOne(), runOne(), runOne(), runOne()]);
@@ -584,7 +588,7 @@ describe('validatePath with a root reached through a symlink (macOS /var, Window
     const link = path.join(base, 'link');
     fs.symlinkSync(real, link, 'dir');
     await expect(validatePath(path.join(link, 'a.txt'), [link])).resolves.toBe(path.join(link, 'a.txt'));
-    await expect(validatePath(path.join(fs.realpathSync(real), 'a.txt'), [link])).resolves.toBe(path.join(link, 'a.txt'));
+    await expect(validatePath(path.join(fs.realpathSync.native(real), 'a.txt'), [link])).resolves.toBe(path.join(link, 'a.txt'));
     await expect(validatePath('new/dir/b.txt', [link])).resolves.toContain('b.txt');
     const outside = path.join(base, 'outside');
     fs.mkdirSync(outside);

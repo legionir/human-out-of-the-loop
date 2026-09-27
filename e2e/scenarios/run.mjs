@@ -41,6 +41,11 @@ let scratchRoot;
 
 // ─── helpers ─────────────────────────────────────────────────────
 
+/** `value` as it appears inside JSON text (Windows backslashes escaped). */
+function jsonText(value) {
+  return JSON.stringify(value).slice(1, -1);
+}
+
 function check(name, ok, detail = '') {
   results.push({ name, ok, detail });
   process.stdout.write(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? `  — ${detail}` : ''}\n`);
@@ -708,7 +713,9 @@ scenarios.memory = async () => {
   // and the observation text — which exists nowhere in the prompt.
   check(
     'memory: results reached the model with the project file name',
-    dump.includes('.ai-runtime/memory.json') && dump.includes('memoryFile')
+    // (the dump is JSON: a Windows separator appears as an escaped "\\")
+    (dump.includes('.ai-runtime/memory.json') || dump.includes('.ai-runtime\\\\memory.json')) &&
+      dump.includes('memoryFile')
   );
   check(
     'memory: the search and the open call returned the stored facts',
@@ -1609,7 +1616,7 @@ scenarios.chat = async () => {
   );
   check(
     'chat: the answer prompt carries the project context too',
-    chatRequests.some((body) => JSON.stringify(body).includes(root)),
+    chatRequests.some((body) => JSON.stringify(body).includes(jsonText(root))),
     'root in the request'
   );
 
@@ -2015,7 +2022,7 @@ scenarios.context = async () => {
   const assessment = requests.find((body) => JSON.stringify(body).includes('PlannerAssessment'));
   const text = JSON.stringify(assessment ?? {});
   check('context: the planner request carries a PROJECT CONTEXT block', text.includes('PROJECT CONTEXT'), text.slice(0, 200));
-  check('context: ...with the absolute project root', text.includes(root), root);
+  check('context: ...with the absolute project root', text.includes(jsonText(root)), root);
   check(
     'context: ...and what is in the project',
     text.includes('README.md') && text.includes('top-level entries'),

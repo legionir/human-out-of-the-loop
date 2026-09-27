@@ -207,7 +207,7 @@ describe('v27.17.0 — what the assessment means', () => {
       }
     );
     expect(normalized.kind).toBe('clarify');
-    expect(normalized.needsClarification[0]).toContain('/tmp/p');
+    expect(normalized.needsClarification[0]).toContain(path.resolve('/tmp/p'));
   });
 });
 
@@ -276,7 +276,7 @@ describe("v27.17.0 — the answer is in the user's language", () => {
       name: 'Persian',
       native: 'فارسی',
     });
-    expect(persian).toContain('/tmp/proj');
+    expect(persian).toContain(path.resolve('/tmp/proj'));
     expect(persian).toMatch(/[\u0600-\u06ff]/);
     expect(persian).toContain('تمام');
     // English (and no detection) keeps the English question.

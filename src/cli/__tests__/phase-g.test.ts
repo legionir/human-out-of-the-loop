@@ -137,6 +137,8 @@ describe('G-03 /cd env snapshot', () => {
     expect(process.env.HOTL_G03).toBe('from-b');
     expect(r.state.cwd).toBe(fs.realpathSync(b));
     expect(r.state.model).toBe('claude-sonnet');
+    // /cd changed the process cwd into b; Windows refuses to remove it then.
+    process.chdir(startCwd);
     fs.rmSync(a, { recursive: true, force: true });
     fs.rmSync(b, { recursive: true, force: true });
   });

@@ -272,7 +272,7 @@ describe('Phase 29 — run pre-flight is a usage error, not a crash', () => {
       '--project-root',
       projectRoot,
     ]);
-    expect(second.code).toBe(0);
+    expect(second.code, `${second.errOut}\n${second.out}`).toBe(0);
     expect(second.out).toContain(`Session: ${sessionId}`);
   });
 });

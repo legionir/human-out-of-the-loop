@@ -391,7 +391,7 @@ describe('E-10 — model Plan schema omits runtime fields', () => {
 describe('E-11 — DEFAULT_MODEL_ID and maxContextTokens', () => {
   it('is gpt-4o and the only production fallback', () => {
     expect(DEFAULT_MODEL_ID).toBe('gpt-4o');
-    const files = walkTs(SRC_DIR).filter((file) => !file.endsWith('models/defaults.ts'));
+    const files = walkTs(SRC_DIR).filter((file) => !file.split(path.sep).join('/').endsWith('models/defaults.ts'));
     for (const file of files) {
       const text = fs.readFileSync(file, 'utf8');
       expect(text, file).not.toMatch(/['"]gpt-4o['"]/);

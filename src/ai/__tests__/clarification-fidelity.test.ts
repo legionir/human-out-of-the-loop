@@ -125,7 +125,7 @@ describe('v27.16.1 — "unclear" always carries a question', () => {
     expect(normalized.needsClarification).toHaveLength(1);
     expect(normalized.needsClarification[0]).toMatch(/What exactly should I do/);
     // The fallback names the project root; it must never ask for it.
-    expect(normalized.needsClarification[0]).toContain('/tmp/some-project');
+    expect(normalized.needsClarification[0]).toContain(path.resolve('/tmp/some-project'));
     expect(normalized.needsClarification[0]).not.toMatch(/which project|current directory/i);
   });
 

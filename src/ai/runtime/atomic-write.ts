@@ -22,6 +22,27 @@ import { randomUUID } from 'node:crypto';
  * recreating it here keeps such a write working instead of failing with
  * a bare ENOENT.
  */
+const TRANSIENT_RENAME_CODES = new Set(['EPERM', 'EACCES', 'EBUSY']);
+
+/**
+ * On Windows a rename onto an existing file fails with EPERM/EACCES/EBUSY
+ * while another process (a reader, an indexer, antivirus) briefly holds it
+ * open.  Retry for up to ~0.5s, as graceful-fs does; elsewhere, once.
+ */
+function renameWithRetry(from: string, to: string): void {
+  const attempts = process.platform === 'win32' ? 10 : 1;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      fs.renameSync(from, to);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? '';
+      if (attempt >= attempts || !TRANSIENT_RENAME_CODES.has(code)) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10 * attempt);
+    }
+  }
+}
+
 export function atomicWriteFileSync(filePath: string, data: string): void {
   const tmp = `${filePath}.tmp-${randomUUID()}`;
   try {
@@ -40,7 +61,7 @@ export function atomicWriteFileSync(filePath: string, data: string): void {
     fs.writeFileSync(tmp, data, 'utf-8');
   }
   try {
-    fs.renameSync(tmp, filePath);
+    renameWithRetry(tmp, filePath);
   } catch (err) {
     // Best-effort cleanup of the temp file on failure
     try {

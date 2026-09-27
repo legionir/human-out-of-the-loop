@@ -76,9 +76,9 @@ describe('Phase 36 — search_files with an editor-grade glob scan', () => {
 
     expect(result.success).toBe(true);
     expect(result.matchMode).toBe('basename');
-    expect(result.matches).toContain(path.join('src', 'index.ts'));
-    expect(result.matches).toContain(path.join('src', 'lib', 'util.ts'));
-    expect(result.matches).toContain(path.join('src', '__tests__', 'util.test.ts'));
+    expect(result.matches).toContain('src/index.ts');
+    expect(result.matches).toContain('src/lib/util.ts');
+    expect(result.matches).toContain('src/__tests__/util.test.ts');
     expect(result.matches).toContain('top.test.ts');
     expect(result.counts.files).toBe(4);
     expect(result.counts.directories).toBe(0);
@@ -101,8 +101,8 @@ describe('Phase 36 — search_files with an editor-grade glob scan', () => {
     const explicit = (await execute({ pattern: '*.ts', skipBuildDirs: false })) as {
       matches: string[];
     };
-    expect(explicit.matches).toContain(path.join('node_modules', 'dep', 'index.ts'));
-    expect(explicit.matches).toContain(path.join('dist', 'bundle.ts'));
+    expect(explicit.matches).toContain('node_modules/dep/index.ts');
+    expect(explicit.matches).toContain('dist/bundle.ts');
   });
 
   it('can match the whole relative path when asked (reference behaviour)', async () => {
@@ -113,7 +113,7 @@ describe('Phase 36 — search_files with an editor-grade glob scan', () => {
     })) as { matchMode: string; matches: string[] };
 
     expect(result.matchMode).toBe('path');
-    expect(result.matches).toEqual([path.join('src', '__tests__', 'util.test.ts')]);
+    expect(result.matches).toEqual(['src/__tests__/util.test.ts']);
   });
 
   it('filters by entry type — directories only, files only', async () => {
@@ -130,7 +130,7 @@ describe('Phase 36 — search_files with an editor-grade glob scan', () => {
     const files = (await execute({ pattern: '*.md', includeDirectories: false })) as {
       matches: string[];
     };
-    expect(files.matches).toEqual([path.join('src', 'notes.md')]);
+    expect(files.matches).toEqual(['src/notes.md']);
   });
 
   it("honours excludePatterns, including '!' re-includes", async () => {
@@ -146,7 +146,7 @@ describe('Phase 36 — search_files with an editor-grade glob scan', () => {
       pattern: '*.ts',
       excludePatterns: ['**/*.test.ts', '!**/__tests__/util.test.ts'],
     })) as { matches: string[] };
-    expect(reIncluded.matches).toContain(path.join('src', '__tests__', 'util.test.ts'));
+    expect(reIncluded.matches).toContain('src/__tests__/util.test.ts');
     expect(reIncluded.matches).not.toContain('top.test.ts');
   });
 
@@ -158,7 +158,7 @@ describe('Phase 36 — search_files with an editor-grade glob scan', () => {
       skippedSymlinks: number;
     };
 
-    const entry = result.entries.find((item) => item.path === path.join('src', 'index.ts'))!;
+    const entry = result.entries.find((item) => item.path === 'src/index.ts')!;
     expect(entry.type).toBe('file');
     expect(entry.size).toBe(Buffer.byteLength('export const index = 1;\n'));
 

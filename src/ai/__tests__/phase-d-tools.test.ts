@@ -194,7 +194,9 @@ gitSuite('Phase D — git runner, commit, push, PR (D-07…D-10, D-13)', () => {
       const pidFile = path.join(repo, 'hook.pid');
       fs.writeFileSync(
         hook,
-        `#!/bin/sh\necho $$ > ${JSON.stringify(pidFile)}\nsleep 60\n`
+        // Git for Windows runs hooks in MSYS, where $$ is not a Windows pid;
+        // /proc/$$/winpid is.
+        `#!/bin/sh\nif [ -r /proc/$$/winpid ]; then cat /proc/$$/winpid; else echo $$; fi > ${JSON.stringify(pidFile.split(path.sep).join('/'))}\nsleep 60\n`
       );
       fs.chmodSync(hook, 0o755);
       fs.writeFileSync(path.join(repo, 'app.ts'), 'export const n = 2;\n');

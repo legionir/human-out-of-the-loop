@@ -583,8 +583,8 @@ describe('Phase 33 — filesystem tools', () => {
     };
 
     expect(result.success).toBe(true);
-    expect(result.matches).toContain(path.join('src', 'index.ts'));
-    expect(result.matches).toContain(path.join('src', 'lib', 'util.ts'));
+    expect(result.matches).toContain('src/index.ts');
+    expect(result.matches).toContain('src/lib/util.ts');
     expect(result.totalMatches).toBe(2);
   });
 
