@@ -3,6 +3,8 @@
  */
 import type { Express } from 'express';
 import type { Orchestrator } from '../ai/orchestrator.js';
+import type { Plan } from '../ai/schemas/plan.js';
+import type { RunMode } from '../ai/modes.js';
 import type { SseHub } from './sse.js';
 
 export type RunStateKind =
@@ -60,4 +62,12 @@ export interface ServerContext {
   authTokens: string[];
   /** A-05: idle TTL for clarification/confirmation; 0 disables. */
   runTtlMs: number;
+  /**
+   * H-08: in-memory preview cache.  A preview is never written to the plan
+   * store; `POST /api/run { previewId }` executes the same steps.
+   */
+  previews: Map<
+    string,
+    { plan: Plan; planText?: string; message: string; mode?: RunMode; createdAt: number }
+  >;
 }

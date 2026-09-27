@@ -24,6 +24,8 @@ import { Router } from 'express';
 import type { Plan } from '../../ai/schemas/plan.js';
 import type { RunOverrides } from '../../ai/orchestrator.js';
 import { parseRunMode, type RunMode } from '../../ai/modes.js';
+import { parseModePrefix, resolveRunMode } from '../../cli/utils/mode-prefix.js';
+import { loadGlobalConfig } from '../../cli/utils/config.js';
 import { getAuthToken } from '../auth.js';
 import { armRunTtl, cancelInFlightRun, clearRunTtl, sendOwnerForbidden } from '../run-control.js';
 import type { ServerContext } from '../types.js';
@@ -32,7 +34,7 @@ export function runRouter(ctx: ServerContext): Router {
   const router = Router();
 
   router.post('/api/run', async (req, res) => {
-    const { message, sessionId, confirm, model, timeoutMs, maxSteps, maxReplans, mode } =
+    const { message, sessionId, confirm, model, timeoutMs, maxSteps, maxReplans, mode, previewId } =
       (req.body ?? {}) as {
         message?: unknown;
         sessionId?: unknown;
@@ -44,9 +46,20 @@ export function runRouter(ctx: ServerContext): Router {
         maxReplans?: unknown;
         /** v27.17.0: auto (default) / chat / plan */
         mode?: unknown;
+        /** H-08: execute a previously previewed plan. */
+        previewId?: unknown;
       };
     // NOTE (UI security step): `projectRoot` intentionally does NOT come
     // from the request body — it is fixed server-side (config/env).
+    if (previewId != null && typeof previewId !== 'string') {
+      res.status(400).json({ error: '"previewId" must be a string when present.' });
+      return;
+    }
+    const preview = previewId ? ctx.previews.get(previewId) : undefined;
+    if (previewId && !preview) {
+      res.status(404).json({ error: `Preview "${previewId}" not found.` });
+      return;
+    }
     if (typeof message !== 'string' || message.trim() === '') {
       res.status(400).json({ error: 'Body must include a non-empty "message".' });
       return;
@@ -56,6 +69,13 @@ export function runRouter(ctx: ServerContext): Router {
     if (sessionId != null && typeof sessionId !== 'string') {
       res.status(400).json({ error: '"sessionId" must be a string when present.' });
       return;
+    }
+    if (sessionId) {
+      await ctx.orchestrator.initialize();
+      if (!ctx.orchestrator.sessionStore.getSession(sessionId)) {
+        res.status(404).json({ error: `Session "${sessionId}" not found.` });
+        return;
+      }
     }
     const autoConfirm = confirm === true;
 
@@ -67,6 +87,19 @@ export function runRouter(ctx: ServerContext): Router {
         return;
       }
       runMode = parseRunMode(mode);
+    }
+
+    // H-09: `@chat` / `@plan` prefixes override body `mode` (same as preview).
+    const prefix = parseModePrefix(message);
+    let runMessage = message;
+    if (prefix.mode) {
+      runMode = prefix.mode;
+      runMessage = prefix.text;
+    } else if (!runMode) {
+      runMode = resolveRunMode({ config: loadGlobalConfig() }).resolved.mode;
+    }
+    if (preview?.mode && !prefix.mode && mode == null) {
+      runMode = preview.mode;
     }
 
     // U3: per-run overrides — validate now (synchronous) so the UI gets
@@ -122,10 +155,11 @@ export function runRouter(ctx: ServerContext): Router {
     // lifecycle is observable via GET /api/runs/:runId + SSE.
     void (async () => {
       try {
-        const result = await ctx.orchestrator.run(message.trim(), {
+        const result = await ctx.orchestrator.run(runMessage.trim(), {
           sessionId: run.sessionId,
           abortSignal: abortController.signal,
           ...(runMode ? { mode: runMode } : {}),
+          ...(preview ? { preparedPlan: preview.plan } : {}),
           // U3: per-run overrides (validated above)
           ...(Object.keys(runOverrides).length > 0 ? { runOverrides } : {}),
           // U5: interactive clarification.  The planner asks questions during
@@ -161,11 +195,14 @@ export function runRouter(ctx: ServerContext): Router {
             }
             run.state = 'awaiting-confirmation';
             run.planText = planText;
+            const confirmationPayload = {
+              runId,
+              ...(run.planId ? { planId: run.planId } : {}),
+              planText,
+            };
+            ctx.hub.emit(runId, 'awaiting-confirmation', confirmationPayload);
             if (run.planId) {
-              ctx.hub.emit(run.planId, 'awaiting-confirmation', {
-                planId: run.planId,
-                planText,
-              });
+              ctx.hub.emit(run.planId, 'awaiting-confirmation', confirmationPayload);
             }
             armRunTtl(ctx, run);
             return new Promise((resolve) => {
@@ -183,11 +220,10 @@ export function runRouter(ctx: ServerContext): Router {
         run.state = 'done';
         run.outcome = result.review.outcome;
         run.report = result.report;
+        const donePayload = { runId, ...(run.planId ? { planId: run.planId } : {}), outcome: result.review.outcome };
+        ctx.hub.emit(runId, 'run:done', donePayload);
         if (run.planId) {
-          ctx.hub.emit(run.planId, 'run:done', {
-            runId,
-            outcome: result.review.outcome,
-          });
+          ctx.hub.emit(run.planId, 'run:done', donePayload);
         }
       } catch (err) {
         clearRunTtl(run);

@@ -99,6 +99,13 @@
         ></textarea>
         <!-- U3: model and per-run execution options -->
         <div class="run-options-row">
+          <label class="model-picker">Mode
+            <select id="run-mode" aria-label="Run mode">
+              <option value="auto">auto</option>
+              <option value="chat">chat</option>
+              <option value="plan">plan</option>
+            </select>
+          </label>
           <label class="model-picker">Model
             <select id="run-model" aria-label="Model for this run"></select>
             <button id="run-model-refresh" class="btn small" type="button" title="Load the models your providers serve">↻</button>
@@ -148,7 +155,8 @@
         </div>
       </div>
       <div class="modal-actions hidden" id="plan-preview-row">
-        <button id="preview-close-btn" class="btn primary">Close preview</button>
+        <button id="preview-close-btn" class="btn">Close preview</button>
+        <button id="preview-run-btn" class="btn primary">Run this plan</button>
       </div>
     </div>
   </div>
@@ -173,6 +181,6 @@
   </div>
 
   <div id="toast" class="toast hidden"></div>
-  <script src="/app.js"></script>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>

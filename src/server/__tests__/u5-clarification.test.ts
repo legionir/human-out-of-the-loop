@@ -265,7 +265,7 @@ describe('U5 — interactive clarification', () => {
 
       let buffer = '';
       const deadline = Date.now() + 10_000;
-      while (!buffer.includes('event: clarification') && Date.now() < deadline) {
+      while (!buffer.includes('"attempt":2') && Date.now() < deadline) {
         const chunk = await Promise.race([
           reader.read(),
           new Promise<{ done: true }>((r) => setTimeout(() => r({ done: true }), 250)),
@@ -278,7 +278,9 @@ describe('U5 — interactive clarification', () => {
       controller.abort();
 
       expect(buffer).toContain('event: clarification');
-      const frame = buffer.slice(buffer.indexOf('event: clarification'));
+      // H-02: late subscribers replay buffered frames, so round 1 may appear
+      // first — the live round is the last clarification event.
+      const frame = buffer.slice(buffer.lastIndexOf('event: clarification'));
       expect(frame).toContain('"questions":["Which auth provider?","Which test framework?"]');
       expect(frame).toContain('"attempt":2');
       expect(frame).toContain(`"runId":"${runId}"`);

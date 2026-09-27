@@ -225,6 +225,11 @@ export interface OrchestratorRunOptions {
    * `POST /api/runs/:runId/cancel` fires this while state is `planning`.
    */
   abortSignal?: AbortSignal;
+  /**
+   * H-08: skip the planner and execute this already-previewed plan.
+   * Feasibility/confirmation still run so the user confirms the same steps.
+   */
+  preparedPlan?: Plan;
 }
 
 export interface OrchestratorResult {
@@ -943,6 +948,11 @@ export class Orchestrator {
       ? { ...requested, modelId: this.useModel(requested.modelId) }
       : requested;
 
+    if (options?.sessionId && !this.sessionStore.getSession(options.sessionId)) {
+      const err = new Error(`Session "${options.sessionId}" not found.`);
+      (err as Error & { status?: number }).status = 404;
+      throw err;
+    }
     const sessionId =
       options?.sessionId ?? this.sessionStore.createSession(options?.sessionLabel);
     const interaction = this.sessionStore.addInteraction(sessionId, userRequest);
@@ -1004,7 +1014,20 @@ export class Orchestrator {
     let planningResult;
     try {
       throwIfAborted(abortSignal);
-      planningResult = await this.planner.plan(userRequest, undefined, runModelId, mode, abortSignal);
+      if (options?.preparedPlan) {
+        planningResult = {
+          kind: 'plan' as const,
+          isClear: true,
+          needsClarification: [] as string[],
+          errors: [] as string[],
+          plan: {
+            ...options.preparedPlan,
+            steps: options.preparedPlan.steps.map((s) => ({ ...s })),
+          },
+        };
+      } else {
+        planningResult = await this.planner.plan(userRequest, undefined, runModelId, mode, abortSignal);
+      }
     } catch (err) {
       if (isAbortError(err) || abortSignal?.aborted) {
         return cancelledResult(
@@ -1622,7 +1645,7 @@ export class Orchestrator {
     if (interactionId) {
       this.sessionStore.updateInteraction(sessionId, interactionId, {
         outcome: text ? 'success' : 'failure',
-        reviewSummary: text ? body.slice(0, 500) : body,
+        reviewSummary: body,
         completedAt: Date.now(),
       });
     }
@@ -1699,18 +1722,17 @@ export class Orchestrator {
     }
 
     if (!planningResult.isClear) {
-      const clarificationMsg =
-        planningResult.needsClarification.length > 0
-          ? planningResult.needsClarification.join('\n')
-          : planningResult.errors.join('\n');
-      return {
-        ok: false,
-        needsClarification:
-          planningResult.needsClarification.length > 0
-            ? planningResult.needsClarification
-            : planningResult.errors,
-        error: `The request needs clarification before a plan can be produced:\n${clarificationMsg}`,
-      };
+      if (planningResult.needsClarification.length > 0) {
+        const clarificationMsg = planningResult.needsClarification.join('\n');
+        return {
+          ok: false,
+          needsClarification: planningResult.needsClarification,
+          error: `The request needs clarification before a plan can be produced:\n${clarificationMsg}`,
+        };
+      }
+      const errorMsg =
+        planningResult.errors.join('\n') || 'The request could not be planned.';
+      return { ok: false, error: errorMsg };
     }
 
     const plan = planningResult.plan!;

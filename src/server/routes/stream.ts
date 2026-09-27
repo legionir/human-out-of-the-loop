@@ -21,8 +21,7 @@ export function streamRouter(ctx: ServerContext): Router {
   router.get('/api/stream/:planId', (req, res) => {
     const planId = req.params.planId;
 
-    const unsubscribe = ctx.hub.subscribe(planId, res);
-    if (!unsubscribe) {
+    if (ctx.hub.atCapacity()) {
       res.status(503).json({ error: 'SSE connection limit reached' });
       return;
     }
@@ -34,6 +33,24 @@ export function streamRouter(ctx: ServerContext): Router {
     res.flushHeaders();
     // Initial comment frame — lets clients (and proxies) see the stream open.
     res.write(': stream-open\n\n');
+
+    const rawLast =
+      req.get('last-event-id') ??
+      (typeof req.query.lastEventId === 'string' ? req.query.lastEventId : undefined);
+    const lastEventId =
+      rawLast !== undefined && rawLast !== '' && Number.isFinite(Number(rawLast))
+        ? Number(rawLast)
+        : undefined;
+
+    const unsubscribe = ctx.hub.subscribe(planId, res, lastEventId);
+    if (!unsubscribe) {
+      try {
+        res.end();
+      } catch {
+        /* already closed */
+      }
+      return;
+    }
 
     // Heartbeat keeps idle connections (proxies) from timing out.
     const heartbeat = setInterval(() => {

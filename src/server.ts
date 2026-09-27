@@ -36,6 +36,7 @@ import {
   resolveServerTokens,
 } from './server/auth.js';
 import { SseHub } from './server/sse.js';
+import { resolveRunMode } from './cli/utils/mode-prefix.js';
 import { sessionsRouter } from './server/routes/sessions.js';
 import { plansRouter } from './server/routes/plans.js';
 import { runRouter } from './server/routes/run.js';
@@ -135,25 +136,6 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
     maxConnections: Number.isFinite(maxSse) && (maxSse as number) > 0 ? maxSse : undefined,
   });
 
-  // Progress events → SSE (compact payloads only — see stream.ts).
-  // Subscribing to the StreamingManager (post-construction) works
-  // identically to the onProgress config hook.
-  orchestrator.streamingManager.subscribe((event) => {
-    const payload: Record<string, unknown> = {
-      planId: event.planId,
-      message: event.message,
-      timestamp: event.timestamp,
-    };
-    if (event.stepId !== undefined) payload.stepId = event.stepId;
-    if (event.taskId !== undefined) payload.taskId = event.taskId;
-    // tool-call events carry only the tool NAME (Law 14) — the
-    // ProgressEvent payload itself never contains arguments.
-    if (event.type === 'task:tool-call' && event.payload?.toolName !== undefined) {
-      payload.toolName = event.payload.toolName;
-    }
-    hub.emit(event.planId, event.type, payload);
-  });
-
   const app = express();
   app.disable('x-powered-by');
   app.use(express.json({ limit: '1mb' }));
@@ -170,6 +152,7 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
     orchestrator,
     hub,
     runs: new Map(),
+    previews: new Map(),
     projectRoot,
     runtimeDir,
     logFilePath: path.join(runtimeDir, 'observability.jsonl'),
@@ -181,6 +164,31 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
       throw err instanceof Error ? err : new Error(String(err));
     }),
   };
+
+  // Progress events → SSE (compact payloads only — see stream.ts).
+  // Dual-emit on runId so a client that subscribed before planId exists
+  // still sees `plan:started` (H-02). `agentLevel` is forwarded (H-04).
+  orchestrator.streamingManager.subscribe((event) => {
+    const payload: Record<string, unknown> = {
+      planId: event.planId,
+      message: event.message,
+      timestamp: event.timestamp,
+    };
+    if (event.stepId !== undefined) payload.stepId = event.stepId;
+    if (event.taskId !== undefined) payload.taskId = event.taskId;
+    if (event.payload) {
+      for (const [key, value] of Object.entries(event.payload)) {
+        if (key === 'args' || key === 'toolArgs') continue;
+        payload[key] = value;
+      }
+    }
+    hub.emit(event.planId, event.type, payload);
+    for (const run of ctx.runs.values()) {
+      if (run.planId === event.planId && run.runId !== event.planId) {
+        hub.emit(run.runId, event.type, { ...payload, runId: run.runId });
+      }
+    }
+  });
 
   // Lazy init: the first request awaits a single shared initialization.
   app.use((req, res, next) => {
@@ -205,6 +213,7 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
       ok: true,
       projectRoot,
       model: orchestrator.config.defaultModelId,
+      mode: resolveRunMode({ config: globalCfg }).resolved.mode,
       persistent,
       redactKeysCount: redactKeys.length,
     });

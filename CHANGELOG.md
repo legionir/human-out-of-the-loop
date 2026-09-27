@@ -5,6 +5,25 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.11] — 2026-09-27 — Phase H: web UI ↔ server
+
+Closes every open row of **Phase H** in `docs/UNIFIED_EXECUTION_PLAN.md` (H-01…H-14).
+
+- **H-01 — plan modal.** Open once per `planId`; a preview stays up while a run is executing; feedback is not wiped by the poller.
+- **H-02 — SSE replay.** Ring buffer with `id:` frames, `Last-Event-ID` / `lastEventId`, and dual-emit onto the runId channel so auto-confirm still sees `plan:started`.
+- **H-03 — `plan:cancelled`.** Streaming manager translates it once and does not emit `plan:failed` for a cancelled plan.
+- **H-04 — event names / `agentLevel`.** UI listens for `task:tool-error`, `plan:replanned`, `plan:error`; SSE forwards `agentLevel` so agent lines are not a second step row.
+- **H-05 — session continuity.** `finishRun` keeps `result.sessionId`; two goals in one session.
+- **H-06 — run errors.** Failures render in the assistant bubble (`error: …`), not only a toast.
+- **H-07 — preview chat vs errors.** Preview shows `answer`; provider failures are errors, not clarification questions.
+- **H-08 — previewId.** `POST /api/preview` returns an in-memory `previewId`; `POST /api/run { previewId }` executes those steps without planning again.
+- **H-09 — mode.** `@plan` / `@chat` prefixes, `HOTL_MODE` / `defaultMode`, and a Mode control; preview accepts `mode`.
+- **H-10 — follow without a log file.** `followLog` stays open and shows the first write.
+- **H-11 — unknown session.** `POST /api/run { sessionId: "nope" }` → 404, no model call.
+- **H-12 — task table.** `finishRunUi` loads tasks before dropping the run.
+- **H-13 — truncated chat.** Clipped session text carries `… [truncated]`.
+- **H-14 — clarification rounds.** Submitted rounds are not reopened by the poller.
+
 ## [27.17.10] — 2026-09-27 — Phase G: CLI, REPL, and server
 
 Closes every open row of **Phase G** in `docs/UNIFIED_EXECUTION_PLAN.md` (G-01…G-18).
