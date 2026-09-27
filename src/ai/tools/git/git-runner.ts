@@ -36,6 +36,8 @@ export const GIT_OUTPUT_LIMIT_BYTES = 256 * 1024;
 export const GIT_TIMEOUT_MS = 15_000;
 /** Commits (and their hooks) get a longer budget than a read. */
 export const GIT_COMMIT_TIMEOUT_MS = 120_000;
+/** How long to wait for stdout/stderr to drain after the git process exited. */
+export const EXIT_DRAIN_GRACE_MS = 250;
 
 /**
  * Parent-env keys a git child is allowed to inherit. Secrets (API keys, tokens)
@@ -279,7 +281,34 @@ export function runGit(
       finish({ ok: false, code: 'GIT_MISSING', error: describeSpawnError(err) });
     });
 
+    // 'exit' can fire before the pipes are drained, which cut stdout short;
+    // 'close' waits for them but never comes if a grandchild (a hook that
+    // backgrounded something) still holds a pipe.  Settle on 'close', or a
+    // short grace period after 'exit'.
+    let exitCode: number | null = null;
+    let exitSignal: NodeJS.Signals | null = null;
+    let exited = false;
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    const onDone = (): void => {
+      if (graceTimer) clearTimeout(graceTimer);
+      settleExit(exitCode, exitSignal);
+    };
     child.on('exit', (code, signal) => {
+      exited = true;
+      exitCode = code;
+      exitSignal = signal;
+      graceTimer = setTimeout(onDone, EXIT_DRAIN_GRACE_MS);
+      graceTimer.unref?.();
+    });
+    child.on('close', (code, signal) => {
+      if (!exited) {
+        exitCode = code;
+        exitSignal = signal;
+      }
+      onDone();
+    });
+
+    const settleExit = (code: number | null, signal: NodeJS.Signals | null): void => {
       const text = Buffer.concat(stdout).toString('utf-8');
       const errText = Buffer.concat(stderr).toString('utf-8');
 
@@ -307,7 +336,7 @@ export function runGit(
         return;
       }
       finish({ ok: true, stdout: text, stderr: errText, truncated, code: exit });
-    });
+    };
 
     timer = setTimeout(() => {
       kill({

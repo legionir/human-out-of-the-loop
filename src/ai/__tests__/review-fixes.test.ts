@@ -334,3 +334,31 @@ describe('R-16 — a persona using a down MCP server\'s tools does not block sta
     await expect(orch.initialize()).rejects.toThrow(/allowedTools/i);
   });
 });
+
+describe('R-18 — process output is read to the end', () => {
+  it('spawnArgv returns every byte a fast-exiting child wrote', async () => {
+    const { spawnArgv } = await import('../tools/spawn-argv.js');
+    for (let i = 0; i < 5; i++) {
+      const result = await spawnArgv(
+        ['node', '-e', 'process.stdout.write("y".repeat(20000)); process.exit(0)'],
+        { cwd: os.tmpdir(), maxBytes: 1_000_000 },
+      );
+      expect(result.stdout.length).toBe(20000);
+    }
+  });
+
+  it('runGit returns a large blob in full', async () => {
+    const { runGit } = await import('../tools/git/git-runner.js');
+    const { execFileSync } = await import('node:child_process');
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-git-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: repo });
+      fs.writeFileSync(path.join(repo, 'big.txt'), 'z'.repeat(150_000));
+      execFileSync('git', ['add', 'big.txt'], { cwd: repo });
+      const blob = await runGit(repo, ['show', ':big.txt'], { maxBytes: 1_000_000 });
+      expect(blob.ok && blob.stdout.length).toBe(150_000);
+    } finally {
+      fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});

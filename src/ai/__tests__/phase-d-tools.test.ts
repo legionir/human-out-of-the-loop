@@ -216,7 +216,7 @@ gitSuite('Phase D — git runner, commit, push, PR (D-07…D-10, D-13)', () => {
       if (fs.existsSync(pidFile)) {
         const pid = Number(fs.readFileSync(pidFile, 'utf-8').trim());
         if (Number.isInteger(pid) && pid > 0) {
-          expect(() => process.kill(pid, 0)).toThrow();
+          expect(isAliveNotZombie(pid)).toBe(false);
         }
       }
     } finally {
@@ -605,3 +605,18 @@ describe('Phase D — journal summary and redaction (D-18)', () => {
     }
   });
 });
+
+/** A killed process nobody has reaped yet is a zombie: gone, but kill(pid, 0) still succeeds. */
+function isAliveNotZombie(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return false;
+  }
+  try {
+    const status = fs.readFileSync(`/proc/${pid}/status`, 'utf-8');
+    return !/^State:\s+Z/m.test(status);
+  } catch {
+    return true;
+  }
+}

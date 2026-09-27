@@ -163,13 +163,28 @@ export function spawnArgv(argv: readonly string[], options: SpawnArgvOptions): P
     child.stdout?.on('data', (chunk: Buffer) => collect(chunk, stdout, 'out'));
     child.stderr?.on('data', (chunk: Buffer) => collect(chunk, stderr, 'err'));
     child.on('error', (err) => finish({ ok: false, error: err.message }));
-    child.on('exit', (code, signal) => {
+    // Settle on 'close' (pipes drained) — or shortly after 'exit' when a
+    // grandchild keeps a pipe open — so the tail of the output is not lost.
+    let exitInfo: { code: number | null; signal: NodeJS.Signals | null } | undefined;
+    let graceTimer: NodeJS.Timeout | undefined;
+    const settle = (): void => {
+      if (graceTimer) clearTimeout(graceTimer);
+      const { code, signal } = exitInfo ?? { code: null, signal: null };
       finish({
         ok: code === 0 && !timedOut,
         code,
         signal,
         ...(timedOut ? { error: `timed out after ${timeoutMs}ms` } : {}),
       });
+    };
+    child.on('exit', (code, signal) => {
+      exitInfo = { code, signal };
+      graceTimer = setTimeout(settle, 250);
+      graceTimer.unref?.();
+    });
+    child.on('close', (code, signal) => {
+      exitInfo ??= { code, signal };
+      settle();
     });
 
     timer = setTimeout(() => {
