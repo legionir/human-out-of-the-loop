@@ -212,6 +212,8 @@ export class TaskRuntime {
    * delegate at once fill every slot and no child can ever start.
    */
   private readonly suspendedParents = new Set<string>();
+  /** Waiters for the next task state change (start, finish, cancel). */
+  private changeWaiters: Array<() => void> = [];
   /** C-01: lock releases waiting for a timed-out task's work to settle. */
   private readonly lingering = new Set<Promise<void>>();
   private readonly completedOrder: string[] = [];
@@ -305,6 +307,18 @@ export class TaskRuntime {
     return Array.from(this.tasks.values());
   }
 
+  /** Resolve every `nextChange()` waiter — a task started, ended or was cancelled. */
+  private notifyChange(): void {
+    const waiters = this.changeWaiters;
+    this.changeWaiters = [];
+    for (const wake of waiters) wake();
+  }
+
+  /** Resolves on the next task state change (replaces fixed-interval polling). */
+  private nextChange(): Promise<void> {
+    return new Promise((resolve) => this.changeWaiters.push(resolve));
+  }
+
   getRunningCount(): number {
     return this.runningIds.size;
   }
@@ -327,6 +341,12 @@ export class TaskRuntime {
    * respecting resource locks.
    */
   private scheduleNext(): void {
+    const before = this.runningIds.size;
+    this.startPending();
+    if (this.runningIds.size !== before) this.notifyChange();
+  }
+
+  private startPending(): void {
     const availableSlots = this.maxConcurrentTasks - this.activeSlotCount();
 
     if (availableSlots <= 0) return;
@@ -456,6 +476,7 @@ export class TaskRuntime {
         this.lockManager.release(taskId);
         this.runningIds.delete(taskId);
         this.scheduleNext();
+        this.notifyChange();
       };
       let cap: ReturnType<typeof setTimeout> | undefined;
       const lingering: Promise<void> = new Promise<void>((resolve) => {
@@ -504,6 +525,7 @@ export class TaskRuntime {
 
     // Try to start queued tasks now that a slot is free
     this.scheduleNext();
+    this.notifyChange();
   }
 
   private pruneTaskMaps(taskId: string): void {
@@ -563,7 +585,7 @@ export class TaskRuntime {
         .map((id) => this.runningPromises.get(id))
         .filter((p): p is Promise<AgentRunResult> => p !== undefined);
       if (promises.length === 0) {
-        await new Promise((r) => setTimeout(r, 15));
+        await this.nextChange();
         continue;
       }
       await Promise.race(promises);
@@ -611,7 +633,7 @@ export class TaskRuntime {
       }
       if (inflight.length === 0 && !pending) return;
       if (inflight.length === 0) {
-        await new Promise((r) => setTimeout(r, 10));
+        await this.nextChange();
         continue;
       }
       await Promise.allSettled(inflight);
@@ -645,7 +667,7 @@ export class TaskRuntime {
         );
         continue;
       }
-      await new Promise((r) => setTimeout(r, 10));
+      await this.nextChange();
     }
   }
 
@@ -654,6 +676,12 @@ export class TaskRuntime {
    * Phase 13 extends this with full cancellation support.
    */
   cancelTask(taskId: string): boolean {
+    const cancelled = this.cancelTaskInner(taskId);
+    if (cancelled) this.notifyChange();
+    return cancelled;
+  }
+
+  private cancelTaskInner(taskId: string): boolean {
     const task = this.tasks.get(taskId);
     if (!task) return false;
 

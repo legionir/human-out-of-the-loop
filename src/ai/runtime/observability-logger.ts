@@ -188,7 +188,11 @@ export class ObservabilityLogger {
     if (this.maxLogBytes <= 0 || !current || current.size < this.maxLogBytes) return false;
     this.close();
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const rotated = `${this.logFilePath}.${stamp}`;
+    // Two rotations in one millisecond must not overwrite each other.
+    let rotated = `${this.logFilePath}.${stamp}`;
+    for (let n = 1; fs.existsSync(rotated); n++) {
+      rotated = `${this.logFilePath}.${stamp}-${String(n).padStart(3, '0')}`;
+    }
     try {
       fs.renameSync(this.logFilePath, rotated);
     } catch {
