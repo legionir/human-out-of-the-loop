@@ -272,3 +272,21 @@ describe('R-14 — plan ownership is claimed atomically across processes', () =>
     fs.rmSync(dir, { recursive: true, force: true });
   }, 30_000);
 });
+
+describe('R-15 — breaking a stale lock never steals a fresh one', () => {
+  it('a waiter that judged the old lock stale leaves a newer lock in place', async () => {
+    const { staleLockIdentity, breakStaleLock } = await import('../runtime/file-lock.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-lock-'));
+    const lockPath = path.join(dir, 'x.lock');
+    fs.writeFileSync(lockPath, JSON.stringify({ pid: 2 ** 22 + 12345, acquiredAt: 0 }));
+    const staleIno = staleLockIdentity(lockPath, 1);
+    expect(typeof staleIno).toBe('string');
+    // Meanwhile another waiter broke it and took a fresh lock at the same path.
+    fs.unlinkSync(lockPath);
+    fs.writeFileSync(lockPath, JSON.stringify({ pid: process.pid, acquiredAt: Date.now() }));
+    expect(breakStaleLock(lockPath, staleIno!)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(lockPath, 'utf8')).pid).toBe(process.pid);
+    expect(fs.readdirSync(dir).filter((f) => f.endsWith('.stale'))).toEqual([]);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});

@@ -107,34 +107,77 @@ export function isLockHeld(lockPath: string): boolean {
  * when its mtime is older than `staleMs`, or when the recorded pid is
  * gone (a crashed writer must not block the store forever).
  */
-function isStaleLock(lockPath: string, staleMs: number): boolean {
-  let mtimeMs: number;
+/**
+ * A lock whose holder is alive is normally never stale (its mtime is not
+ * heartbeaten during a long write) — but past this age the pid is assumed to
+ * have been reused by an unrelated process, or the lock would never break.
+ */
+export const LOCK_HARD_STALE_MS = 10 * 60 * 1000;
+
+/** Inode + contents: an inode number alone is reused at once by some filesystems. */
+function lockIdentity(file: string): string | undefined {
   try {
-    mtimeMs = fs.statSync(lockPath).mtimeMs;
+    return `${fs.statSync(file).ino}:${fs.readFileSync(file, 'utf8')}`;
   } catch {
-    // Vanished between EEXIST and stat → the holder just released it.
-    return true;
+    return undefined;
   }
+}
 
-  const info = readLockInfo(lockPath);
-  // A live holder is never stale — mtime is not heartbeaten during a long write.
-  if (info && isProcessAlive(info.pid)) return false;
-  if (info && !isProcessAlive(info.pid)) return true;
-  if (Date.now() - mtimeMs > staleMs) return true;
-
-  return false;
+async function lockIdentityAsync(file: string): Promise<string | undefined> {
+  try {
+    return `${(await fsp.stat(file)).ino}:${await fsp.readFile(file, 'utf8')}`;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
- * Break a stale lock with an atomic rename so two waiters cannot both
- * unlink and then both believe they own the path.
- * Returns true when this caller won the race to take over.
+ * The identity of the lock file when it is stale, `null` when it vanished
+ * (the holder just released it), `undefined` when a live writer holds it.
  */
-function breakStaleLock(lockPath: string): boolean {
+export function staleLockIdentity(lockPath: string, staleMs: number): string | null | undefined {
+  let stat: fs.Stats;
+  try {
+    stat = fs.statSync(lockPath);
+  } catch {
+    return null;
+  }
+  const age = Date.now() - stat.mtimeMs;
+  const info = readLockInfo(lockPath);
+  const identity = (): string | null => lockIdentity(lockPath) ?? null;
+  if (info && isProcessAlive(info.pid)) return age > LOCK_HARD_STALE_MS ? identity() : undefined;
+  if (info && !isProcessAlive(info.pid)) return identity();
+  return age > staleMs ? identity() : undefined;
+}
+
+/**
+ * Break a stale lock with an atomic rename.  The rename may race another
+ * waiter that already broke the stale lock AND took a fresh one at the same
+ * path; so the renamed file's identity (inode + contents) is compared with the stale one we judged,
+ * and a fresh lock moved by mistake is linked back (link fails if the path is
+ * taken again, which is equally fine).  Returns true when a stale lock was
+ * removed by this caller.
+ */
+export function breakStaleLock(lockPath: string, staleIno: string | null): boolean {
+  if (staleIno === null) return true; // already gone — just retry the open
   const tomb = `${lockPath}.${randomUUID()}.stale`;
   try {
     fs.renameSync(lockPath, tomb);
   } catch {
+    return false;
+  }
+  const movedIno = lockIdentity(tomb);
+  if (movedIno !== undefined && movedIno !== staleIno) {
+    try {
+      fs.linkSync(tomb, lockPath);
+    } catch {
+      // someone else holds the path now — the fresh holder keeps its lock
+    }
+    try {
+      fs.unlinkSync(tomb);
+    } catch {
+      // ignore
+    }
     return false;
   }
   try {
@@ -145,11 +188,26 @@ function breakStaleLock(lockPath: string): boolean {
   return true;
 }
 
-async function breakStaleLockAsync(lockPath: string): Promise<boolean> {
+async function breakStaleLockAsync(lockPath: string, staleIno: string | null): Promise<boolean> {
+  if (staleIno === null) return true;
   const tomb = `${lockPath}.${randomUUID()}.stale`;
   try {
     await fsp.rename(lockPath, tomb);
   } catch {
+    return false;
+  }
+  const movedIno = await lockIdentityAsync(tomb);
+  if (movedIno !== undefined && movedIno !== staleIno) {
+    try {
+      await fsp.link(tomb, lockPath);
+    } catch {
+      // ignore
+    }
+    try {
+      await fsp.unlink(tomb);
+    } catch {
+      // ignore
+    }
     return false;
   }
   try {
@@ -221,8 +279,9 @@ export function withFileLockSync<T>(
 
       if (code !== 'EEXIST') throw err;
 
-      if (isStaleLock(lockPath, staleMs)) {
-        if (!breakStaleLock(lockPath)) {
+      const staleIno = staleLockIdentity(lockPath, staleMs);
+      if (staleIno !== undefined) {
+        if (!breakStaleLock(lockPath, staleIno)) {
           if (Date.now() - startedAt >= timeoutMs) {
             throw new FileLockTimeoutError(lockPath, timeoutMs, readLockInfo(lockPath));
           }
@@ -304,8 +363,9 @@ export async function withFileLock<T>(
         continue;
       }
       if (code !== 'EEXIST') throw err;
-      if (isStaleLock(lockPath, staleMs)) {
-        if (!(await breakStaleLockAsync(lockPath))) {
+      const staleIno = staleLockIdentity(lockPath, staleMs);
+      if (staleIno !== undefined) {
+        if (!(await breakStaleLockAsync(lockPath, staleIno))) {
           if (Date.now() - startedAt >= timeoutMs) {
             throw new FileLockTimeoutError(lockPath, timeoutMs, readLockInfo(lockPath));
           }
@@ -369,10 +429,8 @@ export function cleanupStaleLockFiles(dir: string): number {
   for (const f of fs.readdirSync(dir)) {
     if (!f.endsWith('.lock')) continue;
     const lockPath = path.join(dir, f);
-    if (isStaleLock(lockPath, DEFAULT_LOCK_STALE_MS)) {
-      breakStaleLock(lockPath);
-      removed++;
-    }
+    const staleIno = staleLockIdentity(lockPath, DEFAULT_LOCK_STALE_MS);
+    if (staleIno !== undefined && breakStaleLock(lockPath, staleIno)) removed++;
   }
   return removed;
 }
