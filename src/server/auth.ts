@@ -93,6 +93,20 @@ export function presentedBearerToken(req: Request): string | undefined {
   return token === '' ? undefined : token;
 }
 
+/**
+ * `EventSource` cannot send headers, so the two SSE routes also accept the
+ * token as `?access_token=` — GET only, and nowhere else, so a token never
+ * rides on a state-changing request's URL.
+ */
+const QUERY_TOKEN_PATHS = [/^\/api\/stream\/[^/]+$/, /^\/api\/observability\/stream$/];
+
+export function presentedQueryToken(req: Request): string | undefined {
+  if (req.method !== 'GET') return undefined;
+  if (!QUERY_TOKEN_PATHS.some((re) => re.test(req.path))) return undefined;
+  const raw = req.query?.access_token;
+  return typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : undefined;
+}
+
 export function getAuthToken(req: Request): string | undefined {
   return (req as AuthedRequest).authToken;
 }
@@ -104,7 +118,7 @@ export function createApiAuthMiddleware(tokens: readonly string[]) {
       next();
       return;
     }
-    const presented = presentedBearerToken(req);
+    const presented = presentedBearerToken(req) ?? presentedQueryToken(req);
     if (!presented || !tokenMatches(presented, tokens)) {
       res.status(401).json({ error: 'Missing or invalid bearer token.' });
       return;

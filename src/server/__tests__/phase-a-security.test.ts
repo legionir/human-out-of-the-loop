@@ -175,6 +175,44 @@ describe('A-01 — bind policy and token middleware', () => {
       fs.rmSync(projectRoot, { recursive: true, force: true });
     }
   });
+
+  it('accepts ?access_token= only on the GET SSE routes (EventSource cannot send headers)', async () => {
+    const projectRoot = makeProject();
+    const created = createApp({ projectRoot, persistent: false, token: 'secret-a' });
+    try {
+      // Not an SSE route: a query token is not a credential there.
+      await request(created.app).get('/api/health?access_token=secret-a').expect(401);
+      await request(created.app).post('/api/run?access_token=secret-a').expect(401);
+      await request(created.app).get('/api/stream/x?access_token=wrong').expect(401);
+      // The SSE route opens with the query token (read the headers, then drop).
+      await new Promise<void>((resolve, reject) => {
+        const req = request(created.app)
+          .get('/api/stream/x?access_token=secret-a')
+          .buffer(false)
+          .parse((res, cb) => {
+            expect(res.statusCode).toBe(200);
+            (res as unknown as { destroy: () => void }).destroy();
+            cb(null, null);
+            resolve();
+          });
+        req.end((err) => {
+          if (err && !/aborted|socket hang up|ECONNRESET/i.test(String(err))) reject(err);
+        });
+      });
+    } finally {
+      await created.close();
+      fs.rmSync(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('the web UI sends the token on fetch and on every EventSource', () => {
+    const appJs = fs.readFileSync(path.resolve(__dirname, '../../../public/app.js'), 'utf8');
+    expect(appJs).toMatch(/Authorization: `Bearer \$\{authToken\}`/);
+    expect(appJs).not.toMatch(/[^.\w]fetch\(\s*['`]\/api/);
+    const sse = appJs.match(/new EventSource\(([^)]*\))?[^;]*\)/g) ?? [];
+    expect(sse.length).toBeGreaterThan(0);
+    for (const call of sse) expect(call).toContain('streamUrl(');
+  });
 });
 
 describe('A-04 — cancel during planning aborts further LLM calls', () => {

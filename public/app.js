@@ -16,12 +16,76 @@ import {
   renderMarkdown,
 } from './ui-logic.js';
 
+// ─── Auth token (A-01) ───────────────────────────────────────────
+//
+// When the server runs with --token / HOTL_SERVER_TOKEN every /api call needs
+// it.  Open the UI once as `/?token=<t>`: the token moves to sessionStorage
+// and out of the address bar.  A 401 asks for it.
+
+const TOKEN_KEY = 'hotl.token';
+
+function readStoredToken() {
+  try {
+    return sessionStorage.getItem(TOKEN_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function storeToken(token) {
+  try {
+    if (token) sessionStorage.setItem(TOKEN_KEY, token);
+    else sessionStorage.removeItem(TOKEN_KEY);
+  } catch {
+    /* storage unavailable — the token lives for this page only */
+  }
+}
+
+let authToken = readStoredToken();
+{
+  const params = new URLSearchParams(location.search);
+  const fromUrl = params.get('token');
+  if (fromUrl) {
+    authToken = fromUrl;
+    storeToken(fromUrl);
+    params.delete('token');
+    const rest = params.toString();
+    history.replaceState(null, '', `${location.pathname}${rest ? `?${rest}` : ''}${location.hash}`);
+  }
+}
+
+function authHeaders(extra = {}) {
+  return authToken ? { ...extra, Authorization: `Bearer ${authToken}` } : extra;
+}
+
+/** fetch with the bearer token; one prompt-and-retry on 401. */
+async function authedFetch(path, options = {}) {
+  const send = () =>
+    fetch(path, { ...options, headers: authHeaders(options.headers || {}) });
+  let res = await send();
+  if (res.status === 401) {
+    const entered = window.prompt('This server needs an access token:');
+    if (entered && entered.trim()) {
+      authToken = entered.trim();
+      storeToken(authToken);
+      res = await send();
+    }
+  }
+  return res;
+}
+
+/** EventSource URL with the token (EventSource cannot send headers). */
+function streamUrl(url) {
+  if (!authToken) return url;
+  return `${url}${url.includes('?') ? '&' : '?'}access_token=${encodeURIComponent(authToken)}`;
+}
+
 // ─── Tiny API helper ─────────────────────────────────────────────
 
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    headers: { 'Content-Type': 'application/json' },
+  const res = await authedFetch(path, {
     ...options,
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
   });
   let body = null;
   try {
@@ -572,7 +636,7 @@ function attachProgressListeners(es, run) {
 /** U5: run-scoped SSE channel — clarification arrives before any plan exists. */
 function connectRunStream(run) {
   if (run.runEs) return;
-  const es = new EventSource(`/api/stream/${encodeURIComponent(run.runId)}`);
+  const es = new EventSource(streamUrl(`/api/stream/${encodeURIComponent(run.runId)}`));
   run.runEs = es;
   attachProgressListeners(es, run);
 }
@@ -657,7 +721,7 @@ function connectStream(run) {
   if (run.es || !run.planId) return;
   // Dual-emit already fans plan events onto the run channel (H-02).
   if (run.runEs) return;
-  const es = new EventSource(`/api/stream/${encodeURIComponent(run.planId)}`);
+  const es = new EventSource(streamUrl(`/api/stream/${encodeURIComponent(run.planId)}`));
   run.es = es;
   attachProgressListeners(es, run);
 }
@@ -836,7 +900,7 @@ async function startPreview() {
   }
   previewBtn.disabled = true;
   try {
-    const res = await fetch('/api/preview', {
+    const res = await authedFetch('/api/preview', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -1019,7 +1083,7 @@ function toggleLogFollow() {
   const url = planFilter
     ? `/api/observability/stream?planId=${encodeURIComponent(planFilter)}`
     : '/api/observability/stream';
-  const es = new EventSource(url);
+  const es = new EventSource(streamUrl(url));
   state.logEs = es;
   logFollowBtn.textContent = 'Stop';
   logBodyEl.textContent = planFilter ? `— following ${planFilter} —\n` : '— following —\n';
