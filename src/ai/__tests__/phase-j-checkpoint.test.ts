@@ -245,3 +245,20 @@ describe('J-05 — restore does not rely on timestamps', () => {
     fs.rmSync(root, { recursive: true, force: true });
   });
 });
+
+describe('J-05 — restore writes back only what the step changed', () => {
+  it('leaves an unchanged file untouched', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ckpt-same-'));
+    fs.writeFileSync(path.join(root, 'same.txt'), 'same\n');
+    fs.writeFileSync(path.join(root, 'edit.txt'), 'before\n');
+    captureCheckpoint(root, 'plan_s', 'step-1');
+    const past = new Date(Date.now() - 60_000);
+    fs.utimesSync(path.join(root, 'same.txt'), past, past);
+    fs.writeFileSync(path.join(root, 'edit.txt'), 'after\n');
+    expect(restoreCheckpoint(root, 'plan_s', 'step-1')).toBe(true);
+    expect(fs.readFileSync(path.join(root, 'edit.txt'), 'utf8')).toBe('before\n');
+    // Not rewritten: its mtime is still the one set above.
+    expect(Math.abs(fs.statSync(path.join(root, 'same.txt')).mtimeMs - past.getTime())).toBeLessThan(1000);
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});

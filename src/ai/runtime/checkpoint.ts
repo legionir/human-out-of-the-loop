@@ -72,6 +72,32 @@ function copyFile(from: string, to: string): void {
   fs.copyFileSync(from, to, fs.constants.COPYFILE_FICLONE);
 }
 
+function sameContent(a: string, b: string): boolean {
+  try {
+    const sa = fs.statSync(a);
+    const sb = fs.statSync(b);
+    if (!sb.isFile() || sa.size !== sb.size) return false;
+    return fs.readFileSync(a).equals(fs.readFileSync(b));
+  } catch {
+    return false;
+  }
+}
+
+/** Windows: a target briefly held open fails with EBUSY/EPERM — retry. */
+function copyWithRetry(from: string, to: string): void {
+  const attempts = process.platform === 'win32' ? 10 : 1;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      copyFile(from, to);
+      return;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? '';
+      if (attempt >= attempts || !['EBUSY', 'EPERM', 'EACCES'].includes(code)) throw err;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20 * attempt);
+    }
+  }
+}
+
 /** Keep only the newest `keep` snapshots of one plan. */
 function pruneStepSnapshots(projectRoot: string, planId: string, keep: number, runtimeDir?: string): void {
   const dir = path.join(checkpointsRoot(projectRoot, runtimeDir), planId);
@@ -181,8 +207,12 @@ export function restoreCheckpoint(
   for (const rel of manifest.files) {
     const from = path.join(dest, 'files', rel);
     const to = path.join(projectRoot, rel);
+    // Only files the step changed are written back: an unchanged file is not
+    // touched (no cost, and no EBUSY on Windows while another process has it
+    // open for reading).
+    if (sameContent(from, to)) continue;
     fs.mkdirSync(path.dirname(to), { recursive: true });
-    copyFile(from, to);
+    copyWithRetry(from, to);
   }
   return true;
 }

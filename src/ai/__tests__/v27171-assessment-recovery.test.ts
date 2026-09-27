@@ -21,6 +21,15 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, '../../..');
+/**
+ * Runs that may execute a step work on a temporary copy of the project, never
+ * on the repository itself (a step rollback writes files back).
+ */
+const PROJECT_ROOT = (() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-proj-'));
+  fs.cpSync(path.join(REPO_ROOT, 'registry'), path.join(dir, 'registry'), { recursive: true });
+  return dir;
+})();
 
 const mockGenerateObject = vi.mocked(generateObject);
 const mockGenerateText = vi.mocked(generateText);
@@ -147,7 +156,7 @@ describe('v27.17.1 — recovering an assessment the schema refused', () => {
       steps: [],
     } as never);
 
-    const result = await new Orchestrator({ projectRoot: REPO_ROOT, runtimeDir: tmpDir }).run(
+    const result = await new Orchestrator({ projectRoot: PROJECT_ROOT, runtimeDir: tmpDir }).run(
       'سلام',
       {
         mode: 'chat',
@@ -165,7 +174,7 @@ describe('v27.17.1 — recovering an assessment the schema refused', () => {
   it('a real failure in auto mode is still a failure', async () => {
     mockGenerateObject.mockRejectedValue(new Error('Incorrect API key provided'));
 
-    const result = await new Orchestrator({ projectRoot: REPO_ROOT, runtimeDir: tmpDir }).run(
+    const result = await new Orchestrator({ projectRoot: PROJECT_ROOT, runtimeDir: tmpDir }).run(
       'tidy the fixtures',
       { confirmCallback: async () => ({ confirmed: true }) }
     );
@@ -186,7 +195,7 @@ describe('v27.17.1 — recovering an assessment the schema refused', () => {
       steps: [],
     } as never);
 
-    const result = await new Orchestrator({ projectRoot: REPO_ROOT, runtimeDir: tmpDir }).run(
+    const result = await new Orchestrator({ projectRoot: PROJECT_ROOT, runtimeDir: tmpDir }).run(
       'سلام',
       {
         mode: 'chat',
@@ -205,7 +214,7 @@ describe('v27.17.1 — recovering an assessment the schema refused', () => {
   it('a recovered assessment keeps the clarification loop working', async () => {
     mockGenerateObject.mockRejectedValue(noObject(REPORTED_PAYLOAD));
 
-    const result = await new Orchestrator({ projectRoot: REPO_ROOT, runtimeDir: tmpDir }).run(
+    const result = await new Orchestrator({ projectRoot: PROJECT_ROOT, runtimeDir: tmpDir }).run(
       'tidy the fixtures',
       {
         mode: 'plan',
@@ -256,7 +265,7 @@ describe('v27.17.2 — an answer that only the schema disliked is used as it is'
       steps: [],
     } as never);
 
-    const result = await new Orchestrator({ projectRoot: REPO_ROOT, runtimeDir: tmpDir }).run(
+    const result = await new Orchestrator({ projectRoot: PROJECT_ROOT, runtimeDir: tmpDir }).run(
       'سلام',
       { mode: 'chat', confirmCallback: async () => ({ confirmed: false }) }
     );

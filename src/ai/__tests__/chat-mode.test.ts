@@ -26,6 +26,15 @@ import { parseModePrefix, resolveRunMode } from '../../cli/utils/mode-prefix.js'
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, '../../..');
+/**
+ * Runs that may execute a step work on a temporary copy of the project, never
+ * on the repository itself (a step rollback writes files back).
+ */
+const PROJECT_ROOT = (() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-proj-'));
+  fs.cpSync(path.join(REPO_ROOT, 'registry'), path.join(dir, 'registry'), { recursive: true });
+  return dir;
+})();
 
 const mockGenerateObject = vi.mocked(generateObject);
 const mockGenerateText = vi.mocked(generateText);
@@ -322,7 +331,7 @@ describe('v27.17.0 — chat tool catalog', () => {
 
 describe('v27.17.0 — a greeting is answered, not planned', () => {
   function orchestrator(): Orchestrator {
-    return new Orchestrator({ projectRoot: REPO_ROOT, runtimeDir: tmpDir });
+    return new Orchestrator({ projectRoot: PROJECT_ROOT, runtimeDir: tmpDir });
   }
 
   it('auto mode: answers and never plans when the planner says so', async () => {
@@ -564,7 +573,7 @@ describe('v27.17.0 — a Persian plan is executed in Persian', () => {
       steps: [],
     } as never);
 
-    const result = await new Orchestrator({ projectRoot: REPO_ROOT, runtimeDir: tmpDir }).run(
+    const result = await new Orchestrator({ projectRoot: PROJECT_ROOT, runtimeDir: tmpDir }).run(
       GOAL,
       {
         confirmCallback: async () => ({ confirmed: true }),

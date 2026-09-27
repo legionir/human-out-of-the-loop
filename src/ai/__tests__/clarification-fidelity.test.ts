@@ -27,6 +27,15 @@ import { PlannerAssessmentSchema } from '../schemas/plan.js';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, '../../..');
+/**
+ * Runs that may execute a step work on a temporary copy of the project, never
+ * on the repository itself (a step rollback writes files back).
+ */
+const PROJECT_ROOT = (() => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-proj-'));
+  fs.cpSync(path.join(REPO_ROOT, 'registry'), path.join(dir, 'registry'), { recursive: true });
+  return dir;
+})();
 
 /**
  * v27.16.1 — "the planner's questions must survive the round trip".
@@ -170,7 +179,7 @@ describe('v27.16.1 — the Planner reports questions out of the model call', () 
    * "Persona \"planner\" not found", which is a test artefact, not the bug).
    */
   async function planner(): Promise<Planner> {
-    const orchestrator = new Orchestrator({ projectRoot: REPO_ROOT, runtimeDir: tmpDir });
+    const orchestrator = new Orchestrator({ projectRoot: PROJECT_ROOT, runtimeDir: tmpDir });
     await orchestrator.initialize();
     return orchestrator.planner;
   }
@@ -196,7 +205,7 @@ describe('v27.16.1 — the Planner reports questions out of the model call', () 
     const result = await (await planner()).plan('help me');
     expect(result.isClear).toBe(false);
     expect(result.needsClarification).toHaveLength(1);
-    expect(result.needsClarification[0]).toContain(REPO_ROOT);
+    expect(result.needsClarification[0]).toContain(PROJECT_ROOT);
   });
 
   it('passes a clear assessment through untouched', async () => {
@@ -227,7 +236,7 @@ describe('v27.16.1 — the Planner reports questions out of the model call', () 
 
 describe('v27.16.1 — the run fails loudly, never with a blank reason', () => {
   function makeOrchestrator(): Orchestrator {
-    return new Orchestrator({ projectRoot: REPO_ROOT, runtimeDir: tmpDir });
+    return new Orchestrator({ projectRoot: PROJECT_ROOT, runtimeDir: tmpDir });
   }
 
   it('shows the questions when there are any', async () => {
