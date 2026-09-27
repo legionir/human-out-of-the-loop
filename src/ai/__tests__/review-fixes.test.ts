@@ -475,3 +475,22 @@ describe('ARCH-003 — one layered MCP-server view for CLI, server and runtime',
     fs.rmSync(project, { recursive: true, force: true });
   });
 });
+
+describe('E-01 — the planner catalog shows every tool a persona may use', () => {
+  it('lists coder\'s full allowedTools (not a 16-tool cut)', async () => {
+    const { buildCatalogBlock } = await import('../planning/catalog-prompt.js');
+    const { PersonaRegistry } = await import('../registries/persona-registry.js');
+    const { SkillRegistry } = await import('../registries/skill-registry.js');
+    const { ToolRegistry } = await import('../registries/tool-registry.js');
+    const personas = new PersonaRegistry();
+    personas.loadFromDirectory(path.resolve(__dirname, '../../../registry/personas'));
+    const block = buildCatalogBlock({
+      personaRegistry: personas,
+      skillRegistry: new SkillRegistry({ toolRegistry: new ToolRegistry() }),
+    });
+    const coder = personas.get('coder')!;
+    const line = block.split('\n').find((l) => l.startsWith('- coder:'))!;
+    for (const tool of coder.allowedTools) expect(line).toContain(tool);
+    expect(line).not.toContain('…+');
+  });
+});

@@ -14,7 +14,10 @@ export class CatalogError extends Error {
 
 export interface PromptCatalog {
   personas: string[];
+  /** Listed tool ids; `['*']` = any tool; `[]` = the persona has none. */
   personaTools: Record<string, string[]>;
+  /** The catalog cut the persona's list short (`…+N`): more tools exist. */
+  personaToolsTruncated?: Record<string, boolean>;
 }
 
 export function parseAvailableCatalog(promptText: string): PromptCatalog | null {
@@ -27,6 +30,7 @@ export function parseAvailableCatalog(promptText: string): PromptCatalog | null 
   }
   const personas: string[] = [];
   const personaTools: Record<string, string[]> = {};
+  const personaToolsTruncated: Record<string, boolean> = {};
   for (const raw of section[1]!.split('\n')) {
     const line = raw.trim();
     const match = /^- ([a-z0-9_-]+):/i.exec(line);
@@ -40,13 +44,12 @@ export function parseAvailableCatalog(promptText: string): PromptCatalog | null 
     } else if (listed === '*') {
       personaTools[id] = ['*'];
     } else {
-      personaTools[id] = listed
-        .split(',')
-        .map((part) => part.trim())
-        .filter((part) => part && !part.startsWith('…'));
+      const parts = listed.split(',').map((part) => part.trim());
+      personaToolsTruncated[id] = parts.some((part) => part.startsWith('…'));
+      personaTools[id] = parts.filter((part) => part && !part.startsWith('…'));
     }
   }
-  return { personas, personaTools };
+  return { personas, personaTools, personaToolsTruncated };
 }
 
 export function requirePlannerCatalog(promptText: string): PromptCatalog {
@@ -74,25 +77,28 @@ export function pickPersonaFromCatalog(
     }
     return id;
   }
-  const usable = catalog.personas.filter((id) => id !== 'planner' && id !== 'chat');
-  if (wantedTools.length > 0) {
-    const fit = usable.find((id) => {
-      const allowed = catalog.personaTools[id] ?? [];
-      if (allowed.includes('*') || allowed.length === 0) return true;
-      return wantedTools.every((tool) => allowed.includes(tool) || tool === 'read_file');
-    });
-    if (fit) return fit;
-  }
+  // A persona without tools (e.g. the neutral `judge`) cannot run a step.
+  const usable = catalog.personas.filter(
+    (id) => id !== 'planner' && id !== 'chat' && (catalog.personaTools[id] ?? []).length > 0,
+  );
+  const needed = [...new Set(['read_file', ...wantedTools])];
+  const fit = usable.find((id) => needed.every((tool) => personaMayUse(catalog, id, tool)));
+  if (fit) return fit;
   if (catalog.personas.includes('coder')) return 'coder';
   if (usable.length > 0) return usable[0]!;
   if (catalog.personas.length > 0) return catalog.personas[0]!;
   throw new CatalogError('AVAILABLE CATALOG listed no personas');
 }
 
-export function toolsForPersona(catalog: PromptCatalog, personaId: string, extra: string[] = []): string[] {
+/** Is `tool` allowed for the persona as far as the (possibly cut) catalog shows? */
+function personaMayUse(catalog: PromptCatalog, personaId: string, tool: string): boolean {
   const allowed = catalog.personaTools[personaId] ?? [];
+  if (allowed.includes('*') || allowed.includes(tool)) return true;
+  return catalog.personaToolsTruncated?.[personaId] === true;
+}
+
+export function toolsForPersona(catalog: PromptCatalog, personaId: string, extra: string[] = []): string[] {
   const wanted = [...new Set(['read_file', ...extra])];
-  if (allowed.includes('*') || allowed.length === 0) return wanted;
-  const kept = wanted.filter((id) => allowed.includes(id) || id === 'read_file');
-  return kept.length > 0 ? kept : ['read_file'];
+  const kept = wanted.filter((id) => personaMayUse(catalog, personaId, id));
+  return kept.length > 0 ? kept : (catalog.personaTools[personaId] ?? []).slice(0, 1);
 }

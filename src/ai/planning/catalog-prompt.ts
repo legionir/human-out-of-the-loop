@@ -2,7 +2,13 @@ import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
 import type { ToolRegistry } from '../registries/tool-registry.js';
 
-const MAX_TOOLS_PER_PERSONA = 16;
+/**
+ * A persona's tool list is shown in full up to this many ids: the planner
+ * assigns tools per step and can only assign what it can see (a cut at 16
+ * hid most of coder's 48 tools — memory, git writes, run_command).  Ids are
+ * short, so even a full catalog stays around a thousand tokens.
+ */
+const MAX_TOOLS_PER_PERSONA = 80;
 
 /**
  * Compact catalog injected into planner prompts so the model assigns only
