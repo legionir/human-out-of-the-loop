@@ -79,6 +79,12 @@ export interface CreateTaskOptions {
   parentTaskId?: string;
 }
 
+/**
+ * C-01: longest a timed-out task keeps its locks while its abandoned work
+ * settles.  Past this, the work is assumed dead and the locks are freed.
+ */
+export const LINGER_RELEASE_MS = 30_000;
+
 // ─── Resource Lock Manager ───────────────────────────────────────
 
 /**
@@ -200,6 +206,8 @@ export class TaskRuntime {
   // now truly aborts the in-flight generateText (not just bookkeeping).
   private readonly abortControllers = new Map<string, AbortController>();
   private readonly children = new Map<string, Set<string>>();
+  /** C-01: lock releases waiting for a timed-out task's work to settle. */
+  private readonly lingering = new Set<Promise<void>>();
   private readonly completedOrder: string[] = [];
   private readonly maxTaskRecords: number;
   private unsubscribeFn?: () => void;
@@ -426,10 +434,32 @@ export class TaskRuntime {
     const task = this.tasks.get(taskId);
     if (!task) return;
 
-    // Release resource locks
-    this.lockManager.release(taskId);
     this.runningPromises.delete(taskId);
-    this.runningIds.delete(taskId);
+    // C-01: a run that timed out may still have a tool writing to the
+    // claimed resources; keep the lock and the concurrency slot until that
+    // work settles (bounded, so a call that never ends cannot wedge them).
+    if (result.settled) {
+      const release = (): void => {
+        if (!this.runningIds.has(taskId)) return;
+        this.lockManager.release(taskId);
+        this.runningIds.delete(taskId);
+        this.scheduleNext();
+      };
+      let cap: ReturnType<typeof setTimeout> | undefined;
+      const lingering: Promise<void> = new Promise<void>((resolve) => {
+        cap = setTimeout(resolve, LINGER_RELEASE_MS);
+        cap.unref?.();
+        void result.settled!.then(resolve);
+      }).then(() => {
+        if (cap) clearTimeout(cap);
+        this.lingering.delete(lingering);
+        release();
+      });
+      this.lingering.add(lingering);
+    } else {
+      this.lockManager.release(taskId);
+      this.runningIds.delete(taskId);
+    }
     // Phase 22: drop the (now settable) controller
     this.abortControllers.delete(taskId);
 
@@ -535,6 +565,11 @@ export class TaskRuntime {
       if (promises.length === 0) {
         // No running tasks — check if any pending remain that could be scheduled
         if (this.getPendingCount() === 0) break;
+        // A pending task may be waiting for a timed-out task's lock.
+        if (this.lingering.size > 0) {
+          await Promise.race(this.lingering);
+          continue;
+        }
         // Pending exists but not running (maybe blocked) — try scheduling and wait a tick
         this.scheduleNext();
         if (this.runningPromises.size === 0 && this.getPendingCount() > 0) {

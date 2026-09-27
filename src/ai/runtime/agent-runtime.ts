@@ -39,6 +39,13 @@ export interface AgentRunResult {
   usage?: TokenUsage;
   /** Failure classification (Phase 11 uses this) */
   failureType?: 'technical' | 'quality' | null;
+  /**
+   * C-01: set when the run returned (timeout/abort) while the model call or a
+   * tool may still be running.  It resolves once that work has settled, so a
+   * caller that holds resources (TaskRuntime's locks) can keep them until
+   * then — without the run itself waiting for work that ignores its abort.
+   */
+  settled?: Promise<void>;
 }
 
 /**
@@ -384,6 +391,7 @@ export class AgentRuntime {
     // race settles, or it keeps the event loop alive after every run.
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     const usageAcc: { value?: TokenUsage } = {};
+    const settledRef: { promise?: Promise<void> } = {};
     const runController = new AbortController();
     const abortSignal =
       signal && typeof AbortSignal.any === 'function'
@@ -428,9 +436,9 @@ export class AgentRuntime {
       try {
         sdkResult = await Promise.race([executionPromise, timeoutPromise]);
       } catch (err) {
-        // C-01: hold the caller (and therefore resource locks) until the
-        // in-flight generateText/tool work actually settles.
-        await executionPromise.then(
+        // C-01: the run returns now (a call that ignores the abort must not
+        // hang it forever); the caller learns when the work really ends.
+        settledRef.promise = executionPromise.then(
           () => undefined,
           () => undefined
         );
@@ -525,6 +533,7 @@ export class AgentRuntime {
         errors,
         usage: usageAcc.value,
         failureType: 'technical',
+        ...(settledRef.promise ? { settled: settledRef.promise } : {}),
       };
     } finally {
       if (timeoutTimer) clearTimeout(timeoutTimer);
