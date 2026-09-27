@@ -427,3 +427,29 @@ describe('R-21 — log rotation keeps a bounded history; store retention is conf
     expect(storeRetentionDays({ HOTL_RETENTION_DAYS: 'soon' })).toBe(365);
   });
 });
+
+describe('R-23 — edit_file keeps each line\'s own line ending', () => {
+  it('a mixed CRLF/LF file is byte-identical outside the edit', async () => {
+    const { applyFileEdits } = await import('../tools/fs/lib.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-eol-'));
+    const file = path.join(dir, 'mixed.txt');
+    fs.writeFileSync(file, 'one\r\ntwo\nthree\r\nfour\nfive');
+    await applyFileEdits(file, [{ oldText: 'three', newText: 'THREE\nand a half' }]);
+    expect(fs.readFileSync(file, 'utf8')).toBe('one\r\ntwo\nTHREE\r\nand a half\r\nfour\nfive');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('an all-CRLF file stays all-CRLF, an all-LF file stays LF', async () => {
+    const { applyFileEdits } = await import('../tools/fs/lib.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-eol-'));
+    const crlf = path.join(dir, 'a.txt');
+    fs.writeFileSync(crlf, 'a\r\nb\r\nc\r\n');
+    await applyFileEdits(crlf, [{ oldText: 'b', newText: 'B1\nB2' }]);
+    expect(fs.readFileSync(crlf, 'utf8')).toBe('a\r\nB1\r\nB2\r\nc\r\n');
+    const lf = path.join(dir, 'b.txt');
+    fs.writeFileSync(lf, 'a\nb\nc\n');
+    await applyFileEdits(lf, [{ oldText: 'b', newText: 'B' }]);
+    expect(fs.readFileSync(lf, 'utf8')).toBe('a\nB\nc\n');
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});

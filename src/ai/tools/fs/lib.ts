@@ -34,7 +34,7 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
-import { createTwoFilesPatch } from 'diff';
+import { createTwoFilesPatch, diffArrays } from 'diff';
 import { minimatch } from 'minimatch';
 import { expandHome, normalizePath } from './path-utils.js';
 import { isPathWithinAllowedDirectories } from './path-validation.js';
@@ -543,6 +543,46 @@ function reindentReplacement(originalFirstLine: string, normalizedNew: string): 
   });
 }
 
+/**
+ * D-03: put the original line endings back.  Unchanged lines keep exactly
+ * the terminator they had (so a file with mixed CRLF/LF stays byte-identical
+ * outside the edit); new lines take the terminator of the line they replace,
+ * or the file's dominant one.
+ */
+function restoreLineEndings(originalText: string, normalized: string, modified: string): string {
+  if (!originalText.includes('\r\n')) return modified;
+  // Same split as normalizeLineEndings: a lone \r stays part of its line.
+  const terminators = originalText.match(/\r\n|\n/g) ?? [];
+  const crlf = terminators.filter((t) => t === '\r\n').length;
+  const dominant = crlf * 2 >= terminators.length ? '\r\n' : '\n';
+  const oldLines = normalized.split('\n');
+  const newLines = modified.split('\n');
+  const out: string[] = [];
+  let oi = 0;
+  let ni = 0;
+  let replacedTerm: string | undefined;
+  const push = (line: string, term: string): void => {
+    ni += 1;
+    out.push(ni < newLines.length ? line + term : line);
+  };
+  for (const part of diffArrays(oldLines, newLines)) {
+    if (part.removed) {
+      replacedTerm = terminators[oi] ?? replacedTerm;
+      oi += part.value.length;
+    } else if (part.added) {
+      for (const line of part.value) push(line, replacedTerm ?? dominant);
+      replacedTerm = undefined;
+    } else {
+      for (const line of part.value) {
+        push(line, terminators[oi] ?? dominant);
+        oi += 1;
+      }
+      replacedTerm = undefined;
+    }
+  }
+  return out.join('');
+}
+
 function decodeUtf8Strict(buffer: Buffer): string {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
@@ -571,7 +611,6 @@ export async function applyFileEdits(
 ): Promise<string> {
   const originalBytes = await fs.readFile(filePath);
   const originalText = decodeUtf8Strict(originalBytes);
-  const eol = originalText.includes('\r\n') ? '\r\n' : '\n';
   const content = normalizeLineEndings(originalText);
 
   let modifiedContent = content;
@@ -649,7 +688,7 @@ export async function applyFileEdits(
   }
 
   const diff = createUnifiedDiff(content, modifiedContent, filePath);
-  const outputText = eol === '\r\n' ? modifiedContent.replace(/\n/g, '\r\n') : modifiedContent;
+  const outputText = restoreLineEndings(originalText, content, modifiedContent);
 
   // Fence the diff with one more backtick than the diff itself contains.
   let numBackticks = 3;
