@@ -368,4 +368,42 @@ describe('A-08 — a second token cannot drive another client\'s run', () => {
       .set('Authorization', 'Bearer alice')
       .expect(200);
   }, 20_000);
+
+  it('sessions, their plans, streams and the log are bound to the owner too', async () => {
+    const app = created.app;
+    const as = (who: string) => ({ Authorization: `Bearer ${who}` });
+    const started = await request(app)
+      .post('/api/run')
+      .set(as('alice'))
+      .send({ message: 'Build a login page', confirm: false })
+      .expect(202);
+    const runId = started.body.runId as string;
+    const waiting = await pollRun(app, runId, (s) => s.state === 'awaiting-confirmation', as('alice'));
+    const sessionId = waiting.sessionId as string;
+    const planId = waiting.planId as string;
+    expect(sessionId).toBeTypeOf('string');
+    expect(planId).toBeTypeOf('string');
+
+    // Session: read / rename / delete / continue.
+    await request(app).get(`/api/sessions/${sessionId}`).set(as('bob')).expect(403);
+    await request(app).patch(`/api/sessions/${sessionId}`).set(as('bob')).send({ label: 'x' }).expect(403);
+    await request(app).delete(`/api/sessions/${sessionId}`).set(as('bob')).expect(403);
+    await request(app).post('/api/run').set(as('bob')).send({ message: 'more', sessionId }).expect(403);
+    const bobSessions = await request(app).get('/api/sessions').set(as('bob')).expect(200);
+    expect(bobSessions.body.map((x: { id: string }) => x.id)).not.toContain(sessionId);
+    const aliceSessions = await request(app).get('/api/sessions').set(as('alice')).expect(200);
+    expect(aliceSessions.body.map((x: { id: string }) => x.id)).toContain(sessionId);
+
+    // Plan and streams.
+    await request(app).get(`/api/plans/${planId}`).set(as('bob')).expect(403);
+    const bobPlans = await request(app).get('/api/plans').set(as('bob')).expect(200);
+    expect(bobPlans.body.map((x: { id: string }) => x.id)).not.toContain(planId);
+    await request(app).get(`/api/stream/${planId}?access_token=bob`).expect(403);
+    await request(app).get(`/api/stream/${runId}?access_token=bob`).expect(403);
+    await request(app).get('/api/observability').set(as('bob')).expect(403);
+    await request(app).get(`/api/observability?planId=${planId}`).set(as('bob')).expect(403);
+    await request(app).get(`/api/observability?planId=${planId}`).set(as('alice')).expect(200);
+
+    await request(app).post(`/api/runs/${runId}/cancel`).set(as('alice')).expect(200);
+  }, 20_000);
 });

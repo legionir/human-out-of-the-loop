@@ -11,6 +11,7 @@
  * (Law 14), no credentials (step 4).
  */
 import { Router } from 'express';
+import { canAccessStream } from '../run-control.js';
 import type { ServerContext } from '../types.js';
 
 const HEARTBEAT_MS = 15_000;
@@ -20,6 +21,10 @@ export function streamRouter(ctx: ServerContext): Router {
 
   router.get('/api/stream/:planId', (req, res) => {
     const planId = req.params.planId;
+    if (!canAccessStream(ctx, req, planId)) {
+      res.status(403).json({ error: 'Forbidden: this resource belongs to another client.' });
+      return;
+    }
 
     if (ctx.hub.atCapacity()) {
       res.status(503).json({ error: 'SSE connection limit reached' });

@@ -27,7 +27,14 @@ import { parseRunMode, type RunMode } from '../../ai/modes.js';
 import { parseModePrefix, resolveRunMode } from '../../cli/utils/mode-prefix.js';
 import { loadGlobalConfig } from '../../cli/utils/config.js';
 import { getAuthToken } from '../auth.js';
-import { armRunTtl, cancelInFlightRun, clearRunTtl, sendOwnerForbidden } from '../run-control.js';
+import {
+  armRunTtl,
+  cancelInFlightRun,
+  claimSession,
+  clearRunTtl,
+  sendOwnerForbidden,
+  sendSessionForbidden,
+} from '../run-control.js';
 import type { ServerContext } from '../types.js';
 
 export function runRouter(ctx: ServerContext): Router {
@@ -76,6 +83,7 @@ export function runRouter(ctx: ServerContext): Router {
         res.status(404).json({ error: `Session "${sessionId}" not found.` });
         return;
       }
+      if (sendSessionForbidden(ctx, req, res, sessionId)) return;
     }
     const autoConfirm = confirm === true;
 
@@ -141,9 +149,16 @@ export function runRouter(ctx: ServerContext): Router {
 
     const runId = randomUUID();
     const abortController = new AbortController();
+    // A-08: with auth on, a run that starts a new session owns it.
+    let runSessionId = sessionId as string | undefined;
+    if (!runSessionId && ctx.authTokens.length > 0) {
+      await ctx.orchestrator.initialize();
+      runSessionId = ctx.orchestrator.sessionStore.createSession();
+      claimSession(ctx, req, runSessionId);
+    }
     ctx.runs.set(runId, {
       runId,
-      sessionId: sessionId as string | undefined,
+      sessionId: runSessionId,
       state: 'planning',
       createdAt: Date.now(),
       abortController,

@@ -10,7 +10,8 @@
  * the "follow" semantics are identical to `human-out-of-the-loop logs -f`.
  * The stream is read-only and never rewrites the log file.
  */
-import { Router } from 'express';
+import { Router, type Response } from 'express';
+import { sendObservabilityForbidden } from '../run-control.js';
 import type { ServerResponse } from 'node:http';
 import { followLog, readEntries } from '../../cli/commands/logs.js';
 
@@ -39,6 +40,7 @@ export function observabilityStreamRouter(ctx: ServerContext): Router {
       res.end(JSON.stringify({ error: '"planId" must be a non-empty string when present.' }));
       return;
     }
+    if (sendObservabilityForbidden(ctx, req, res as unknown as Response, planId)) return;
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
