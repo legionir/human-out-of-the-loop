@@ -183,6 +183,16 @@ export interface RunOverrides {
 
 export { PlanLiveOwnerError } from './runtime/plan-owner.js';
 
+/** C-11: how long plans/sessions are kept (`HOTL_RETENTION_DAYS`, 0 = forever). */
+export function storeRetentionDays(env: Record<string, string | undefined>): number {
+  const raw = env.HOTL_RETENTION_DAYS;
+  if (raw !== undefined && raw.trim() !== '') {
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0) return n;
+  }
+  return 365;
+}
+
 /** U3: thrown when a per-run `modelId` is not in the ModelRegistry. */
 export class InvalidModelError extends Error {
   constructor(public readonly modelId: string, public readonly validIds: string[]) {
@@ -706,8 +716,10 @@ export class Orchestrator {
       cleanupStaleTempFiles(path.join(runtimeDir, 'sessions'));
       cleanupStaleLockFiles(path.join(runtimeDir, 'sessions'));
       this.journal.prune();
-      this.planStore.pruneOlderThan?.(365);
-      this.sessionStore.pruneOlderThan?.(365);
+      // C-11: HOTL_RETENTION_DAYS (default 365; 0 keeps everything).
+      const retentionDays = storeRetentionDays(this.env);
+      this.planStore.pruneOlderThan?.(retentionDays);
+      this.sessionStore.pruneOlderThan?.(retentionDays);
       pruneCheckpoints(root, 7);
     } catch {
       // housekeeping must never block startup

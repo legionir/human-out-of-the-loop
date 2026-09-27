@@ -397,3 +397,33 @@ describe('R-20 — the tool-result cap trims to the budget, not to a stub', () =
     expect(JSON.stringify(capped).length).toBeLessThanOrEqual(TOOL_RESULT_CHAR_CAP);
   });
 });
+
+describe('R-21 — log rotation keeps a bounded history; store retention is configurable', () => {
+  it('keeps only the newest rotated logs', async () => {
+    const { ObservabilityLogger, ROTATED_LOGS_KEPT } = await import('../runtime/observability-logger.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-rot-'));
+    const logFilePath = path.join(dir, 'observability.jsonl');
+    // Old rotated files from earlier runs.
+    for (let i = 0; i < 8; i++) {
+      fs.writeFileSync(`${logFilePath}.2020-01-0${i + 1}T00-00-00-000Z`, 'x');
+    }
+    const logger = new ObservabilityLogger({ logFilePath, maxLogBytes: 200 });
+    for (let i = 0; i < 20; i++) {
+      logger.log({ eventType: 'system:info', message: `entry ${i} ${'p'.repeat(80)}` } as never);
+    }
+    logger.close();
+    const rotated = fs.readdirSync(dir).filter((f) => f.startsWith('observability.jsonl.'));
+    expect(rotated.length).toBe(ROTATED_LOGS_KEPT);
+    expect(rotated.some((f) => f.startsWith('observability.jsonl.2020-'))).toBe(false);
+    expect(fs.existsSync(logFilePath)).toBe(true);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('HOTL_RETENTION_DAYS sets how long plans and sessions are kept', async () => {
+    const { storeRetentionDays } = await import('../orchestrator.js');
+    expect(storeRetentionDays({})).toBe(365);
+    expect(storeRetentionDays({ HOTL_RETENTION_DAYS: '0' })).toBe(0);
+    expect(storeRetentionDays({ HOTL_RETENTION_DAYS: '30' })).toBe(30);
+    expect(storeRetentionDays({ HOTL_RETENTION_DAYS: 'soon' })).toBe(365);
+  });
+});
