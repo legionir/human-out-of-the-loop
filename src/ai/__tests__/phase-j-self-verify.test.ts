@@ -3,6 +3,7 @@
  * Failure is technical and re-plan sees the test output.
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { clearSessionTrust, markRootTrusted } from '../registries/trust.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -87,6 +88,7 @@ describe('J-02 — self-verify after coder', () => {
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'hootl-j02-'));
+    markRootTrusted(root);
     fs.mkdirSync(path.join(root, '.ai-runtime'), { recursive: true });
     fs.writeFileSync(
       path.join(root, '.ai-runtime', 'commands.json'),
@@ -107,6 +109,7 @@ describe('J-02 — self-verify after coder', () => {
   });
 
   afterEach(() => {
+    clearSessionTrust();
     env.taskRuntime.destroy();
     fs.rmSync(root, { recursive: true, force: true });
   });

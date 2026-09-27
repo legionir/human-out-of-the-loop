@@ -24,6 +24,7 @@ import { MemorySessionStore, FileSessionStore, type SessionStore } from './runti
 import { ObservabilityLogger } from './runtime/observability-logger.js';
 import { collectSecretValues } from './runtime/secret-scrub.js';
 import type { ToolCallLogOptions, ToolCallSink } from './runtime/tool-call-log.js';
+import { markRootTrusted } from './registries/trust.js';
 import { ScrubbingPlanStore } from './runtime/secret-scrub.js';
 import { logStepEvent, parseStepEvent } from './runtime/step-events.js';
 import { JournalWriter, journalOptionsFromEnv } from './runtime/journal.js';
@@ -752,6 +753,8 @@ export class Orchestrator {
     // and send named env vars to arbitrary URLs, so a freshly cloned,
     // unreviewed repository must not get that on the first `initialize()`.
     // The packaged (global) layer always loads.
+    // Same decision for `.ai-runtime/commands.json` (run_command / run_tests).
+    if (this.config.trustedProject) markRootTrusted(root);
     const allMcpServerLayers = forEachLayer('mcp-servers');
     const mcpServerLayers = allMcpServerLayers.filter(
       (l) => l.scope === 'package' || this.config.trustedProject

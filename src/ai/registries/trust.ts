@@ -10,6 +10,7 @@
  * config.json`), independent of any one CLI command.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 
 export interface TrustConfig {
@@ -45,4 +46,32 @@ export function loadTrustedProjects(configPath: string): string[] {
   } catch {
     return [];
   }
+}
+
+/** Roots trusted for this process only (`trustedProject: true` without persisting). */
+const sessionTrusted = new Set<string>();
+
+/** Mark `root` trusted for the lifetime of this process (Orchestrator does this). */
+export function markRootTrusted(root: string): void {
+  sessionTrusted.add(normalize(root));
+}
+
+/** Test helper: forget process-level trust. */
+export function clearSessionTrust(): void {
+  sessionTrusted.clear();
+}
+
+/** The global CLI config file (`~/.human-out-of-the-loop/config.json`). */
+export function defaultTrustConfigPath(): string {
+  return path.join(os.homedir(), '.human-out-of-the-loop', 'config.json');
+}
+
+/**
+ * True when `root` was trusted in this process or persisted with
+ * `--trust-project`.  Project-controlled configuration that can execute
+ * code (MCP servers, `.ai-runtime/commands.json`) is honoured only then.
+ */
+export function isRootTrusted(root: string, configPath: string = defaultTrustConfigPath()): boolean {
+  if (sessionTrusted.has(normalize(root))) return true;
+  return isProjectTrusted(root, { trustedProjects: loadTrustedProjects(configPath) });
 }

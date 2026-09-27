@@ -3,7 +3,7 @@ import { z } from 'zod';
 import path from 'node:path';
 import { resolvePathInWorkspace } from './path-security.js';
 import { getAgentRunContext } from '../../runtime/agent-run-context.js';
-import { isCommandAllowed, loadCommandPolicy } from '../command-allowlist.js';
+import { commandChildEnv, isCommandAllowed, loadCommandPolicy } from '../command-allowlist.js';
 import { spawnArgv } from '../spawn-argv.js';
 
 function relativeCwd(projectRoot: string, requested?: string): Promise<{ ok: true; cwd: string } | { ok: false; error: string; code: string }> {
@@ -45,6 +45,7 @@ export function createRunCommandTool(projectRoot: string) {
         cwd: cwd.cwd,
         timeoutMs: policy.timeoutMs,
         maxBytes: policy.maxOutputBytes,
+        env: commandChildEnv(),
         abortSignal: options?.abortSignal ?? getAgentRunContext()?.abortSignal,
       });
       return {
@@ -107,7 +108,10 @@ export async function runProjectTests(
     };
   }
   const bin = policy.testCommand[0]!;
-  if (!isCommandAllowed(bin, policy.allow.length > 0 ? policy.allow : [bin])) {
+  // The configured test command is itself an allow entry (it came from the
+  // operator or a trusted project) — but only as the exact argv[0] written
+  // there, with the same bare-name/path rule as run_command.
+  if (!isCommandAllowed(bin, [...policy.allow, bin])) {
     return {
       success: false,
       code: 'NOT_ALLOWED',
@@ -125,6 +129,7 @@ export async function runProjectTests(
     cwd: projectRoot,
     timeoutMs: policy.timeoutMs,
     maxBytes: policy.maxOutputBytes,
+    env: commandChildEnv(),
     abortSignal,
   });
   return {

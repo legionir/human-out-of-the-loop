@@ -774,7 +774,7 @@ Produce a new plan that:
     if (!root) return;
     const policy = loadCommandPolicy(root);
     if (policy.testCommand.length === 0) return;
-    if (policy.allow.length > 0 && !isCommandAllowed(policy.testCommand[0]!, policy.allow)) return;
+    if (!isCommandAllowed(policy.testCommand[0]!, [...policy.allow, policy.testCommand[0]!])) return;
     const result = await runProjectTests(root);
     if (result.success) return;
     const output = `${result.stdout}\n${result.stderr}`.trim();

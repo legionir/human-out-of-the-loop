@@ -9,10 +9,12 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnArgv } from '../tools/spawn-argv.js';
 import {
+  commandChildEnv,
   isCommandAllowed,
   isForbiddenShell,
   loadCommandPolicy,
 } from '../tools/command-allowlist.js';
+import { clearSessionTrust, markRootTrusted } from '../registries/trust.js';
 import { createRunCommandTool, createRunTestsTool, runProjectTests } from '../tools/implementations/run-command.js';
 import { isReadOnlyTool } from '../tools/read-only.js';
 import { JournalWriter, journalFileFor, withJournal, type JournalEntry } from '../runtime/journal.js';
@@ -34,8 +36,10 @@ describe('J-01 — run_command / run_tests', () => {
 
   beforeEach(() => {
     root = fs.mkdtempSync(path.join(os.tmpdir(), 'hootl-j01-'));
+    markRootTrusted(root);
   });
   afterEach(() => {
+    clearSessionTrust();
     fs.rmSync(root, { recursive: true, force: true });
   });
 
@@ -45,6 +49,41 @@ describe('J-01 — run_command / run_tests', () => {
     expect(isForbiddenShell('/bin/zsh')).toBe(true);
     expect(isCommandAllowed('bash', ['bash', 'node'])).toBe(false);
     expect(isCommandAllowed('node', ['node'])).toBe(true);
+  });
+
+  it('matches argv[0] exactly: a bare name never matches a path to a same-named binary', () => {
+    expect(isCommandAllowed('./scripts/node', ['node'])).toBe(false);
+    expect(isCommandAllowed('/tmp/evil/node', ['node'])).toBe(false);
+    expect(isCommandAllowed('evil/node', ['node'])).toBe(false);
+    expect(isCommandAllowed('/usr/bin/node', ['/usr/bin/node'])).toBe(true);
+    expect(isCommandAllowed('rel/node', ['rel/node'])).toBe(false);
+  });
+
+  it('ignores .ai-runtime/commands.json in an untrusted project', async () => {
+    clearSessionTrust();
+    writePolicy(root, { allow: ['node'], testCommand: ['node', '-e', '0'] });
+    const policy = loadCommandPolicy(root, {});
+    expect(policy.allow).toEqual([]);
+    expect(policy.testCommand).toEqual([]);
+    const tests = await runProjectTests(root);
+    expect(tests.code).toBe('NO_TEST_COMMAND');
+  });
+
+  it('does not hand credentials to the child process', async () => {
+    const env = commandChildEnv({ PATH: '/bin', OPENAI_API_KEY: 'sk-x', GITHUB_TOKEN: 't', HOME: '/h' });
+    expect(env).toEqual({ PATH: '/bin', HOME: '/h' });
+    writePolicy(root, { allow: ['node'] });
+    const prev = process.env.MY_SECRET_TOKEN;
+    process.env.MY_SECRET_TOKEN = 'leak-me-please';
+    try {
+      const out = await executeOf(createRunCommandTool(root))({
+        argv: ['node', '-e', 'process.stdout.write(String(process.env.MY_SECRET_TOKEN))'],
+      });
+      expect(out.stdout).toBe('undefined');
+    } finally {
+      if (prev === undefined) delete process.env.MY_SECRET_TOKEN;
+      else process.env.MY_SECRET_TOKEN = prev;
+    }
   });
 
   it('loads allow + testCommand from .ai-runtime/commands.json', () => {
