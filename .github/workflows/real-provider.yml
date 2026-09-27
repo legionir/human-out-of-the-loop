@@ -132,6 +132,15 @@ jobs:
           echo "HOTL_PROJECT_ROOT=$root" >> "$GITHUB_ENV"
           echo "::notice::model=$HOTL_MODEL baseURL=${HOTL_BASE_URL:-<provider default>} style=${HOTL_API_STYLE:-<default>}"
 
+      # Which models does this endpoint serve?  Names only — a wrong
+      # HOTL_MODEL ("model does not exist") is then fixable from the log.
+      - name: List the provider's models
+        if: steps.creds.outputs.skip != '1'
+        continue-on-error: true
+        run: |
+          cd "$HOTL_PROJECT_ROOT"
+          hootl models --remote --project-root "$HOTL_PROJECT_ROOT" || true
+
       - name: hootl run (real provider, auto-confirmed)
         if: steps.creds.outputs.skip != '1'
         env:
