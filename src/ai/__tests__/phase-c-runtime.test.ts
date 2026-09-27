@@ -161,6 +161,34 @@ describe('C-02 — stream error is a failure', () => {
     expect(result.success).toBe(false);
     expect(result.errors.join(' ')).toMatch(/502|error/i);
   });
+
+  it('an error after the stream produced output fails without re-asking (tools may have run)', async () => {
+    mockGenerateText.mockResolvedValue({ text: 'second answer', steps: [], usage: undefined } as never);
+    mockStreamText.mockImplementation((async () => {
+      async function* fullStream() {
+        yield { type: 'tool-call', toolCallId: 'c1', toolName: 'write_file', input: {} };
+        yield { type: 'finish-step' };
+        yield { type: 'error', error: '502 Bad Gateway' };
+      }
+      return {
+        fullStream: fullStream(),
+        text: Promise.resolve(''),
+        steps: Promise.resolve([]),
+        usage: Promise.resolve(undefined),
+        reasoningText: Promise.resolve(''),
+        finishReason: Promise.resolve('error'),
+      };
+    }) as never);
+    const result = await new AgentRuntime().run({
+      agent: makeAgent(),
+      taskId: 't-mid',
+      prompt: 'p',
+      eventBus: new EventBus(),
+      onThought: () => undefined,
+    });
+    expect(result.success).toBe(false);
+    expect(mockGenerateText).not.toHaveBeenCalled();
+  });
 });
 
 describe('C-03 — cancel running tasks and skip acceptance', () => {

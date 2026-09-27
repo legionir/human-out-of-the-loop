@@ -107,7 +107,7 @@ ${taskResult.summary ?? 'No summary available.'}
 ${(taskResult.result ?? 'No result available.').slice(0, ACCEPTANCE_RESULT_CHARS)}
 
 ## Task Errors (if any)
-${taskResult.errors.length > 0 ? taskResult.errors.join('\n') : 'None'}
+${(taskResult.errors ?? []).length > 0 ? (taskResult.errors ?? []).join('\n') : 'None'}
 
 Evaluate the output against the acceptance criteria and respond with
 a JSON object containing "accepted" (boolean) and "reason" (string).

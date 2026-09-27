@@ -257,17 +257,6 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
   const projectRoot = defaults.projectRoot;
   const globalConfig = defaults.global;
 
-  // G-02: fail before any paid LLM call.  Confirmation needs a TTY unless
-  // `--yes` (or a dry-run, which never confirms).
-  if (!opts.yes && !opts.dryRun && !opts.estimate && (!process.stdout.isTTY || !process.stdin.isTTY)) {
-    err(
-      chalk.red(
-        'Interactive confirmation requires a TTY. Re-run with --yes to auto-confirm (CI / Human-Out-Of-Loop mode), or from an interactive terminal.',
-      ),
-    );
-    return { exitCode: 1 };
-  }
-
   const { resolved, invalid: badMode } = resolveRunMode({
     ...(prefixed.mode ? { prefix: prefixed.mode } : {}),
     ...(opts.mode !== undefined ? { flag: String(opts.mode) } : {}),
@@ -495,6 +484,22 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
         return { exitCode: 0 };
       }
       out(color.failed(preview.error ?? 'Planning failed.'));
+      return { exitCode: 1 };
+    }
+
+    // G-02: fail before any paid LLM call.  Confirmation needs a TTY unless
+    // `--yes`; a chat-mode run never confirms.  This comes after the free
+    // pre-flight (options, --session, model) so usage errors still exit 2.
+    if (
+      !opts.yes &&
+      resolved.mode !== 'chat' &&
+      (!process.stdout.isTTY || !process.stdin.isTTY)
+    ) {
+      err(
+        chalk.red(
+          'Interactive confirmation requires a TTY. Re-run with --yes to auto-confirm (CI / Human-Out-Of-Loop mode), or from an interactive terminal.',
+        ),
+      );
       return { exitCode: 1 };
     }
 

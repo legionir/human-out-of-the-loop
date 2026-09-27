@@ -17,7 +17,7 @@ import {
   getReadySteps,
 } from '../schemas/plan.js';
 import type { AcceptanceChecker } from './acceptance-checker.js';
-import type { Task } from '../schemas/task.js';
+import { createTaskRecord, type Task } from '../schemas/task.js';
 import { mergeReplannedSteps } from './replan-merge.js';
 import { buildStepPrompt, formatDoneStepSummaries } from './step-prompt.js';
 import { DEFAULT_MODEL_ID } from '../models/defaults.js';
@@ -481,12 +481,20 @@ export class PlanRuntime {
 
       const task =
         live ??
-        ({
+        // B-08: the task record is gone (the process that ran it crashed);
+        // judge the stored summary with a complete, well-formed record.
+        createTaskRecord({
           id: step.taskId,
-          status: 'completed',
-          summary: step.resultSummary ?? '',
-          result: step.resultSummary ?? '',
-        } as Task);
+          agentDefinitionOrId: step.assignedPersona,
+          prompt: step.description,
+          planStepId: step.id,
+          ...(plan.id ? { planId: plan.id } : {}),
+        });
+      if (!live) {
+        task.status = 'completed';
+        task.summary = step.resultSummary ?? '';
+        task.result = step.resultSummary ?? '';
+      }
 
       this.acceptanceChecked.add(step.id);
       pending.push({ step, task });

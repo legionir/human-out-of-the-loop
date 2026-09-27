@@ -18,7 +18,7 @@
 | `HOTL_PROJECT_ROOT` | خیر | ریشه‌ی پروژه برای سرور (registry + `.ai-runtime`). اگر نباشد: `projectRoot` از global config، وگرنه `process.cwd()` |
 | `HOTL_PORT` | خیر | پورت HTTP سرور (پیش‌فرض: ۳۰۰۰) |
 | `HOTL_HOST` | خیر | آدرس bind سرور وب (پیش‌فرض: `127.0.0.1`). bind غیر-loopback بدون توکن در استارت رد می‌شود |
-| `HOTL_SERVER_TOKEN` | بله اگر host غیر-loopback باشد | توکن Bearer برای همهٔ `/api/*` (چند توکن با کاما). معادل `--token`. بدون توکن روی loopback، auth خاموش است |
+| `HOTL_SERVER_TOKEN` | بله اگر host غیر-loopback باشد | توکن Bearer برای همهٔ `/api/*` (چند توکن با کاما). معادل `--token`. بدون توکن روی loopback، auth خاموش است. رابط وب را یک‌بار با `/?token=<t>` باز کنید (در sessionStorage می‌ماند؛ EventSource با `?access_token=` فقط روی دو مسیر SSE). با چند توکن، session/plan/stream هر کلاینت فقط برای خودش است |
 | `HOTL_RUN_TTL_MS` | خیر | مهلت انتظار clarification/confirmation (پیش‌فرض ۳۰ دقیقه؛ `0` = خاموش). پس از TTL ران `cancelled` می‌شود |
 | `HOTL_MODEL` | خیر | مدل پیش‌فرض سرور — اولویت از بالا: گزینه‌ی `model` در `createApp()` > `HOTL_MODEL` > `defaultModel` در global config > `gpt-4o`. از UI هم per-run قابل تغییر است (U3) |
 | `HOTL_REDACT_KEYS` | خیر | لیست کلیدهای اضافی برای redact شدن در observability (با کاما جدا می‌شود؛ مکمل `redactKeys` در config) |
@@ -80,8 +80,9 @@
 | `HOTL_BASE_URL` | خیر | URL سازگار با OpenAI؛ به‌تنهایی `defaultModel` سراسری را عوض نمی‌کند (B-22) — همراه `HOTL_MODEL` |
 | `HOTL_API_STYLE` | خیر | `chat` (Chat Completions) یا `responses`؛ پیش‌فرض برای base URL سفارشی: `chat` |
 | `HOTL_FETCH_ALLOW_PRIVATE` | خیر | `1`/`true` = اجازهٔ fetch به آدرس‌های خصوصی (loopback / RFC1918)؛ پیش‌فرض رد |
-| `HOTL_ALLOWED_COMMANDS` | خیر | لیست باینری‌های مجاز برای `run_command` (با کاما). مکمل `.ai-runtime/commands.json` |
-| `HOTL_TEST_COMMAND` | خیر | argv دستور تست پروژه برای `run_tests` / حلقهٔ خودتأییدی (جدا با فاصله) |
+| `HOTL_ALLOWED_COMMANDS` | خیر | لیست باینری‌های مجاز برای `run_command` (با کاما). هر مورد دقیقاً با argv[0] تطبیق می‌شود: نام خالی (`npm`) فقط همان نام از PATH را مجاز می‌کند، نه `./scripts/npm`. `.ai-runtime/commands.json` فقط برای پروژهٔ trusted (`--trust-project`) خوانده می‌شود |
+| `HOTL_TEST_COMMAND` | خیر | argv دستور تست پروژه برای `run_tests` / حلقهٔ خودتأییدی (جدا با فاصله). فرزند بدون متغیرهای credential (کلید/توکن/رمز) اجرا می‌شود |
+| `HOTL_RETENTION_DAYS` | خیر | نگه‌داری پلن‌ها و sessionهای `.ai-runtime` (روز؛ پیش‌فرض ۳۶۵؛ `0` = همه نگه داشته شوند). checkpointها ۷ روز، و از `observability.jsonl` چرخش‌یافته فقط ۵ فایل آخر می‌ماند |
 | `HOTL_PLAN_EXAMPLES` | خیر | `0`/`false`/`off` = خاموش‌کردن نمونه‌های پلن موفق در پرامپت پلن‌ساز |
 | `HOTL_MODE` | خیر | حالت پیش‌فرض اجرا: `auto` (پیش‌فرض؛ سؤال جواب داده می‌شود، کار واقعی پلن می‌شود) \| `chat` (هرگز پلن نکن) \| `plan` (هرگز جواب نده). ترتیب: پیشوند `@chat`/`@plan` در خود درخواست > `--mode` > `HOTL_MODE` > `defaultMode` در global config > `auto`. مقدار نامعتبر = خطای مصرف (exit 2) با نام منبع |
 

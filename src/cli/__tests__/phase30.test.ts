@@ -43,7 +43,9 @@ const __dirname = path.dirname(__filename);
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 const REGISTRY_SRC = path.join(REPO_ROOT, 'registry');
 
-const PLAN_ID = 'plan_phase30_crash';
+// R1-09: the runtime assigns plan ids (the model's `id` is ignored), so the
+// id of the run's plan is read back from the store after each CLI call.
+let PLAN_ID = 'plan_phase30_crash';
 const STEP_1_DESC = 'Create the login form component';
 const STEP_2_DESC = 'Add unit tests for the login form';
 
@@ -136,6 +138,9 @@ async function runCli(args: Array<string>): Promise<{ code: number; out: string;
   process.exitCode = undefined;
   try {
     const code = await main(['node', 'hootl', ...args]);
+    const plansDir = path.join(projectRoot, '.ai-runtime', 'plans');
+    const ids = fs.existsSync(plansDir) ? planStore().list() : [];
+    if (ids.length === 1) PLAN_ID = ids[0]!;
     return { code, out: chunks.join(''), errOut: errChunks.join('') };
   } finally {
     outSpy.mockRestore();

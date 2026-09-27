@@ -73,11 +73,30 @@ interface SdkRunOutcome {
 }
 
 export class ProviderStreamError extends Error {
-  constructor(message: string) {
+  /**
+   * True when the stream had already produced output (text, a tool call, a
+   * finished step) before it failed.  Only a stream that failed before any
+   * output may be asked again without streaming (v27.17.2 — a gateway that
+   * cannot stream); after output, tools may have run and re-asking would
+   * repeat them, so it is a failure (C-02).
+   */
+  constructor(message: string, readonly afterOutput = true) {
     super(message);
     this.name = 'ProviderStreamError';
   }
 }
+
+/** Stream parts that mean the turn already produced something. */
+const OUTPUT_PART_TYPES = new Set([
+  'text-delta',
+  'text',
+  'reasoning-delta',
+  'tool-call',
+  'tool-input-start',
+  'tool-result',
+  'tool-error',
+  'finish-step',
+]);
 
 /** Did any step call a tool?  A turn with tool calls is not "empty". */
 function stepsHaveToolCalls(steps: ReadonlyArray<SdkStepLike> | undefined): boolean {
@@ -679,9 +698,18 @@ export class AgentRuntime {
         });
       } catch (err) {
         if (!stillWanted()) throw err;
-        if (err instanceof ProviderStreamError) throw err;
+        if (err instanceof ProviderStreamError && err.afterOutput) throw err;
         reaskedWithoutStreaming = true;
-        result = await generateText(generateOptions);
+        try {
+          result = await generateText(generateOptions);
+          if (!result || typeof result !== 'object') throw new Error('empty response');
+        } catch (retryErr) {
+          // Both failed: report the stream's own error first — it is usually
+          // the real cause (a 502, a key problem), not the retry's.
+          const first = err instanceof Error ? err.message : String(err);
+          const second = retryErr instanceof Error ? retryErr.message : String(retryErr);
+          throw new ProviderStreamError(`${first} (retry without streaming also failed: ${second})`);
+        }
       }
 
       if (!reaskedWithoutStreaming && result.text.trim() === '' && !stepsHaveToolCalls(result.steps)) {
@@ -885,6 +913,8 @@ export class AgentRuntime {
     // Everything shown this turn, whatever the source — used to show only the
     // part of a late full item that was not streamed already.
     let emitted = '';
+    // v27.17.2 / C-02: whether this turn produced output before any error.
+    let sawOutput = false;
 
     const openBlock = (source: 'reasoning' | 'provider-field'): void => {
       if (blockOpen) return;
@@ -910,6 +940,7 @@ export class AgentRuntime {
         rawValue?: unknown;
         error?: unknown;
       };
+      if (typeof part.type === 'string' && OUTPUT_PART_TYPES.has(part.type)) sawOutput = true;
       switch (part.type) {
         case 'error': {
           const message =
@@ -920,7 +951,7 @@ export class AgentRuntime {
                 : typeof part.text === 'string'
                   ? part.text
                   : 'Provider stream error';
-          throw new ProviderStreamError(message);
+          throw new ProviderStreamError(message, sawOutput);
         }
         case 'reasoning-start':
           nativeReasoning = true;
