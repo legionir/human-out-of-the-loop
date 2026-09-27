@@ -135,7 +135,7 @@ export function captureCheckpoint(
   }
   fs.writeFileSync(
     path.join(dest, 'manifest.json'),
-    JSON.stringify({ planId, stepId, files: copied, capturedAt: Date.now() }),
+    JSON.stringify({ planId, stepId, files: copied, present: files, capturedAt: Date.now() }),
   );
   pruneStepSnapshots(projectRoot, planId, CHECKPOINTS_KEPT_PER_PLAN, limits.runtimeDir);
   return dest;
@@ -152,18 +152,27 @@ export function restoreCheckpoint(
   if (!fs.existsSync(manifestPath)) return false;
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as {
     files: string[];
+    present?: string[];
     capturedAt?: number;
   };
   const snap = new Set(manifest.files);
   // Only a file that appeared AFTER the snapshot is the step's to remove; an
-  // older file the snapshot merely skipped (or could not copy) is not.
+  // older file the snapshot merely could not copy is not.  `present` lists
+  // every file seen at capture time; timestamps are only a fallback for
+  // older manifests (a file written in the capture's millisecond, or on a
+  // coarse-mtime filesystem, looks "older" by time).
+  const present = manifest.present ? new Set(manifest.present) : undefined;
   const since = manifest.capturedAt ?? 0;
   for (const rel of listProjectFiles(projectRoot)) {
     if (snap.has(rel)) continue;
     const full = path.join(projectRoot, rel);
     try {
-      const st = fs.statSync(full);
-      if (Math.max(st.mtimeMs, st.birthtimeMs || 0) < since) continue;
+      if (present) {
+        if (present.has(rel)) continue;
+      } else {
+        const st = fs.statSync(full);
+        if (Math.max(st.mtimeMs, st.birthtimeMs || 0) < since) continue;
+      }
       fs.unlinkSync(full);
     } catch {
       /* ignore */

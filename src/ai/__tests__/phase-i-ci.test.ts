@@ -87,9 +87,11 @@ describe('I-06 — real-provider workflow', () => {
     expect(yaml).toMatch(/The Anthropic API key leaked/);
   });
 
-  it('takes the model id from a variable, not a secret', () => {
-    expect(yaml).toMatch(/vars\.HOTL_MODEL/);
-    expect(yaml).not.toMatch(/secrets\.HOTL_MODEL/);
+  it('takes the model id from a variable first, a secret only as fallback', () => {
+    // A variable stays readable in the log; a secret (masked as ***) is
+    // accepted too, since owners commonly put it there.
+    expect(yaml).toMatch(/vars\.HOTL_MODEL \|\| secrets\.HOTL_MODEL/);
+    expect(yaml).toMatch(/vars\.HOTL_API_STYLE \|\| secrets\.HOTL_API_STYLE/);
   });
 
   it('forwards HOTL_API_STYLE', () => {

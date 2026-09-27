@@ -30,7 +30,7 @@
  *     of leaking an exception into the agent loop.
  */
 import fs from 'node:fs/promises';
-import { createReadStream } from 'node:fs';
+import { createReadStream, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { StringDecoder } from 'node:string_decoder';
@@ -191,6 +191,30 @@ function resolveRelativePathAgainstAllowedDirectories(
 }
 
 /**
+ * The allowed directories plus their real paths.  A root given as
+ * `/var/folders/…` (macOS, where /var → /private/var) or with a Windows 8.3
+ * short name (`C:\\Users\\RUNNER~1`) must still contain the real paths
+ * `fs.realpath` returns for the files under it.
+ */
+const realAllowedCache = new Map<string, string>();
+function withRealPaths(allowedDirectories: string[]): string[] {
+  const out = new Set(allowedDirectories);
+  for (const dir of allowedDirectories) {
+    let real = realAllowedCache.get(dir);
+    if (real === undefined) {
+      try {
+        real = normalizePath(realpathSync.native(dir));
+      } catch {
+        real = dir;
+      }
+      realAllowedCache.set(dir, real);
+    }
+    out.add(real);
+  }
+  return [...out];
+}
+
+/**
  * Resolve the Unicode-equivalent (NFC/NFD) form of a path that does not exist
  * yet, component by component, refusing ambiguous matches.
  *
@@ -199,8 +223,9 @@ function resolveRelativePathAgainstAllowedDirectories(
  */
 async function resolveUnicodeEquivalentPath(
   absolutePath: string,
-  allowedDirectories: string[]
+  allowedDirs: string[]
 ): Promise<string> {
+  const allowedDirectories = withRealPaths(allowedDirs);
   const allowedDirectory = [...allowedDirectories]
     .sort((left, right) => right.length - left.length)
     .find((directory) => isPathWithinAllowedDirectories(normalizePath(absolutePath), [directory]));
@@ -257,8 +282,9 @@ async function resolveUnicodeEquivalentPath(
  */
 export async function validatePath(
   requestedPath: string,
-  allowedDirectories: string[]
+  allowedDirs: string[]
 ): Promise<string> {
+  const allowedDirectories = withRealPaths(allowedDirs);
   const expandedPath = expandHome(requestedPath);
 
   // Do not silently reinterpret a Windows drive path as a relative POSIX path:

@@ -573,3 +573,22 @@ describe('checkpoint never copies credential files', () => {
     fsm.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('validatePath with a root reached through a symlink (macOS /var, Windows 8.3 names)', () => {
+  it('accepts files under the real directory of a symlinked root', async () => {
+    const { validatePath } = await import('../tools/fs/lib.js');
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'vp-link-'));
+    const real = path.join(base, 'real');
+    fs.mkdirSync(real);
+    fs.writeFileSync(path.join(real, 'a.txt'), 'x');
+    const link = path.join(base, 'link');
+    fs.symlinkSync(real, link, 'dir');
+    await expect(validatePath(path.join(link, 'a.txt'), [link])).resolves.toBe(fs.realpathSync(path.join(real, 'a.txt')));
+    await expect(validatePath('new/dir/b.txt', [link])).resolves.toContain('b.txt');
+    const outside = path.join(base, 'outside');
+    fs.mkdirSync(outside);
+    fs.symlinkSync(outside, path.join(real, 'esc'), 'dir');
+    await expect(validatePath(path.join(link, 'esc', 'x.txt'), [link])).rejects.toThrow(/outside allowed/);
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+});

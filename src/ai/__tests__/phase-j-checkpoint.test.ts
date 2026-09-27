@@ -229,3 +229,19 @@ describe('J-05 — checkpoint / rollback', () => {
     taskRuntime.destroy();
   });
 });
+
+describe('J-05 — restore does not rely on timestamps', () => {
+  it('removes a file created after capture even if its mtime predates the capture', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ckpt-mtime-'));
+    fs.writeFileSync(path.join(root, 'keep.txt'), 'original\n');
+    captureCheckpoint(root, 'plan_m', 'step-1');
+    const extra = path.join(root, 'extra.txt');
+    fs.writeFileSync(extra, 'new\n');
+    const past = new Date(Date.now() - 60_000);
+    fs.utimesSync(extra, past, past);
+    expect(restoreCheckpoint(root, 'plan_m', 'step-1')).toBe(true);
+    expect(fs.existsSync(extra)).toBe(false);
+    expect(fs.readFileSync(path.join(root, 'keep.txt'), 'utf8')).toBe('original\n');
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
