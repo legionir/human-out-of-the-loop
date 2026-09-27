@@ -228,7 +228,7 @@ export interface OrchestratorRunOptions {
   confirmCallback: (
     planText: string,
     plan?: Plan,
-  ) => Promise<{ confirmed: boolean; feedback?: string }>;
+  ) => Promise<{ confirmed: boolean; feedback?: string; cancelled?: boolean }>;
   /**
    * A-04: abort planning (and skip later LLM calls). The web server
    * `POST /api/runs/:runId/cancel` fires this while state is `planning`.
@@ -1396,7 +1396,13 @@ export class Orchestrator {
     let feedbackRound = 0;
     while (!confirmation.confirmed) {
       const fb = confirmation.feedback?.trim();
-      const hardReject = !fb || /^user rejected the plan\.?$/i.test(fb);
+      // A cancel (Ctrl-C, shutdown, TTL, operator cancel) or a rejection
+      // without real feedback ends the run; only feedback text re-plans.
+      const hardReject =
+        confirmation.cancelled === true ||
+        abortSignal?.aborted === true ||
+        !fb ||
+        /^user rejected the plan\.?$/i.test(fb);
       if (hardReject || feedbackRound >= this.config.maxClarificationRounds) {
         if (interaction) {
           this.sessionStore.updateInteraction(sessionId, interaction.id, {
@@ -1433,13 +1439,22 @@ export class Orchestrator {
         };
       }
       feedbackRound++;
-      const revised = await this.planner.plan(
-        `${userRequest}\n\nPLANNER FEEDBACK FROM USER (revise the plan accordingly):\n${fb}`,
-        plan.id,
-        runModelId,
-        'plan',
-        abortSignal,
-      );
+      let revised;
+      try {
+        revised = await this.planner.plan(
+          `${userRequest}\n\nPLANNER FEEDBACK FROM USER (revise the plan accordingly):\n${fb}`,
+          plan.id,
+          runModelId,
+          'plan',
+          abortSignal,
+        );
+      } catch (err) {
+        if (isAbortError(err) || abortSignal?.aborted) {
+          confirmation = { confirmed: false, cancelled: true, feedback: 'Run cancelled while re-planning.' };
+          continue;
+        }
+        throw err;
+      }
       if (!revised.isClear || !revised.plan) {
         confirmation = { confirmed: false, feedback: fb };
         continue;

@@ -296,7 +296,7 @@ export async function startServer(options: ServeOptions = {}): Promise<CreatedSe
         run.ttlTimer = undefined;
       }
       run.abortController?.abort();
-      run.confirmResolver?.({ confirmed: false, feedback: 'server shutting down' });
+      run.confirmResolver?.({ confirmed: false, cancelled: true, feedback: 'server shutting down' });
       run.clarificationResolver?.(null);
     }
     for (const id of ctx.orchestrator.livePlanIds()) {

@@ -16,6 +16,8 @@ import { color, out } from './output.js';
 export interface ConfirmationResult {
   confirmed: boolean;
   feedback?: string;
+  /** The prompt was aborted (Ctrl-C / Escape): stop, never re-plan. */
+  cancelled?: boolean;
 }
 
 /** Thrown when interactive confirmation is impossible (no TTY). */
@@ -66,7 +68,7 @@ export async function confirmPlanInteractively(planText: string): Promise<Confir
     // not print a stack and leave it pending.
     if (isExitPromptError(e)) {
       out(color.warn('cancelled'));
-      return { confirmed: false, feedback: 'User cancelled the confirmation prompt.' };
+      return { confirmed: false, cancelled: true, feedback: 'User cancelled the confirmation prompt.' };
     }
     throw e;
   }
@@ -75,13 +77,23 @@ export async function confirmPlanInteractively(planText: string): Promise<Confir
     return { confirmed: true };
   }
 
-  const { feedback } = await inquirer.prompt<{ feedback: string }>([
-    {
-      type: 'input',
-      name: 'feedback',
-      message: 'Feedback for the planner (optional, enter to skip):',
-    },
-  ]);
+  let feedback: string;
+  try {
+    ({ feedback } = await inquirer.prompt<{ feedback: string }>([
+      {
+        type: 'input',
+        name: 'feedback',
+        message: 'Feedback for the planner (optional, enter to skip):',
+      },
+    ]));
+  } catch (e) {
+    // Ctrl-C at the feedback question is still a rejection, not a crash.
+    if (isExitPromptError(e)) {
+      out(color.warn('cancelled'));
+      return { confirmed: false, cancelled: true, feedback: 'User cancelled the confirmation prompt.' };
+    }
+    throw e;
+  }
   const trimmed = feedback.trim();
   return {
     confirmed: false,

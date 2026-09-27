@@ -38,7 +38,7 @@ export function cancelInFlightRun(ctx: ServerContext, run: RunState): boolean {
   const confirm = run.confirmResolver;
   if (confirm) {
     run.confirmResolver = undefined;
-    confirm({ confirmed: false });
+    confirm({ confirmed: false, cancelled: true });
   }
   if (run.planId && (run.state === 'running' || run.state === 'planning')) {
     void ctx.orchestrator.cancelPlan(run.planId).catch(() => undefined);

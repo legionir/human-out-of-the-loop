@@ -26,7 +26,7 @@ export interface RunState {
   error?: string;
   createdAt: number;
   /** Resolves the interactive confirmation for this run (UI decision). */
-  confirmResolver?: (decision: { confirmed: boolean; feedback?: string }) => void;
+  confirmResolver?: (decision: { confirmed: boolean; feedback?: string; cancelled?: boolean }) => void;
   /**
    * U5: the planner's pending questions while `state === 'awaiting-clarification'`.
    * Exposed over `GET /api/runs/:runId` so a client that missed the SSE
