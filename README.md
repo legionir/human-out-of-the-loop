@@ -9,6 +9,8 @@ npm install
 export OPENAI_API_KEY="sk-..."
 npm run build
 npx vitest run
+# CI prints `N/M tests passed` from scripts/ci-test.mjs; keep that count
+# in sync with CHANGELOG when a phase lands.
 ```
 
 ```typescript

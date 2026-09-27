@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { waitUntil } from '../../test-utils/wait-until.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -416,9 +417,21 @@ describe('Phase 43 — resources', () => {
         id: 'plan-mcp-resource',
         goal: 'be readable over MCP',
         status: 'completed',
-        createdAt: new Date('2026-09-25T00:00:00.000Z').toISOString(),
-        updatedAt: new Date('2026-09-25T00:00:00.000Z').toISOString(),
-        steps: [],
+        createdAt: Date.parse('2026-09-25T00:00:00.000Z'),
+        updatedAt: Date.parse('2026-09-25T00:00:00.000Z'),
+        steps: [
+          {
+            id: 's1',
+            description: 'exist so the store will load this plan',
+            dependsOn: [],
+            assignedPersona: 'coder',
+            assignedSkills: [],
+            assignedTools: ['read_file'],
+            claimedResources: [],
+            acceptanceCriteria: 'saved',
+            status: 'done',
+          },
+        ],
       } as unknown as Plan;
       store.save(plan);
 
@@ -486,7 +499,9 @@ describe('Phase 43 — the stdio transport', () => {
     const output = new PassThrough();
     const errors = new PassThrough();
     const written: string[] = [];
+    const errText: string[] = [];
     output.on('data', (chunk: Buffer) => written.push(chunk.toString()));
+    errors.on('data', (chunk: Buffer) => errText.push(chunk.toString()));
 
     const handle = serveStdio(server, {
       input,
@@ -500,7 +515,15 @@ describe('Phase 43 — the stdio transport', () => {
     input.write(
       `${frame(82, 'tools/call', { name: 'read_file', arguments: { filePath: 'hello.txt' } })}\n`
     );
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    await waitUntil(
+      () =>
+        written
+          .join('')
+          .trim()
+          .split('\n')
+          .filter(Boolean).length >= 3,
+      { timeoutMs: 5_000, message: 'stdio server never answered all three frames' },
+    );
     input.end();
     await handle.done;
 
@@ -514,8 +537,10 @@ describe('Phase 43 — the stdio transport', () => {
 
     // stdout carried protocol only; the human-facing line went to stderr.
     expect(written.join('')).not.toContain('banner');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(errors.read()?.toString()).toContain('banner goes to stderr');
+    await waitUntil(() => errText.join('').includes('banner goes to stderr'), {
+      timeoutMs: 2_000,
+      message: 'banner never reached stderr',
+    });
   });
 
   it('answers an unparseable line in-band, because a client has to hear about it', async () => {
@@ -525,7 +550,10 @@ describe('Phase 43 — the stdio transport', () => {
     output.on('data', (chunk: Buffer) => written.push(chunk.toString()));
     const handle = serveStdio(server, { input, output });
     input.write('{ this is not json\n');
-    await new Promise((resolve) => setTimeout(resolve, 100));
+    await waitUntil(() => written.join('').trim().length > 0, {
+      timeoutMs: 5_000,
+      message: 'parse error never answered in-band',
+    });
     input.end();
     await handle.done;
     const response = JSON.parse(written.join('').trim()) as Record<string, unknown>;

@@ -5,6 +5,19 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.13] — 2026-09-27 — Phase I: tests, CI, docs
+
+Closes every open row of **Phase I** in `docs/UNIFIED_EXECUTION_PLAN.md` (I-01…I-08).
+
+- **I-01 — catalog-aware stub.** `e2e/fake-llm.mjs` parses `AVAILABLE CATALOG` and assigns only listed personas; missing catalog or `PERSONA:ghost` errors. Scenario `catalog` covers E-01/E-02.
+- **I-02 — coverage map.** One directed `it` per closed A–H UNIFIED row pointing at the regression file.
+- **I-03 — no fixed sleeps.** `waitUntil` poll with a cap in followLog, stdio MCP, and EPIPE tests.
+- **I-04 — CI once per PR.** `push` only `main`; concurrency `workflow-PR|sha`; npm cache kept.
+- **I-05 — annotations.** Cap 40 GitHub `::error` lines, each with `line=`.
+- **I-06 — real-provider.** Anthropic leak grep; model from `vars.HOTL_MODEL`; `HOTL_API_STYLE`; cron without a secret skips.
+- **I-07 — docs.** `HOTL_*` ↔ `CONFIGURATION.md`; `HOTL_NO_SPLASH`; planner `skillIds: ["task_decomposition"]`; README/`CHANGELOG` suite notes.
+- **I-08 — comments.** Semantic comments on files touched this phase.
+
 ## [27.17.12] — 2026-09-27 — Project index for agent context
 
 Adds `hootl index` and `docs/PROJECT_INDEX.md`: a static `structure.json` (directories + direct file counts) separate from on-demand `files.json` (`size` + `lines`). Traversal is parallel `readdir({ withFileTypes })`; metadata is one `readFile` per file (no extra `stat`). Tools: `list_tree`, `list_files`, `find_files`, `search`, `read_file_range`.

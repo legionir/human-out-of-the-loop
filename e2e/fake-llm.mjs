@@ -1,12 +1,17 @@
 /**
- * Minimal local LLM stub (OpenAI Responses API) for the sandbox.
+ * Local LLM stub (OpenAI Responses + Chat Completions) for e2e.
  *
- * Rebuilt after the sandbox restart wiped the original harness.  It is
- * deliberately small: enough to plan, run and review a short plan.
- *   - structured calls -> a payload derived from the request's schema name
- *   - agent turns      -> one read_file call, then a final message
+ * Structured calls become a payload derived from the schema name; agent
+ * turns call one tool then finish.  Planner payloads pick `assignedPersona`
+ * from the AVAILABLE CATALOG in the prompt — never invent `coder`.
  */
 import http from 'node:http';
+import {
+  CatalogError,
+  pickPersonaFromCatalog,
+  requirePlannerCatalog,
+  toolsForPersona,
+} from './catalog-from-prompt.mjs';
 
 const PORT = Number(process.env.FAKE_PORT ?? 8931);
 const DELAY_MS = Number(process.env.FAKE_DELAY_MS ?? 0);
@@ -68,6 +73,15 @@ function sendHttpError(res, status) {
   if (status === 429) headers['retry-after'] = '0';
   res.writeHead(status, headers);
   res.end(JSON.stringify({ error: { ...body, param: null } }));
+}
+
+function sendCatalogError(res, error) {
+  res.writeHead(400, { 'content-type': 'application/json' });
+  res.end(
+    JSON.stringify({
+      error: { message: error.message, type: 'invalid_request_error', code: 'catalog' },
+    }),
+  );
 }
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -444,7 +458,7 @@ function step(id, description, over = {}) {
     id,
     description,
     dependsOn: [],
-    assignedPersona: 'coder',
+    assignedPersona: over.assignedPersona ?? 'coder',
     assignedSkills: [],
     assignedTools: ['read_file'],
     claimedResources: [],
@@ -474,17 +488,19 @@ function goalFromPrompt(promptText) {
  * "the tool was never offered".
  */
 function planPayload(promptText = '') {
+  const catalog = requirePlannerCatalog(promptText);
   const goal = goalFromPrompt(promptText);
   const wanted = [...new Set(MARKERS.map((m) => m.tool))].filter((tool) =>
     markersIn(promptText).some((m) => m.tool === tool)
   );
-  const tools = [...new Set([...wanted, 'read_file'])];
+  const assignedPersona = pickPersonaFromCatalog(promptText, catalog, wanted);
+  const tools = toolsForPersona(catalog, assignedPersona, wanted);
   const description = goal || 'Read the project README';
   return {
     goal: goal || 'stub goal',
     steps: [
-      step('step-1', description, { assignedTools: tools }),
-      step('step-2', description, { dependsOn: ['step-1'], assignedTools: tools }),
+      step('step-1', description, { assignedTools: tools, assignedPersona }),
+      step('step-2', description, { dependsOn: ['step-1'], assignedTools: tools, assignedPersona }),
     ],
   };
 }
@@ -594,9 +610,16 @@ async function handleChat(body, req, res) {
     message.content = '';
   } else if (format) {
     // json_schema or json_object: the SDK parses the message content.
-    message.content = schemaName && badJsonFor(schemaName, promptText)
-      ? 'Sure! Here is the result: {not valid json'
-      : JSON.stringify(structuredPayload(schemaName ?? guessSchema(promptText), promptText));
+    if (schemaName && badJsonFor(schemaName, promptText)) {
+      message.content = 'Sure! Here is the result: {not valid json';
+    } else {
+      try {
+        message.content = JSON.stringify(structuredPayload(schemaName ?? guessSchema(promptText), promptText));
+      } catch (error) {
+        if (error instanceof CatalogError) return void sendCatalogError(res, error);
+        throw error;
+      }
+    }
   } else if (tools.length > 0 && /\bCHATREPLY\b/.test(promptText)) {
     // The chat answer: text only (no tool call), and in the language the
     // runtime asked for — if the LANGUAGE rule did not reach the model, this
@@ -998,7 +1021,12 @@ const server = http.createServer((req, res) => {
     if (format?.type === 'json_schema' && badJsonFor(format.name, promptText)) {
       output = [messageItem('Sure! Here is the result: {not valid json')];
     } else if (format?.type === 'json_schema') {
-      output = [messageItem(JSON.stringify(structuredPayload(format.name, promptText)))];
+      try {
+        output = [messageItem(JSON.stringify(structuredPayload(format.name, promptText)))];
+      } catch (error) {
+        if (error instanceof CatalogError) return void sendCatalogError(res, error);
+        throw error;
+      }
     } else if (tools.length > 0 && /\bCHATREPLY\b/.test(promptText)) {
       // Same chat behaviour as the Chat Completions path (see handleChat):
       // text only, in the language the LANGUAGE rule names; with CHATREAD the

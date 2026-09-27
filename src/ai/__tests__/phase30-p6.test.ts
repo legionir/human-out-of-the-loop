@@ -20,6 +20,7 @@
  *      built-in tools).
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { waitUntil } from '../../test-utils/wait-until.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -344,11 +345,17 @@ describe('Phase 30 / P6 — stdio transport', () => {
     transport.onclose = () => {};
 
     await transport.start();
-    await new Promise((r) => setTimeout(r, 200)); // let the child destroy stdin
-
-    await expect(
-      transport.send({ jsonrpc: '2.0', id: 1, method: 'ping', params: {} } as never)
-    ).rejects.toThrow();
+    await waitUntil(
+      async () => {
+        try {
+          await transport.send({ jsonrpc: '2.0', id: 1, method: 'ping', params: {} } as never);
+          return false;
+        } catch {
+          return true;
+        }
+      },
+      { timeoutMs: 5_000, message: 'child never closed stdin (send still succeeds)' },
+    );
     // The failure was REPORTED, not thrown as an unhandled 'error' event.
     // POSIX raises EPIPE on the next write once the child released its read
     // end; Windows anonymous pipes do not, so the transport's 'error'

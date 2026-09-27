@@ -38,6 +38,7 @@ import { FilePlanStore } from '../../ai/runtime/plan-store.js';
 import { loadGlobalConfig, loadDotEnv } from '../../cli/utils/config.js';
 import { followLog } from '../../cli/commands/logs.js';
 import { createPlan, type Plan } from '../../ai/schemas/plan.js';
+import { waitUntil } from '../../test-utils/wait-until.js';
 import { Orchestrator } from '../../ai/orchestrator.js';
 import type { LogEntry } from '../../ai/runtime/observability-logger.js';
 import { useIsolatedHome } from '../../test-utils/isolated-home.js';
@@ -563,8 +564,6 @@ describe('Phase 23 — CLI: mcp + logs', () => {
     const seen: string[] = [];
     const stop = followLog(logFile, undefined, 50, (entry) => seen.push(entry.message));
 
-    // Give the watcher a beat to attach, then append two new entries.
-    await new Promise((r) => setTimeout(r, 150));
     fs.appendFileSync(
       logFile,
       JSON.stringify({
@@ -575,7 +574,10 @@ describe('Phase 23 — CLI: mcp + logs', () => {
         message: 'new entry 1',
       }) + '\n',
     );
-    await new Promise((r) => setTimeout(r, 300));
+    await waitUntil(() => seen.includes('new entry 1'), {
+      timeoutMs: 5_000,
+      message: 'followLog never emitted the first appended entry',
+    });
     fs.appendFileSync(
       logFile,
       JSON.stringify({
@@ -586,7 +588,10 @@ describe('Phase 23 — CLI: mcp + logs', () => {
         message: 'new entry 2',
       }) + '\n',
     );
-    await new Promise((r) => setTimeout(r, 300));
+    await waitUntil(() => seen.includes('new entry 2'), {
+      timeoutMs: 5_000,
+      message: 'followLog never emitted the second appended entry',
+    });
     stop();
 
     expect(seen).toContain('new entry 1');

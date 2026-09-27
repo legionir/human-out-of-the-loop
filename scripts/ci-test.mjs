@@ -10,6 +10,9 @@
  *
  *     ::error file=src/foo.test.ts,line=42::test name — assertion message
  *
+ * At most MAX_ANNOTATIONS `::error` lines are emitted so the Checks UI
+ * does not drop the rest; each includes `line=` when Vitest names one.
+ *
  * Usage: node scripts/ci-test.mjs [extra vitest args]
  * Exits with vitest's own exit code.
  */
@@ -17,10 +20,10 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
+import { collectFailures, formatGithubAnnotations, MAX_ANNOTATIONS } from './ci-annotations.mjs';
 
 const REPORT_DIR = path.resolve('.ci');
 const REPORT_FILE = path.join(REPORT_DIR, 'vitest.json');
-const MAX_ANNOTATIONS = 40;
 
 fs.rmSync(REPORT_DIR, { recursive: true, force: true });
 fs.mkdirSync(REPORT_DIR, { recursive: true });
@@ -48,18 +51,10 @@ child.on('close', (code) => {
     process.exit(code ?? 1);
   }
 
-  const failures = [];
-  for (const file of report.testResults ?? []) {
-    for (const assertion of file.assertionResults ?? []) {
-      if (assertion.status !== 'failed') continue;
-      const message = (assertion.failureMessages ?? []).join('\n').split('\n')[0]?.trim() ?? 'failed';
-      failures.push({
-        file: path.relative(process.cwd(), String(file.name ?? '')).replace(/\\/g, '/'),
-        title: assertion.fullName || assertion.title || 'unnamed test',
-        message: message.slice(0, 900),
-      });
-    }
-  }
+  const failures = collectFailures(report).map((failure) => ({
+    ...failure,
+    file: path.relative(process.cwd(), failure.file).replace(/\\/g, '/'),
+  }));
 
   const totals = report.numTotalTests ?? 0;
   const passed = report.numPassedTests ?? 0;
@@ -67,15 +62,15 @@ child.on('close', (code) => {
 
   if (failures.length === 0) process.exit(code ?? 0);
 
-  console.log(`\n${failures.length} failing test(s):`);
-  for (const failure of failures) {
-    console.log(`  ${failure.file} :: ${failure.title}`);
-    if (process.env.GITHUB_ACTIONS) {
-      console.log(`::error file=${failure.file}::${failure.title} — ${failure.message}`);
-    }
+  const shown = Math.min(failures.length, MAX_ANNOTATIONS);
+  console.log(`\n${failures.length} failing test(s) (annotating ${shown}):`);
+  for (const failure of failures.slice(0, shown)) {
+    console.log(`  ${failure.file}${failure.line ? `:${failure.line}` : ''} :: ${failure.title}`);
   }
-  if (failures.length > MAX_ANNOTATIONS && process.env.GITHUB_ACTIONS) {
-    console.log(`::error::…and ${failures.length - MAX_ANNOTATIONS} more failures (see the log)`);
+  if (process.env.GITHUB_ACTIONS) {
+    for (const line of formatGithubAnnotations(failures)) {
+      console.log(line);
+    }
   }
   process.exit(code === 0 ? 1 : (code ?? 1));
 });

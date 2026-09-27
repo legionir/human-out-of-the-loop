@@ -181,7 +181,7 @@ function makeProject(name, extra = {}) {
   const cfg = JSON.parse(fs.readFileSync(modelFile, 'utf-8'));
   cfg.config = { ...(cfg.config ?? {}), baseURL: STUB_URL, temperature: 0 };
   fs.writeFileSync(modelFile, JSON.stringify(cfg, null, 2));
-  fs.writeFileSync(path.join(root, '.env'), `OPENAI_API_KEY=stub-key\n`);
+  fs.writeFileSync(path.join(root, '.env'), 'OPENAI_API_KEY=stub-key\nHOTL_API_KEY=stub-key\n');
   fs.writeFileSync(path.join(root, 'README.md'), '# Scratch project\n');
   fs.mkdirSync(path.join(root, 'notes'), { recursive: true });
   for (const [rel, content] of Object.entries(extra)) {
@@ -2013,6 +2013,55 @@ scenarios.envendpoint = async () => {
   const models = await run(['models', '--project-root', root, '--json'], { env });
   const custom = JSON.parse(models.stdout).find((m) => m.id === 'custom');
   check('envendpoint: `models` lists the env model as "custom"', custom?.model === '@aur/auto', JSON.stringify(custom));
+  return root;
+};
+
+function dumpedPromptText(body) {
+  const bits = [];
+  const walk = (value) => {
+    if (typeof value === 'string') bits.push(value);
+    else if (Array.isArray(value)) value.forEach(walk);
+    else if (value && typeof value === 'object') Object.values(value).forEach(walk);
+  };
+  walk(body?.input ?? body?.messages ?? body);
+  return bits.join('\n');
+}
+
+/**
+ * I-01 / E-01 / E-02: the stub must see the catalog the planner injects,
+ * assign a persona from that list, refuse an unknown PERSONA:, and the
+ * executing step must receive the plan goal + acceptance criteria.
+ */
+scenarios.catalog = async () => {
+  const root = makeProject('catalog');
+  fs.writeFileSync(REQUEST_DUMP, '');
+  const ok = await run(runArgs('write the project notes PERSONA:coder WRITE:notes/catalog.txt', root));
+  check('catalog: listed persona exits 0', ok.code === 0, `exit=${ok.code}`);
+  const { plans } = planStore(root);
+  const plan = plans[0];
+  check('catalog: assignedPersona is from the catalog', plan?.steps.every((s) => s.assignedPersona === 'coder'), plan?.steps.map((s) => s.assignedPersona).join(','));
+  check('catalog: the step wrote its file', fs.existsSync(path.join(root, 'notes', 'catalog.txt')));
+
+  const texts = stubRequests().map(dumpedPromptText);
+  const planner = texts.find((t) => t.includes('AVAILABLE CATALOG')) ?? '';
+  check('catalog: planner prompt includes AVAILABLE CATALOG', planner.includes('AVAILABLE CATALOG'));
+  check('catalog: planner prompt lists coder', /- coder:/.test(planner));
+  check('catalog: planner prompt lists reviewer', /- reviewer:/.test(planner));
+  const stepPrompt = texts.find((t) => t.includes('PLAN GOAL:') && t.includes('ACCEPTANCE CRITERIA:')) ?? '';
+  check('catalog: step prompt carries PLAN GOAL (E-02)', stepPrompt.includes('PLAN GOAL:'));
+  check('catalog: step prompt carries ACCEPTANCE CRITERIA (E-02)', stepPrompt.includes('ACCEPTANCE CRITERIA:'));
+
+  const ghostRoot = makeProject('catalog-ghost');
+  const ghost = await run(runArgs('write notes PERSONA:ghost WRITE:notes/ghost.txt', ghostRoot));
+  check(
+    'catalog: unknown PERSONA:ghost fails (E-01)',
+    ghost.code !== 0,
+    `exit=${ghost.code}`,
+  );
+  check(
+    'catalog: unknown persona did not write the file',
+    !fs.existsSync(path.join(ghostRoot, 'notes', 'ghost.txt')),
+  );
   return root;
 };
 

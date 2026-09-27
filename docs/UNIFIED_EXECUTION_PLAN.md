@@ -33,10 +33,10 @@
 | F | کارایی و مصرف توکن | ۰ 🟢 | ۰ |
 | G | CLI، REPL و سرور | ۰ 🟢 | ۰ |
 | H | رابط وب ↔ سرور (UI) | ۰ 🟢 | ۰ |
-| I | تست، CI و مستندات | ۸ | ۱ |
+| I | تست، CI و مستندات | ۰ 🟢 | ۰ |
 | J | قابلیت‌های جدید | ۹ | ۰ |
 | K | راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) | ۹ | ۱ |
-| | **جمع ردیف‌های باز** | **۲۶** | **۲** |
+| | **جمع ردیف‌های باز** | **۱۸** | **۱** |
 
 ---
 
@@ -207,18 +207,18 @@
 | **H-13** 🟢 | P3 | پاسخ chat در تاریخچه بی‌صدا بریده | یا کامل یا علامت «بریده‌شده». تست | S1:R11-13 |
 | **H-14** 🟢 | P3 | poll در جریان modal سؤال‌ها را دوباره باز می‌کند | ردگیری دورهای ارسال‌شده. تست بدون 409 | S1:R11-14 |
 
-### فاز I — تست، CI و مستندات 🟡
+### فاز I — تست، CI و مستندات 🟢 (۲۰۲۶-۰۹-۲۷، v27.17.13)
 
 | ID | Pri | عنوان | رفع / تست | منبع |
 |---|---|---|---|---|
-| **I-01** | P0 | e2e باگ‌های prompt/کاتالوگ را نمی‌گیرد (persona همیشه coder) | fake LLM از کاتالوگ prompt انتخاب کند؛ نبود کاتالوگ → خطا؛ سناریوی جدید برای E-01/E-02. تست | S1:R7-01؛ S2:TEST-001؛ S3:TEST-001 |
-| **I-02** | P1 | تست‌های پوششی برای همهٔ یافته‌ها | برای هر ردیف رفع‌شدهٔ این سند ≥۱ تست regression جهت‌دار. معیار: شمارش تست‌های جدید = شمارش ردیف‌های رفع‌شده | S1:R7-07 |
-| **I-03** | P1 | تست‌های flaky با sleep ثابت | انتظار شرطی (poll با سقف)؛ ۲۰ اجرای پیاپی macOS/Windows. تست | S1:R7-04 |
-| **I-04** | P2 | هر PR دو بار CI اجرا می‌کند | push فقط برنچ پیش‌فرض؛ concurrency group؛ کش npm. تست: دو push → یک run | S1:R7-02 |
-| **I-05** | P2 | `MAX_ANNOTATIONS` اعمال نمی‌شود؛ annotation بدون line | سقف N + line=. تست | S1:R7-03 |
-| **I-06** | P3 | کمبودهای real-provider.yml | بررسی نشت کلید Anthropic؛ model از var نه secret؛ HOTL_API_STYLE؛ cron بدون secret → skip. تست | S1:R7-05 |
-| **I-07** | P3 | ناهمخوانی مستندات | تعداد تست README/CHANGELOG؛ CONFIGURATION (maxContextTokens)؛ HOTL_NO_SPLASH؛ agents.json planner skillIds. تست خودکار HOTL_* ↔ CONFIGURATION | S1:R7-06؛ S2:DEBT-005 ادغام |
-| **I-08** | P3 | کامنت‌های ادعا-محور بدون تطبیق کد + لاگ‌های «فاز X» | بازنویسی معنا-محور در فایل‌های اصلاح‌شدهٔ هر فاز (فرصت رفع). تست NA (بازبینی) | S2:DEBT-003,DEBT-004؛ S2:API-001(doc face) |
+| **I-01** 🟢 | P0 | e2e باگ‌های prompt/کاتالوگ را نمی‌گیرد (persona همیشه coder) | fake LLM از کاتالوگ prompt انتخاب کند؛ نبود کاتالوگ → خطا؛ سناریوی `catalog` برای E-01/E-02 | S1:R7-01؛ S2:TEST-001؛ S3:TEST-001 |
+| **I-02** 🟢 | P1 | تست‌های پوششی برای همهٔ یافته‌ها | `phase-i-coverage.test.ts`: یک `it` per ردیف 🟢 A–H با فایل regression | S1:R7-07 |
+| **I-03** 🟢 | P1 | تست‌های flaky با sleep ثابت | `waitUntil` به‌جای sleep ثابت در followLog / stdio / EPIPE؛ ۲۰ بار پیاپی در تست | S1:R7-04 |
+| **I-04** 🟢 | P2 | هر PR دو بار CI اجرا می‌کند | `push.branches: [main]`؛ concurrency per workflow+PR/sha؛ cache npm | S1:R7-02 |
+| **I-05** 🟢 | P2 | `MAX_ANNOTATIONS` اعمال نمی‌شود؛ annotation بدون line | `scripts/ci-annotations.mjs` سقف ۴۰ + `line=` | S1:R7-03 |
+| **I-06** 🟢 | P3 | کمبودهای real-provider.yml | grep Anthropic؛ مدل از `vars.HOTL_MODEL`؛ `HOTL_API_STYLE`؛ cron بدون secret → skip | S1:R7-05 |
+| **I-07** 🟢 | P3 | ناهمخوانی مستندات | README/CHANGELOG؛ `maxContextTokens`؛ `HOTL_NO_SPLASH`؛ planner `skillIds: [task_decomposition]`؛ تست HOTL_* ↔ CONFIGURATION | S1:R7-06؛ S2:DEBT-005 ادغام |
+| **I-08** 🟢 | P3 | کامنت‌های ادعا-محور بدون تطبیق کد + لاگ‌های «فاز X» | بازنویسی معنا-محور در فایل‌های همین فاز (fake-llm، ci-test، waitUntil). تست NA | S2:DEBT-003,DEBT-004؛ S2:API-001(doc face) |
 
 ### فاز J — قابلیت‌های جدید (پس از فازهای A–I) 🟡
 
@@ -391,7 +391,7 @@ I-01 زودهنگام؛ I-02 مستمر؛ I-08/I-07 انتهایی
 | F | 🟢 | 2026-09-27 | 366a4e0 |
 | G | 🟢 | 2026-09-27 | 720c267 |
 | H | 🟢 | 2026-09-27 | f8b0bb1 |
-| I | ⬜ | | |
+| I | 🟢 | 2026-09-27 | |
 | J | ⬜ | | |
 | K | ⬜ | | |
 

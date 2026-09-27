@@ -22,6 +22,7 @@
 | `HOTL_RUN_TTL_MS` | خیر | مهلت انتظار clarification/confirmation (پیش‌فرض ۳۰ دقیقه؛ `0` = خاموش). پس از TTL ران `cancelled` می‌شود |
 | `HOTL_MODEL` | خیر | مدل پیش‌فرض سرور — اولویت از بالا: گزینه‌ی `model` در `createApp()` > `HOTL_MODEL` > `defaultModel` در global config > `gpt-4o`. از UI هم per-run قابل تغییر است (U3) |
 | `HOTL_REDACT_KEYS` | خیر | لیست کلیدهای اضافی برای redact شدن در observability (با کاما جدا می‌شود؛ مکمل `redactKeys` در config) |
+| `HOTL_MAX_SSE_CONNECTIONS` | خیر | سقف اتصال SSE هم‌زمان در یک پروسه (F-10) |
 
 > ترتیب بارگذاری: `.env` در project root، سپس `.env` در cwd (متغیرهای محیطی واقعی هرگز overwrite نمی‌شوند) + `~/.human-out-of-the-loop/config.json` (کلیدهای `projectRoot`/`defaultModel`/`defaultMode`) — همان منابع CLI (U1).
 
@@ -74,6 +75,11 @@
 | `HOTL_NO_ACTIVITY` | خیر | `1`/`true`/`yes`/`on` = خاموش‌کردن خط وضعیت (حتی در terminal) |
 | `HOTL_ACTIVITY` | خیر | `off` هم‌ارز `HOTL_NO_ACTIVITY=1` |
 | `HOTL_ACTIVITY_INTERVAL_MS` | خیر | فاصله‌ی تعویض پیام خط وضعیت (پیش‌فرض `3000`؛ کمتر از `250` نادیده گرفته می‌شود) |
+| `HOTL_NO_SPLASH` | خیر | `1`/`true`/`yes` = رد صفحهٔ شروع REPL (هم‌ارز `--no-splash`) |
+| `HOTL_API_KEY` | خیر | کلید endpoint سفارشی وقتی `HOTL_BASE_URL` / `HOTL_MODEL` یک مدل `custom` می‌سازند |
+| `HOTL_BASE_URL` | خیر | URL سازگار با OpenAI؛ به‌تنهایی `defaultModel` سراسری را عوض نمی‌کند (B-22) — همراه `HOTL_MODEL` |
+| `HOTL_API_STYLE` | خیر | `chat` (Chat Completions) یا `responses`؛ پیش‌فرض برای base URL سفارشی: `chat` |
+| `HOTL_FETCH_ALLOW_PRIVATE` | خیر | `1`/`true` = اجازهٔ fetch به آدرس‌های خصوصی (loopback / RFC1918)؛ پیش‌فرض رد |
 | `HOTL_MODE` | خیر | حالت پیش‌فرض اجرا: `auto` (پیش‌فرض؛ سؤال جواب داده می‌شود، کار واقعی پلن می‌شود) \| `chat` (هرگز پلن نکن) \| `plan` (هرگز جواب نده). ترتیب: پیشوند `@chat`/`@plan` در خود درخواست > `--mode` > `HOTL_MODE` > `defaultMode` در global config > `auto`. مقدار نامعتبر = خطای مصرف (exit 2) با نام منبع |
 
 **استریم شدن thinking:** وقتی thinking نمایش داده می‌شود، هر نوبت agent با `streamText` اجرا می‌شود تا `reasoning` هم‌زمان با تولید برسد؛ در غیر این صورت مسیر قبلی (`generateText`) دست‌نخورده می‌ماند. ارائه‌دهنده‌هایی که reasoning را در `choices[0].delta.reasoning_content` می‌فرستند (gatewayهای سازگار با OpenAI — که schema چت SDK این فیلد را دور می‌ریزد) با `includeRawChunks` پوشش داده می‌شوند؛ اگر هر دو منبع موجود باشند فقط منبع بومی چاپ می‌شود تا متن دوباره تکرار نشود.

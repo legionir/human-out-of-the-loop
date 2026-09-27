@@ -3,15 +3,19 @@ name: CI
 # The matrix P8 could not close in a sandbox: real Windows, real macOS, and
 # Node versions newer than the one the sandbox had.  Nothing here needs a
 # provider key — the stub in `e2e/` stands in for the model.
+#
+# Push only the default branch so a PR is not billed twice (push of the
+# branch + pull_request).  Shared concurrency cancels the previous run of
+# the same PR or the previous default-branch SHA.
 
 on:
   push:
-    branches: ['**']
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: true
 
 permissions:
