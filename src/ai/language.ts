@@ -100,11 +100,24 @@ function countInRanges(text: string, ranges: ScriptRule['ranges']): number {
   return count;
 }
 
+/**
+ * Latin letters of the *prose* in `text`.  Code the user quotes — file paths,
+ * identifiers, `inline code`, URLs, ALLCAPS names like README — is not the
+ * language they write in, and a Persian request full of paths must still be
+ * answered in Persian.
+ */
 function latinLetterCount(text: string): number {
+  const prose = text
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`[^`]*`/g, ' ')
+    .replace(/\b[a-z][a-z0-9+.-]*:\/\/\S+/gi, ' ');
   let count = 0;
-  for (const char of text) {
-    const code = char.codePointAt(0) ?? 0;
-    if ((code >= 0x41 && code <= 0x5a) || (code >= 0x61 && code <= 0x7a)) count++;
+  for (const token of prose.split(/\s+/)) {
+    const word = token.replace(/^[("'\[]+|[)"'\],.;:!?]+$/g, '');
+    if (!/^[A-Za-z]+$/.test(word)) continue; // paths, snake_case, dotted, digits
+    if (/[a-z][A-Z]/.test(word)) continue; // camelCase identifier
+    if (word.length > 1 && word === word.toUpperCase()) continue; // README, API
+    count += word.length;
   }
   return count;
 }

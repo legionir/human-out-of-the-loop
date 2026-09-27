@@ -362,3 +362,17 @@ describe('R-18 — process output is read to the end', () => {
     }
   });
 });
+
+describe('R-19 — language detection ignores quoted code', () => {
+  it('a Persian request full of paths and identifiers is still Persian', async () => {
+    const { detectLanguage } = await import('../language.js');
+    expect(detectLanguage('فایل src/components/LoginButton.tsx و README.md رو درست کن')?.code).toBe('fa');
+    expect(detectLanguage('تابع `validateUserSession` در auth_service.ts را بازنویسی کن')?.code).toBe('fa');
+    expect(detectLanguage('https://example.com/docs/getting-started را بخوان و خلاصه کن')?.code).toBe('fa');
+  });
+
+  it('an English sentence with one quoted foreign word stays English', async () => {
+    const { detectLanguage } = await import('../language.js');
+    expect(detectLanguage('Please translate the word "سلام" into French for the greeting page')).toBeUndefined();
+  });
+});
