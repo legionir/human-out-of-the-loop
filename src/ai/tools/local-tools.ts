@@ -14,6 +14,8 @@ import { createWriteMultipleFilesTool } from './implementations/write-multiple-f
 import { createListDirectoryTool } from './implementations/list-directory.js';
 import { createDirectoryTreeTool } from './implementations/directory-tree.js';
 import { createMoveFileTool } from './implementations/move-file.js';
+import { createDeleteFileTool } from './implementations/delete-file.js';
+import { createRunCommandTool, createRunTestsTool } from './implementations/run-command.js';
 import { createGetFileInfoTool } from './implementations/get-file-info.js';
 import { createCreateDirectoryTool } from './implementations/create-directory.js';
 import { createSearchFilesTool } from './implementations/search-files.js';
@@ -73,6 +75,9 @@ export const LOCAL_TOOL_FACTORIES: Readonly<Record<string, (projectRoot: string)
   list_directory_with_sizes: createListDirectoryWithSizesTool,
   directory_tree: createDirectoryTreeTool,
   move_file: createMoveFileTool,
+  delete_file: createDeleteFileTool,
+  run_command: createRunCommandTool,
+  run_tests: createRunTestsTool,
   get_file_info: createGetFileInfoTool,
   create_directory: createCreateDirectoryTool,
   search_files: createSearchFilesTool,

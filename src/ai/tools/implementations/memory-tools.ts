@@ -70,6 +70,7 @@ interface MemoryOutcome {
   relatedOutsideResult?: string[];
   truncated?: boolean;
   total?: number;
+  offset?: number;
   memoryFile?: string;
   error?: string;
   code?: string;
@@ -277,8 +278,14 @@ export function createReadGraphTool(projectRoot: string): Tool {
         .max(2000)
         .default(200)
         .describe('Ceiling on returned entities; `total` still reports the true count'),
+      offset: z
+        .number()
+        .int()
+        .min(0)
+        .default(0)
+        .describe('Skip this many entities (pagination)'),
     }),
-    execute: async ({ maxEntities }) => {
+    execute: async ({ maxEntities, offset }) => {
       const loaded = loadGraph(projectRoot);
       if (!loaded.ok)
         return withFile(projectRoot, {
@@ -287,9 +294,10 @@ export function createReadGraphTool(projectRoot: string): Tool {
           code: loaded.code,
         });
 
-      const entities = loaded.graph.entities.slice(0, maxEntities);
+      const start = offset ?? 0;
+      const entities = loaded.graph.entities.slice(start, start + (maxEntities ?? 200));
       const names = new Set(entities.map((entity) => entity.name));
-      const truncated = loaded.graph.entities.length > entities.length;
+      const truncated = start + entities.length < loaded.graph.entities.length;
       const graph: MemoryGraph = {
         entities,
         // A relation is kept when both ends are in the page, so the returned
@@ -301,6 +309,7 @@ export function createReadGraphTool(projectRoot: string): Tool {
       return graphOutcome(projectRoot, graph, {
         truncated,
         total: loaded.graph.entities.length,
+        offset: start,
       });
     },
   });

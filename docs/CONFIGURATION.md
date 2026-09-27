@@ -80,6 +80,9 @@
 | `HOTL_BASE_URL` | خیر | URL سازگار با OpenAI؛ به‌تنهایی `defaultModel` سراسری را عوض نمی‌کند (B-22) — همراه `HOTL_MODEL` |
 | `HOTL_API_STYLE` | خیر | `chat` (Chat Completions) یا `responses`؛ پیش‌فرض برای base URL سفارشی: `chat` |
 | `HOTL_FETCH_ALLOW_PRIVATE` | خیر | `1`/`true` = اجازهٔ fetch به آدرس‌های خصوصی (loopback / RFC1918)؛ پیش‌فرض رد |
+| `HOTL_ALLOWED_COMMANDS` | خیر | لیست باینری‌های مجاز برای `run_command` (با کاما). مکمل `.ai-runtime/commands.json` |
+| `HOTL_TEST_COMMAND` | خیر | argv دستور تست پروژه برای `run_tests` / حلقهٔ خودتأییدی (جدا با فاصله) |
+| `HOTL_PLAN_EXAMPLES` | خیر | `0`/`false`/`off` = خاموش‌کردن نمونه‌های پلن موفق در پرامپت پلن‌ساز |
 | `HOTL_MODE` | خیر | حالت پیش‌فرض اجرا: `auto` (پیش‌فرض؛ سؤال جواب داده می‌شود، کار واقعی پلن می‌شود) \| `chat` (هرگز پلن نکن) \| `plan` (هرگز جواب نده). ترتیب: پیشوند `@chat`/`@plan` در خود درخواست > `--mode` > `HOTL_MODE` > `defaultMode` در global config > `auto`. مقدار نامعتبر = خطای مصرف (exit 2) با نام منبع |
 
 **استریم شدن thinking:** وقتی thinking نمایش داده می‌شود، هر نوبت agent با `streamText` اجرا می‌شود تا `reasoning` هم‌زمان با تولید برسد؛ در غیر این صورت مسیر قبلی (`generateText`) دست‌نخورده می‌ماند. ارائه‌دهنده‌هایی که reasoning را در `choices[0].delta.reasoning_content` می‌فرستند (gatewayهای سازگار با OpenAI — که schema چت SDK این فیلد را دور می‌ریزد) با `includeRawChunks` پوشش داده می‌شوند؛ اگر هر دو منبع موجود باشند فقط منبع بومی چاپ می‌شود تا متن دوباره تکرار نشود.

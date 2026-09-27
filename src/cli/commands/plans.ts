@@ -18,6 +18,7 @@ import { resolveCliDefaults } from '../utils/config.js';
 import { color, err, out, renderTable } from '../utils/output.js';
 import { validateRunOptions } from './run.js';
 import { evaluatePlanResume } from '../../ai/runtime/resume-guard.js';
+import { latestCheckpointStep, restoreCheckpoint } from '../../ai/runtime/checkpoint.js';
 
 export interface PlansCommandOptions {
   projectRoot?: string;
@@ -35,6 +36,29 @@ function planStoreFor(opts: PlansCommandOptions): FilePlanStore {
 
 function projectRootFor(opts: PlansCommandOptions): string {
   return resolveCliDefaults({ projectRoot: opts.projectRoot }).projectRoot;
+}
+
+/** J-05: restore the working tree captured before a writable step. */
+export async function plansRollbackCommand(planId: string, opts: PlansCommandOptions): Promise<number> {
+  const projectRoot = projectRootFor(opts);
+  const store = planStoreFor(opts);
+  const plan = store.load(planId);
+  if (!plan) {
+    err(color.failed(`Plan "${planId}" not found.`));
+    return 1;
+  }
+  const stepId = latestCheckpointStep(projectRoot, planId);
+  if (!stepId) {
+    err(color.failed(`No checkpoint for plan "${planId}".`));
+    return 1;
+  }
+  const ok = restoreCheckpoint(projectRoot, planId, stepId);
+  if (!ok) {
+    err(color.failed(`Failed to restore checkpoint ${stepId}.`));
+    return 1;
+  }
+  out(color.done(`Restored working tree from checkpoint ${stepId} of ${planId}.`));
+  return 0;
 }
 
 export async function plansListCommand(opts: PlansCommandOptions): Promise<number> {

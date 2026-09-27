@@ -17,6 +17,8 @@ export interface UsageRecord {
    * a task, so it does not count toward `taskCount`.
    */
   llmCall?: boolean;
+  /** J-06: model that produced the tokens. */
+  modelId?: string;
 }
 
 export interface UsageSummary {
@@ -30,6 +32,8 @@ export interface UsageSummary {
   byAgent: Record<string, TokenUsage & { count: number }>;
   /** Breakdown by plan */
   byPlan: Record<string, TokenUsage & { count: number }>;
+  /** J-06: breakdown by model id. */
+  byModel: Record<string, TokenUsage & { count: number }>;
 }
 
 // ─── UsageAggregator ─────────────────────────────────────────────
@@ -121,6 +125,7 @@ export class UsageAggregator {
       taskCount: this.records.filter((r) => !r.llmCall).length,
       byAgent: {},
       byPlan: {},
+      byModel: {},
     };
 
     for (const r of this.records) {
@@ -160,6 +165,21 @@ export class UsageAggregator {
       planUsage.completionTokens += r.usage.completionTokens;
       planUsage.totalTokens += r.usage.totalTokens;
       planUsage.count++;
+
+      const modelKey = r.modelId ?? 'unassigned';
+      if (!summary.byModel[modelKey]) {
+        summary.byModel[modelKey] = {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+          count: 0,
+        };
+      }
+      const modelUsage = summary.byModel[modelKey]!;
+      modelUsage.promptTokens += r.usage.promptTokens;
+      modelUsage.completionTokens += r.usage.completionTokens;
+      modelUsage.totalTokens += r.usage.totalTokens;
+      modelUsage.count++;
     }
 
     return summary;

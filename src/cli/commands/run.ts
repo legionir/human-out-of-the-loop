@@ -43,6 +43,7 @@ import {
   type ThinkingMode,
 } from '../utils/reasoning.js';
 import { createToolLogRenderer, resolveToolLogEnabled } from '../utils/tool-log.js';
+import { parseBudget } from '../../ai/runtime/budget.js';
 
 export interface RunCommandOptions {
   /** Default: '.' (or the global config's projectRoot) */
@@ -105,6 +106,10 @@ export interface RunCommandOptions {
    * `registry/mcp-servers` layer is allowed to spawn.
    */
   trustProject?: boolean;
+  /** J-03: token count or `$1.50`. */
+  budget?: string;
+  /** J-07: plan only and print an estimate; nothing is executed. */
+  estimate?: boolean;
 }
 
 /** C3: option validation → undefined when OK, error message otherwise (exit 2). */
@@ -137,6 +142,10 @@ export function validateRunOptions(opts: RunCommandOptions): string | undefined 
     (!Number.isInteger(opts.timeoutMs) || opts.timeoutMs < 1000 || opts.timeoutMs > 600000)
   ) {
     return '--timeout-ms must be an integer between 1000 and 600000';
+  }
+  if (opts.budget !== undefined) {
+    const parsed = parseBudget(String(opts.budget));
+    if ('error' in parsed) return `--budget: ${parsed.error}`;
   }
   // Phase 32: a typo in --thinking must fail fast, not silently do nothing.
   if (
@@ -250,7 +259,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
 
   // G-02: fail before any paid LLM call.  Confirmation needs a TTY unless
   // `--yes` (or a dry-run, which never confirms).
-  if (!opts.yes && !opts.dryRun && (!process.stdout.isTTY || !process.stdin.isTTY)) {
+  if (!opts.yes && !opts.dryRun && !opts.estimate && (!process.stdout.isTTY || !process.stdin.isTTY)) {
     err(
       chalk.red(
         'Interactive confirmation requires a TTY. Re-run with --yes to auto-confirm (CI / Human-Out-Of-Loop mode), or from an interactive terminal.',
@@ -449,6 +458,25 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       out(color.dim(`Mode: ${resolved.mode} (${resolved.source})`));
     }
 
+    // ── Estimate: plan, print cost, stop ──────────────────────
+    if (opts.estimate) {
+      out(color.bold('📊 Estimate — planning only, nothing will be executed.'));
+      const estimated = await orchestrator.estimatePlan(requested, undefined, resolved.mode);
+      if (!estimated.ok && !estimated.plan) {
+        out(color.failed(estimated.error ?? 'Planning failed.'));
+        return { exitCode: 1 };
+      }
+      if (estimated.planText) {
+        out(color.bold('\n── Planned steps ─────────────────────────────'));
+        out(estimated.planText);
+      }
+      out(color.bold('\n── Estimate ──────────────────────────────────'));
+      out(`Steps:  ${estimated.estimate.steps}`);
+      out(`Tokens: ~${estimated.estimate.tokens} (planning used ${estimated.usage.totalTokens})`);
+      out(`Cost:   ~$${estimated.estimate.usd.toFixed(4)}`);
+      return { exitCode: 0 };
+    }
+
     // ── Dry run: plan, show, stop ─────────────────────────────
     if (opts.dryRun) {
       out(color.bold('📋 Dry run — planning only, nothing will be executed.'));
@@ -476,6 +504,16 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       abortSignal: abortController.signal,
       // v27.17.0: auto (default) / chat / plan — the prefix in the goal wins.
       mode: resolved.mode,
+      ...(opts.budget || opts.timeoutMs !== undefined || opts.maxSteps !== undefined || opts.maxReplans !== undefined
+        ? {
+            runOverrides: {
+              ...(opts.budget !== undefined ? { budget: opts.budget } : {}),
+              ...(opts.timeoutMs !== undefined ? { agentTimeoutMs: opts.timeoutMs } : {}),
+              ...(opts.maxSteps !== undefined ? { maxSteps: opts.maxSteps } : {}),
+              ...(opts.maxReplans !== undefined ? { maxReplanningAttempts: opts.maxReplans } : {}),
+            },
+          }
+        : {}),
       // C3: label the NEW session (--label is rejected with --session)
       ...(opts.label !== undefined ? { sessionLabel: opts.label } : {}),
       confirmCallback,

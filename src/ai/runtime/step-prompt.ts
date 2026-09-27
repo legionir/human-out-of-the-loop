@@ -1,4 +1,5 @@
 import type { Plan, PlanStep } from '../schemas/plan.js';
+import { formatHandoff, extractHandoff } from './handoff.js';
 
 /** Per-field character cap for the compact step context (E-02). */
 export const STEP_CONTEXT_CHAR_CAP = 1500;
@@ -17,8 +18,8 @@ export function buildStepPrompt(plan: Plan, step: PlanStep, cap = STEP_CONTEXT_C
   for (const depId of step.dependsOn ?? []) {
     const dep = plan.steps.find((candidate) => candidate.id === depId);
     if (!dep) continue;
-    const summary = dep.resultSummary?.trim() || dep.description;
-    depLines.push(`- ${dep.id} (${dep.status}): ${clip(summary, cap)}`);
+    const handoff = dep.handoff ?? extractHandoff(dep.resultSummary);
+    depLines.push(`- ${dep.id} (${dep.status}):\n${clip(formatHandoff(handoff), cap)}`);
   }
 
   const parts = [
@@ -27,7 +28,7 @@ export function buildStepPrompt(plan: Plan, step: PlanStep, cap = STEP_CONTEXT_C
     `ACCEPTANCE CRITERIA:\n${clip(step.acceptanceCriteria, cap)}`,
   ];
   if (depLines.length > 0) {
-    parts.push(`DEPENDENCY RESULTS:\n${depLines.join('\n')}`);
+    parts.push(`DEPENDENCY HANDOFF:\n${depLines.join('\n')}`);
   }
   return parts.join('\n\n');
 }

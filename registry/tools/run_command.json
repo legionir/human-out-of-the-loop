@@ -1,0 +1,8 @@
+{
+  "id": "run_command",
+  "name": "Run Command",
+  "description": "Run an allowlisted argv command (no shell); timeout kills the process group; output is capped",
+  "source": "local",
+  "modulePath": "./implementations/run-command",
+  "category": "execution"
+}

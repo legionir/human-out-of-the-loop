@@ -1,0 +1,8 @@
+{
+  "id": "delete_file",
+  "name": "Delete File",
+  "description": "Deletes a file inside the workspace; refuses directories and protected paths",
+  "source": "local",
+  "modulePath": "./implementations/delete-file",
+  "category": "filesystem"
+}

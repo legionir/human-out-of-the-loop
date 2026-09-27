@@ -52,6 +52,9 @@ import {
   summarizePlan,
   formatPlanForUser,
 } from './planning/plan-confirmation.js';
+import { BudgetTracker, estimatePlanCost, parseBudget, priceFromModelConfig } from './runtime/budget.js';
+import { resolveModelForRole, type ModelRoutes } from './models/model-routes.js';
+import { planExamplesEnabled, savePlanExample } from './planning/plan-examples.js';
 
 import { bootstrapCatalogTools } from './tools/catalog-bootstrap.js';
 import { bootstrapDelegateTask } from './tools/delegate-bootstrap.js';
@@ -112,6 +115,8 @@ export const OrchestratorConfigSchema = z.object({
   // U1 (config parity): extra observability redaction keys (defaults
   // still apply when the list is non-empty).
   redactKeys: z.array(z.string().min(1)).default([]),
+  /** J-06: model id per role (classify/judge/review/plan/code). */
+  modelRoutes: z.record(z.string(), z.string()).optional(),
   // C4: max question-and-answer rounds before the run fails.
   maxClarificationRounds: z.number().int().min(0).max(10).default(3),
   // Phase 27 (CFG-08): optional per-Orchestrator environment.  When set,
@@ -168,6 +173,8 @@ export interface RunOverrides {
   agentTimeoutMs?: number;
   maxSteps?: number;
   maxReplanningAttempts?: number;
+  /** J-03: token count or `$1.50`. */
+  budget?: string;
 }
 
 export { PlanLiveOwnerError } from './runtime/plan-owner.js';
@@ -329,6 +336,8 @@ export class Orchestrator {
   readonly cancellationManager: CancellationManager;
   readonly rateLimiter: RateLimiter;
   readonly usageAggregator: UsageAggregator;
+  /** J-03: per-run budget; set for the duration of `run()`. */
+  private activeBudget?: BudgetTracker;
   readonly observabilityLogger: ObservabilityLogger;
   readonly acceptanceChecker: AcceptanceChecker;
   readonly finalReviewer: FinalReviewer;
@@ -395,6 +404,7 @@ export class Orchestrator {
       // R0-08: untrusted by default — a project's own mcp-servers layer is
       // not bootstrapped unless the caller explicitly says it is trusted.
       trustedProject: config.trustedProject === true,
+      modelRoutes: data.modelRoutes ?? {},
     };
 
     // Phase 27 (CFG-08): resolve the env once, before any registry or
@@ -540,7 +550,7 @@ export class Orchestrator {
       // The judge runs on the run's model like every other call — without
       // it every acceptance check went to the built-in default (gpt-4o),
       // whatever `--model` / HOTL_MODEL selected.
-      modelId: this.config.defaultModelId,
+      modelId: resolveModelForRole('judge', this.config.modelRoutes as ModelRoutes | undefined, this.config.defaultModelId),
       // Phase 30 (P5): the same deadline `--timeout-ms` gives an agent run
       // now also covers the judgment call.
       timeoutMs: this.config.agentTimeoutMs,
@@ -562,7 +572,7 @@ export class Orchestrator {
       skillRegistry: this.skillRegistry,
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
-      modelId: this.config.defaultModelId,
+      modelId: resolveModelForRole('review', this.config.modelRoutes as ModelRoutes | undefined, this.config.defaultModelId),
       timeoutMs: this.config.agentTimeoutMs,
       onUsage: (report) => this.recordLlmUsage(report),
     });
@@ -572,7 +582,7 @@ export class Orchestrator {
       skillRegistry: this.skillRegistry,
       toolRegistry: this.toolRegistry,
       modelRegistry: this.modelRegistry,
-      modelId: this.config.defaultModelId,
+      modelId: resolveModelForRole('plan', this.config.modelRoutes as ModelRoutes | undefined, this.config.defaultModelId),
       timeoutMs: this.config.agentTimeoutMs,
       // Phase 32: the planner is told WHERE it is working.  Without the
       // project root it answered "which project?" to a goal like "scan
@@ -595,7 +605,12 @@ export class Orchestrator {
       usage: report.usage,
       timestamp: Date.now(),
       llmCall: true,
+      modelId: report.modelId,
     });
+    this.activeBudget?.record(
+      report.usage,
+      priceFromModelConfig(report.modelId ? this.modelRegistry.getConfig(report.modelId) : undefined),
+    );
     this.observabilityLogger.logLlmUsage(report.purpose, report.usage, report.planId);
   }
 
@@ -947,6 +962,12 @@ export class Orchestrator {
     const ov = requested?.modelId !== undefined
       ? { ...requested, modelId: this.useModel(requested.modelId) }
       : requested;
+    this.activeBudget = undefined;
+    if (ov?.budget) {
+      const parsed = parseBudget(ov.budget);
+      if ('error' in parsed) throw new Error(parsed.error);
+      this.activeBudget = new BudgetTracker(parsed);
+    }
 
     if (options?.sessionId && !this.sessionStore.getSession(options.sessionId)) {
       const err = new Error(`Session "${options.sessionId}" not found.`);
@@ -1349,7 +1370,16 @@ export class Orchestrator {
     }
 
     const summary = summarizePlan(plan);
-    const planText = formatPlanForUser(summary);
+    let planText = formatPlanForUser(summary);
+    if (this.activeBudget?.budget) {
+      const used = this.usageAggregator.getSummary();
+      const estimate = estimatePlanCost(plan.steps.length, {
+        promptTokens: used.totalPromptTokens,
+        completionTokens: used.totalCompletionTokens,
+        totalTokens: used.totalTokens,
+      });
+      planText += `\n\nBudget: ${this.activeBudget.budget.raw} — estimate ${estimate.tokens} tokens / $${estimate.usd.toFixed(4)} for ${estimate.steps} steps.`;
+    }
 
     if (abortSignal?.aborted) {
       return cancelledResult(
@@ -1469,6 +1499,9 @@ export class Orchestrator {
       defaultModelId: ov?.modelId ?? this.config.defaultModelId,
       ...(ov?.agentTimeoutMs !== undefined ? { agentTimeoutMs: ov.agentTimeoutMs } : {}),
       ...(ov?.maxSteps !== undefined ? { maxSteps: ov.maxSteps } : {}),
+      projectRoot: this.config.projectRoot,
+      modelRoutes: this.config.modelRoutes as ModelRoutes | undefined,
+      budgetExceeded: () => (this.activeBudget?.exceeded() ? 'budget exceeded' : undefined),
       onStatusChange: (p, event) => {
         // Phase 30 (P7): re-planning was invisible — the runtime emits
         // `plan:replanning-attempt-N` / `plan:replanned`, and nothing
@@ -1532,6 +1565,9 @@ export class Orchestrator {
     }
 
     this.observabilityLogger.logPlanCompleted(plan);
+    if (executionResult.status === 'completed' && planExamplesEnabled()) {
+      savePlanExample(this.config.projectRoot, plan);
+    }
 
     const review = await this.finalReviewer.review(plan, executionResult, runModelId);
 
@@ -1774,6 +1810,22 @@ export class Orchestrator {
     };
   }
 
+  /**
+   * J-07: plan only, then report step count and an estimated token/USD cost.
+   * Nothing is executed.
+   */
+  async estimatePlan(userRequest: string, modelSpec?: string, mode: RunMode = DEFAULT_RUN_MODE) {
+    const preview = await this.previewPlan(userRequest, modelSpec, mode);
+    const usage = this.usageAggregator.getSummary();
+    const steps = preview.plan?.steps.length ?? 0;
+    const estimate = estimatePlanCost(steps, {
+      promptTokens: usage.totalPromptTokens,
+      completionTokens: usage.totalCompletionTokens,
+      totalTokens: usage.totalTokens,
+    });
+    return { ...preview, estimate, usage };
+  }
+
   async cancelPlan(planId: string) {
     return this.cancellationManager.cancelPlan(planId);
   }
@@ -1896,6 +1948,9 @@ export class Orchestrator {
       },
       maxReplanningAttempts: this.config.maxReplanningAttempts,
       defaultModelId: this.config.defaultModelId,
+      projectRoot: this.config.projectRoot,
+      modelRoutes: this.config.modelRoutes as ModelRoutes | undefined,
+      budgetExceeded: () => (this.activeBudget?.exceeded() ? 'budget exceeded' : undefined),
       // Phase 20 (CORR-04): same explicit acceptance hook on resume
       acceptanceChecker: this.acceptanceChecker,
       onPersistError: (err) => {

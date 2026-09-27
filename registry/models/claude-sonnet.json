@@ -6,5 +6,6 @@
     "temperature": 0.3,
     "maxTokens": 8192
   },
-  "description": "Anthropic Claude Sonnet — strong at code analysis"
+  "description": "Anthropic Claude Sonnet — strong at code analysis",
+  "pricing": { "inputUsdPerMTok": 3, "outputUsdPerMTok": 15 }
 }

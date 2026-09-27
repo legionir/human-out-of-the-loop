@@ -21,6 +21,12 @@ import type { Task } from '../schemas/task.js';
 import { mergeReplannedSteps } from './replan-merge.js';
 import { buildStepPrompt, formatDoneStepSummaries } from './step-prompt.js';
 import { DEFAULT_MODEL_ID } from '../models/defaults.js';
+import { extractHandoff } from './handoff.js';
+import { captureCheckpoint, restoreCheckpoint } from './checkpoint.js';
+import { runProjectTests } from '../tools/implementations/run-command.js';
+import { isReadOnlyTool } from '../tools/read-only.js';
+import { isCommandAllowed, loadCommandPolicy } from '../tools/command-allowlist.js';
+import { resolveModelForRole, roleForPersona, type ModelRoutes } from '../models/model-routes.js';
 
 const ACCEPTANCE_MARK = '[Acceptance:';
 /** F-06: how many acceptance judgments may run at once. */
@@ -74,6 +80,12 @@ export interface PlanRuntimeConfig {
   acceptanceChecker?: AcceptanceChecker;
   /** B-10: persistence failures are reported instead of swallowed. */
   onPersistError?: (err: unknown) => void;
+  /** Workspace root for checkpoints, self-verify, and command policy. */
+  projectRoot?: string;
+  /** J-06: persona → model id. */
+  modelRoutes?: ModelRoutes;
+  /** J-03: return a cancel reason to stop dispatching. */
+  budgetExceeded?: () => string | undefined;
 }
 
 export interface PlanExecutionResult {
@@ -162,6 +174,14 @@ export class PlanRuntime {
       // finishes); the loop stops before dispatching more work.
       if (this.persistedStatus(plan) === 'cancelled') {
         plan.status = 'cancelled';
+        this.persist(plan);
+        this.notify(plan, 'plan:cancelled');
+        break;
+      }
+      const budgetReason = this.config.budgetExceeded?.();
+      if (budgetReason) {
+        plan.status = 'cancelled';
+        plan.cancelReason = budgetReason;
         this.persist(plan);
         this.notify(plan, 'plan:cancelled');
         break;
@@ -307,6 +327,19 @@ export class PlanRuntime {
    */
   private async dispatchStep(plan: Plan, step: PlanStep): Promise<void> {
     try {
+      const budgetReason = this.config.budgetExceeded?.();
+      if (budgetReason) {
+        plan.status = 'cancelled';
+        plan.cancelReason = budgetReason;
+        this.persist(plan);
+        this.notify(plan, 'plan:cancelled');
+        return;
+      }
+      const root = this.config.projectRoot;
+      if (root && step.assignedTools.some((id) => !isReadOnlyTool(id))) {
+        captureCheckpoint(root, plan.id ?? 'plan', step.id);
+        step.checkpointId = step.id;
+      }
       step.status = 'running';
       this.persist(plan);
       this.notify(plan, `step:${step.id}:running`);
@@ -356,7 +389,7 @@ export class PlanRuntime {
         personaId: step.assignedPersona,
         skillIds: step.assignedSkills,
         toolIds: step.assignedTools,
-        modelId: this.defaultModelId,
+        modelId: resolveModelForRole(roleForPersona(step.assignedPersona), this.config.modelRoutes, this.defaultModelId),
       },
       refs: this.config.refs,
       ...(languageHint ? { languageHint } : {}),
@@ -368,7 +401,7 @@ export class PlanRuntime {
   /**
    * Read task results from TaskRuntime and update PlanStep statuses.
    */
-  private syncStepStatuses(plan: Plan): void {
+  private async syncStepStatuses(plan: Plan): Promise<void> {
     for (const step of plan.steps) {
       if (step.status !== 'running' || !step.taskId) continue;
 
@@ -379,12 +412,15 @@ export class PlanRuntime {
         case 'completed':
           step.status = 'done';
           step.resultSummary = task.summary;
-          this.notify(plan, `step:${step.id}:done`);
+          step.handoff = extractHandoff(task.summary);
+          await this.selfVerifyCoderStep(plan, step);
+          if (step.status === 'done') this.notify(plan, `step:${step.id}:done`);
           break;
         case 'failed':
           step.status = 'failed';
           step.failureType = task.failureType ?? 'technical';
           step.resultSummary = task.summary;
+          this.rollbackWritableStep(plan, step);
           this.notify(plan, `step:${step.id}:failed`);
           break;
         case 'cancelled':
@@ -721,9 +757,32 @@ Produce a new plan that:
     const waitForAny = this.config.taskRuntime.waitForAny?.bind(this.config.taskRuntime);
     if (waitForAny) await waitForAny(ids);
     else await this.config.taskRuntime.waitForAll();
-    this.syncStepStatuses(plan);
+    await this.syncStepStatuses(plan);
     await this.runAcceptanceChecks(plan);
     this.persist(plan);
+  }
+
+  private rollbackWritableStep(plan: Plan, step: PlanStep): void {
+    const root = this.config.projectRoot;
+    if (!root || !step.checkpointId) return;
+    restoreCheckpoint(root, plan.id ?? 'plan', step.checkpointId);
+  }
+
+  private async selfVerifyCoderStep(plan: Plan, step: PlanStep): Promise<void> {
+    if (step.assignedPersona !== 'coder') return;
+    const root = this.config.projectRoot;
+    if (!root) return;
+    const policy = loadCommandPolicy(root);
+    if (policy.testCommand.length === 0) return;
+    if (policy.allow.length > 0 && !isCommandAllowed(policy.testCommand[0]!, policy.allow)) return;
+    const result = await runProjectTests(root);
+    if (result.success) return;
+    const output = `${result.stdout}\n${result.stderr}`.trim();
+    step.status = 'failed';
+    step.failureType = 'technical';
+    step.resultSummary = `Self-verify tests failed (exit ${result.exitCode ?? 'n/a'}):\n${output || result.error || ''}`.trim();
+    this.rollbackWritableStep(plan, step);
+    this.notify(plan, `step:${step.id}:failed`);
   }
 
   private persist(plan: Plan): void {

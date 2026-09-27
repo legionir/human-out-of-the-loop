@@ -34,9 +34,9 @@
 | G | CLI، REPL و سرور | ۰ 🟢 | ۰ |
 | H | رابط وب ↔ سرور (UI) | ۰ 🟢 | ۰ |
 | I | تست، CI و مستندات | ۰ 🟢 | ۰ |
-| J | قابلیت‌های جدید | ۹ | ۰ |
+| J | قابلیت‌های جدید | ۰ 🟢 | ۰ |
 | K | راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) | ۹ | ۱ |
-| | **جمع ردیف‌های باز** | **۱۸** | **۱** |
+| | **جمع ردیف‌های باز** | **۹** | **۱** |
 
 ---
 
@@ -220,19 +220,19 @@
 | **I-07** 🟢 | P3 | ناهمخوانی مستندات | README/CHANGELOG؛ `maxContextTokens`؛ `HOTL_NO_SPLASH`؛ planner `skillIds: [task_decomposition]`؛ تست HOTL_* ↔ CONFIGURATION | S1:R7-06؛ S2:DEBT-005 ادغام |
 | **I-08** 🟢 | P3 | کامنت‌های ادعا-محور بدون تطبیق کد + لاگ‌های «فاز X» | بازنویسی معنا-محور در فایل‌های همین فاز (fake-llm، ci-test، waitUntil). تست NA | S2:DEBT-003,DEBT-004؛ S2:API-001(doc face) |
 
-### فاز J — قابلیت‌های جدید (پس از فازهای A–I) 🟡
+### فاز J — قابلیت‌های جدید (پس از فازهای A–I) 🟢 (۲۰۲۶-۰۹-۲۷، v27.17.14)
 
-| ID | Pri | عنوان | معیار پذیرش | منبع |
+| ID | Pri | عنوان | رفع / تست | منبع |
 |---|---|---|---|---|
-| **J-01** | P2 | ابزار `run_command`/`run_tests` | allowlist، timeout+kill، سقف خروجی+truncated، بدون shell، journal، خارج از read-only | S1:R8-01؛ (پیش‌نیاز E-04 گزینهٔ ابزار) |
-| **J-02** | P2 | حلقهٔ خودتأییدی | پس از coder اگر دستور تست تعریف شده → خودکار؛ شکست → re-plan. e2e | S1:R8-02 |
-| **J-03** | P2 | بودجهٔ توکن/هزینه پلن | `--budget`؛ عبور → cancelled با دلیل؛ هیچ فراخوانی بعدی | S1:R8-03 |
-| **J-04** | P2 | handoff ساختاریافته میان مراحل | `{changedFiles,keyResult,notes}`؛ prompt وابسته فقط handoff | S1:R8-04 |
-| **J-05** | P2 | checkpoint/rollback با git | snapshot پیش از مرحلهٔ نوشتنی؛ شکست → بازگشت؛ `plans rollback`. تست درخت کاری | S1:R8-05 |
-| **J-06** | P3 | مسیریابی مدل بر اساس نوع کار | مدل جدا classify/judge/review vs plan/code؛ usage تفکیکی | S1:R8-06 |
-| **J-07** | P3 | `--estimate` | فقط پلن‌سازی؛ خروجی مراحل/توکن/هزینه | S1:R8-07 |
-| **J-08** | P3 | نمونه‌های پلن موفق برای پلن‌ساز | قابل خاموشی؛ سقف اندازه؛ تست انتخاب | S1:R8-08 |
-| **J-09** | P3 | ابزارهای تکمیلی | `delete_file` (sandbox+journal)؛ صفحه‌بندی read_graph؛ `GET /api/runs` | S1:R8-09 |
+| **J-01** 🟢 | P2 | ابزار `run_command`/`run_tests` | allowlist (`.ai-runtime/commands.json` + `HOTL_ALLOWED_COMMANDS`)؛ argv بدون shell؛ timeout+kill؛ سقف خروجی+`truncated`؛ journal؛ خارج از read-only. تست: `phase-j-run-command.test.ts` | S1:R8-01؛ (پیش‌نیاز E-04 گزینهٔ ابزار) |
+| **J-02** 🟢 | P2 | حلقهٔ خودتأییدی | پس از coder اگر `testCommand` تعریف شده → `runProjectTests`؛ شکست → technical + re-plan با خروجی تست. e2e: `phase-j-self-verify.test.ts` | S1:R8-02 |
+| **J-03** 🟢 | P2 | بودجهٔ توکن/هزینه پلن | `--budget` توکن یا `$`؛ عبور → `cancelled` / `budget exceeded`؛ بدون فراخوانی مدل بعدی؛ قیمت در registry مدل. تست: `phase-j-budget.test.ts` | S1:R8-03 |
+| **J-04** 🟢 | P2 | handoff ساختاریافته میان مراحل | `{changedFiles,keyResult,notes}`؛ prompt وابسته `DEPENDENCY HANDOFF` نه transcript. تست: `phase-j-handoff.test.ts` | S1:R8-04 |
+| **J-05** 🟢 | P2 | checkpoint/rollback | کپی درخت پیش از مرحلهٔ نوشتنی در `.ai-runtime/checkpoints`؛ شکست → restore؛ `hootl plans rollback`. تست درخت کاری: `phase-j-checkpoint.test.ts` | S1:R8-05 |
+| **J-06** 🟢 | P3 | مسیریابی مدل بر اساس نوع کار | نقش classify/judge/review/plan/code؛ judge روی مدل routed؛ usage `byModel`. تست: `phase-j-model-routes.test.ts` | S1:R8-06 |
+| **J-07** 🟢 | P3 | `--estimate` | فقط پلن‌سازی؛ چاپ مراحل/توکن/هزینه؛ بدون execute. تست: `phase-j-estimate.test.ts` | S1:R8-07 |
+| **J-08** 🟢 | P3 | نمونه‌های پلن موفق برای پلن‌ساز | `.ai-runtime/plan-examples.jsonl`؛ `HOTL_PLAN_EXAMPLES=0`؛ سقف ۲۰؛ انتخاب همپوشانی. تست: `phase-j-plan-examples.test.ts` | S1:R8-08 |
+| **J-09** 🟢 | P3 | ابزارهای تکمیلی | `delete_file` (sandbox+journal)؛ `read_graph` offset؛ `GET /api/runs`. تست: `phase-j-extras.test.ts` | S1:R8-09 |
 
 ### فاز K — راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) ⛔/🟡
 

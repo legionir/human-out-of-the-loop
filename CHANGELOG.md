@@ -5,6 +5,20 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.14] — 2026-09-27 — Phase J: new capabilities
+
+Closes every open row of **Phase J** in `docs/UNIFIED_EXECUTION_PLAN.md` (J-01…J-09). Independent tests live in `src/ai/__tests__/phase-j-*.test.ts`.
+
+- **J-01 — `run_command` / `run_tests`.** Allowlist (`.ai-runtime/commands.json`, `HOTL_ALLOWED_COMMANDS`); argv spawn (no shell); timeout kills the process group; output cap + `truncated`; journalled; not read-only.
+- **J-02 — self-verify.** After a coder step, if `testCommand` / `HOTL_TEST_COMMAND` is set, tests run automatically. Failure is technical and re-plan sees the output.
+- **J-03 — `--budget`.** Token count or `$1.50`. Exceeding cancels with `budget exceeded` and blocks further model calls. Model registry `pricing`.
+- **J-04 — step handoff.** `{changedFiles,keyResult,notes}` in dependent prompts (`DEPENDENCY HANDOFF`), not the full transcript.
+- **J-05 — checkpoint / rollback.** File-copy snapshot before a writable step; restore on failure; `hootl plans rollback <id>`.
+- **J-06 — model routes.** Cheap classify/judge/review vs plan/code; usage `byModel`.
+- **J-07 — `--estimate`.** Plan only; print steps, tokens, and USD; nothing executes.
+- **J-08 — plan examples.** Successful plans in `.ai-runtime/plan-examples.jsonl`; `HOTL_PLAN_EXAMPLES=0` disables; size cap; overlap selection.
+- **J-09 — extras.** `delete_file` (sandbox + journal); `read_graph` `offset`; `GET /api/runs`.
+
 ## [27.17.13] — 2026-09-27 — Phase I: tests, CI, docs
 
 Closes every open row of **Phase I** in `docs/UNIFIED_EXECUTION_PLAN.md` (I-01…I-08).

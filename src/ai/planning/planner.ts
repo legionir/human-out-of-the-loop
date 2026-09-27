@@ -17,6 +17,12 @@ import { DEFAULT_MODEL_ID } from '../models/defaults.js';
 import { withGenerationSettings } from '../models/generation-settings.js';
 import { buildCatalogBlock } from './catalog-prompt.js';
 import {
+  formatPlanExample,
+  loadPlanExamples,
+  planExamplesEnabled,
+  selectPlanExample,
+} from './plan-examples.js';
+import {
   PlanModelSchema,
   PlannerAssessmentLlmSchema,
   PlannerAssessmentRecoverySchema,
@@ -249,6 +255,7 @@ export function buildPlanPrompt(
   projectRoot?: string,
   sessionHistory?: string,
   catalog?: string,
+  example?: string,
 ): string {
   const context = buildProjectContext(projectRoot);
   let prompt = `
@@ -263,6 +270,10 @@ ${userRequest}
 
   if (sessionHistory) {
     prompt += `\n\n${sessionHistory}`;
+  }
+
+  if (example) {
+    prompt += `\n\n${example}`;
   }
 
   if (clarifications && Object.keys(clarifications).length > 0) {
@@ -663,12 +674,17 @@ export class Planner {
     throwIfAborted(abortSignal, 'Plan generation');
     const agent = this.buildPlannerAgent(modelId, detectLanguage(userRequest));
 
+    const example =
+      this.config.projectRoot && planExamplesEnabled()
+        ? selectPlanExample(userRequest, loadPlanExamples(this.config.projectRoot))
+        : undefined;
     const prompt = buildPlanPrompt(
       userRequest,
       clarifications,
       this.config.projectRoot,
       this.config.sessionHistory,
       this.catalogBlock(),
+      example ? formatPlanExample(example) : undefined,
     );
 
     const { object, usage } = await withStructuredRetry<{ object: Plan; usage: unknown }>(

@@ -366,7 +366,7 @@ describe('Phase 35 — filesystem parity with the vendored MCP reference server'
     // `git_status` — and the phase-38 trio (time, time conversion,
     // sequential thinking), which comes from other reference servers.
     // Phases 39-42 add memory, fetch, git reads and the guarded git writes.
-    expect(LOCAL_TOOL_IDS.length).toBe(45);
+    expect(LOCAL_TOOL_IDS.length).toBe(48);
     expect([...LOCAL_TOOL_IDS]).toEqual(
       expect.arrayContaining(['get_current_time', 'convert_time', 'sequentialthinking'])
     );

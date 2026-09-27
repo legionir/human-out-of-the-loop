@@ -1,0 +1,156 @@
+/**
+ * J-05 — file-copy checkpoint before a writable step; fail restores the tree;
+ * `hootl plans rollback <id>` restores the latest snapshot.
+ */
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import type { LanguageModel } from 'ai';
+import { captureCheckpoint, restoreCheckpoint, listProjectFiles } from '../runtime/checkpoint.js';
+import { plansRollbackCommand } from '../../cli/commands/plans.js';
+import { FilePlanStore } from '../runtime/plan-store.js';
+import { createPlan } from '../schemas/plan.js';
+import { EventBus } from '../runtime/event-bus.js';
+import { AgentRuntime } from '../runtime/agent-runtime.js';
+import { TaskRuntime } from '../runtime/task-runtime.js';
+import { MemoryPlanStore } from '../runtime/plan-store.js';
+import { PlanRuntime } from '../runtime/plan-runtime.js';
+import type { Planner } from '../planning/planner.js';
+import { PersonaRegistry } from '../registries/persona-registry.js';
+import { SkillRegistry, loadSkillsFromDirectory } from '../registries/skill-registry.js';
+import { ToolRegistry } from '../registries/tool-registry.js';
+import { ModelRegistry, type ProviderFactory } from '../registries/model-registry.js';
+import { bootstrapCatalogTools } from '../tools/catalog-bootstrap.js';
+import { registerLocalToolFixtures } from './helpers/local-tools-fixture.js';
+
+vi.mock('ai', async () => {
+  const actual = (await vi.importActual('ai')) as object;
+  return { ...actual, generateText: vi.fn(), generateObject: vi.fn() };
+});
+
+import { generateText } from 'ai';
+const mockGenerateText = vi.mocked(generateText);
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const PERSONAS_DIR = path.resolve(__dirname, '../../../registry/personas');
+const SKILLS_DIR = path.resolve(__dirname, '../../../registry/skills');
+
+function createMockProvider(name: string): ProviderFactory {
+  return {
+    name,
+    create: (config) =>
+      ({
+        specificationVersion: 'v1',
+        provider: name,
+        modelId: config.model,
+        defaultObjectGenerationMode: 'json',
+        doGenerate: vi.fn(),
+        doStream: vi.fn(),
+      }) as unknown as LanguageModel,
+  };
+}
+
+function snapshot(root: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const rel of listProjectFiles(root)) {
+    out[rel] = fs.readFileSync(path.join(root, rel), 'utf8');
+  }
+  return out;
+}
+
+describe('J-05 — checkpoint / rollback', () => {
+  let root: string;
+
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'hootl-j05-'));
+    fs.writeFileSync(path.join(root, 'keep.txt'), 'original\n');
+  });
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('restore puts the working tree back to the captured files', () => {
+    captureCheckpoint(root, 'plan_a', 'step-1');
+    const before = snapshot(root);
+    fs.writeFileSync(path.join(root, 'keep.txt'), 'dirty\n');
+    fs.writeFileSync(path.join(root, 'extra.txt'), 'new\n');
+    expect(restoreCheckpoint(root, 'plan_a', 'step-1')).toBe(true);
+    expect(snapshot(root)).toEqual(before);
+    expect(fs.existsSync(path.join(root, 'extra.txt'))).toBe(false);
+  });
+
+  it('plans rollback <id> restores the latest checkpoint', async () => {
+    const plan = createPlan('goal', [
+      {
+        id: 'step-1',
+        description: 'write',
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: [],
+        assignedTools: ['write_file'],
+        claimedResources: [],
+        acceptanceCriteria: 'ok',
+      },
+    ]);
+    captureCheckpoint(root, plan.id!, 'step-1');
+    fs.writeFileSync(path.join(root, 'keep.txt'), 'dirty\n');
+    const store = new FilePlanStore(path.join(root, '.ai-runtime', 'plans'));
+    store.save(plan);
+    const code = await plansRollbackCommand(plan.id!, { projectRoot: root });
+    expect(code).toBe(0);
+    expect(fs.readFileSync(path.join(root, 'keep.txt'), 'utf8')).toBe('original\n');
+  });
+
+  it('a failed writable step restores the pre-step tree', async () => {
+    const eventBus = new EventBus();
+    const agentRuntime = new AgentRuntime();
+    const taskRuntime = new TaskRuntime({ maxConcurrentTasks: 2, eventBus, agentRuntime });
+    const personaRegistry = new PersonaRegistry();
+    personaRegistry.loadFromDirectory(PERSONAS_DIR);
+    const toolRegistry = new ToolRegistry();
+    registerLocalToolFixtures(toolRegistry, root);
+    const skillRegistry = new SkillRegistry({ toolRegistry });
+    bootstrapCatalogTools({ toolRegistry, personaRegistry, skillRegistry });
+    loadSkillsFromDirectory(SKILLS_DIR, skillRegistry);
+    const modelRegistry = new ModelRegistry();
+    modelRegistry.registerProvider(createMockProvider('openai'));
+    modelRegistry.registerConfig({ id: 'gpt-4o', provider: 'openai', model: 'gpt-4o' });
+
+    mockGenerateText.mockReset();
+    mockGenerateText.mockImplementation(async () => {
+      fs.writeFileSync(path.join(root, 'keep.txt'), 'from-agent\n');
+      fs.writeFileSync(path.join(root, 'new-from-step.txt'), 'x\n');
+      throw new Error('step blew up');
+    });
+
+    const runtime = new PlanRuntime({
+      taskRuntime,
+      planStore: new MemoryPlanStore(),
+      planner: { generatePlan: vi.fn().mockResolvedValue(null) } as unknown as Planner,
+      feasibilityDeps: { personaRegistry, skillRegistry, toolRegistry },
+      refs: { personaRegistry, skillRegistry, toolRegistry, modelRegistry },
+      maxReplanningAttempts: 0,
+      defaultModelId: 'gpt-4o',
+      projectRoot: root,
+    });
+
+    const plan = createPlan('write then fail', [
+      {
+        id: 'step-1',
+        description: 'write',
+        dependsOn: [],
+        assignedPersona: 'coder',
+        assignedSkills: ['file_management'],
+        assignedTools: ['write_file'],
+        claimedResources: [],
+        acceptanceCriteria: 'file written',
+      },
+    ]);
+    await runtime.execute(plan);
+    expect(fs.readFileSync(path.join(root, 'keep.txt'), 'utf8')).toBe('original\n');
+    expect(fs.existsSync(path.join(root, 'new-from-step.txt'))).toBe(false);
+    taskRuntime.destroy();
+  });
+});

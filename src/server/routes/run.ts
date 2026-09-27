@@ -315,6 +315,22 @@ export function runRouter(ctx: ServerContext): Router {
     res.json({ ok: true, answered: Object.keys(answers).length, round: run.clarificationRound });
   });
 
+  router.get('/api/runs', (req, res) => {
+    const token = getAuthToken(req);
+    const runs = [...ctx.runs.values()]
+      .filter((run) => !ctx.authTokens.length || run.ownerToken === token)
+      .map((run) => ({
+        runId: run.runId,
+        sessionId: run.sessionId,
+        state: run.state,
+        planId: run.planId,
+        outcome: run.outcome,
+        createdAt: run.createdAt,
+        error: run.error,
+      }));
+    res.json({ runs });
+  });
+
   router.get('/api/runs/:runId', (req, res) => {
     const run = ctx.runs.get(req.params.runId);
     if (!run) {

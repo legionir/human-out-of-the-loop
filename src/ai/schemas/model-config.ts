@@ -13,6 +13,13 @@ export const ModelConfigSchema = z.object({
   /** Provider-specific options (temperature, maxTokens, …) */
   config: z.record(z.string(), z.unknown()).optional(),
   description: z.string().optional(),
+  /** J-03: USD per million tokens, used by `--budget` / `--estimate`. */
+  pricing: z
+    .object({
+      inputUsdPerMTok: z.number().nonnegative(),
+      outputUsdPerMTok: z.number().nonnegative(),
+    })
+    .optional(),
 });
 
 export type ModelConfig = z.infer<typeof ModelConfigSchema>;

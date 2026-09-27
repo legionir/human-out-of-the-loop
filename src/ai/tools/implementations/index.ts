@@ -14,6 +14,8 @@ export { createListDirectoryWithSizesTool } from './list-directory-with-sizes.js
 export { createReadMediaFileTool } from './read-media-file.js';
 export { createDirectoryTreeTool } from './directory-tree.js';
 export { createMoveFileTool } from './move-file.js';
+export { createDeleteFileTool } from './delete-file.js';
+export { createRunCommandTool, createRunTestsTool, runProjectTests } from './run-command.js';
 export { createGetFileInfoTool } from './get-file-info.js';
 export { createCreateDirectoryTool } from './create-directory.js';
 export { createSearchFilesTool } from './search-files.js';

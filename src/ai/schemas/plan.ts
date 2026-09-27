@@ -59,6 +59,16 @@ export const PlanStepSchema = z.object({
     .min(1)
     .optional()
     .describe('When this step replaces a failed one, that step id'),
+  /** J-04: compact result passed to dependent steps. */
+  handoff: z
+    .object({
+      changedFiles: z.array(z.string()).default([]),
+      keyResult: z.string().default(''),
+      notes: z.string().default(''),
+    })
+    .optional(),
+  /** J-05: checkpoint directory id captured before a writable step. */
+  checkpointId: z.string().optional(),
 });
 
 export type PlanStep = z.infer<typeof PlanStepSchema>;
@@ -102,6 +112,8 @@ export const PlanSchema = z.object({
   /** Timestamps */
   createdAt: z.number().optional(),
   completedAt: z.number().optional(),
+  /** J-03 / J-05: why a plan was cancelled (e.g. "budget exceeded"). */
+  cancelReason: z.string().optional(),
 });
 
 export type Plan = z.infer<typeof PlanSchema>;
@@ -115,6 +127,8 @@ export const PlanStepModelSchema = PlanStepSchema.omit({
   failureType: true,
   resultSummary: true,
   taskId: true,
+  handoff: true,
+  checkpointId: true,
 });
 
 export const PlanModelSchema = z.object({

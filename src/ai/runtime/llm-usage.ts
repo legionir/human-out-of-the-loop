@@ -16,6 +16,8 @@ export interface LlmUsageReport {
   usage: TokenUsage;
   /** Plan the call worked for, when it is known at call time. */
   planId?: string;
+  /** J-06: model id that produced this usage. */
+  modelId?: string;
 }
 
 export type LlmUsageReporter = (report: LlmUsageReport) => void;

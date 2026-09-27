@@ -1,0 +1,8 @@
+{
+  "id": "run_tests",
+  "name": "Run Tests",
+  "description": "Run the project test command from commands.json / HOTL_TEST_COMMAND",
+  "source": "local",
+  "modulePath": "./implementations/run-command",
+  "category": "execution"
+}

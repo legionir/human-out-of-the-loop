@@ -5,6 +5,9 @@
   "allowedTools": [
     "read_file",
     "write_file",
+    "delete_file",
+    "run_command",
+    "run_tests",
     "edit_file",
     "read_multiple_files",
     "write_multiple_files",
