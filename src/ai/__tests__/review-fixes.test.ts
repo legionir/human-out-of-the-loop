@@ -168,3 +168,52 @@ describe('R-11 — reconcile never closes a live interaction', () => {
     expect(orch.sessionStore.getSession(sid)!.interactions[0]!.completedAt).toBeUndefined();
   });
 });
+
+describe('R-12 — usage accounting', () => {
+  let root: string;
+  let orch: Orchestrator;
+  beforeEach(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-review-'));
+    orch = new Orchestrator({ projectRoot: root, persistent: false });
+    await orch.initialize();
+  });
+  afterEach(async () => {
+    await orch.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('a chat answer is counted once, and each run reports only its own tokens', async () => {
+    const planner = (orch as unknown as { planner: { plan: (...a: unknown[]) => unknown } }).planner;
+    vi.spyOn(planner, 'plan').mockResolvedValue({
+      kind: 'answer',
+      isClear: true,
+      needsClarification: [],
+      errors: [],
+      answer: 'draft',
+    } as never);
+    // No provider key in tests: the chat agent itself is a stub.
+    vi.spyOn(planner as unknown as { buildChatAgent: () => unknown }, 'buildChatAgent').mockReturnValue({
+      agentId: 'chat',
+      systemPrompt: 's',
+      tools: {},
+      model: {},
+      persona: { id: 'chat', name: 'Chat', system: 's', allowedTools: [] },
+      skills: [],
+      toolWarnings: [],
+      trimmingLog: [],
+      contextBudgetExceeded: false,
+    } as never);
+    const runtime = (orch as unknown as { agentRuntime: { run: (o: { eventBus: { emit: (e: unknown) => void }; taskId: string }) => unknown } }).agentRuntime;
+    vi.spyOn(runtime, 'run').mockImplementation((async (o: { eventBus: { emit: (e: unknown) => void }; taskId: string }) => {
+      const usage = { promptTokens: 10, completionTokens: 5, totalTokens: 15 };
+      o.eventBus.emit({ type: 'agent:completed', taskId: o.taskId, agentId: 'chat', timestamp: Date.now(), status: 'completed', summary: 'hi', toolsUsed: [], usage });
+      return { taskId: o.taskId, agentId: 'chat', success: true, summary: 'hi', result: 'hi', toolsUsed: [], errors: [], usage };
+    }) as never);
+    const confirm = async () => ({ confirmed: true });
+    const first = await orch.run('hello', { mode: 'chat', confirmCallback: confirm });
+    const second = await orch.run('hello again', { mode: 'chat', confirmCallback: confirm });
+    expect(orch.getUsageSummary().totalTokens).toBe(30);
+    expect(first.review.usage.totalTokens).toBe(15);
+    expect(second.review.usage.totalTokens).toBe(15);
+  });
+});

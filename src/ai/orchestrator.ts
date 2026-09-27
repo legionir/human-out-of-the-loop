@@ -345,7 +345,11 @@ export class Orchestrator {
    * Per-run state for the web server, which runs several goals on one
    * Orchestrator at once: kept per async call chain, never on the instance.
    */
-  private readonly runContext = new AsyncLocalStorage<{ budget?: BudgetTracker }>();
+  private readonly runContext = new AsyncLocalStorage<{
+    budget?: BudgetTracker;
+    /** Tokens this run spent (planning calls + chat answer). */
+    usage: { prompt: number; completion: number; total: number };
+  }>();
 
   /** J-03: the budget of the run this call belongs to (none outside a run). */
   private get activeBudget(): BudgetTracker | undefined {
@@ -622,6 +626,7 @@ export class Orchestrator {
       llmCall: true,
       modelId: report.modelId,
     });
+    this.addRunUsage(report.usage);
     this.activeBudget?.record(
       report.usage,
       priceFromModelConfig(report.modelId ? this.modelRegistry.getConfig(report.modelId) : undefined),
@@ -672,13 +677,20 @@ export class Orchestrator {
     };
   }
 
+  /** Tokens of the current run only (not everything this long-lived instance spent). */
   private totalReviewUsage(): Review['usage'] {
-    const u = this.usageAggregator.getSummary();
-    return {
-      totalPromptTokens: u.totalPromptTokens,
-      totalCompletionTokens: u.totalCompletionTokens,
-      totalTokens: u.totalTokens,
-    };
+    const u = this.runContext.getStore()?.usage;
+    return u
+      ? { totalPromptTokens: u.prompt, totalCompletionTokens: u.completion, totalTokens: u.total }
+      : emptyReviewUsage;
+  }
+
+  private addRunUsage(usage: { promptTokens: number; completionTokens: number; totalTokens: number }): void {
+    const u = this.runContext.getStore()?.usage;
+    if (!u) return;
+    u.prompt += usage.promptTokens;
+    u.completion += usage.completionTokens;
+    u.total += usage.totalTokens;
   }
 
   async initialize(): Promise<void> {
@@ -1002,7 +1014,7 @@ export class Orchestrator {
       : undefined;
     if (interaction) this.liveInteractions.add(interaction.id);
     try {
-      return await this.runContext.run({ budget }, () =>
+      return await this.runContext.run({ budget, usage: { prompt: 0, completion: 0, total: 0 } }, () =>
         this.planner.withSessionHistory(historyBlock, () =>
           this.runInSession(userRequest, options, ov, sessionId, interaction),
         ),
@@ -1682,7 +1694,6 @@ export class Orchestrator {
     const toolIds = readOnlyToolIds();
     let text: string | undefined;
     let errors: string[] = [];
-    let answerUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined;
 
     try {
       const agent = this.planner.buildChatAgent(modelId, mode === 'chat' ? toolIds : undefined);
@@ -1697,15 +1708,9 @@ export class Orchestrator {
         ...(this.config.onToolCall ? { onToolCall: this.config.onToolCall } : {}),
         ...(this.toolCallOptions ? { toolCallOptions: this.toolCallOptions } : {}),
       });
-      answerUsage = run.usage;
-      if (run.usage) {
-        this.usageAggregator.recordDirect({
-          taskId: `chat:${interactionId ?? sessionId}`,
-          agentId: agent.agentId,
-          usage: run.usage,
-          timestamp: Date.now(),
-        });
-      }
+      // The aggregator already counts this turn from the run's own
+      // agent:completed / agent:error event; only the per-run tally is added.
+      if (run.usage) this.addRunUsage(run.usage);
       if (run.success && run.result.trim().length > 0) {
         text = run.result.trim();
       } else {
