@@ -15,15 +15,32 @@ export function resolveAnthropicClientOptions(
   env?: EnvSource
 ): { apiKey: string; baseURL?: string } {
   const source = env ?? process.env;
-  const keyVar =
-    typeof config.config?.apiKeyEnv === 'string' ? config.config.apiKeyEnv : 'ANTHROPIC_API_KEY';
-  const apiKey = source[keyVar] || source.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error(
-      `[anthropicProvider] ${keyVar === 'ANTHROPIC_API_KEY' ? 'ANTHROPIC_API_KEY' : `${keyVar} (or ANTHROPIC_API_KEY)`} environment variable is not set.`
-    );
-  }
   const baseURL = typeof config.config?.baseURL === 'string' ? config.config.baseURL : undefined;
+  // R0-07 (same rule as the OpenAI provider): ANTHROPIC_API_KEY is only ever
+  // sent to Anthropic itself.  A custom baseURL — which a project's model
+  // config can set — must name its own key variable (or use HOTL_API_KEY).
+  const isRealAnthropicEndpoint =
+    baseURL === undefined ||
+    (() => {
+      try {
+        return /(^|\.)api\.anthropic\.com$/i.test(new URL(baseURL).hostname);
+      } catch {
+        return false;
+      }
+    })();
+  const configured =
+    typeof config.config?.apiKeyEnv === 'string' ? config.config.apiKeyEnv : undefined;
+  const keyVar =
+    configured === 'ANTHROPIC_API_KEY' && !isRealAnthropicEndpoint ? undefined : configured;
+  const apiKey =
+    (keyVar ? source[keyVar] : undefined) ||
+    (isRealAnthropicEndpoint ? source.ANTHROPIC_API_KEY : source.HOTL_API_KEY);
+  if (!apiKey) {
+    const wanted = isRealAnthropicEndpoint
+      ? `${keyVar && keyVar !== 'ANTHROPIC_API_KEY' ? `${keyVar} (or ANTHROPIC_API_KEY)` : 'ANTHROPIC_API_KEY'}`
+      : `${keyVar ? `${keyVar} or ` : ''}HOTL_API_KEY (ANTHROPIC_API_KEY is not sent to a custom baseURL)`;
+    throw new Error(`[anthropicProvider] ${wanted} environment variable is not set.`);
+  }
   return { apiKey, ...(baseURL ? { baseURL } : {}) };
 }
 

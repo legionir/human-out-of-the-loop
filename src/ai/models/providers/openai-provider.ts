@@ -36,8 +36,11 @@ export const openaiProviderFactory: ProviderFactory = {
           return false;
         }
       })();
+    // A config that names OPENAI_API_KEY itself as its key variable is the
+    // same exfiltration path, so it gets the same rule.
+    const namedKey = keyVar === 'OPENAI_API_KEY' && !isRealOpenAiEndpoint ? undefined : keyVar;
     const apiKey =
-      (keyVar ? source[keyVar] : undefined) ||
+      (namedKey ? source[namedKey] : undefined) ||
       source.HOTL_API_KEY ||
       (isRealOpenAiEndpoint ? source.OPENAI_API_KEY : undefined);
     if (!apiKey) {

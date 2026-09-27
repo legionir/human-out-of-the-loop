@@ -15,6 +15,7 @@ import type { ModelConfig } from '../schemas/model-config.js';
 // internals.
 import { openaiProviderFactory } from '../models/providers/openai-provider.js';
 import { modelSources } from '../models/list-models.js';
+import { resolveAnthropicClientOptions } from '../models/providers/anthropic-provider.js';
 
 function cfg(config: ModelConfig['config']): ModelConfig {
   return { id: 'm', provider: 'openai', model: 'test-model', config };
@@ -51,6 +52,15 @@ describe('R0-07 — OPENAI_API_KEY is never sent to a custom baseURL', () => {
     ).not.toThrow();
   });
 
+  it('does NOT send OPENAI_API_KEY to a custom baseURL even when apiKeyEnv names it', () => {
+    expect(() =>
+      openaiProviderFactory.create(
+        cfg({ baseURL: 'https://attacker.example/v1', apiKeyEnv: 'OPENAI_API_KEY' }),
+        { OPENAI_API_KEY: 'sk-REAL-OPENAI' }
+      )
+    ).toThrow(/HOTL_API_KEY/);
+  });
+
   describe('list-models: modelSources', () => {
     it('never falls back to OPENAI_API_KEY for the HOTL_BASE_URL source', () => {
       const sources = modelSources({
@@ -71,5 +81,49 @@ describe('R0-07 — OPENAI_API_KEY is never sent to a custom baseURL', () => {
       const hotl = sources.find((s) => s.label === 'HOTL_BASE_URL');
       expect(hotl?.apiKey).toBe('hotl-key');
     });
+  });
+});
+
+describe('R0-07 — ANTHROPIC_API_KEY is never sent to a custom baseURL', () => {
+  const acfg = (config: ModelConfig['config']): ModelConfig => ({
+    id: 'a',
+    provider: 'anthropic',
+    model: 'claude-test',
+    config,
+  });
+
+  it('refuses a custom baseURL with only ANTHROPIC_API_KEY set', () => {
+    expect(() =>
+      resolveAnthropicClientOptions(acfg({ baseURL: 'https://attacker.example/v1' }), {
+        ANTHROPIC_API_KEY: 'sk-ant-REAL',
+      })
+    ).toThrow(/not sent to a custom baseURL/);
+  });
+
+  it('refuses a custom baseURL whose apiKeyEnv names ANTHROPIC_API_KEY', () => {
+    expect(() =>
+      resolveAnthropicClientOptions(
+        acfg({ baseURL: 'https://attacker.example/v1', apiKeyEnv: 'ANTHROPIC_API_KEY' }),
+        { ANTHROPIC_API_KEY: 'sk-ant-REAL' }
+      )
+    ).toThrow(/not sent to a custom baseURL/);
+  });
+
+  it('uses HOTL_API_KEY for a custom baseURL', () => {
+    expect(
+      resolveAnthropicClientOptions(acfg({ baseURL: 'https://gw.example/v1' }), {
+        ANTHROPIC_API_KEY: 'sk-ant-REAL',
+        HOTL_API_KEY: 'gw-key',
+      }).apiKey
+    ).toBe('gw-key');
+  });
+
+  it('uses ANTHROPIC_API_KEY for the real endpoint or no baseURL', () => {
+    expect(resolveAnthropicClientOptions(acfg(undefined), { ANTHROPIC_API_KEY: 'k' }).apiKey).toBe('k');
+    expect(
+      resolveAnthropicClientOptions(acfg({ baseURL: 'https://api.anthropic.com/v1' }), {
+        ANTHROPIC_API_KEY: 'k',
+      }).apiKey
+    ).toBe('k');
   });
 });
