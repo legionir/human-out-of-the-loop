@@ -12,7 +12,7 @@ name: Real provider (P1)
 #                       https://api.openai.com/v1            (optional;
 #                       defaults to the official OpenAI API)
 #
-# Repository variables (Settings → Variables) — not secrets:
+# Repository variables (Settings → Variables) or secrets — either works:
 #   HOTL_MODEL          model id to run, e.g. gpt-4o-mini     (optional;
 #                       defaults to gpt-4o)
 #   HOTL_API_STYLE      "chat" or "responses" for a custom base URL
@@ -59,7 +59,7 @@ jobs:
       HOTL_API_KEY: ${{ secrets.HOTL_API_KEY }}
       ANTHROPIC_API_KEY: ${{ secrets.HOTL_ANTHROPIC_API_KEY }}
       HOTL_BASE_URL: ${{ secrets.HOTL_BASE_URL }}
-      HOTL_API_STYLE: ${{ vars.HOTL_API_STYLE }}
+      HOTL_API_STYLE: ${{ vars.HOTL_API_STYLE || secrets.HOTL_API_STYLE }}
     steps:
       - uses: actions/checkout@v4
 
@@ -96,7 +96,7 @@ jobs:
         if: steps.creds.outputs.skip != '1'
         env:
           # Model id comes from a variable (or the dispatch input), never a secret.
-          HOTL_MODEL: ${{ inputs.model || vars.HOTL_MODEL || 'gpt-4o' }}
+          HOTL_MODEL: ${{ inputs.model || vars.HOTL_MODEL || secrets.HOTL_MODEL || 'gpt-4o' }}
         run: |
           set -euo pipefail
           root="$RUNNER_TEMP/real-provider"
@@ -156,7 +156,7 @@ jobs:
       - name: hootl run (real provider, auto-confirmed)
         if: steps.creds.outputs.skip != '1'
         env:
-          HOTL_MODEL: ${{ inputs.model || vars.HOTL_MODEL || 'gpt-4o' }}
+          HOTL_MODEL: ${{ inputs.model || vars.HOTL_MODEL || secrets.HOTL_MODEL || 'gpt-4o' }}
           HOTL_RUN_GOAL: "${{ inputs.goal || vars.HOTL_RUN_GOAL || 'Create notes/provider-check.txt containing the single line: real provider test' }}"
         run: |
           set -euo pipefail
@@ -172,7 +172,7 @@ jobs:
       - name: The run must have produced a real plan, tokens and no leak
         if: steps.creds.outputs.skip != '1'
         env:
-          HOTL_MODEL: ${{ inputs.model || vars.HOTL_MODEL || 'gpt-4o' }}
+          HOTL_MODEL: ${{ inputs.model || vars.HOTL_MODEL || secrets.HOTL_MODEL || 'gpt-4o' }}
           HOTL_RUN_GOAL: "${{ inputs.goal || vars.HOTL_RUN_GOAL || 'Create notes/provider-check.txt containing the single line: real provider test' }}"
         run: |
           set -euo pipefail
