@@ -124,7 +124,7 @@ export class FilePlanStore implements PlanStore {
     }
     // Phase 19 (PERS-01): atomic write — a crash mid-save can never
     // leave a corrupted (truncated) plan file behind.
-    const data = JSON.stringify(plan, null, 2);
+    const data = JSON.stringify(plan);
     const filePath = this.filePath(plan.id);
     // Phase 27 (PERS-04): serialise writers across processes sharing
     // this store directory (CLI ↔ server).
@@ -163,7 +163,7 @@ export class FilePlanStore implements PlanStore {
     if (path.resolve(oldPath) === path.resolve(dest)) return;
     withFileLockSync(lockPathFor(dest), () => {
       if (!fs.existsSync(dest)) {
-        atomicWriteFileSync(dest, JSON.stringify(plan, null, 2));
+        atomicWriteFileSync(dest, JSON.stringify(plan));
       }
       try {
         if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
@@ -184,7 +184,7 @@ export class FilePlanStore implements PlanStore {
       if (!next.id) {
         throw new Error('[plan-store] refusing to save a plan without an id.');
       }
-      atomicWriteFileSync(this.filePath(next.id), JSON.stringify(next, null, 2));
+      atomicWriteFileSync(this.filePath(next.id), JSON.stringify(next));
       this.idByFile.set(path.basename(this.filePath(next.id)), next.id);
       return structuredClone(next);
     });

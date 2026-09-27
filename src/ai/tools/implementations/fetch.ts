@@ -490,11 +490,7 @@ export function createFetchTool(projectRoot: string, toolOptions: FetchToolOptio
     execute: (input: FetchToolInput, options?: { abortSignal?: AbortSignal }) => Promise<FetchOutcome>;
   } = {
     description:
-      'Fetches a URL and returns its content as Markdown (or raw HTML with raw: true). Use it to read ' +
-      'documentation, a changelog or a spec you do not have locally. Long pages are paged: a result ' +
-      'with truncated: true carries nextStartIndex for the next call. Only http/https; loopback and ' +
-      'private addresses are always blocked (an operator-only setting, not available here); robots.txt ' +
-      'is honoured unless respectRobots is false.',
+      'Fetch an http(s) URL as Markdown. Truncated pages include nextStartIndex. Loopback/private blocked.',
     inputSchema,
     execute: async (input, options) => {
       // The schema's `.default()` values are applied by the SDK when the model

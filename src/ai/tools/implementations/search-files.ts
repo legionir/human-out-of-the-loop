@@ -114,10 +114,7 @@ export function createSearchFilesTool(projectRoot: string) {
     execute: (input: SearchFilesInput) => Promise<SearchFilesOutcome>;
   } = {
     description:
-      'Recursively finds files and directories whose name or path matches a glob pattern. ' +
-      "'*.ts' matches that name at any depth (set matchBaseName: false to match the whole relative " +
-      'path), directory names are matched too, and build/vendor directories are skipped unless ' +
-      'skipBuildDirs is false. Returns workspace-relative paths, sorted, with per-type counts.',
+      'Find files/directories by glob. Skips build/vendor dirs by default. Returns workspace-relative paths.',
     inputSchema,
     execute: async (input) => {
       const {

@@ -173,7 +173,9 @@ export function environmentBullets(facts: EnvironmentFacts = collectEnvironmentF
     // and a plan that says "the release from last week" depends on it.  The
     // `get_current_time` tool is the precise form of this; one line here keeps
     // the common case from needing a tool call at all.
-    `- current time: ${facts.now.formatted} (${facts.now.timeZone}, ${facts.now.utcOffset})`,
+    // F-01: date only — a clock that ticks every second busts the Anthropic
+    // prompt cache on every call.  `get_current_time` is the precise form.
+    `- current time: ${facts.now.formatted.slice(0, 10)} (${facts.now.timeZone}, ${facts.now.utcOffset})`,
     `- default shell: ${facts.shell}${facts.shellFamily === 'posix' ? ' (POSIX sh syntax)' : ''}` +
       `${facts.shellFamily === 'powershell' ? ' (PowerShell syntax, not sh)' : ''}`,
     `- path separator: "${facts.pathSeparator}" — build paths with node:path (path.join('src', 'index.ts') → '${facts.pathJoinExample}'); a hard-coded "\\" only works on Windows and a hard-coded "/" only on POSIX`,

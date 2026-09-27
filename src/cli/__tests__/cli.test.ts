@@ -852,7 +852,8 @@ describe('C2 — usage + tasks commands (from the observability log)', () => {
     expect(out).toContain('300');
     expect(out).toContain('450');
     expect(out).toContain('Build a login page');
-    expect(out).toMatch(/Totals: 300 prompt \+ 150 completion = 450 tokens across 2 task/);
+    expect(out).toMatch(/Totals: 300 prompt \+ 150 completion = 450 tokens/);
+    expect(out).toContain('across 2 task');
   });
 
   it('usage --plan filters to one plan; unknown plan → exit 1', async () => {
@@ -879,6 +880,8 @@ describe('C2 — usage + tasks commands (from the observability log)', () => {
       promptTokens: 300,
       completionTokens: 150,
       totalTokens: 450,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
       taskCount: 2,
     });
   });

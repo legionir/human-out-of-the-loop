@@ -174,10 +174,7 @@ export function createSequentialThinkingTool(projectRoot: string) {
     execute: (input: SequentialThinkingInput) => Promise<SequentialThinkingOutcome>;
   } = {
     description:
-      'Records one step of a multi-step reasoning process: numbered, estimated, revisable and ' +
-      'branchable. Use it for a problem that needs several dependent steps (a plan, a diagnosis, a ' +
-      'design decision) instead of reasoning silently — the steps persist in the project, so a later ' +
-      'turn or a resumed run can continue the same chain.',
+      'Record one numbered reasoning step (revisable, branchable). Persists for later turns.',
     inputSchema,
     execute: async (input) => {
       const sessionId = input.sessionId?.trim() || defaultSessionId();

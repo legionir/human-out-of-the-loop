@@ -30,14 +30,40 @@ export function generationSettingsFromConfig(
   };
 }
 
+/** Anthropic prompt-cache breakpoint (F-01). Harmless on other providers. */
+export const ANTHROPIC_CACHE_CONTROL = { type: 'ephemeral' as const };
+
+/** Stamp `providerOptions.anthropic.cacheControl` onto an SDK call. */
+export function withAnthropicPromptCache<T extends Record<string, unknown>>(options: T): T {
+  const existing =
+    options.providerOptions && typeof options.providerOptions === 'object'
+      ? (options.providerOptions as Record<string, unknown>)
+      : {};
+  const anthropic =
+    existing.anthropic && typeof existing.anthropic === 'object'
+      ? (existing.anthropic as Record<string, unknown>)
+      : {};
+  return {
+    ...options,
+    providerOptions: {
+      ...existing,
+      anthropic: {
+        ...anthropic,
+        cacheControl: ANTHROPIC_CACHE_CONTROL,
+      },
+    },
+  };
+}
+
 /** Merge generation settings onto an AI SDK call options object. */
 export function withGenerationSettings<T extends Record<string, unknown>>(
   options: T,
   settings: GenerationSettings | undefined
 ): T {
-  if (!settings) return options;
+  const cached = withAnthropicPromptCache(options);
+  if (!settings) return cached;
   return {
-    ...options,
+    ...cached,
     ...(settings.temperature !== undefined ? { temperature: settings.temperature } : {}),
     ...(settings.maxOutputTokens !== undefined ? { maxOutputTokens: settings.maxOutputTokens } : {}),
   };

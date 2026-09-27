@@ -90,6 +90,10 @@ export interface TokenUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  /** F-01: tokens served from the provider prompt cache. */
+  cacheReadTokens?: number;
+  /** F-01: tokens written into the provider prompt cache. */
+  cacheWriteTokens?: number;
 }
 
 // ─── Subscriber type ─────────────────────────────────────────────

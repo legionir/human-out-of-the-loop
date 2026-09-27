@@ -78,10 +78,7 @@ export function createSearchCodeTool(projectRoot: string) {
   const allowed = [projectRoot];
   return tool({
     description:
-      'Searches file contents in a directory — VS Code style: a content regex plus an optional path ' +
-      'regex/glob filters, case-sensitive / whole-word / literal toggles and context lines. ' +
-      'Returns, for every match, the file path (relative to the workspace root), the 1-based line ' +
-      'and column, and the matching line, plus the list of matched files.',
+      'Search file contents with a regex. Returns relative path, line, column, and matching text.',
     inputSchema,
     execute: async (input) => {
       const {

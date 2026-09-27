@@ -173,8 +173,8 @@ describe('R1-02 — a failed single/last step triggers re-planning', () => {
 
     const mockPlanner = {
       assess: vi.fn(),
-      generatePlan: vi.fn(),
-      plan: vi.fn().mockResolvedValue({ isClear: true, needsClarification: [], errors: [], plan: replacementPlan() }),
+      generatePlan: vi.fn().mockResolvedValue(replacementPlan()),
+      plan: vi.fn(),
     } as unknown as Planner;
 
     const runtime = new PlanRuntime({
@@ -199,7 +199,7 @@ describe('R1-02 — a failed single/last step triggers re-planning', () => {
     const plan = singleStepPlan();
     const result = await runtime.execute(plan);
 
-    expect(mockPlanner.plan).toHaveBeenCalled();
+    expect(mockPlanner.generatePlan).toHaveBeenCalled();
     expect(result.replanningAttempts).toBeGreaterThanOrEqual(1);
     expect(result.status).toBe('completed');
   });

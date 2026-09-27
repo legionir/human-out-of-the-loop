@@ -15,6 +15,7 @@ import {
   type GenerationSettings,
 } from '../models/generation-settings.js';
 import { DEFAULT_MODEL_ID } from '../models/defaults.js';
+import { compactToolDescriptions } from '../tools/compact-descriptions.js';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -166,17 +167,18 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
   const toolWarnings: ToolFilterWarning[] = [];
   let requestedToolIds = new Set<string>();
 
-  for (const skill of skills) {
-    for (const toolId of skill.resolvedTools) {
-      requestedToolIds.add(toolId);
+  // F-02: a plan step that names `toolIds` means "these tools, not the
+  // union of every skill in the catalog".  Empty/missing toolIds still
+  // fall back to the skill set so ad-hoc agents keep working.
+  const explicitToolIds = def.toolIds ?? [];
+  if (explicitToolIds.length > 0) {
+    for (const toolId of explicitToolIds) requestedToolIds.add(toolId);
+  } else {
+    for (const skill of skills) {
+      for (const toolId of skill.resolvedTools) {
+        requestedToolIds.add(toolId);
+      }
     }
-  }
-
-  // Tools declared directly on the agent definition (plan steps pass
-  // PlanStep.assignedTools here) are requested as well; they still have
-  // to survive the persona allow-list filter below.
-  for (const toolId of def.toolIds ?? []) {
-    requestedToolIds.add(toolId);
   }
 
   // Apply DelegationGuard if provided
@@ -214,6 +216,7 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
   if (allowedToolIds.size > 0) {
     const resolved = refs.toolRegistry.getToolsByIds(Array.from(allowedToolIds));
     Object.assign(tools, resolved);
+    compactToolDescriptions(tools);
   }
 
   // ── 3. Determine context budget ─────────────────────────────

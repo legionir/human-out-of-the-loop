@@ -74,18 +74,35 @@ export function sumUsageFromEntries(entries: RawLogEntry[]): {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   taskCount: number;
 } {
-  const totals = { promptTokens: 0, completionTokens: 0, totalTokens: 0, taskCount: 0 };
+  const totals = {
+    promptTokens: 0,
+    completionTokens: 0,
+    totalTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    taskCount: 0,
+  };
   for (const e of entries) {
     if (e.eventType === 'task:completed') totals.taskCount++;
     else if (e.eventType !== 'llm:usage') continue;
     const usage = e.payload?.usage as
-      | { promptTokens?: number; completionTokens?: number; totalTokens?: number }
+      | {
+          promptTokens?: number;
+          completionTokens?: number;
+          totalTokens?: number;
+          cacheReadTokens?: number;
+          cacheWriteTokens?: number;
+        }
       | undefined;
     totals.promptTokens += usage?.promptTokens ?? 0;
     totals.completionTokens += usage?.completionTokens ?? 0;
     totals.totalTokens += usage?.totalTokens ?? 0;
+    totals.cacheReadTokens += usage?.cacheReadTokens ?? 0;
+    totals.cacheWriteTokens += usage?.cacheWriteTokens ?? 0;
   }
   return totals;
 }

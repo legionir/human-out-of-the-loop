@@ -23,6 +23,22 @@ import { buildStepPrompt, formatDoneStepSummaries } from './step-prompt.js';
 import { DEFAULT_MODEL_ID } from '../models/defaults.js';
 
 const ACCEPTANCE_MARK = '[Acceptance:';
+/** F-06: how many acceptance judgments may run at once. */
+const ACCEPTANCE_CONCURRENCY = 4;
+
+async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  if (items.length === 0) return [];
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -177,22 +193,21 @@ export class PlanRuntime {
           continue; // Re-evaluate with the patched plan
         }
 
-        // Steps are running — wait for them, persisting each completion
-        // immediately (B-14) and judging before the next persist (B-08).
-        await this.drainRunningSteps(plan);
+        // F-05: wait for ANY running step, then loop so newly-ready
+        // dependents can dispatch without waiting for the rest of the wave.
+        await this.waitForNextCompletion(plan);
         continue;
       }
 
-      // 4. Dispatch ready steps as tasks
+      // 4. Dispatch currently-ready steps as tasks
       const dispatchPromises = ready.map((step) => this.dispatchStep(plan, step));
 
       // Use allSettled so one failure doesn't block others
       await Promise.allSettled(dispatchPromises);
 
-      // 5–6. Wait for EACH task to complete, persist + judge immediately
-      // so a crash mid-wave does not re-run finished work and does not
-      // leave an unjudged `done` on disk.
-      await this.drainRunningSteps(plan);
+      // 5–6. Persist + judge the first completion (B-14 / B-08), then
+      // re-evaluate readiness so C can start while B is still running.
+      await this.waitForNextCompletion(plan);
       this.notify(plan, 'plan:steps-updated');
     }
 
@@ -386,8 +401,9 @@ export class PlanRuntime {
 
   /**
    * Run the acceptance check for every step that just transitioned
-   * to "done", SEQUENTIALLY and AFTER the status sync — so the checker
-   * always sees current state and parallel tasks can no longer race.
+   * to "done", AFTER the status sync.  F-06: judgments run concurrently
+   * (capped) — verdicts are applied after the wave so persist cannot
+   * race with itself.
    *
    * A rejected verdict marks the step `failed` with `failureType:
    * 'quality'` (distinct from 'technical') and fires the checker's
@@ -399,6 +415,7 @@ export class PlanRuntime {
     if (!checker) return;
     if (this.cancelled) return;
 
+    const pending: Array<{ step: PlanStep; task: Task }> = [];
     for (const step of plan.steps) {
       if (step.status !== 'done') continue;
       if (this.acceptanceChecked.has(step.id)) continue;
@@ -419,31 +436,31 @@ export class PlanRuntime {
           result: step.resultSummary ?? '',
         } as Task);
 
-      // Mark as checked BEFORE awaiting so an interleaved re-entry
-      // (e.g. resume) cannot double-judge the same step.
       this.acceptanceChecked.add(step.id);
+      pending.push({ step, task });
+    }
 
+    if (pending.length === 0) return;
+
+    const judged = await mapLimit(pending, ACCEPTANCE_CONCURRENCY, async ({ step, task }) => {
       const judgment = await checker.checkStep(step, task, this.defaultModelId);
+      return { step, judgment };
+    });
 
+    for (const { step, judgment } of judged) {
       if (judgment.checkerError) {
-        // R1-07: the judge itself failed (timeout/error), not the step's
-        // work — keep the step `done` and its own output, just note that
-        // no verdict could be reached.
         step.resultSummary = `${step.resultSummary ?? ''}\n[Acceptance: UNVERIFIED — ${judgment.reason}]`.trim();
-        this.persist(plan);
       } else if (judgment.accepted) {
         step.resultSummary = `${step.resultSummary ?? ''}\n[Acceptance: PASSED — ${judgment.reason}]`.trim();
-        this.persist(plan);
       } else {
         step.status = 'failed';
         step.failureType = 'quality';
-        // R1-07: append the verdict, never overwrite the step's own output.
         step.resultSummary = `${step.resultSummary ?? ''}\n[Acceptance: FAILED — ${judgment.reason}]`.trim();
         this.notify(plan, `step:${step.id}:failed`);
-        checker.reportQualityFailure(plan.id ?? 'unknown', step.id, judgment.reason);
-        this.persist(plan);
+        checker.reportQualityFailure?.(plan.id ?? 'unknown', step.id, judgment.reason);
       }
     }
+    this.persist(plan);
   }
 
   // ── Private: priority queue ───────────────────────────────────
@@ -582,20 +599,16 @@ Produce a new plan that:
 3. Preserves the original goal.
 `.trim();
 
-      // A re-plan is always a plan: never answer conversationally here, and
-      // never open a chat answer for a request built from a failed plan.
-      const result = await this.config.planner.plan(
+      // F-07: skip the assess() round-trip — a re-plan is always a plan.
+      const newPlan = await this.config.planner.generatePlan(
         replanRequest,
+        undefined,
         plan.id,
         this.defaultModelId,
-        'plan'
       );
-
-      if (!result.isClear || !result.plan) {
-        return false; // Planner couldn't produce a valid revision
+      if (!newPlan?.steps) {
+        return false;
       }
-
-      const newPlan = result.plan;
 
       // Phase 30 (P7): keep terminal steps (done AND failed) so an abandoned
       // sub-goal never disappears from the plan; see `replan-merge.ts`.
@@ -696,22 +709,21 @@ Produce a new plan that:
   // ── Private: helpers ──────────────────────────────────────────
 
   /**
-   * B-14: wait until every currently-running step is terminal, persisting
-   * (and judging) after EACH completion so a crash mid-wave keeps finished
-   * work and does not store unjudged `done`.
+   * F-05 / B-14: wait until ANY currently-running step is terminal, then
+   * persist and judge.  The execute loop re-evaluates readiness so a
+   * dependent of A can start while B is still running.
    */
-  private async drainRunningSteps(plan: Plan): Promise<void> {
-    while (plan.steps.some((s) => s.status === 'running')) {
-      const ids = plan.steps
-        .filter((s) => s.status === 'running' && s.taskId)
-        .map((s) => s.taskId!);
-      const waitForAny = this.config.taskRuntime.waitForAny?.bind(this.config.taskRuntime);
-      if (waitForAny) await waitForAny(ids);
-      else await this.config.taskRuntime.waitForAll();
-      this.syncStepStatuses(plan);
-      await this.runAcceptanceChecks(plan);
-      this.persist(plan);
-    }
+  private async waitForNextCompletion(plan: Plan): Promise<void> {
+    const ids = plan.steps
+      .filter((s) => s.status === 'running' && s.taskId)
+      .map((s) => s.taskId!);
+    if (ids.length === 0) return;
+    const waitForAny = this.config.taskRuntime.waitForAny?.bind(this.config.taskRuntime);
+    if (waitForAny) await waitForAny(ids);
+    else await this.config.taskRuntime.waitForAll();
+    this.syncStepStatuses(plan);
+    await this.runAcceptanceChecks(plan);
+    this.persist(plan);
   }
 
   private persist(plan: Plan): void {

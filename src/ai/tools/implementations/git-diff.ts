@@ -22,6 +22,8 @@ import { parseDiff, type DiffFile } from '../git/parse.js';
  */
 
 const DEFAULT_CONTEXT_LINES = 3;
+/** F-03: a full patch larger than this is truncated (prefer `statOnly`). */
+const GIT_PATCH_CHAR_CAP = 16_000;
 
 const inputSchema = z.object({
   directory: z
@@ -151,11 +153,15 @@ export function createGitDiffTool(projectRoot: string) {
         return {
           ...(failureResult(result) as GitDiffOutcome),
           directory: repo.display,
-          repository: repo.root,
         };
       }
 
-      const text = result.stdout;
+      let text = result.stdout;
+      let truncated = Boolean(result.truncated);
+      if (!statOnly && !nameOnly && text.length > GIT_PATCH_CHAR_CAP) {
+        text = text.slice(0, GIT_PATCH_CHAR_CAP);
+        truncated = true;
+      }
       const summary =
         statOnly || nameOnly ? { files: [], additions: 0, deletions: 0 } : parseDiff(text);
       const paths = nameOnly
@@ -168,7 +174,6 @@ export function createGitDiffTool(projectRoot: string) {
       return {
         success: true,
         directory: repo.display,
-        repository: repo.root,
         scope: target !== undefined ? 'target' : staged ? 'staged' : 'worktree',
         ...(target !== undefined ? { target } : {}),
         diff: text.trimEnd(),
@@ -178,7 +183,7 @@ export function createGitDiffTool(projectRoot: string) {
         additions: summary.additions,
         deletions: summary.deletions,
         bytes: Buffer.byteLength(text),
-        truncated: result.truncated,
+        truncated,
         warnings: result.stderr.trim() || undefined,
       };
     },

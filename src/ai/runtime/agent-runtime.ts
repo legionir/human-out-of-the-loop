@@ -4,6 +4,11 @@ import { withGenerationSettings } from '../models/generation-settings.js';
 import { withJournal, type JournalWriter } from './journal.js';
 import { withToolCallLog, type ToolCallLogOptions, type ToolCallSink } from './tool-call-log.js';
 import { addTokenUsage, toTokenUsage } from './llm-usage.js';
+import { capToolResult } from './tool-result-cap.js';
+import {
+  DEFAULT_CONTEXT_BUDGET_CHARS,
+  trimConversationMessages,
+} from './conversation-budget.js';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
 import { EventBus, type TokenUsage } from './event-bus.js';
 import { runWithAgentContext } from './agent-run-context.js';
@@ -122,6 +127,8 @@ export interface AgentRunOptions {
    * falls back to name-based inference.
    */
   toolCallOptions?: ToolCallLogOptions;
+  /** F-04: conversation history is trimmed to this many characters. */
+  contextBudgetChars?: number;
 }
 
 // ─── Constants ────────────────────────────────────────────────────
@@ -272,7 +279,8 @@ function withRuntimeToolHooks<T extends Record<string, unknown>>(
           callId,
           ...ctx.planContext,
         });
-        return originalExecute(input, { ...options, abortSignal: signal } as never);
+        const output = await originalExecute(input, { ...options, abortSignal: signal } as never);
+        return capToolResult(output);
       },
     };
   }
@@ -344,6 +352,7 @@ export class AgentRuntime {
       onThought,
       onToolCall,
       toolCallOptions,
+      contextBudgetChars = DEFAULT_CONTEXT_BUDGET_CHARS,
     } = options;
 
     const agentId = agent.agentId;
@@ -404,6 +413,7 @@ export class AgentRuntime {
         ...(onThought ? { onThought } : {}),
         ...(onToolCall ? { onToolCall } : {}),
         ...(toolCallOptions ? { toolCallOptions } : {}),
+        contextBudgetChars,
       });
 
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -543,6 +553,7 @@ export class AgentRuntime {
     onToolCall?: ToolCallSink;
     /** v27.17.3: how those records resolve a tool's type, and what to redact */
     toolCallOptions?: ToolCallLogOptions;
+    contextBudgetChars?: number;
   }): Promise<{ text: string; usage?: TokenUsage; reaskedWithoutStreaming?: boolean }> {
     const {
       agent,
@@ -559,6 +570,7 @@ export class AgentRuntime {
       onThought,
       onToolCall,
       toolCallOptions,
+      contextBudgetChars = DEFAULT_CONTEXT_BUDGET_CHARS,
     } = params;
 
     const hasTools = Object.keys(agent.tools).length > 0;
@@ -602,6 +614,10 @@ export class AgentRuntime {
       }
     };
 
+    const prepareStep = (({ messages }: { messages: unknown[] }) => ({
+      messages: trimConversationMessages(messages, contextBudgetChars),
+    })) as never;
+
     const generateOptions: Parameters<typeof generateText>[0] = withGenerationSettings(
       {
         model,
@@ -612,6 +628,7 @@ export class AgentRuntime {
         // Phase 22: real cancellation — aborting rejects generateText
         ...(signal ? { abortSignal: signal } : {}),
         onStepFinish,
+        prepareStep,
       },
       agent.generationSettings
     );
@@ -784,6 +801,9 @@ export class AgentRuntime {
           // `delta.reasoning_content`, which the SDK's chat chunk schema
           // drops; the raw chunk still carries it.
           includeRawChunks: true,
+          prepareStep: (({ messages }: { messages: unknown[] }) => ({
+            messages: trimConversationMessages(messages, DEFAULT_CONTEXT_BUDGET_CHARS),
+          })) as never,
         },
         generationSettings
       )

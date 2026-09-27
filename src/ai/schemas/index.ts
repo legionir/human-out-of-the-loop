@@ -34,6 +34,7 @@ export {
 } from './plan.js';
 export {
   ReviewSchema,
+  ReviewModelSchema,
   FindingSchema,
   IncompleteStepSchema,
   type Review,

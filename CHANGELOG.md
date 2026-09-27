@@ -5,6 +5,21 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.9] — 2026-09-27 — Phase F: efficiency and token use
+
+Closes every open row of **Phase F** in `docs/UNIFIED_EXECUTION_PLAN.md` (F-01…F-10).
+
+- **F-01 — prompt cache.** Environment clock is the date (not seconds); every SDK call stamps Anthropic `cacheControl`; `TokenUsage` / `hootl usage` record cache read/write tokens.
+- **F-02 — step tools.** Non-empty `toolIds` are the requested set (then ∩ persona `allowedTools`); four long tool descriptions are shortened; coder-step catalog ≤3500 tokens.
+- **F-03 — tool output caps.** `directory_tree` skips build dirs, stops at 500 entries, drops `formatted`; `read_file` pages with offset/maxBytes; git diff/show drop the absolute `repository` and truncate huge patches; runtime wrapper caps ~30k.
+- **F-04 — conversation budget.** `prepareStep` replaces older tool results so 20 steps fit `contextBudgetChars`.
+- **F-05 — event-driven dispatch.** After each completion the loop re-evaluates readiness so C (depends on A) starts while B is still running.
+- **F-06 — concurrent acceptance.** Judgments run with a concurrency cap; the judge sees a clipped result.
+- **F-07 — slim review / re-plan.** `ReviewModelSchema` is findings+summary; re-plan calls `generatePlan` (no assess round-trip).
+- **F-08 — cheaper writes.** Journal redacts then stringifies once; plan files are compact JSON.
+- **F-09 — followLog.** Byte-offset reads, directory watch, resume after rotate (CLI and `/api/observability/stream`).
+- **F-10 — SSE cap.** Per-process connection limit (`HOTL_MAX_SSE_CONNECTIONS`, default 32).
+
 ## [27.17.8] — 2026-09-27 — Phase E: context, prompts, and models
 
 Closes every open row of **Phase E** in `docs/UNIFIED_EXECUTION_PLAN.md` (E-01…E-12).

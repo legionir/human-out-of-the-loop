@@ -43,6 +43,18 @@ export type IncompleteStep = z.infer<typeof IncompleteStepSchema>;
  *
  * This is the ONLY structured output returned to the user (Law 15).
  */
+/**
+ * F-07: fields the model is asked to produce.  Orchestrator-owned fields
+ * (planId, goal, outcome, usage, incompleteSteps) are filled in after.
+ */
+export const ReviewModelSchema = z.object({
+  acceptedFindings: z.array(FindingSchema).default([]),
+  rejectedFindings: z.array(FindingSchema).default([]),
+  finalSummary: z.string().min(1),
+});
+
+export type ReviewModel = z.infer<typeof ReviewModelSchema>;
+
 export const ReviewSchema = z.object({
   /** The plan id being reviewed */
   planId: z.string().min(1),

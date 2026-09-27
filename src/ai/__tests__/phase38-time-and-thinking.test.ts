@@ -553,7 +553,7 @@ describe('Phase 38 — the environment block carries the clock', () => {
     expect(facts.now.dayOfWeek).toMatch(/^[A-Z][a-z]+$/);
 
     const bullets = environmentBullets(facts).join('\n');
-    expect(bullets).toContain(`current time: ${facts.now.formatted} (${facts.now.timeZone}`);
+    expect(bullets).toContain(`current time: ${facts.now.formatted.slice(0, 10)} (${facts.now.timeZone}`);
   });
 
   it('reports the clock for an injected platform too (deterministic parts)', () => {

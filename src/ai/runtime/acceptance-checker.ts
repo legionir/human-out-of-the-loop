@@ -13,6 +13,9 @@ import { withGenerationSettings } from '../models/generation-settings.js';
 import type { PlanStep } from '../schemas/plan.js';
 import type { Task } from '../schemas/task.js';
 
+/** F-06: the judge does not need the whole tool transcript. */
+const ACCEPTANCE_RESULT_CHARS = 4_000;
+
 export const AcceptanceResultSchema = z.object({
   accepted: z.boolean(),
   reason: z.string().min(1),
@@ -101,7 +104,7 @@ ${step.acceptanceCriteria}
 ${taskResult.summary ?? 'No summary available.'}
 
 ## Task Output (full)
-${taskResult.result ?? 'No result available.'}
+${(taskResult.result ?? 'No result available.').slice(0, ACCEPTANCE_RESULT_CHARS)}
 
 ## Task Errors (if any)
 ${taskResult.errors.length > 0 ? taskResult.errors.join('\n') : 'None'}

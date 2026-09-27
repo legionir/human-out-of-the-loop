@@ -9,7 +9,7 @@ import type { ModelRegistry } from '../registries/model-registry.js';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
 import { DEFAULT_MODEL_ID } from '../models/defaults.js';
 import { withGenerationSettings } from '../models/generation-settings.js';
-import { ReviewSchema, emptyReviewUsage, type Review } from '../schemas/review.js';
+import { ReviewModelSchema, emptyReviewUsage, type Review } from '../schemas/review.js';
 import type { Plan } from '../schemas/plan.js';
 import type { PlanExecutionResult } from './plan-runtime.js';
 
@@ -137,12 +137,10 @@ export class FinalReviewer {
             model: reviewerAgent.model,
             system: reviewerAgent.systemPrompt,
             prompt,
-            schema: ReviewSchema,
+            schema: ReviewModelSchema,
             schemaName: 'FinalReview',
             schemaDescription:
-              'Structured review of a completed plan execution, including ' +
-              'accepted findings, rejected findings, incomplete steps, and ' +
-              'a human-readable summary.',
+              'Accepted findings, rejected findings, and a human-readable summary.',
             abortSignal,
           }, reviewerAgent.generationSettings))
       ),
@@ -157,14 +155,14 @@ export class FinalReviewer {
 
     // Ensure planId and goal match (the model might hallucinate)
     return {
-      ...object,
       planId: plan.id ?? 'unknown',
       goal: plan.goal,
       outcome,
-      incompleteSteps:
-        object.incompleteSteps.length > 0
-          ? object.incompleteSteps
-          : executionResult.incompleteSteps,
+      acceptedFindings: object.acceptedFindings,
+      rejectedFindings: object.rejectedFindings,
+      incompleteSteps: executionResult.incompleteSteps,
+      finalSummary: object.finalSummary,
+      usage: emptyReviewUsage,
     };
   }
 

@@ -500,14 +500,14 @@ describe('Phase 33 — filesystem tools', () => {
       path: '.',
       excludePatterns: ['lib'],
       maxDepth: 5,
-    })) as { success: boolean; tree: Array<Record<string, unknown>>; formatted: string };
+    })) as { success: boolean; tree: Array<Record<string, unknown>> };
 
     expect(result.success).toBe(true);
     const src = result.tree.find((entry) => entry.name === 'src') as {
       children: Array<Record<string, unknown>>;
     };
     expect(src.children.map((child) => child.name)).toEqual(['index.ts']); // lib excluded
-    expect(result.formatted).toContain('"index.ts"');
+    expect(JSON.stringify(result.tree)).toContain('"index.ts"');
 
     const shallow = (await execute({ path: '.', maxDepth: 1 })) as {
       tree: Array<{ name: string; children?: unknown[]; truncated?: boolean }>;

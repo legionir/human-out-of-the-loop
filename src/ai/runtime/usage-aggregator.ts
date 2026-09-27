@@ -23,6 +23,8 @@ export interface UsageSummary {
   totalPromptTokens: number;
   totalCompletionTokens: number;
   totalTokens: number;
+  totalCacheReadTokens: number;
+  totalCacheWriteTokens: number;
   taskCount: number;
   /** Breakdown by agent/persona */
   byAgent: Record<string, TokenUsage & { count: number }>;
@@ -114,6 +116,8 @@ export class UsageAggregator {
       totalPromptTokens: 0,
       totalCompletionTokens: 0,
       totalTokens: 0,
+      totalCacheReadTokens: 0,
+      totalCacheWriteTokens: 0,
       taskCount: this.records.filter((r) => !r.llmCall).length,
       byAgent: {},
       byPlan: {},
@@ -123,6 +127,8 @@ export class UsageAggregator {
       summary.totalPromptTokens += r.usage.promptTokens;
       summary.totalCompletionTokens += r.usage.completionTokens;
       summary.totalTokens += r.usage.totalTokens;
+      summary.totalCacheReadTokens += r.usage.cacheReadTokens ?? 0;
+      summary.totalCacheWriteTokens += r.usage.cacheWriteTokens ?? 0;
 
       // By agent
       if (!summary.byAgent[r.agentId]) {

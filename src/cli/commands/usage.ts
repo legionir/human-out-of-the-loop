@@ -32,6 +32,8 @@ interface UsageRow {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  cacheReadTokens: number;
+  cacheWriteTokens: number;
   taskCount: number;
 }
 
@@ -71,6 +73,8 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
         promptTokens: 0,
         completionTokens: 0,
         totalTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
         taskCount: 0,
       };
       const ctx = planContext.get(id);
@@ -81,6 +85,8 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
         promptTokens: usage.promptTokens,
         completionTokens: usage.completionTokens,
         totalTokens: usage.totalTokens,
+        cacheReadTokens: usage.cacheReadTokens,
+        cacheWriteTokens: usage.cacheWriteTokens,
         taskCount: usage.taskCount,
       };
     })
@@ -106,10 +112,12 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
       out(JSON.stringify(row, null, 2));
     } else {
       out(`Plan ${row.planId}  ${color.dim(`(${row.status})`)}  ${color.dim(row.goal)}`);
-      out(renderTable(['PROMPT', 'COMPLETION', 'TOTAL', 'TASKS'], [[
+      out(renderTable(['PROMPT', 'COMPLETION', 'TOTAL', 'CACHE_READ', 'CACHE_WRITE', 'TASKS'], [[
         row.promptTokens,
         row.completionTokens,
         row.totalTokens,
+        row.cacheReadTokens,
+        row.cacheWriteTokens,
         row.taskCount,
       ]]));
     }
@@ -122,9 +130,18 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
         promptTokens: acc.promptTokens + r.promptTokens,
         completionTokens: acc.completionTokens + r.completionTokens,
         totalTokens: acc.totalTokens + r.totalTokens,
+        cacheReadTokens: acc.cacheReadTokens + r.cacheReadTokens,
+        cacheWriteTokens: acc.cacheWriteTokens + r.cacheWriteTokens,
         taskCount: acc.taskCount + r.taskCount,
       }),
-      { promptTokens: 0, completionTokens: 0, totalTokens: 0, taskCount: 0 },
+      {
+        promptTokens: 0,
+        completionTokens: 0,
+        totalTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+        taskCount: 0,
+      },
     );
     out(JSON.stringify({ plans: rows, totals: grand }, null, 2));
     return 0;
@@ -132,7 +149,7 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
 
   out(
     renderTable(
-      ['PLAN', 'STATUS', 'GOAL', 'PROMPT', 'COMPLETION', 'TOTAL', 'TASKS'],
+      ['PLAN', 'STATUS', 'GOAL', 'PROMPT', 'COMPLETION', 'TOTAL', 'CACHE_READ', 'CACHE_WRITE', 'TASKS'],
       rows.map((r) => [
         shortId(r.planId),
         r.status,
@@ -140,6 +157,8 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
         r.promptTokens,
         r.completionTokens,
         r.totalTokens,
+        r.cacheReadTokens,
+        r.cacheWriteTokens,
         r.taskCount,
       ]),
     ),
@@ -149,11 +168,18 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
       prompt: acc.prompt + r.promptTokens,
       completion: acc.completion + r.completionTokens,
       total: acc.total + r.totalTokens,
+      cacheRead: acc.cacheRead + r.cacheReadTokens,
+      cacheWrite: acc.cacheWrite + r.cacheWriteTokens,
       tasks: acc.tasks + r.taskCount,
     }),
-    { prompt: 0, completion: 0, total: 0, tasks: 0 },
+    { prompt: 0, completion: 0, total: 0, cacheRead: 0, cacheWrite: 0, tasks: 0 },
   );
-  out(color.dim(`Totals: ${grand.prompt} prompt + ${grand.completion} completion = ${grand.total} tokens across ${grand.tasks} task(s)`));
+  out(
+    color.dim(
+      `Totals: ${grand.prompt} prompt + ${grand.completion} completion = ${grand.total} tokens` +
+        ` (cache ${grand.cacheRead} read / ${grand.cacheWrite} write) across ${grand.tasks} task(s)`,
+    ),
+  );
   return 0;
 }
 

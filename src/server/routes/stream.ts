@@ -21,6 +21,12 @@ export function streamRouter(ctx: ServerContext): Router {
   router.get('/api/stream/:planId', (req, res) => {
     const planId = req.params.planId;
 
+    const unsubscribe = ctx.hub.subscribe(planId, res);
+    if (!unsubscribe) {
+      res.status(503).json({ error: 'SSE connection limit reached' });
+      return;
+    }
+
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache, no-transform');
     res.setHeader('Connection', 'keep-alive');
@@ -28,8 +34,6 @@ export function streamRouter(ctx: ServerContext): Router {
     res.flushHeaders();
     // Initial comment frame — lets clients (and proxies) see the stream open.
     res.write(': stream-open\n\n');
-
-    const unsubscribe = ctx.hub.subscribe(planId, res);
 
     // Heartbeat keeps idle connections (proxies) from timing out.
     const heartbeat = setInterval(() => {

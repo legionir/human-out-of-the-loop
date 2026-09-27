@@ -24,6 +24,7 @@ import { LOG_FORMAT, parseDiff, parseLog, type DiffFile, type LogEntry } from '.
  */
 
 const DEFAULT_CONTEXT_LINES = 3;
+const GIT_PATCH_CHAR_CAP = 16_000;
 
 const inputSchema = z.object({
   directory: z
@@ -121,7 +122,6 @@ export function createGitShowTool(projectRoot: string) {
         return {
           ...(failureResult(meta) as GitShowOutcome),
           directory: repo.display,
-          repository: repo.root,
         };
       }
       const commit = parseLog(meta.stdout)[0];
@@ -141,28 +141,32 @@ export function createGitShowTool(projectRoot: string) {
         return {
           ...(failureResult(patch) as GitShowOutcome),
           directory: repo.display,
-          repository: repo.root,
           ...(commit ? { commit } : {}),
         };
       }
 
+      let showText = patch.stdout.trimEnd();
+      let truncated = Boolean(patch.truncated || meta.truncated);
+      if (!statOnly && showText.length > GIT_PATCH_CHAR_CAP) {
+        showText = showText.slice(0, GIT_PATCH_CHAR_CAP);
+        truncated = true;
+      }
       const summary = statOnly
         ? { files: [], additions: 0, deletions: 0 }
-        : parseDiff(patch.stdout);
+        : parseDiff(showText);
       return {
         success: true,
         directory: repo.display,
-        repository: repo.root,
         revision,
         ...(commit ? { commit } : {}),
-        show: patch.stdout.trimEnd(),
+        show: showText,
         files: summary.files,
         paths: summary.files.map((file) => file.path),
         filesChanged: summary.files.length,
         additions: summary.additions,
         deletions: summary.deletions,
-        bytes: Buffer.byteLength(patch.stdout),
-        truncated: patch.truncated || meta.truncated,
+        bytes: Buffer.byteLength(showText),
+        truncated,
         warnings: (patch.stderr || meta.stderr).trim() || undefined,
       };
     },

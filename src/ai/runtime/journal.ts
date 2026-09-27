@@ -374,9 +374,7 @@ export class JournalWriter {
   log(entry: JournalEntry): void {
     if (!this.enabled) return;
     try {
-      const prepared = this.prepare(entry);
-      const line = `${JSON.stringify(prepared)}\n`;
-      this.write(line, this.fdFor(this.now()));
+      this.write(this.encode(entry), this.fdFor(this.now()));
     } catch {
       this.reportFailure();
     }
@@ -422,8 +420,8 @@ export class JournalWriter {
 
   // ── Private ────────────────────────────────────────────────────
 
-  /** Redact, summarize, cap. */
-  private prepare(entry: JournalEntry): JournalEntry {
+  /** Redact once, stringify once (F-08). Oversized entries stringify a trimmed copy. */
+  private encode(entry: JournalEntry): string {
     const redacted: JournalEntry = {
       ...entry,
       ...(entry.input !== undefined
@@ -439,9 +437,8 @@ export class JournalWriter {
     }
 
     const encoded = JSON.stringify(redacted);
-    if (encoded.length <= this.maxEntryBytes) return redacted;
+    if (encoded.length <= this.maxEntryBytes) return `${encoded}\n`;
 
-    // Too big: keep the metadata, keep a preview, drop the payloads.
     const preview = (value: unknown): string => {
       const text = typeof value === 'string' ? value : JSON.stringify(value ?? null);
       return text.length > PREVIEW_CHARS ? `${text.slice(0, PREVIEW_CHARS)}…` : text;
@@ -455,7 +452,7 @@ export class JournalWriter {
         : {}),
     };
     if (this.includeResults === 'summary') delete trimmed.result;
-    return trimmed;
+    return `${JSON.stringify(trimmed)}\n`;
   }
 
   /** Open (or reopen) the file for `date`, rotating on a day change. */
@@ -547,7 +544,10 @@ export function withJournal<T extends Record<string, unknown>>(
             input,
             ...(writer.includeResults === 'full' ? { result: output } : {}),
             summary: summarize(name, input, output, status.ok),
-            ...(artifactsOf(input, output) ? { artifacts: artifactsOf(input, output) } : {}),
+            ...(() => {
+              const artifacts = artifactsOf(input, output);
+              return artifacts ? { artifacts } : {};
+            })(),
             ...(status.ok
               ? {}
               : { error: status.error, ...(status.code ? { code: status.code } : {}) }),
