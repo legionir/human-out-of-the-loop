@@ -26,42 +26,67 @@ function jsonLength(value: unknown): number {
   }
 }
 
+/** A clipped field keeps at least this much, so it still says something. */
+const MIN_FIELD_CHARS = 500;
+const TRUNCATION_MARK = '…';
+
 /**
- * If `value` serialises under the cap it is returned unchanged; otherwise
- * large string/array fields are clipped and `truncated: true` is set.
+ * If `value` serialises under the cap it is returned unchanged; otherwise the
+ * large string/array fields are clipped — by just as much as the cap needs,
+ * biggest field first — and `truncated: true` is set.  A 31 000-char file
+ * therefore still hands the model ~30 000 chars, not a 2 000-char stub.
  */
-export function capToolResult(value: unknown): unknown {
+export function capToolResult(value: unknown, cap: number = TOOL_RESULT_CHAR_CAP): unknown {
   if (value === undefined || value === null) return value;
-  if (jsonLength(value) <= TOOL_RESULT_CHAR_CAP) return value;
+  if (jsonLength(value) <= cap) return value;
 
   if (typeof value === 'string') {
-    return `${value.slice(0, TOOL_RESULT_CHAR_CAP)}…`;
+    return `${value.slice(0, cap)}${TRUNCATION_MARK}`;
   }
 
   if (Array.isArray(value)) {
-    return {
-      truncated: true,
-      preview: value.slice(0, 20),
-    };
+    let keep = value.length;
+    while (keep > 0 && jsonLength({ truncated: true, preview: value.slice(0, keep) }) > cap) {
+      keep = Math.floor(keep / 2);
+    }
+    return { truncated: true, total: value.length, preview: value.slice(0, keep) };
   }
 
   if (typeof value !== 'object') return value;
 
   const clone: Record<string, unknown> = { ...(value as Record<string, unknown>), truncated: true };
-  for (const key of SHRINK_KEYS) {
+  const fields = SHRINK_KEYS.filter((key) => {
     const field = clone[key];
-    if (typeof field === 'string' && field.length > 2_000) {
-      clone[key] = `${field.slice(0, 2_000)}…`;
-    } else if (Array.isArray(field) && field.length > 40) {
-      clone[key] = field.slice(0, 40);
+    return (typeof field === 'string' && field.length > MIN_FIELD_CHARS) || Array.isArray(field);
+  }).sort((a, b) => jsonLength(clone[b]) - jsonLength(clone[a]));
+
+  for (const key of fields) {
+    const over = jsonLength(clone) - cap;
+    if (over <= 0) break;
+    const field = clone[key];
+    if (typeof field === 'string') {
+      // JSON escaping can make a char cost more than one; aim a little low.
+      const target = Math.max(MIN_FIELD_CHARS, field.length - over - 64);
+      clone[key] = `${field.slice(0, target)}${TRUNCATION_MARK}`;
+      // Escape-heavy text: keep halving until it fits or hits the floor.
+      while (jsonLength(clone) > cap && (clone[key] as string).length > MIN_FIELD_CHARS + 1) {
+        const cur = clone[key] as string;
+        clone[key] = `${cur.slice(0, Math.max(MIN_FIELD_CHARS, Math.floor(cur.length / 2)))}${TRUNCATION_MARK}`;
+      }
+    } else if (Array.isArray(field)) {
+      let keep = field.length;
+      while (keep > 0 && jsonLength(clone) > cap) {
+        keep = Math.floor(keep / 2);
+        clone[key] = field.slice(0, keep);
+      }
     }
   }
 
-  if (jsonLength(clone) <= TOOL_RESULT_CHAR_CAP) return clone;
+  if (jsonLength(clone) <= cap) return clone;
 
   return {
     success: clone.success ?? true,
     truncated: true,
-    preview: JSON.stringify(clone).slice(0, 2_000),
+    preview: JSON.stringify(clone).slice(0, cap - 200),
   };
 }

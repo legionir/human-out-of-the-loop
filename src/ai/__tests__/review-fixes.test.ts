@@ -376,3 +376,24 @@ describe('R-19 — language detection ignores quoted code', () => {
     expect(detectLanguage('Please translate the word "سلام" into French for the greeting page')).toBeUndefined();
   });
 });
+
+describe('R-20 — the tool-result cap trims to the budget, not to a stub', () => {
+  it('a file just over the cap keeps almost all of its content', async () => {
+    const { capToolResult, TOOL_RESULT_CHAR_CAP } = await import('../runtime/tool-result-cap.js');
+    const capped = capToolResult({ success: true, content: 'a'.repeat(31_000), filePath: 'x.ts' }) as {
+      content: string;
+      truncated: boolean;
+      filePath: string;
+    };
+    expect(capped.truncated).toBe(true);
+    expect(capped.filePath).toBe('x.ts');
+    expect(capped.content.length).toBeGreaterThan(29_000);
+    expect(JSON.stringify(capped).length).toBeLessThanOrEqual(TOOL_RESULT_CHAR_CAP);
+  });
+
+  it('escape-heavy content still fits', async () => {
+    const { capToolResult, TOOL_RESULT_CHAR_CAP } = await import('../runtime/tool-result-cap.js');
+    const capped = capToolResult({ content: '"\n'.repeat(20_000) });
+    expect(JSON.stringify(capped).length).toBeLessThanOrEqual(TOOL_RESULT_CHAR_CAP);
+  });
+});
