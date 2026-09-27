@@ -72,7 +72,7 @@ describe('Phase 39 — memory: the reference toolset, per project', () => {
     const empty = (await readGraph({})) as unknown as Graphish;
     expect(empty.success).toBe(true);
     expect(empty.entities).toEqual([]);
-    expect(empty.memoryFile).toBe(path.join('.ai-runtime', 'memory.json'));
+    expect(empty.memoryFile).toBe('.ai-runtime/memory.json'); // forward slashes on every platform
 
     const created = (await createEntities({
       entities: [
