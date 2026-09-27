@@ -119,8 +119,11 @@ jobs:
           } > "$root/.env"
           chmod 600 "$root/.env"
           python3 - "$root" "$HOTL_MODEL" "${HOTL_BASE_URL:-}" <<'PY'
-          import json, sys
-          root, model_id, base_url = sys.argv[1], sys.argv[2], sys.argv[3]
+          import json, os, re, sys
+          root, model_name, base_url = sys.argv[1], sys.argv[2], sys.argv[3]
+          # Registry ids allow only [a-z0-9_-]; a provider model name such as
+          # "mimo-v2.6-flash-free" keeps its name but gets a safe id.
+          model_id = re.sub(r'[^a-z0-9_-]+', '-', model_name.lower()).strip('-')
           path = f'{root}/registry/models/{model_id}.json'
           try:
               cfg = json.load(open(path))
@@ -128,7 +131,11 @@ jobs:
               # Unknown id: register it on top of the default to keep the run simple.
               cfg = json.load(open(f'{root}/registry/models/gpt-4o.json'))
               cfg['id'] = model_id
-              cfg['model'] = model_id
+              cfg['model'] = model_name
+              cfg['description'] = f'{model_name} (real-provider run)'
+              cfg.pop('pricing', None)
+          with open(os.environ['GITHUB_ENV'], 'a') as env_file:
+              env_file.write(f'HOTL_MODEL_ID={model_id}\n')
           if base_url:
               cfg.setdefault('config', {})['baseURL'] = base_url
           json.dump(cfg, open(path, 'w'), indent=2)
@@ -155,7 +162,7 @@ jobs:
           set -euo pipefail
           hootl run "$HOTL_RUN_GOAL" \
             --yes --persistent --timeout-ms 180000 \
-            --project-root "$HOTL_PROJECT_ROOT" --model "$HOTL_MODEL" \
+            --project-root "$HOTL_PROJECT_ROOT" --model "$HOTL_MODEL_ID" \
             --label "github-actions"
           echo "--- plans ---"
           hootl plans list --project-root "$HOTL_PROJECT_ROOT"
