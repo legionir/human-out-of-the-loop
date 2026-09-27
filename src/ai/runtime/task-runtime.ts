@@ -206,6 +206,12 @@ export class TaskRuntime {
   // now truly aborts the in-flight generateText (not just bookkeeping).
   private readonly abortControllers = new Map<string, AbortController>();
   private readonly children = new Map<string, Set<string>>();
+  /**
+   * C-07: parents blocked in `delegate_task` waiting for their child.  They
+   * lend their concurrency slot to the child — otherwise N parents that all
+   * delegate at once fill every slot and no child can ever start.
+   */
+  private readonly suspendedParents = new Set<string>();
   /** C-01: lock releases waiting for a timed-out task's work to settle. */
   private readonly lingering = new Set<Promise<void>>();
   private readonly completedOrder: string[] = [];
@@ -303,6 +309,13 @@ export class TaskRuntime {
     return this.runningIds.size;
   }
 
+  /** Running tasks that hold a slot (a parent waiting on its child does not). */
+  private activeSlotCount(): number {
+    let suspended = 0;
+    for (const id of this.suspendedParents) if (this.runningIds.has(id)) suspended += 1;
+    return this.runningIds.size - suspended;
+  }
+
   getPendingCount(): number {
     return this.pendingIds.size;
   }
@@ -314,8 +327,7 @@ export class TaskRuntime {
    * respecting resource locks.
    */
   private scheduleNext(): void {
-    const runningCount = this.getRunningCount();
-    const availableSlots = this.maxConcurrentTasks - runningCount;
+    const availableSlots = this.maxConcurrentTasks - this.activeSlotCount();
 
     if (availableSlots <= 0) return;
 
@@ -606,7 +618,20 @@ export class TaskRuntime {
     }
   }
 
-  async waitForTask(taskId: string): Promise<Task | undefined> {
+  async waitForTask(taskId: string, parentTaskId?: string): Promise<Task | undefined> {
+    const lend = parentTaskId !== undefined && this.runningIds.has(parentTaskId);
+    if (lend) {
+      this.suspendedParents.add(parentTaskId);
+      this.scheduleNext();
+    }
+    try {
+      return await this.waitForTaskSettled(taskId);
+    } finally {
+      if (lend) this.suspendedParents.delete(parentTaskId);
+    }
+  }
+
+  private async waitForTaskSettled(taskId: string): Promise<Task | undefined> {
     const terminal = new Set(['completed', 'failed', 'cancelled']);
     for (;;) {
       const task = this.tasks.get(taskId);

@@ -217,3 +217,31 @@ describe('R-12 — usage accounting', () => {
     expect(second.review.usage.totalTokens).toBe(15);
   });
 });
+
+describe('R-13 — delegate_task cannot deadlock the concurrency slots', () => {
+  it('a parent waiting on its child lends its slot (maxConcurrentTasks = 1)', async () => {
+    const { TaskRuntime } = await import('../runtime/task-runtime.js');
+    const { EventBus } = await import('../runtime/event-bus.js');
+    const agent = { agentId: 'a', tools: {}, systemPrompt: '', model: {} } as never;
+    let tr!: InstanceType<typeof TaskRuntime>;
+    const agentRuntime = {
+      run: async (o: { taskId: string; prompt: string }) => {
+        if (o.prompt === 'parent') {
+          const child = tr.createTask({ agent, prompt: 'child', parentTaskId: o.taskId });
+          const done = await tr.waitForTask(child, o.taskId);
+          return { taskId: o.taskId, agentId: 'a', success: true, summary: `child:${done?.status}`, result: '', toolsUsed: [], errors: [] };
+        }
+        return { taskId: o.taskId, agentId: 'a', success: true, summary: 'ok', result: '', toolsUsed: [], errors: [] };
+      },
+    };
+    tr = new TaskRuntime({ maxConcurrentTasks: 1, eventBus: new EventBus(), agentRuntime: agentRuntime as never });
+    const parent = tr.createTask({ agent, prompt: 'parent' });
+    const outcome = await Promise.race([
+      tr.waitForTask(parent),
+      new Promise((r) => setTimeout(() => r('deadlock'), 2_000)),
+    ]);
+    expect(outcome).not.toBe('deadlock');
+    expect(tr.getStatus(parent)?.summary).toBe('child:completed');
+    tr.destroy();
+  });
+});

@@ -85,7 +85,7 @@ export interface DelegateTaskDeps {
   resolveAgentId?: (agentId: string) => AgentDefinition | undefined;
   delegationGuard?: DelegationGuard;
   currentDelegationDepth?: number;
-  waitForTask?: (taskId: string) => Promise<Task | undefined>;
+  waitForTask?: (taskId: string, parentTaskId?: string) => Promise<Task | undefined>;
 }
 
 export function createDelegateTaskTool(deps: DelegateTaskDeps) {
@@ -240,7 +240,7 @@ export function createDelegateTaskTool(deps: DelegateTaskDeps) {
           ...(runCtx?.taskId ? { parentTaskId: runCtx.taskId } : {}),
         });
 
-        const child = deps.waitForTask ? await deps.waitForTask(taskId) : undefined;
+        const child = deps.waitForTask ? await deps.waitForTask(taskId, runCtx?.taskId) : undefined;
 
         return {
           success: true as const,

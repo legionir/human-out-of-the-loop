@@ -900,7 +900,7 @@ export class Orchestrator {
           ...(meta?.parentTaskId ? { parentTaskId: meta.parentTaskId } : {}),
         });
       },
-      waitForTask: (taskId) => this.taskRuntime.waitForTask(taskId),
+      waitForTask: (taskId, parentTaskId) => this.taskRuntime.waitForTask(taskId, parentTaskId),
       resolveAgentId: (id: string) => this.agentRegistry.get(id),
       // Phase 19 (CFG-04): the guard is actually enforced now
       delegationGuard: this.delegationGuard,
