@@ -5,6 +5,10 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.12] — 2026-09-27 — Project index for agent context
+
+Adds `hootl index` and `docs/PROJECT_INDEX.md`: a static `structure.json` (directories + direct file counts) separate from on-demand `files.json` (`size` + `lines`). Traversal is parallel `readdir({ withFileTypes })`; metadata is one `readFile` per file (no extra `stat`). Tools: `list_tree`, `list_files`, `find_files`, `search`, `read_file_range`.
+
 ## [27.17.11] — 2026-09-27 — Phase H: web UI ↔ server
 
 Closes every open row of **Phase H** in `docs/UNIFIED_EXECUTION_PLAN.md` (H-01…H-14).

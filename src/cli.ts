@@ -48,6 +48,7 @@ import {
 } from './cli/commands/registry.js';
 import { usageCommand } from './cli/commands/usage.js';
 import { tasksListCommand, tasksShowCommand } from './cli/commands/tasks.js';
+import { indexCommand } from './cli/commands/index-project.js';
 import { err } from './cli/utils/output.js';
 import { startRepl, parseInteractiveArgs } from './cli/repl.js';
 
@@ -225,6 +226,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '  models / personas / skills / tools',
         '               list what the runtime can use (registry introspection)',
         '  mcp          list configured MCP servers and test a connection',
+        '  index        project tree for agent context (structure.json + files.json)',
         '  serve        expose THESE tools to an MCP client (--mcp; --read-only for untrusted clients)',
         '',
         'CONFIGURATION PRECEDENCE (highest first)',
@@ -764,6 +766,45 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         'SOURCE',
         '  <project-root>/.ai-runtime/observability.jsonl; a project without persistent',
         '  runs has no log, which is reported as an empty result (not an error).',
+      ),
+    );
+
+  program
+    .command('index')
+    .description('Build the project tree index (directory counts + on-demand file metadata)')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .option(
+      '--write [dir]',
+      'write structure.json and files.json (default: <root>/.ai-runtime/project-index)',
+    )
+    .option('--files <path>', 'list_files: names + size + lines for one directory')
+    .option('--find <pattern>', 'find_files: glob against indexed names')
+    .option('--search <query>', 'search: regex/text over file contents')
+    .option('--path <dir>', 'limit --find / --search to this directory')
+    .action(async (opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await indexCommand({
+        projectRoot: opts.projectRoot as string | undefined,
+        write: opts.write as boolean | string | undefined,
+        files: opts.files as string | undefined,
+        find: opts.find as string | undefined,
+        search: opts.search as string | undefined,
+        path: opts.path as string | undefined,
+      });
+    })
+    .addHelpText(
+      'after',
+      helpBlock(
+        'WHAT THIS IS',
+        '  Two indexes, never mixed: structure.json is directories + direct file',
+        '  counts (static agent context). files.json is per-folder name → size/lines',
+        '  and is loaded only when a path is inspected.  See docs/PROJECT_INDEX.md.',
+        '',
+        'EXAMPLES',
+        `  ${binName} index                         print the tree (list_tree)`,
+        `  ${binName} index --files src/ai          list_files for one folder`,
+        `  ${binName} index --find "*.ts" --path src`,
+        `  ${binName} index --search TODO`,
+        `  ${binName} index --write                 write both JSON files`,
       ),
     );
 
