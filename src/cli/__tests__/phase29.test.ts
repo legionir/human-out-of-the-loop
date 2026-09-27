@@ -245,7 +245,7 @@ describe('Phase 29 — run pre-flight is a usage error, not a crash', () => {
       '--project-root',
       projectRoot,
     ]);
-    expect(code).toBe(2);
+    expect(code, errOut).toBe(2);
     expect(errOut).toContain('Session "session_nope" not found');
   });
 

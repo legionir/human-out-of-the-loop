@@ -10,7 +10,7 @@ vi.mock('ai', async () => {
 });
 
 import { generateObject, generateText } from 'ai';
-import { Orchestrator } from '../orchestrator.js';
+import { Orchestrator, defersToPlan } from '../orchestrator.js';
 import { parseRunMode } from '../modes.js';
 import {
   buildAssessmentPrompt,
@@ -376,6 +376,60 @@ describe('v27.17.0 — a greeting is answered, not planned', () => {
     });
     expect(result.kind).toBe('plan');
     expect(result.report).not.toContain('💬 Answer');
+  });
+
+  it('auto mode: an answer that only defers to @plan becomes a plan (real Persian run)', async () => {
+    // The real gateway run: "یک فایل … بساز" was classified as a conversation,
+    // and the answer told the user to retype it with @plan.
+    mockGenerateObject
+      .mockResolvedValueOnce({
+        object: { kind: 'answer', isClear: true, needsClarification: [], answer: 'draft' },
+      } as never)
+      .mockResolvedValueOnce({
+        object: {
+          kind: 'plan',
+          isClear: true,
+          needsClarification: [],
+          plan: {
+            goal: 'notes/salam.txt',
+            steps: [
+              {
+                id: 'step-1',
+                description: 'write notes/salam.txt',
+                dependsOn: [],
+                assignedPersona: 'coder',
+                assignedSkills: ['file_management'],
+                assignedTools: ['write_file'],
+                claimedResources: ['notes/salam.txt'],
+                acceptanceCriteria: 'the file exists',
+              },
+            ],
+          },
+        },
+      } as never);
+    mockGenerateText.mockResolvedValueOnce({
+      text: 'برای این کار باید فایل بسازم؛ لطفاً با `@plan یک فایل بساز` اجرا کنید.',
+      usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
+      steps: [],
+    } as never);
+
+    let confirmedPlan: unknown;
+    const result = await orchestrator().run('یک فایل به نام notes/salam.txt بساز', {
+      confirmCallback: async (plan) => {
+        confirmedPlan = plan;
+        return { confirmed: false };
+      },
+    });
+    expect(result.report).not.toContain('💬 Answer');
+    expect(confirmedPlan).toBeDefined();
+    expect(mockGenerateObject).toHaveBeenCalledTimes(2);
+  });
+
+  it('defersToPlan recognises the @plan pointer, not an e-mail-like word', () => {
+    expect(defersToPlan('Run it as `@plan build it`.')).toBe(true);
+    expect(defersToPlan('@plan do it')).toBe(true);
+    expect(defersToPlan('write to me@planet.example')).toBe(false);
+    expect(defersToPlan('Here is the answer.')).toBe(false);
   });
 
   it('@chat (mode chat) never plans, even when the model offers a plan', async () => {

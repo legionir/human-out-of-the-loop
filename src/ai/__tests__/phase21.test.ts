@@ -380,7 +380,10 @@ describe('PERF-04: ObservabilityLogger (reused fd, sync durability)', () => {
     }
     const dt = performance.now() - t0;
 
-    expect(dt).toBeLessThan(100);
+    // A synchronous write costs more on Windows (NTFS + Defender on CI
+    // runners: ~170 ms measured); the budget still catches a regression to
+    // one open/close per event, which costs seconds there.
+    expect(dt).toBeLessThan(process.platform === 'win32' ? 500 : 100);
 
     // Synchronous durability: everything is readable immediately.
     const entries = logger.readAll();

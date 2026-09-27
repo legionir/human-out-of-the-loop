@@ -81,7 +81,8 @@ function withFile(projectRoot: string, outcome: MemoryOutcome): MemoryOutcome {
   return {
     ...outcome,
     memoryFile:
-      path.relative(projectRoot, memoryFilePath(projectRoot)) || memoryFilePath(projectRoot),
+      // Forward slashes on every platform, like search_files.
+      path.relative(projectRoot, memoryFilePath(projectRoot)).split(path.sep).join('/') || memoryFilePath(projectRoot),
   };
 }
 

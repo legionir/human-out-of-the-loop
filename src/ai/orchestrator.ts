@@ -299,6 +299,16 @@ export function createCliConfirmCallback(): (planText: string) => Promise<{ conf
 
 // ─── Orchestrator ────────────────────────────────────────────────
 
+
+/**
+ * The answer prompt tells the chat model to point the user at `@plan` when a
+ * request needs files changed; an answer that does so is a deferral, not an
+ * answer.
+ */
+export function defersToPlan(answer: string): boolean {
+  return /(^|[\s`'"(«])@plan\b/.test(answer);
+}
+
 export class Orchestrator {
   /**
    * The validated, defaults-applied config.  Exposed read-only so
@@ -1138,14 +1148,37 @@ export class Orchestrator {
     // read-only tools), record it as an answered interaction, and stop — no
     // plan, no confirmation, no execution.
     if (planningResult.kind === 'answer') {
-      return await this.answerRun({
+      const answered = await this.answerRun({
         userRequest,
         sessionId,
         ...(interaction ? { interactionId: interaction.id } : {}),
         modelId: runModelId,
         ...(planningResult.answer ? { draft: planningResult.answer } : {}),
         mode,
+        escalateToPlan: mode === 'auto',
       });
+      if (answered !== 'escalate') return answered;
+      // Auto mode: the assessment called this a conversation, but the answer
+      // itself says the request needs work (it points at `@plan`, as the
+      // answer prompt tells it to).  Found on a real Persian request: the
+      // user was asked to retype it with @plan.  Plan it instead.
+      this.observabilityLogger.log({
+        eventType: 'system:info',
+        message: 'Auto mode: the answer deferred to @plan — planning the request instead.',
+        level: 'info',
+      });
+      try {
+        throwIfAborted(abortSignal);
+        planningResult = await this.planner.plan(userRequest, undefined, runModelId, 'plan', abortSignal);
+      } catch (err) {
+        if (isAbortError(err) || abortSignal?.aborted) {
+          return cancelledResult(
+            'Run cancelled during planning.',
+            '🛑 Run cancelled during planning — no further model calls will be made.',
+          );
+        }
+        throw err;
+      }
     }
 
     let clarifyRound = 0;
@@ -1203,7 +1236,7 @@ export class Orchestrator {
     // properties of undefined (setting 'sessionId')" and the interaction
     // was left 'pending' forever.
     if (planningResult.kind === 'answer') {
-      return await this.answerRun({
+      const answered = await this.answerRun({
         userRequest,
         sessionId,
         ...(interaction ? { interactionId: interaction.id } : {}),
@@ -1211,6 +1244,8 @@ export class Orchestrator {
         ...(planningResult.answer ? { draft: planningResult.answer } : {}),
         mode,
       });
+      // No escalation requested here, so this is always a result.
+      return answered as OrchestratorResult;
     }
 
     if (clarificationDeclined) {
@@ -1715,7 +1750,12 @@ export class Orchestrator {
     /** The model's draft from the assessment — used if the answer call fails. */
     draft?: string;
     mode: RunMode;
-  }): Promise<OrchestratorResult> {
+    /**
+     * Return `'escalate'` (before recording anything) when the answer only
+     * defers the request to `@plan` — auto mode then plans it.
+     */
+    escalateToPlan?: boolean;
+  }): Promise<OrchestratorResult | 'escalate'> {
     const { userRequest, sessionId, interactionId, modelId, draft, mode } = params;
     const language = detectLanguage(userRequest);
     const toolIds = readOnlyToolIds();
@@ -1750,6 +1790,8 @@ export class Orchestrator {
     // A failed answer call is not a failed conversation when the assessment
     // already wrote the reply (auto mode) — the user still gets an answer.
     if (!text && draft) text = draft;
+
+    if (params.escalateToPlan && text && defersToPlan(text)) return 'escalate';
 
     const body = text ?? `The request could not be answered: ${errors.join('; ')}`;
     const report = `💬 Answer\n\n${body}`;
