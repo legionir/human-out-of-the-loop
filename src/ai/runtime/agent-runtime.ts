@@ -666,6 +666,7 @@ export class AgentRuntime {
           onThought,
           context: { taskId, agentId, ...planContext },
           generationSettings: agent.generationSettings,
+          contextBudgetChars,
         });
       } catch (err) {
         if (!stillWanted()) throw err;
@@ -780,9 +781,11 @@ export class AgentRuntime {
     signal?: AbortSignal;
     onThought: ThoughtSink;
     context: { taskId?: string; agentId?: string; planId?: string; planStepId?: string };
+    contextBudgetChars?: number;
   }): Promise<SdkRunOutcome> {
     const { model, system, prompt, maxSteps, tools, signal, onThought, context, generationSettings } =
       params;
+    const budgetChars = params.contextBudgetChars ?? DEFAULT_CONTEXT_BUDGET_CHARS;
 
     // `await` on purpose: the SDK returns the result object synchronously, and
     // awaiting a non-promise is a no-op — but a provider shim (a test double,
@@ -802,7 +805,7 @@ export class AgentRuntime {
           // drops; the raw chunk still carries it.
           includeRawChunks: true,
           prepareStep: (({ messages }: { messages: unknown[] }) => ({
-            messages: trimConversationMessages(messages, DEFAULT_CONTEXT_BUDGET_CHARS),
+            messages: trimConversationMessages(messages, budgetChars),
           })) as never,
         },
         generationSettings

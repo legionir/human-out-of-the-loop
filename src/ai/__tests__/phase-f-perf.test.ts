@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { z } from 'zod';
 import type { LanguageModel } from 'ai';
 import type { ServerResponse } from 'node:http';
 import { environmentBullets, collectEnvironmentFacts } from '../environment-context.js';
@@ -341,6 +342,55 @@ describe('F-04 — prepareStep conversation budget', () => {
     expect(JSON.stringify(messages).length).toBeGreaterThan(budget);
     const trimmed = trimConversationMessages(messages, budget);
     expect(JSON.stringify(trimmed).length).toBeLessThanOrEqual(budget);
+  });
+
+  it('trimmed tool results keep a ToolResultOutput shape the provider can send', async () => {
+    const { generateText: realGenerateText, tool, stepCountIs } =
+      await vi.importActual<typeof import('ai')>('ai');
+    const { createOpenAI } = await import('@ai-sdk/openai');
+    const bodies: Array<{ messages: Array<{ role: string; content?: unknown }> }> = [];
+    let n = 0;
+    const fetchMock = async (_url: unknown, init: { body: string }) => {
+      bodies.push(JSON.parse(init.body));
+      n += 1;
+      const message =
+        n <= 5
+          ? {
+              role: 'assistant',
+              content: null,
+              tool_calls: [
+                { id: `c${n}`, type: 'function', function: { name: 'echo', arguments: '{"x":1}' } },
+              ],
+            }
+          : { role: 'assistant', content: 'done' };
+      return new Response(
+        JSON.stringify({
+          id: 'x',
+          object: 'chat.completion',
+          created: 0,
+          model: 'm',
+          choices: [{ index: 0, message, finish_reason: n <= 5 ? 'tool_calls' : 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      );
+    };
+    const openai = createOpenAI({ apiKey: 'k', fetch: fetchMock as never });
+    await realGenerateText({
+      model: openai.chat('m'),
+      prompt: 'hi',
+      stopWhen: stepCountIs(8),
+      tools: {
+        echo: tool({ inputSchema: z.object({ x: z.number() }), execute: async () => ({ ok: true }) }),
+      },
+      prepareStep: (({ messages }: { messages: unknown[] }) => ({
+        messages: trimConversationMessages(messages),
+      })) as never,
+    });
+    const toolMessages = bodies[bodies.length - 1]!.messages.filter((m) => m.role === 'tool');
+    expect(toolMessages.length).toBe(5);
+    for (const m of toolMessages) expect(typeof m.content).toBe('string');
+    expect(toolMessages[0]!.content).toContain('omitted');
   });
 });
 
