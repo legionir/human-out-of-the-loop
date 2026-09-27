@@ -8,6 +8,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { Orchestrator } from '../orchestrator.js';
 import { finalizePlan } from '../planning/planner.js';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 function planResult(goal: string) {
   return {
@@ -244,4 +247,28 @@ describe('R-13 — delegate_task cannot deadlock the concurrency slots', () => {
     expect(tr.getStatus(parent)?.summary).toBe('child:completed');
     tr.destroy();
   });
+});
+
+describe('R-14 — plan ownership is claimed atomically across processes', () => {
+  it('of several processes racing for one plan, exactly one wins', async () => {
+    const { spawn } = await import('node:child_process');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-owner-'));
+    const script = `
+      import { tryAcquirePlanOwner } from ${JSON.stringify(path.resolve(__dirname, '../runtime/plan-owner.ts'))};
+      const h = tryAcquirePlanOwner(${JSON.stringify(dir)}, 'plan_race');
+      process.stdout.write(h ? 'WON' : 'LOST');
+      setTimeout(() => process.exit(0), 300);
+    `;
+    const tsx = path.resolve(__dirname, '../../../node_modules/.bin/tsx');
+    const runOne = () =>
+      new Promise<string>((resolve) => {
+        const child = spawn(tsx, ['--input-type=module', '-e', script]);
+        let out = '';
+        child.stdout.on('data', (d) => (out += d));
+        child.on('close', () => resolve(out.trim()));
+      });
+    const results = await Promise.all([runOne(), runOne(), runOne(), runOne()]);
+    expect(results.filter((r) => r === 'WON')).toHaveLength(1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }, 30_000);
 });

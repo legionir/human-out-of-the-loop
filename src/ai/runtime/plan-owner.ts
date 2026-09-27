@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { atomicWriteFileSync } from './atomic-write.js';
+import { withFileLockSync } from './file-lock.js';
 
 /**
  * B-01 — cross-process ownership of a running plan.
@@ -97,10 +98,14 @@ export function tryAcquirePlanOwner(
   const staleMs = options.staleMs ?? PLAN_OWNER_STALE_MS;
   const heartbeatMs = options.heartbeatMs ?? PLAN_OWNER_HEARTBEAT_MS;
   const fp = planOwnerFilePath(plansDir, planId);
-  if (isPlanOwnerAlive(plansDir, planId, Date.now(), staleMs)) {
-    return undefined;
-  }
-  writeOwner(fp, planId);
+  // Check-and-claim under a lock: two processes resuming the same plan at
+  // once must not both see "no live owner" and both take it.
+  const claimed = withFileLockSync(`${fp}.lock`, () => {
+    if (isPlanOwnerAlive(plansDir, planId, Date.now(), staleMs)) return false;
+    writeOwner(fp, planId);
+    return true;
+  });
+  if (!claimed) return undefined;
   const timer = setInterval(() => {
     try {
       writeOwner(fp, planId);
