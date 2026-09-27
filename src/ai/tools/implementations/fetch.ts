@@ -656,11 +656,14 @@ export function createFetchTool(projectRoot: string, toolOptions: FetchToolOptio
       if (!isTextual(contentType)) {
         return {
           ...base,
+          success: false,
+          code: 'UNSUPPORTED_CONTENT_TYPE',
           unsupportedContentType: true,
-          content: `[${contentType.split(';')[0]} — not text, so the body was not downloaded]`,
+          content: '',
           totalChars: 0,
           startIndex,
           truncated: false,
+          error: `Content type "${contentType.split(';')[0]}" is not text, so the body was not downloaded.`,
         };
       }
       if (response.body === '' && response.bytesRead >= maxBytes) {
@@ -688,17 +691,11 @@ export function createFetchTool(projectRoot: string, toolOptions: FetchToolOptio
       const end = from + window.length;
       const truncated = end < totalChars;
 
-      // The reference's own affordance, kept in spirit: a truncated result says
-      // exactly where to continue, so the model never guesses an offset.
-      const content = truncated
-        ? `${window}\n\n<error>Content truncated. Call fetch with startIndex ${end} for more.</error>`
-        : window;
-
       return {
         ...base,
         raw,
         ...(converted.title ? { title: converted.title } : {}),
-        content,
+        content: window,
         totalChars,
         startIndex: from,
         truncated,

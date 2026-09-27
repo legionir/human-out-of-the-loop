@@ -35,7 +35,11 @@ import { createHash } from 'node:crypto';
  *   - **never fatal**: a journal write that fails (read-only disk, deleted
  *     directory) must not break the run that is being observed.
  */
-import { SECRET_REDACTION_MARKER, scrubSecretValues } from './secret-scrub.js';
+import {
+  MIN_REDACT_VALUE_LENGTH,
+  SECRET_REDACTION_MARKER,
+  scrubSecretValues,
+} from './secret-scrub.js';
 
 /** Marker written where a redacted key's value would be. */
 export const JOURNAL_REDACTED = SECRET_REDACTION_MARKER;
@@ -103,7 +107,6 @@ export interface JournalOptions {
 
 export const DEFAULT_JOURNAL_MAX_ENTRY_BYTES = 8 * 1024;
 export const DEFAULT_JOURNAL_RETENTION_DAYS = 30;
-const MIN_REDACT_VALUE_LENGTH = 8;
 const PREVIEW_CHARS = 2000;
 const MAX_HASH_BYTES = 256 * 1024;
 
@@ -158,6 +161,14 @@ function normalizeKeys(keys: readonly string[]): Set<string> {
   return new Set(keys.map(normalizeKey));
 }
 
+function isRedactedKey(key: string, keys: Set<string>): boolean {
+  const normalized = normalizeKey(key);
+  for (const pattern of keys) {
+    if (normalized.includes(pattern)) return true;
+  }
+  return false;
+}
+
 /** Deep-copy `value`, redacting by key name and by known secret value. */
 function redact(value: unknown, keys: Set<string>, secrets: string[], depth = 0): unknown {
   if (depth > 12) return '[depth limit]';
@@ -168,7 +179,7 @@ function redact(value: unknown, keys: Set<string>, secrets: string[], depth = 0)
   if (value && typeof value === 'object') {
     const out: Record<string, unknown> = {};
     for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = keys.has(normalizeKey(key))
+      out[key] = isRedactedKey(key, keys)
         ? JOURNAL_REDACTED
         : redact(item, keys, secrets, depth + 1);
     }
@@ -423,7 +434,7 @@ export class JournalWriter {
         : {}),
     };
 
-    if (this.includeResults === 'none' && redacted.result !== undefined) {
+    if (this.includeResults !== 'full' && redacted.result !== undefined) {
       delete redacted.result;
     }
 
@@ -534,7 +545,7 @@ export function withJournal<T extends Record<string, unknown>>(
             durationMs: Date.now() - startedAt,
             ok: status.ok,
             input,
-            ...(writer.includeResults !== 'none' ? { result: output } : {}),
+            ...(writer.includeResults === 'full' ? { result: output } : {}),
             summary: summarize(name, input, output, status.ok),
             ...(artifactsOf(input, output) ? { artifacts: artifactsOf(input, output) } : {}),
             ...(status.ok

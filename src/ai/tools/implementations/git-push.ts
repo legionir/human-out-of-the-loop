@@ -66,6 +66,8 @@ export interface GitPushOutcome {
   before?: ReturnType<typeof snapshotSummary>;
   after?: ReturnType<typeof snapshotSummary>;
   warnings?: string;
+  /** False when git reported everything already up to date (or nothing was sent). */
+  pushed?: boolean;
   error?: string;
   code?: string;
 }
@@ -177,6 +179,10 @@ export function createGitPushTool(projectRoot: string, options: { env?: NodeJS.P
         };
       }
 
+      const report = `${result.stderr}\n${result.stdout}`;
+      const upToDate =
+        /everything up-to-date/i.test(report) ||
+        (result.stderr.trim() === '' && result.stdout.trim() === '');
       return {
         success: true,
         directory: repo.display,
@@ -184,6 +190,7 @@ export function createGitPushTool(projectRoot: string, options: { env?: NodeJS.P
         remote,
         branch,
         upstreamSet: setUpstream,
+        pushed: !upToDate,
         // git prints the progress on stderr; that *is* the useful output here.
         output: (result.stderr || result.stdout).trim(),
         before: snapshotSummary(before),
@@ -192,9 +199,7 @@ export function createGitPushTool(projectRoot: string, options: { env?: NodeJS.P
         // here, and the interesting fields are the remote, the branch and git's
         // own report of what it sent.
         ...changeReport(snapshot),
-        ...(result.stderr.trim() === '' && result.stdout.trim() === ''
-          ? { warnings: 'Nothing was pushed — the remote is already up to date.' }
-          : {}),
+        ...(upToDate ? { warnings: 'Nothing was pushed — the remote is already up to date.' } : {}),
       };
     },
   };

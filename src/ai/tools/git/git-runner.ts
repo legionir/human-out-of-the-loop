@@ -34,22 +34,67 @@ import { getAgentRunContext } from '../../runtime/agent-run-context.js';
 export const GIT_OUTPUT_LIMIT_BYTES = 256 * 1024;
 /** Time allowed for one git command. */
 export const GIT_TIMEOUT_MS = 15_000;
+/** Commits (and their hooks) get a longer budget than a read. */
+export const GIT_COMMIT_TIMEOUT_MS = 120_000;
+
+/**
+ * Parent-env keys a git child is allowed to inherit. Secrets (API keys, tokens)
+ * stay out; SSH/proxy/author identity must get through so a push can auth.
+ */
+export const GIT_ENV_PASSTHROUGH = [
+  'PATH',
+  'Path',
+  'HOME',
+  'USERPROFILE',
+  'SSH_AUTH_SOCK',
+  'SSH_AGENT_PID',
+  'GIT_SSH_COMMAND',
+  'GIT_SSH',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'NO_PROXY',
+  'no_proxy',
+  'ALL_PROXY',
+  'all_proxy',
+  'XDG_CONFIG_HOME',
+  'GIT_AUTHOR_NAME',
+  'GIT_AUTHOR_EMAIL',
+  'GIT_AUTHOR_DATE',
+  'GIT_COMMITTER_NAME',
+  'GIT_COMMITTER_EMAIL',
+  'GIT_COMMITTER_DATE',
+  'GIT_CONFIG_NOSYSTEM',
+  'GIT_CONFIG_GLOBAL',
+  'GIT_CONFIG_SYSTEM',
+  'SystemRoot',
+  'SystemDrive',
+  'WINDIR',
+  'ComSpec',
+  'COMSPEC',
+] as const;
+
 /** Identical environment for every command, whatever the user's shell says. */
 export function gitEnv(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
-  return {
-    PATH: process.env.PATH ?? '',
-    ...(process.platform === 'win32' ? {} : { HOME: process.env.HOME ?? '' }),
-    // Read the user's own config (aliases, identity) but never write to it and
-    // never block on input.
-    GIT_TERMINAL_PROMPT: '0',
-    GIT_ASKPASS: 'echo',
-    SSH_ASKPASS: 'echo',
-    GIT_PAGER: 'cat',
-    GIT_OPTIONAL_LOCKS: '0',
-    GIT_CONFIG_NOSYSTEM: process.env.GIT_CONFIG_NOSYSTEM ?? '',
-    LC_ALL: 'C',
-    ...overrides,
-  };
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of GIT_ENV_PASSTHROUGH) {
+    const value = process.env[key];
+    if (value !== undefined) env[key] = value;
+  }
+  if (!env.PATH) env.PATH = process.env.PATH ?? '';
+  // Read the user's own config (aliases, identity) but never write to it and
+  // never block on input.
+  env.GIT_TERMINAL_PROMPT = '0';
+  env.GIT_ASKPASS = 'echo';
+  env.SSH_ASKPASS = 'echo';
+  env.GIT_PAGER = 'cat';
+  env.GIT_OPTIONAL_LOCKS = '0';
+  env.LC_ALL = 'C';
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value !== undefined) env[key] = value;
+  }
+  return env;
 }
 
 export type GitErrorCode =
@@ -70,7 +115,9 @@ export type GitErrorCode =
   | 'PR_UNAVAILABLE'
   | 'NOT_GITHUB_REMOTE'
   | 'PR_NOT_FOUND'
-  | 'PR_FAILED';
+  | 'PR_FAILED'
+  | 'DETACHED_HEAD'
+  | 'BRANCH_NOT_PUSHED';
 
 export interface GitFailure {
   ok: false;
@@ -101,6 +148,8 @@ export interface RunGitOptions {
   allowFailure?: boolean;
   /** C-01: kill the child when the agent run is cancelled. */
   abortSignal?: AbortSignal;
+  /** Bytes written to the child's stdin (used by `git commit -F -`). */
+  stdin?: string;
 }
 
 /**
@@ -111,6 +160,36 @@ export interface RunGitOptions {
  * A non-zero exit is *not* automatically a failure: `git diff --quiet` and
  * `git rev-parse` use the exit code to answer, so callers decide.
  */
+function killGitProcessTree(child: { pid?: number; kill: (signal?: NodeJS.Signals) => boolean }): void {
+  const pid = child.pid;
+  if (pid && process.platform === 'win32') {
+    spawn('taskkill', ['/pid', String(pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore',
+    }).on('error', () => {
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* already gone */
+      }
+    });
+    return;
+  }
+  if (pid) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+      return;
+    } catch {
+      /* fall through to a direct kill */
+    }
+  }
+  try {
+    child.kill('SIGKILL');
+  } catch {
+    // already gone
+  }
+}
+
 export function runGit(
   cwd: string,
   args: readonly string[],
@@ -126,8 +205,10 @@ export function runGit(
       child = spawn('git', [...args], {
         cwd,
         env: gitEnv(options.env),
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: [options.stdin !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
         windowsHide: true,
+        // Own process group so a timeout SIGKILL also reaps hook grandchildren.
+        detached: process.platform !== 'win32',
       });
     } catch (err) {
       resolve({ ok: false, code: 'GIT_MISSING', error: describeSpawnError(err) });
@@ -153,11 +234,7 @@ export function runGit(
 
     const kill = (reason: GitFailure): void => {
       failure = reason;
-      try {
-        child.kill('SIGKILL');
-      } catch {
-        // already gone
-      }
+      killGitProcessTree(child);
     };
 
     const onAbort = (): void => {
@@ -191,12 +268,18 @@ export function runGit(
 
     child.stdout?.on('data', (chunk: Buffer) => collect(chunk, stdout, true));
     child.stderr?.on('data', (chunk: Buffer) => collect(chunk, stderr, false));
+    if (options.stdin !== undefined) {
+      child.stdin?.on('error', () => {
+        /* EPIPE after a kill is expected */
+      });
+      child.stdin?.end(options.stdin, 'utf-8');
+    }
 
     child.on('error', (err) => {
       finish({ ok: false, code: 'GIT_MISSING', error: describeSpawnError(err) });
     });
 
-    child.on('close', (code, signal) => {
+    child.on('exit', (code, signal) => {
       const text = Buffer.concat(stdout).toString('utf-8');
       const errText = Buffer.concat(stderr).toString('utf-8');
 
@@ -311,6 +394,11 @@ export function rejectFlagLike(value: string, label: string): GitFailure | undef
 /** True when the string has bytes git would choke on (NUL, newline). */
 export function isCleanGitName(value: string): boolean {
   return !/[\0\n\r]/.test(value);
+}
+
+/** Commit messages may contain newlines; they still cannot contain NUL or other C0. */
+export function isCleanGitMessage(value: string): boolean {
+  return !/[\0\r\x01-\x08\x0b\x0c\x0e-\x1f]/.test(value);
 }
 
 /**

@@ -390,16 +390,27 @@ export async function readFileAsBase64(filePath: string): Promise<string> {
  *    the temp file's default (0644).  A failed chmod never fails the write:
  *    the content is already safely in place.
  */
-export async function writeFileContent(filePath: string, content: string): Promise<void> {
+export async function writeFileContent(
+  filePath: string,
+  content: string | Uint8Array
+): Promise<void> {
+  const writeOnce = async (target: string, flag?: string): Promise<void> => {
+    if (typeof content === 'string') {
+      await fs.writeFile(target, content, { encoding: 'utf-8', ...(flag ? { flag } : {}) });
+    } else {
+      await fs.writeFile(target, content, flag ? { flag } : undefined);
+    }
+  };
+
   try {
-    await fs.writeFile(filePath, content, { encoding: 'utf-8', flag: 'wx' });
+    await writeOnce(filePath, 'wx');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
 
     const origStats = await fs.stat(filePath);
     const tempPath = `${filePath}.${randomBytes(16).toString('hex')}.tmp`;
     try {
-      await fs.writeFile(tempPath, content, 'utf-8');
+      await writeOnce(tempPath);
       await fs.rename(tempPath, filePath);
     } catch (renameError) {
       try {
@@ -444,6 +455,25 @@ export async function moveFile(sourcePath: string, destinationPath: string): Pro
  * or -1.  Line-aligned matching is tried before substring matching so a quoted
  * *indented* block does not match the tail of a more-indented line.
  */
+export type FileEditCode =
+  | 'AMBIGUOUS_MATCH'
+  | 'EDIT_NOT_FOUND'
+  | 'ENCODING_UNSUPPORTED'
+  | 'EMPTY_OLD_TEXT';
+
+/** Structured failure from `applyFileEdits` so tools can return a code. */
+export class FileEditError extends Error {
+  readonly code: FileEditCode;
+  readonly matchCount?: number;
+
+  constructor(code: FileEditCode, message: string, matchCount?: number) {
+    super(message);
+    this.name = 'FileEditError';
+    this.code = code;
+    if (matchCount !== undefined) this.matchCount = matchCount;
+  }
+}
+
 function findExactLineSequence(contentLines: string[], oldLines: string[]): number {
   if (oldLines.length === 0) return -1;
   for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
@@ -457,6 +487,71 @@ function findExactLineSequence(contentLines: string[], oldLines: string[]): numb
     if (matches) return i;
   }
   return -1;
+}
+
+function countExactLineSequence(contentLines: string[], oldLines: string[]): number {
+  if (oldLines.length === 0) return 0;
+  let count = 0;
+  for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
+    let matches = true;
+    for (let j = 0; j < oldLines.length; j++) {
+      if (contentLines[i + j] !== oldLines[j]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) count += 1;
+  }
+  return count;
+}
+
+function countWhitespaceLineSequence(contentLines: string[], oldLines: string[]): number {
+  if (oldLines.length === 0) return 0;
+  let count = 0;
+  for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
+    const potentialMatch = contentLines.slice(i, i + oldLines.length);
+    if (oldLines.every((oldLine, j) => oldLine.trim() === potentialMatch[j]!.trim())) count += 1;
+  }
+  return count;
+}
+
+function countSubstrings(haystack: string, needle: string): number {
+  if (needle.length === 0) return 0;
+  let count = 0;
+  let from = 0;
+  while (from <= haystack.length - needle.length) {
+    const index = haystack.indexOf(needle, from);
+    if (index === -1) break;
+    count += 1;
+    from = index + needle.length;
+  }
+  return count;
+}
+
+/** Keep the original line's indent characters (tabs stay tabs). */
+function reindentReplacement(originalFirstLine: string, normalizedNew: string): string[] {
+  const originalIndent = originalFirstLine.match(/^[\t ]*/)?.[0] ?? '';
+  const newLines = normalizedNew.split('\n');
+  const firstNewIndent = newLines[0]!.match(/^[\t ]*/)?.[0] ?? '';
+  return newLines.map((line) => {
+    if (line.trim() === '') return line;
+    const thisIndent = line.match(/^[\t ]*/)?.[0] ?? '';
+    const extra = thisIndent.startsWith(firstNewIndent)
+      ? thisIndent.slice(firstNewIndent.length)
+      : '';
+    return originalIndent + extra + line.trimStart();
+  });
+}
+
+function decodeUtf8Strict(buffer: Buffer): string {
+  try {
+    return new TextDecoder('utf-8', { fatal: true }).decode(buffer);
+  } catch {
+    throw new FileEditError(
+      'ENCODING_UNSUPPORTED',
+      'File is not valid UTF-8; refuse to edit so the bytes stay intact. Use write_file with encoding=base64 for binary content.'
+    );
+  }
 }
 
 /**
@@ -474,70 +569,87 @@ export async function applyFileEdits(
   edits: FileEdit[],
   dryRun: boolean = false
 ): Promise<string> {
-  const content = normalizeLineEndings(await fs.readFile(filePath, 'utf-8'));
+  const originalBytes = await fs.readFile(filePath);
+  const originalText = decodeUtf8Strict(originalBytes);
+  const eol = originalText.includes('\r\n') ? '\r\n' : '\n';
+  const content = normalizeLineEndings(originalText);
 
   let modifiedContent = content;
   for (const edit of edits) {
     const normalizedOld = normalizeLineEndings(edit.oldText);
     const normalizedNew = normalizeLineEndings(edit.newText);
+    if (normalizedOld.length === 0) {
+      throw new FileEditError('EMPTY_OLD_TEXT', 'oldText must not be empty.');
+    }
     const oldLines = normalizedOld.split('\n');
 
     // 1. Exact, line-aligned match — the common case: the model quoted the
     //    block as it appears in the file.  Splicing whole lines leaves every
     //    other byte (including indentation) untouched.
-    if (!oldLines.every((oldLine) => oldLine.includes('\n'))) {
-      const lines = modifiedContent.split('\n');
+    const lines = modifiedContent.split('\n');
+    const exactCount = countExactLineSequence(lines, oldLines);
+    if (exactCount > 1) {
+      throw new FileEditError(
+        'AMBIGUOUS_MATCH',
+        `oldText matched ${exactCount} times; refuse to guess which occurrence to edit.`,
+        exactCount
+      );
+    }
+    if (exactCount === 1) {
       const lineStart = findExactLineSequence(lines, oldLines);
-      if (lineStart !== -1) {
-        lines.splice(lineStart, oldLines.length, ...normalizedNew.split('\n'));
-        modifiedContent = lines.join('\n');
-        continue;
-      }
+      lines.splice(lineStart, oldLines.length, ...normalizedNew.split('\n'));
+      modifiedContent = lines.join('\n');
+      continue;
     }
 
     // 2. Whitespace-flexible, line-by-line match — the model re-indented
-    //    the block it quoted.
+    //    the block it quoted. Original indent characters (tabs) are kept.
     const contentLines = modifiedContent.split('\n');
-    let matchFound = false;
-
-    for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
-      const potentialMatch = contentLines.slice(i, i + oldLines.length);
-      const isMatch = oldLines.every((oldLine, j) => oldLine.trim() === potentialMatch[j]!.trim());
-
-      if (!isMatch) continue;
-
-      // Re-indent the replacement relative to the block it replaces: the whole
-      // block is shifted by the difference between the matched line's
-      // indentation and the replacement's own first-line indentation, so a
-      // re-indented multi-line block keeps its internal structure.
-      const originalIndent = contentLines[i]!.match(/^\s*/)?.[0] || '';
-      const newLines = normalizedNew.split('\n');
-      const firstNewIndent = newLines[0]!.match(/^\s*/)?.[0] || '';
-      const indentDelta = originalIndent.length - firstNewIndent.length;
-      const adjustedNewLines = newLines.map((line) => {
-        if (line.trim() === '') return line;
-        const newIndent = line.match(/^\s*/)?.[0] || '';
-        return ' '.repeat(Math.max(0, newIndent.length + indentDelta)) + line.trimStart();
-      });
-
-      contentLines.splice(i, oldLines.length, ...adjustedNewLines);
-      modifiedContent = contentLines.join('\n');
-      matchFound = true;
-      break;
+    const wsCount = countWhitespaceLineSequence(contentLines, oldLines);
+    if (wsCount > 1) {
+      throw new FileEditError(
+        'AMBIGUOUS_MATCH',
+        `oldText matched ${wsCount} times; refuse to guess which occurrence to edit.`,
+        wsCount
+      );
+    }
+    if (wsCount === 1) {
+      for (let i = 0; i <= contentLines.length - oldLines.length; i++) {
+        const potentialMatch = contentLines.slice(i, i + oldLines.length);
+        const isMatch = oldLines.every(
+          (oldLine, j) => oldLine.trim() === potentialMatch[j]!.trim()
+        );
+        if (!isMatch) continue;
+        const adjustedNewLines = reindentReplacement(contentLines[i]!, normalizedNew);
+        contentLines.splice(i, oldLines.length, ...adjustedNewLines);
+        modifiedContent = contentLines.join('\n');
+        break;
+      }
+      continue;
     }
 
     // 3. Last resort: exact substring (partial-line edit, e.g. a rename).
-    if (!matchFound && modifiedContent.includes(normalizedOld)) {
+    const subCount = countSubstrings(modifiedContent, normalizedOld);
+    if (subCount > 1) {
+      throw new FileEditError(
+        'AMBIGUOUS_MATCH',
+        `oldText matched ${subCount} times; refuse to guess which occurrence to edit.`,
+        subCount
+      );
+    }
+    if (subCount === 1) {
       modifiedContent = modifiedContent.replace(normalizedOld, () => normalizedNew);
       continue;
     }
 
-    if (!matchFound) {
-      throw new Error(`Could not find exact match for edit:\n${edit.oldText}`);
-    }
+    throw new FileEditError(
+      'EDIT_NOT_FOUND',
+      `Could not find exact match for edit:\n${edit.oldText}`
+    );
   }
 
   const diff = createUnifiedDiff(content, modifiedContent, filePath);
+  const outputText = eol === '\r\n' ? modifiedContent.replace(/\n/g, '\r\n') : modifiedContent;
 
   // Fence the diff with one more backtick than the diff itself contains.
   let numBackticks = 3;
@@ -548,7 +660,7 @@ export async function applyFileEdits(
     const origStats = await fs.stat(filePath);
     const tempPath = `${filePath}.${randomBytes(16).toString('hex')}.tmp`;
     try {
-      await fs.writeFile(tempPath, modifiedContent, 'utf-8');
+      await fs.writeFile(tempPath, outputText, 'utf-8');
       await fs.rename(tempPath, filePath);
     } catch (error) {
       try {

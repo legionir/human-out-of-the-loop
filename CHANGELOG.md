@@ -5,6 +5,29 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.7] — 2026-09-27 — Phase D: tools and journal
+
+Closes every open row of **Phase D** in `docs/UNIFIED_EXECUTION_PLAN.md` (D-01…D-18).
+
+- **D-01 — ambiguous edit.** More than one `oldText` match is `AMBIGUOUS_MATCH` with a count; the file is left untouched.
+- **D-02 — tabs.** Whitespace-tolerant edits keep the original indent characters (Makefile recipes stay tab-indented).
+- **D-03 — CRLF.** Unedited lines are rewritten with the file's original EOL.
+- **D-04 — empty `oldText`.** Schema and `applyFileEdits` reject empty search text (`EMPTY_OLD_TEXT`).
+- **D-05 — encoding.** Non-UTF-8 files are `ENCODING_UNSUPPORTED`; `write_file` accepts `encoding: "base64"`.
+- **D-06 — MCP connect.** `client.tools()` is inside the connect timeout race; timeout closes the client and transport.
+- **D-07 — git process group.** `runGit` spawns a detached group, kills it on timeout, and settles on `exit`. Commits allow 120s.
+- **D-08 — `gitEnv` allowlist.** SSH, proxy, `XDG_CONFIG_HOME`, `GIT_AUTHOR_*`/`COMMITTER_*`, and `USERPROFILE` pass through; secrets do not.
+- **D-09 — detached HEAD / no-op push.** Commits on a detached HEAD are `DETACHED_HEAD`; an up-to-date push reports `pushed: false`.
+- **D-10 — PR head/base.** `git_pr_create` sends current head, default base, and `gh --repo`; unpushed branches are `BRANCH_NOT_PUSHED`.
+- **D-11 — sequentialthinking.** Default session is per plan/task; TTL prunes old files; thoughts are secret-scrubbed.
+- **D-12 — fetch.** Truncation is `truncated`/`nextStartIndex` only; non-text is `UNSUPPORTED_CONTENT_TYPE`.
+- **D-13 — commit body.** Multiline messages go to `git commit -F -`.
+- **D-14 — calendar dates.** Impossible days such as `2026-02-31` are `INVALID_DATE`.
+- **D-15 — create_task.** A bare TaskRuntime handle returns `USE_DELEGATE_TASK` instead of a fake success.
+- **D-16 — read-only PRs.** `git_pr_list` and `git_pr_view` are in `readOnlyToolIds()`.
+- **D-17 — previous plan summary.** `get_previous_plan_summary` is registered with the session store.
+- **D-18 — journal summary.** Default `summary` omits full tool results; key redaction is substring-based; secret values redact from length 6.
+
 ## [27.17.6] — 2026-09-27 — Phase C: runtime, task, agent
 
 Closes every open row of **Phase C** in `docs/UNIFIED_EXECUTION_PLAN.md` (C-01…C-14).

@@ -457,8 +457,8 @@ describe('Phase 40 — the fetch tool against a local server', () => {
   it('pages with maxLength/startIndex and says where to continue', async () => {
     const first = await fetchTool()({ url: `${fixture.origin}/page`, maxLength: 80 });
     expect(first.truncated).toBe(true);
-    expect(first.content).toContain('<error>Content truncated');
-    expect(first.content).toContain(`startIndex ${first.nextStartIndex}`);
+    expect(first.content).not.toContain('<error>Content truncated');
+    expect(first.nextStartIndex).toBe(80);
     expect(first.remainingChars).toBe(first.totalChars! - first.nextStartIndex!);
 
     const second = await fetchTool()({
@@ -524,9 +524,10 @@ describe('Phase 40 — the fetch tool against a local server', () => {
 
   it('reports a non-text content type without downloading the body', async () => {
     const result = await fetchTool()({ url: `${fixture.origin}/image` });
-    expect(result.success).toBe(true);
+    expect(result.success).toBe(false);
+    expect(result.code).toBe('UNSUPPORTED_CONTENT_TYPE');
     expect(result.unsupportedContentType).toBe(true);
-    expect(result.content).toContain('image/png');
+    expect(result.content).toBe('');
     expect(result.totalChars).toBe(0);
   });
 

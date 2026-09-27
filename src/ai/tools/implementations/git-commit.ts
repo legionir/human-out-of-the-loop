@@ -4,8 +4,9 @@ import path from 'node:path';
 import {
   ensureRepo,
   failureResult,
+  GIT_COMMIT_TIMEOUT_MS,
   gitExitOk,
-  isCleanGitName,
+  isCleanGitMessage,
   isFailure,
   rejectFlagLike,
   runGit,
@@ -49,7 +50,9 @@ const inputSchema = z.object({
   message: z
     .string()
     .min(1)
-    .describe('Commit message (required). A conventional-commit subject is fine.'),
+    .describe(
+      'Commit message (required). A conventional-commit subject is fine; extra lines become the body.'
+    ),
   paths: z
     .array(z.string().min(1))
     .optional()
@@ -118,12 +121,11 @@ export function createGitCommitTool(
       if (message === '') {
         return { success: false, code: 'BAD_ARGUMENT', error: 'A commit message is required.' };
       }
-      if (!isCleanGitName(message)) {
+      if (!isCleanGitMessage(message)) {
         return {
           success: false,
           code: 'BAD_ARGUMENT',
-          error:
-            'The commit message must be a single line with no control characters (use \\n in the body instead).',
+          error: 'The commit message must not contain NUL or other control characters.',
         };
       }
       for (const file of paths ?? []) {
@@ -144,6 +146,19 @@ export function createGitCommitTool(
         }
       );
       const currentBranch = gitExitOk(currentBranchResult) ? currentBranchResult.stdout.trim() : '';
+      const symbolic = await runGit(repo.directory, ['symbolic-ref', '-q', 'HEAD'], {
+        allowFailure: true,
+        env: options.env,
+      });
+      if (!gitExitOk(symbolic)) {
+        return {
+          success: false,
+          code: 'DETACHED_HEAD',
+          directory: repo.display,
+          error:
+            'HEAD is detached — checkout a branch before committing so the commit is not orphaned.',
+        };
+      }
       const isProtected = protectedMatch(currentBranch, protectedList);
 
       if (amend) {
@@ -233,7 +248,7 @@ export function createGitCommitTool(
         };
       }
 
-      const args = ['commit', '-m', message, '--cleanup=strip'];
+      const args = ['commit', '-F', '-', '--cleanup=strip'];
       if (amend) args.push('--amend');
       // R0-11: when the caller named specific `paths`, commit ONLY those —
       // `git add -- paths` followed by a plain `git commit` would also
@@ -245,7 +260,9 @@ export function createGitCommitTool(
       if (!amend && paths && paths.length > 0) {
         args.push('--only', '--', ...paths);
       }
-      const snapshot = await withSnapshot(repo, () => runGit(repo.directory, args));
+      const snapshot = await withSnapshot(repo, () =>
+        runGit(repo.directory, args, { stdin: message, timeoutMs: GIT_COMMIT_TIMEOUT_MS })
+      );
       const { result, before, after } = snapshot;
       if (!result.ok) {
         return {

@@ -3,9 +3,11 @@ import { z } from 'zod';
 import {
   ensureRepo,
   failureResult,
+  gitExitOk,
   isFailure,
   isCleanGitName,
   rejectFlagLike,
+  runGit,
 } from '../git/git-runner.js';
 import {
   prComment,
@@ -44,6 +46,58 @@ import {
  */
 
 const DEFAULT_REMOTE = 'origin';
+
+async function resolvePrRefs(
+  directory: string,
+  remote: string,
+  headInput?: string,
+  baseInput?: string
+): Promise<
+  | { ok: true; head: string; base: string }
+  | { ok: false; code: string; error: string }
+> {
+  const current = await runGit(directory, ['rev-parse', '--abbrev-ref', 'HEAD'], {
+    allowFailure: true,
+  });
+  const currentBranch = gitExitOk(current) ? current.stdout.trim() : '';
+  const head = (headInput ?? currentBranch).trim();
+  if (head === '' || head === 'HEAD') {
+    return {
+      ok: false,
+      code: 'DETACHED_HEAD',
+      error: 'HEAD is detached — name the branch to open a pull request from (head: "…").',
+    };
+  }
+  // `owner:branch` is a fork head — GitHub resolves it; there is no local tracking ref.
+  if (!head.includes(':')) {
+    const tracking = await runGit(
+      directory,
+      ['rev-parse', '--verify', `refs/remotes/${remote}/${head}`],
+      { allowFailure: true }
+    );
+    if (!gitExitOk(tracking)) {
+      return {
+        ok: false,
+        code: 'BRANCH_NOT_PUSHED',
+        error: `Branch "${head}" has not been pushed to "${remote}". Push it first, then open the PR.`,
+      };
+    }
+  }
+  if (baseInput && baseInput.trim() !== '') {
+    return { ok: true, head, base: baseInput.trim() };
+  }
+  const remoteHead = await runGit(directory, ['symbolic-ref', `refs/remotes/${remote}/HEAD`], {
+    allowFailure: true,
+  });
+  let base = 'main';
+  if (gitExitOk(remoteHead)) {
+    const ref = remoteHead.stdout.trim();
+    const parts = ref.split('/');
+    const name = parts[parts.length - 1];
+    if (name) base = name;
+  }
+  return { ok: true, head, base };
+}
 
 const createSchema = z.object({
   directory: z
@@ -202,7 +256,7 @@ export function createGitPrCreateTool(projectRoot: string, options: ToolOptions 
         },
         projectRoot,
         options,
-        async (resolved) => {
+        async (resolved, repo) => {
           const title = String(raw.title ?? '').trim();
           if (title === '') {
             return { ok: false, code: 'BAD_ARGUMENT', error: 'A pull-request title is required.' };
@@ -210,11 +264,18 @@ export function createGitPrCreateTool(projectRoot: string, options: ToolOptions 
           if (!isCleanGitName(title)) {
             return { ok: false, code: 'BAD_ARGUMENT', error: 'The title must be a single line.' };
           }
+          const refs = await resolvePrRefs(
+            resolved.backend.cwd,
+            (raw.remote as string) ?? DEFAULT_REMOTE,
+            raw.head === undefined ? undefined : String(raw.head),
+            raw.base === undefined ? undefined : String(raw.base)
+          );
+          if (!refs.ok) return refs;
           const result = await prCreate(resolved.backend, {
             title,
             ...(raw.body === undefined ? {} : { body: String(raw.body) }),
-            ...(raw.base === undefined ? {} : { base: String(raw.base) }),
-            ...(raw.head === undefined ? {} : { head: String(raw.head) }),
+            base: refs.base,
+            head: refs.head,
             draft: raw.draft === true,
           });
           if (!result.ok) return { ok: false, code: result.code, error: result.error };

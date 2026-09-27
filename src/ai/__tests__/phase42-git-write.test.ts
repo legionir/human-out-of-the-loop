@@ -583,6 +583,9 @@ function githubRepo(name: string): string {
   git(dir, ['add', '.']);
   git(dir, ['commit', '-q', '-m', 'initial']);
   git(dir, ['remote', 'add', 'origin', 'https://github.com/acme/widgets.git']);
+  const sha = git(dir, ['rev-parse', 'HEAD']).trim();
+  git(dir, ['update-ref', 'refs/remotes/origin/main', sha]);
+  git(dir, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
   return dir;
 }
 

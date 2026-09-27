@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import { tool } from 'ai';
 import { z } from 'zod';
 import type { TaskRuntime } from '../../runtime/task-runtime.js';
@@ -52,10 +51,11 @@ export function createCreateTaskTool(deps: CreateTaskToolDeps | TaskRuntime) {
       }),
       execute: async ({ agentId }: { agentId: string; prompt: string; claimedResources: string[] }) => {
         return {
-          success: true as const,
-          taskId: `pending_${agentId}_${randomUUID()}`,
-          message:
-            'Task creation request received. Use delegate_task for full agent resolution.',
+          success: false as const,
+          error:
+            'create_task cannot schedule work from a TaskRuntime-only handle. Use delegate_task.',
+          code: 'USE_DELEGATE_TASK',
+          hint: `Pass full CreateTaskToolDeps (not a bare TaskRuntime) or call delegate_task. agentId=${agentId}`,
         };
       },
     });

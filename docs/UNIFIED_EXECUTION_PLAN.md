@@ -28,7 +28,7 @@
 | A | امنیت — سرور وب و گیت اعتماد | ۰ 🟢 | ۰ |
 | B | صحت ارکستراسیون، state، پیکربندی و registry | ۰ 🟢 | ۰ |
 | C | صحت runtime، تسک و ایجنت | ۰ 🟢 | ۰ |
-| D | صحت ابزارها و journal | ۱۸ | ۰ |
+| D | صحت ابزارها و journal | ۰ 🟢 | ۰ |
 | E | context، prompt و مدل | ۱۲ | ۵ |
 | F | کارایی و مصرف توکن | ۱۰ | ۳ |
 | G | CLI، REPL و سرور | ۱۸ | ۳ |
@@ -36,7 +36,7 @@
 | I | تست، CI و مستندات | ۸ | ۱ |
 | J | قابلیت‌های جدید | ۹ | ۰ |
 | K | راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) | ۹ | ۱ |
-| | **جمع ردیف‌های باز** | **۹۸** | **۱۰** |
+| | **جمع ردیف‌های باز** | **۸۰** | **۱۰** |
 
 ---
 
@@ -108,28 +108,28 @@
 | **C-13** 🟢 | P1 | همهٔ نوبت‌های chat یک task id مشترک | `chat:${interactionId}`. تست: دو نوبت = دو task؛ chat kill‌شده reconcile شود | S1:R9-12 |
 | **C-14** 🟢 | P2 | `review.usage` ناقص در ۳ مسیر | usage دورهای clarification + answer + `withStructuredRetry` تلاش اول. تست هر ۳ مسیر | S1:R1-13 |
 
-### فاز D — صحت ابزارها 🟡
+### فاز D — صحت ابزارها 🟢 (۲۰۲۶-۰۹-۲۷، v27.17.7)
 
 | ID | Pri | عنوان | رفع / تست | منبع |
 |---|---|---|---|---|
-| **D-01** | P1 | `edit_file` تطابق چندگانه → فقط اولی | بیش از یک تطابق → `AMBIGUOUS_MATCH` با تعداد؛ فایل دست‌نخورده. تست | S1:R3-01 |
-| **D-02** | P1 | `edit_file` tab→space | حفظ tab. تست Makefile | S1:R3-02 |
-| **D-03** | P1 | `edit_file` CRLF→LF | بقیهٔ خطوط بایت‌به‌بایت ثابت. تست | S1:R3-03 |
-| **D-04** | P1 | `oldText` خالی درج در اولین خط خالی | `.min(1)` در schema → رد. تست | S1:R3-04 |
-| **D-05** | P1 | `edit_file` فایل غیر UTF-8 را خراب می‌کند | `TextDecoder(fatal:true)` → `ENCODING_UNSUPPORTED`؛ گزینهٔ base64 برای `write_file`. تست Latin-1 دست‌نخورده | S1:R3-14 |
-| **D-06** | P1 | اتصال MCP ممکن است برای همیشه گیر کند؛ نشت فرزند | `client.tools()` داخل race timeout؛ بستن client در catch؛ علامت ابزارهای سرور مرده. تست: سرور بی‌پاسخ → بازگشت بعد از `connectTimeoutMs` + kill | S1:R3-05 |
-| **D-07** | P1 | git timeout hookها را نیمه‌کاره kill نمی‌کند | spawn `detached` + kill گروه؛ settle روی `'exit'`؛ timeout پیکربندی commit ~120s. تست: hook `sleep 60`، timeout 1s → بازگشت ~1.5s، بدون process زنده | S1:R3-09 |
-| **D-08** | P1 | `gitEnv` متغیرهای لازم را حذف می‌کند | allowlist: `SSH_AUTH_SOCK`, `GIT_SSH_COMMAND`, `HTTP(S)_PROXY`, `NO_PROXY`, `XDG_CONFIG_HOME`, `GIT_AUTHOR_*`/`COMMITTER_*`, `USERPROFILE`. تست: هر متغیر به فرزند برسد | S1:R3-10 |
-| **D-09** | P1 | detached HEAD → commit یتیم + push «موفق» | `DETACHED_HEAD` از commit؛ تشخیص «Everything up-to-date» روی stderr → `pushed:false`. تست همان سناریو | S1:R3-11 |
-| **D-10** | P1 | `git_pr_create` head/base نمی‌فرستد؛ gh به remote توجه نمی‌کند | head=برنچ جاری، base=پیش‌فرض؛ `--repo host/owner/name`. تست REST + fork | S1:R3-12 |
-| **D-11** | P1 | `sequentialthinking` session مشترک + بدون redaction | session پیش‌فرض per-task/plan؛ TTL پاک‌سازی؛ redactor journal. تست: دو پلن ۳۰ فکری؛ بدون راز در فایل | S1:R3-13 |
-| **D-12** | P2 | ذخیرهٔ نتیجهٔ fetch محتوای placeholder می‌نویسد | اعلان بریدگی فیلد جدا؛ غیرمتنی → `success:false`/`UNSUPPORTED_CONTENT_TYPE`. تست: `content` بدون marker | S1:R3-15 |
-| **D-13** | P2 | پیام commit بدنه نمی‌تواند داشته باشد | پذیرش چندخطی + ارسال با `-F -`. تست پیام چندخطی | S1:R3-16 |
-| **D-14** | P2 | `get_current_time` تاریخ ناممکن را جلو می‌برد | `{date:"2026-02-31"}` → `INVALID_DATE`. تست | S1:R3-17 |
-| **D-15** | P2 | `create_task` قدیمی موفقیت ساختگی | `success:false` با پیام یا حذف ابزار. تست | S1:R3-06؛ S2:DEBT-001 |
-| **D-16** | P3 | `git_pr_list/view` در read-only نیستند | افزودن به `readOnlyToolIds()` + تست عدم‌نوشتن. تست | S1:R3-07 |
-| **D-17** | P3 | `get_previous_plan_summary` تعریف‌شده ولی ثبت‌نشده | ثبت + تست یا حذف. تست | S1:R3-08 |
-| **D-18** | P1 | journal با پیش‌فرض `summary` نتیجهٔ کامل ابزار را می‌نویسد؛ redaction ناهمسان (substring vs نام‌محور؛ حداقل طول راز ۶) | شرط withJournal: حذف فقط برای `none`؛ summary واقعی (سقف چند صد کاراکتر)؛ redaction کلیدها با تطبیق substring مثل observability logger؛ حداقل طول مقدار راز یکسان ۶. تست: کلیدهای `githubToken` و `x-api-key` و راز ۶ کاراکتری ماسک شوند؛ تست حالت summary (شکاف فعلی phase37-journal.test.ts) | S1:R2-13؛ S2:BUG-001 |
+| **D-01** 🟢 | P1 | `edit_file` تطابق چندگانه → فقط اولی | بیش از یک تطابق → `AMBIGUOUS_MATCH` با تعداد؛ فایل دست‌نخورده. تست | S1:R3-01 |
+| **D-02** 🟢 | P1 | `edit_file` tab→space | حفظ tab. تست Makefile | S1:R3-02 |
+| **D-03** 🟢 | P1 | `edit_file` CRLF→LF | بقیهٔ خطوط بایت‌به‌بایت ثابت. تست | S1:R3-03 |
+| **D-04** 🟢 | P1 | `oldText` خالی درج در اولین خط خالی | `.min(1)` در schema → رد. تست | S1:R3-04 |
+| **D-05** 🟢 | P1 | `edit_file` فایل غیر UTF-8 را خراب می‌کند | `TextDecoder(fatal:true)` → `ENCODING_UNSUPPORTED`؛ گزینهٔ base64 برای `write_file`. تست Latin-1 دست‌نخورده | S1:R3-14 |
+| **D-06** 🟢 | P1 | اتصال MCP ممکن است برای همیشه گیر کند؛ نشت فرزند | `client.tools()` داخل race timeout؛ بستن client در catch؛ علامت ابزارهای سرور مرده. تست: سرور بی‌پاسخ → بازگشت بعد از `connectTimeoutMs` + kill | S1:R3-05 |
+| **D-07** 🟢 | P1 | git timeout hookها را نیمه‌کاره kill نمی‌کند | spawn `detached` + kill گروه؛ settle روی `'exit'`؛ timeout پیکربندی commit ~120s. تست: hook `sleep 60`، timeout 1s → بازگشت ~1.5s، بدون process زنده | S1:R3-09 |
+| **D-08** 🟢 | P1 | `gitEnv` متغیرهای لازم را حذف می‌کند | allowlist: `SSH_AUTH_SOCK`, `GIT_SSH_COMMAND`, `HTTP(S)_PROXY`, `NO_PROXY`, `XDG_CONFIG_HOME`, `GIT_AUTHOR_*`/`COMMITTER_*`, `USERPROFILE`. تست: هر متغیر به فرزند برسد | S1:R3-10 |
+| **D-09** 🟢 | P1 | detached HEAD → commit یتیم + push «موفق» | `DETACHED_HEAD` از commit؛ تشخیص «Everything up-to-date» روی stderr → `pushed:false`. تست همان سناریو | S1:R3-11 |
+| **D-10** 🟢 | P1 | `git_pr_create` head/base نمی‌فرستد؛ gh به remote توجه نمی‌کند | head=برنچ جاری، base=پیش‌فرض؛ `--repo host/owner/name`. تست REST + fork | S1:R3-12 |
+| **D-11** 🟢 | P1 | `sequentialthinking` session مشترک + بدون redaction | session پیش‌فرض per-task/plan؛ TTL پاک‌سازی؛ redactor journal. تست: دو پلن ۳۰ فکری؛ بدون راز در فایل | S1:R3-13 |
+| **D-12** 🟢 | P2 | ذخیرهٔ نتیجهٔ fetch محتوای placeholder می‌نویسد | اعلان بریدگی فیلد جدا؛ غیرمتنی → `success:false`/`UNSUPPORTED_CONTENT_TYPE`. تست: `content` بدون marker | S1:R3-15 |
+| **D-13** 🟢 | P2 | پیام commit بدنه نمی‌تواند داشته باشد | پذیرش چندخطی + ارسال با `-F -`. تست پیام چندخطی | S1:R3-16 |
+| **D-14** 🟢 | P2 | `get_current_time` تاریخ ناممکن را جلو می‌برد | `{date:"2026-02-31"}` → `INVALID_DATE`. تست | S1:R3-17 |
+| **D-15** 🟢 | P2 | `create_task` قدیمی موفقیت ساختگی | `success:false` با پیام یا حذف ابزار. تست | S1:R3-06؛ S2:DEBT-001 |
+| **D-16** 🟢 | P3 | `git_pr_list/view` در read-only نیستند | افزودن به `readOnlyToolIds()` + تست عدم‌نوشتن. تست | S1:R3-07 |
+| **D-17** 🟢 | P3 | `get_previous_plan_summary` تعریف‌شده ولی ثبت‌نشده | ثبت + تست یا حذف. تست | S1:R3-08 |
+| **D-18** 🟢 | P1 | journal با پیش‌فرض `summary` نتیجهٔ کامل ابزار را می‌نویسد؛ redaction ناهمسان (substring vs نام‌محور؛ حداقل طول راز ۶) | شرط withJournal: حذف فقط برای `none`؛ summary واقعی (سقف چند صد کاراکتر)؛ redaction کلیدها با تطبیق substring مثل observability logger؛ حداقل طول مقدار راز یکسان ۶. تست: کلیدهای `githubToken` و `x-api-key` و راز ۶ کاراکتری ماسک شوند؛ تست حالت summary (شکاف فعلی phase37-journal.test.ts) | S1:R2-13؛ S2:BUG-001 |
 
 ### فاز E — context، prompt و مدل 🔴
 
@@ -343,9 +343,9 @@
 | فاز | ردیف‌ها | شمار |
 |---|---|---|
 | A | A-01..A-08 | ۰ 🟢 |
-| B | B-01..B-22 | ۲۲ |
+| B | B-01..B-22 | ۰ 🟢 |
 | C | C-01..C-14 | ۰ 🟢 |
-| D | D-01..D-18 | ۱۸ |
+| D | D-01..D-18 | ۰ 🟢 |
 | E | E-01..E-12 | ۱۲ |
 | F | F-01..F-10 | ۱۰ |
 | G | G-01..G-18 | ۱۸ |
@@ -386,7 +386,7 @@ I-01 زودهنگام؛ I-02 مستمر؛ I-08/I-07 انتهایی
 | A | 🟢 | 2026-09-27 | 3887ed5 |
 | B | 🟢 | 2026-09-27 | 9b41a9c |
 | C | 🟢 | 2026-09-27 | f977650 |
-| D | ⬜ | | |
+| D | 🟢 | 2026-09-27 | 87c3ade |
 | E | ⬜ | | |
 | F | ⬜ | | |
 | G | ⬜ | | |

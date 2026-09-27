@@ -3,6 +3,8 @@ import { z } from 'zod';
 import fs from 'node:fs';
 import path from 'node:path';
 import { atomicWriteFileSync } from '../../runtime/atomic-write.js';
+import { getAgentRunContext } from '../../runtime/agent-run-context.js';
+import { collectSecretValues, scrubSecretValues } from '../../runtime/secret-scrub.js';
 
 const inputSchema = z.object({
   thought: z.string().min(1, 'thought must not be empty').describe('The current reasoning step'),
@@ -85,8 +87,36 @@ interface SessionFile {
 /** Hard ceilings: a reasoning loop must not become an unbounded file. */
 export const MAX_THOUGHTS_PER_SESSION = 50;
 export const MAX_SESSION_BYTES = 256 * 1024;
+/** Drop session files that have not been touched for this long. */
+export const THINKING_SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 /** Longest single thought kept verbatim (the rest is elided, not dropped). */
 const MAX_THOUGHT_CHARS = 4000;
+
+function defaultSessionId(): string {
+  const ctx = getAgentRunContext();
+  if (ctx?.planId) return `plan:${ctx.planId}`;
+  if (ctx?.taskId) return `task:${ctx.taskId}`;
+  return 'default';
+}
+
+function pruneThinkingSessions(dir: string, now = Date.now()): void {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return;
+  }
+  for (const name of names) {
+    if (!name.endsWith('.json')) continue;
+    const file = path.join(dir, name);
+    try {
+      const stats = fs.statSync(file);
+      if (now - stats.mtimeMs > THINKING_SESSION_TTL_MS) fs.unlinkSync(file);
+    } catch {
+      /* best-effort */
+    }
+  }
+}
 
 function sessionPath(runtimeDir: string, sessionId: string): string {
   // The id becomes a file name, so it is sanitised: separators become `_`,
@@ -150,10 +180,12 @@ export function createSequentialThinkingTool(projectRoot: string) {
       'turn or a resumed run can continue the same chain.',
     inputSchema,
     execute: async (input) => {
-      const sessionId = input.sessionId?.trim() || 'default';
+      const sessionId = input.sessionId?.trim() || defaultSessionId();
       const file = sessionPath(runtimeDir, sessionId);
 
       try {
+        fs.mkdirSync(path.dirname(file), { recursive: true });
+        pruneThinkingSessions(path.dirname(file));
         const session = readSession(file) ?? {
           sessionId,
           updatedAt: new Date().toISOString(),
@@ -208,9 +240,10 @@ export function createSequentialThinkingTool(projectRoot: string) {
           );
         }
 
+        const secrets = collectSecretValues(process.env);
         const record: ThoughtRecord = {
           ...input,
-          thought: input.thought.slice(0, MAX_THOUGHT_CHARS),
+          thought: scrubSecretValues(input.thought.slice(0, MAX_THOUGHT_CHARS), secrets),
           totalThoughts,
           recordedAt: new Date().toISOString(),
         };

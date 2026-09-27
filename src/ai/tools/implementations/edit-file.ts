@@ -2,14 +2,17 @@ import { tool } from 'ai';
 import { z } from 'zod';
 import path from 'node:path';
 import { resolvePathInWorkspace, checkProtectedPath } from './path-security.js';
-import { applyFileEdits } from '../fs/lib.js';
+import { applyFileEdits, FileEditError } from '../fs/lib.js';
 
 const inputSchema = z.object({
   path: z.string().min(1, 'path must not be empty'),
   edits: z
     .array(
       z.object({
-        oldText: z.string().describe('Text to search for - must match the file exactly'),
+        oldText: z
+          .string()
+          .min(1, 'oldText must not be empty')
+          .describe('Text to search for - must match the file exactly'),
         newText: z.string().describe('Text to replace it with'),
       })
     )
@@ -73,6 +76,14 @@ export function createEditFileTool(projectRoot: string) {
           diff,
         };
       } catch (err) {
+        if (err instanceof FileEditError) {
+          return {
+            success: false as const,
+            error: err.message,
+            code: err.code,
+            ...(err.matchCount !== undefined ? { matchCount: err.matchCount } : {}),
+          };
+        }
         const message = err instanceof Error ? err.message : String(err);
         const isNoMatch = message.startsWith('Could not find exact match for edit:');
         return {

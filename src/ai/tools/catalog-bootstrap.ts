@@ -1,14 +1,17 @@
 import type { ToolRegistry } from '../registries/tool-registry.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
+import type { SessionStore } from '../runtime/session-store.js';
 import { createListPersonasTool } from './implementations/list-personas.js';
 import { createListSkillsTool } from './implementations/list-skills.js';
 import { createListToolsTool } from './implementations/list-tools.js';
+import { createGetPreviousPlanSummaryTool } from './implementations/session-tools.js';
 
 export interface CatalogBootstrapDeps {
   toolRegistry: ToolRegistry;
   personaRegistry: PersonaRegistry;
   skillRegistry: SkillRegistry;
+  sessionStore?: SessionStore;
 }
 
 /**
@@ -17,7 +20,7 @@ export interface CatalogBootstrapDeps {
  * intended for the Planner/Main Agent only.
  */
 export function bootstrapCatalogTools(deps: CatalogBootstrapDeps): void {
-  const { toolRegistry, personaRegistry, skillRegistry } = deps;
+  const { toolRegistry, personaRegistry, skillRegistry, sessionStore } = deps;
 
   const catalogTools = [
     {
@@ -47,6 +50,20 @@ export function bootstrapCatalogTools(deps: CatalogBootstrapDeps): void {
       category: 'catalog',
       impl: createListToolsTool(toolRegistry),
     },
+    ...(sessionStore
+      ? [
+          {
+            id: 'get_previous_plan_summary',
+            name: 'Get Previous Plan Summary',
+            description:
+              'Retrieves the summary of the most recent completed plan in the current session.',
+            source: 'local' as const,
+            modulePath: './implementations/session-tools',
+            category: 'catalog',
+            impl: createGetPreviousPlanSummaryTool(sessionStore),
+          },
+        ]
+      : []),
   ];
 
   for (const ct of catalogTools) {

@@ -400,12 +400,18 @@ export interface PrCreateInput {
   draft?: boolean;
 }
 
+function ghRepoSlug(identity: { host: string; owner: string; name: string }): string {
+  return identity.host === 'github.com'
+    ? `${identity.owner}/${identity.name}`
+    : `${identity.host}/${identity.owner}/${identity.name}`;
+}
+
 export async function prCreate(
   backend: PrBackend,
   input: PrCreateInput
 ): Promise<PrOperationResult> {
   if (backend.kind === 'gh') {
-    const args = ['pr', 'create', '--title', input.title];
+    const args = ['pr', 'create', '--repo', ghRepoSlug(backend.identity), '--title', input.title];
     if (input.body !== undefined) args.push('--body', input.body);
     else args.push('--body', '');
     if (input.base) args.push('--base', input.base);

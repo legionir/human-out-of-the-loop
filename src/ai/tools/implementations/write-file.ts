@@ -8,6 +8,10 @@ import { writeFileContent } from '../fs/lib.js';
 const inputSchema = z.object({
   filePath: z.string().min(1, 'filePath must not be empty'),
   content: z.string(),
+  encoding: z
+    .enum(['utf8', 'base64'])
+    .default('utf8')
+    .describe('utf8 (default) or base64 for binary / non-UTF-8 bytes.'),
   overwrite: z
     .boolean()
     .default(false)
@@ -31,7 +35,7 @@ export function createWriteFileTool(projectRoot: string) {
     description:
       'Writes content to a file. Creates parent directories if needed. Refuses to overwrite existing files unless overwrite=true.',
     inputSchema,
-    execute: async ({ filePath, content, overwrite }, options) => {
+    execute: async ({ filePath, content, overwrite, encoding }, options) => {
       if (options?.abortSignal?.aborted) {
         return { success: false as const, error: 'Aborted', code: 'ABORTED' };
       }
@@ -73,13 +77,18 @@ export function createWriteFileTool(projectRoot: string) {
         }
 
         await fs.mkdir(path.dirname(resolved), { recursive: true });
-        await writeFileContent(resolved, content);
+        const payloadEncoding = encoding ?? 'utf8';
+        const payload =
+          payloadEncoding === 'base64' ? Buffer.from(content, 'base64') : content;
+        await writeFileContent(resolved, payload);
 
         return {
           success: true as const,
           filePath: relative,
-          bytesWritten: Buffer.byteLength(content, 'utf-8'),
+          bytesWritten:
+            typeof payload === 'string' ? Buffer.byteLength(payload, 'utf-8') : payload.byteLength,
           overwritten: replaceExisting,
+          encoding: payloadEncoding,
         };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

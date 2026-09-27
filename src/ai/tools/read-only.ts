@@ -28,6 +28,8 @@ export const READ_ONLY_IDS: ReadonlySet<string> = new Set([
   'git_show',
   'git_branch_list',
   'git_remote_list',
+  'git_pr_list',
+  'git_pr_view',
   'read_graph',
   'search_nodes',
   'open_nodes',

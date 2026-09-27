@@ -272,7 +272,8 @@ describe('Phase 37 — withJournal wraps tool execution', () => {
       ok: true,
     });
     expect(typeof entry!.durationMs).toBe('number');
-    expect((entry!.result as Record<string, unknown>).text).toBe('hello');
+    expect(entry!.result).toBeUndefined();
+    expect(entry!.summary).toBeDefined();
     expect(entry!.input).toEqual({ text: 'hello' });
   });
 
@@ -606,7 +607,8 @@ describe('Phase 37 — AgentRuntime is the one hook for every tool call', () => 
     await runtime.run({ agent: agentWithTools(), taskId: 'task_3', prompt: 'write', eventBus });
 
     const passed = generateTextMock.mock.calls[0]![0] as { tools: Record<string, unknown> };
-    expect(passed.tools.write_file).toBe(writeTool);
+    expect(passed.tools.write_file).toBeDefined();
+    expect(typeof (passed.tools.write_file as { execute?: unknown }).execute).toBe('function');
     expect(journalFiles(runtimeDir)).toEqual([]);
   });
 });

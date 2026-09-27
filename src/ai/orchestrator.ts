@@ -776,6 +776,7 @@ export class Orchestrator {
       toolRegistry: this.toolRegistry,
       personaRegistry: this.personaRegistry,
       skillRegistry: this.skillRegistry,
+      sessionStore: this.sessionStore,
     });
 
     for (const layer of forEachLayer('skills')) {

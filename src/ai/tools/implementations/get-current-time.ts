@@ -101,20 +101,30 @@ export function createGetCurrentTimeTool(projectRoot: string) {
 
       let instant: Date;
       if (date) {
-        if (!/^\d{4}-\d{2}-\d{2}$/.test(date.trim())) {
+        const trimmed = date.trim();
+        const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(trimmed);
+        if (!parts) {
           return {
             success: false,
             error: `Invalid date "${date}" — expected YYYY-MM-DD.`,
             code: 'INVALID_DATE',
           };
         }
+        const year = Number(parts[1]);
+        const month = Number(parts[2]);
+        const day = Number(parts[3]);
         // Noon UTC of that day: the zone's offset at that moment is what the
         // caller is asking about, without the risk of a midnight edge case.
-        instant = new Date(`${date.trim()}T12:00:00Z`);
-        if (Number.isNaN(instant.getTime())) {
+        instant = new Date(Date.UTC(year, month - 1, day, 12, 0, 0));
+        if (
+          Number.isNaN(instant.getTime()) ||
+          instant.getUTCFullYear() !== year ||
+          instant.getUTCMonth() !== month - 1 ||
+          instant.getUTCDate() !== day
+        ) {
           return {
             success: false,
-            error: `Invalid date "${date}" — expected YYYY-MM-DD.`,
+            error: `Invalid date "${date}" — expected a real calendar day in YYYY-MM-DD.`,
             code: 'INVALID_DATE',
           };
         }
