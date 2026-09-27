@@ -15,6 +15,7 @@ Does **not** close K-01 (real provider), K-02 (Windows Actions), K-03 (full-gree
 - **K-07 (partial).** Cancel unblocks `waitForAll` (`phase-k-shutdown.test.ts`).
 - **K-03.** Baseline recorded in `audit/baseline/k03-SUMMARY.md` (tsc clean; vitest 1607/19; e2e 144/194).
 - Owner checklists: `audit/baseline/K01_OWNER_CHECKLIST.md`, `K02_CI_WINDOWS.md`, `K05_BIND_OWNER.md`.
+- **Tracker.** `docs/UNIFIED_EXECUTION_PLAN.md` §1–§7 refreshed after `b2a8acb` / v27.17.15; Phase K test inventory registered. Open rows remain K-01/K-02/K-03/K-05/K-07.
 
 ## [27.17.14] — 2026-09-27 — Phase J: new capabilities
 

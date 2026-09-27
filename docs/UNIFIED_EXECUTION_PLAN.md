@@ -2,7 +2,8 @@
 
 **شناسه سند:** `docs/UNIFIED_EXECUTION_PLAN.md`
 **تاریخ تألیف:** 2026-09-26
-**مبنای کد:** شاخه `worktree-review-execution-plan` / `arena/01a0e249-human-out-of-the-loop`، HEAD = `720c267` (A–G 🟢؛ H در همین فاز)
+**آخرین به‌روزرسانی:** 2026-09-27
+**مبنای کد:** شاخه `arena/01a0e249-human-out-of-the-loop`؛ فاز K جزئی در `b2a8acb` / v27.17.15 (A–J 🟢؛ K جزئی 🟡)
 **جایگاه:** این سند، **تنها مرجع ردیابی و اجرا** برای رفع همهٔ نواقص و باگ‌های شناسایی‌شده است. هر موردی که در هر سند منبع ثبت شده، یا اینجا یک ردیف دارد یا صراحتاً به یک ردیف ادغام شده — **هیچ موردی حذف نشده است** (اثبات کامل تطبیق در §۴).
 
 ---
@@ -11,11 +12,11 @@
 
 | # | سند منبع | محتوا | وضعیت |
 |---|---|---|---|
-| S1 | `docs/REVIEW_EXECUTION_PLAN.md` (834 خط) | ماتریس ۱۴۵ یافته R0–R11 + فازهای R8 (قابلیت جدید) | ۲۱ مورد 🟢 رفع‌شده، ۱۲۴ باز |
-| S2 | `docs/FORENSIC_AUDIT_REPORT.md` (891 خط) | ممیزی فارنزیک ۱۹بخشی: SEC/BUG/ARCH/REL/CONF/DEBT/POT/TEST | ۱۳ تأییدشده + ۵ POTENTIAL/UNVERIFIED |
-| S3 | `audit/` (workspace ممیزی integration) | ۶۵ EP، ۶۰ WF، ۵ ENT، ۱۰ BND، یافته‌های F-0001..F-0011 | حکم: SUBSTANTIALLY VERIFIED WITH OPEN ITEMS |
-| S4 | `docs/READINESS_AUDIT.md` (514 خط) | ۱۰ محور readiness P1–P10 + CI | همه 🟢 جز P1 ⛔ (کلید واقعی) و P8 🟡 (windows-leg) |
-| S5 | `audit/unknowns.md` + Appendix B فارنزیک | ۴ + ۵ مورد UNKNOWN/UNVERIFIED | برای بستن، ورودی بیرونی/آزمون لازم دارد |
+| S1 | `docs/REVIEW_EXECUTION_PLAN.md` (834 خط) | ماتریس ۱۴۵ یافته R0–R11 + فازهای R8 (قابلیت جدید) | ۱۲۴ ردیف اجرایی در A–J 🟢؛ باقی‌مانده فقط K (بیرونی) |
+| S2 | `docs/FORENSIC_AUDIT_REPORT.md` (891 خط) | ممیزی فارنزیک ۱۹بخشی: SEC/BUG/ARCH/REL/CONF/DEBT/POT/TEST | POT-001/005 🟢 (K-08/K-06)؛ POT-002/003 و REL-004 هنوز باز |
+| S3 | `audit/` (workspace ممیزی integration) | ۶۵ EP، ۶۰ WF، ۵ ENT، ۱۰ BND، یافته‌های F-0001..F-0011 | F-0007 سقف SSE 🟢 (K-04)؛ بقیهٔ بازها در K-01/K-03 |
+| S4 | `docs/READINESS_AUDIT.md` (514 خط) | ۱۰ محور readiness P1–P10 + CI | P1 ⛔ = K-01؛ P8 🟡 = K-02 (ماتریس در `ci.yml` هست، verdict Actions با مالک) |
+| S5 | `audit/unknowns.md` + Appendix B فارنزیک | ۴ + ۵ مورد UNKNOWN/UNVERIFIED | UNKNOWN-0001 🟢 پذیرش مکتوب (K-04)؛ 0002/0003/0004 هنوز مالک/CI |
 
 **قانون طلایی این سند:** هر یافته یک **ردیف واحد** با ID پایدار دارد. IDهای قدیمی در ستون «منبع» حفظ شده‌اند تا هیچ ردپایی گم نشود. رفع = نوشتن تست fail-سپس-pass + رفع + `tsc`/`vitest` سبز + تیک 🟢 در همین جدول + کامیت جدا.
 
@@ -240,13 +241,26 @@
 |---|---|---|---|---|
 | **K-01** | P0 | اجرا با provider واقعی (OpenAI/Anthropic) | ⛔ مالک: secret + `real-provider.yml` یا run دستی. چک‌لیست: `audit/baseline/K01_OWNER_CHECKLIST.md`. این sandbox کلید ندارد و API واقعی صدا زده نشد. | S4:P1 ⛔؛ S5:UNKNOWN-0003؛ S2:POT-002 |
 | **K-02** | P1 | windows-leg ماتریس CI | 🟡 مالک: `ci.yml` از قبل windows/mac/ubuntu دارد؛ سبز بودن Actions اینجا دیده نمی‌شود. `audit/baseline/K02_CI_WINDOWS.md` | S4:P8 🟡 |
-| **K-03** | P1 | baseline typecheck/test | 🟡 اجرا شد: tsc 0، vitest 1607/19، e2e 144/194. خروجی: `audit/baseline/k03-SUMMARY.md`. سبز کامل نیست. | S5:UNKNOWN-0004؛ S3:P2 |
-| **K-04** 🟢 | P2 | اندازهٔ SSE / log | سقف اتصال ۳۲ + بافر ۲۰۰؛ تست synthetic `phase-k-sse-scale.test.ts`. telemetry پروداکشن نیست — پذیرش مکتوب همین سقف‌ها به‌عنوان کنترل F-10. | S5:UNKNOWN-0001؛ S3:F-0007/0011 |
+| **K-03** | P1 | baseline typecheck/test | 🟡 اجرا شد (2026-09-27، node v22.22.3): tsc 0، build 0، vitest **1607 passed / 19 failed**، e2e **144/194**. خلاصه: `audit/baseline/k03-SUMMARY.md`. سبز کامل نیست. | S5:UNKNOWN-0004؛ S3:P2 |
+| **K-04** 🟢 | P2 | اندازهٔ SSE / log | سقف اتصال ۳۲ + بافر ۲۰۰؛ تست synthetic `phase-k-sse-scale.test.ts` (به‌علاوهٔ F-10 در `phase-f-perf.test.ts`). telemetry پروداکشن نیست — پذیرش مکتوب همین سقف‌ها به‌عنوان کنترل F-10. | S5:UNKNOWN-0001؛ S3:F-0007/0011 |
 | **K-05** | P2 | bind غیر-loopback در دیپلوی | 🟡 تصمیم مالک. پس از A-01 غیر-loopback فقط با توکن. `audit/baseline/K05_BIND_OWNER.md` | S5:UNKNOWN-0002؛ S2:POT-003 |
-| **K-06** 🟢 | P2 | MCP SSE کند / UND_ERR_BODY_TIMEOUT | `bodyTimeout: 0` + تست زندهٔ استریم ساکت در `phase30-p10-fetch.test.ts` و قفل در `phase-k-sse-scale.test.ts` | S2:POT-005 |
+| **K-06** 🟢 | P2 | MCP SSE کند / UND_ERR_BODY_TIMEOUT | `bodyTimeout: 0`؛ تست زندهٔ استریم ساکت `phase30-p10-fetch.test.ts`؛ قفل مقدار در `phase-k-sse-scale.test.ts` | S2:POT-005 |
 | **K-07** | P3 | SIGKILL روی waitForAll | 🟡 نیمه: cancel مسیر shutdown را باز می‌کند (`phase-k-shutdown.test.ts`). SIGKILL واقعی قابل catch نیست — تست زنده با مالک. | S2:REL-004 |
 | **K-08** 🟢 | P3 | XSS / escapeHtml تک‌نقطه‌ای | `escapeHtml`/`renderMarkdown` فقط در `public/ui-logic.js`؛ اسکن innerHTML + payload. تست: `phase-k-xss.test.ts` | S2:POT-001؛ S2:ARCH-004 |
-| **K-09** 🟢 | P3 | re-verify R0-07/09/10 | تست‌های اصلی + `phase-k-r0-reverify.test.ts` سبز | S2:§۹ نکته |
+| **K-09** 🟢 | P3 | re-verify R0-07/09/10 | تست‌های اصلی + `phase-k-r0-reverify.test.ts` سبز (همراه `r0-07-key-leak.test.ts`، `r0-09-protected-paths.test.ts`، `r0-10-outside-workspace.test.ts`) | S2:§۹ نکته |
+
+**ثبت تست‌های فاز K (اجرا شده در همین شاخه، 2026-09-27):**
+
+| ID | فایل تست | چه چیزی اثبات می‌شود | نتیجهٔ آخرین اجرا |
+|---|---|---|---|
+| K-03 | `audit/baseline/k03-SUMMARY.md` (نه vitest واحد) | `tsc --noEmit`؛ `vitest run` کامل؛ `npm run e2e` | tsc ✅ · vitest 1607/19 · e2e 144/194 → ردیف 🟡 |
+| K-04 | `src/ai/__tests__/phase-k-sse-scale.test.ts` | سقف N+1 اتصال؛ ring buffer ≤ `bufferSize` | ✅ |
+| K-06 | همان فایل + `src/ai/__tests__/phase30-p10-fetch.test.ts` | `MCP_STREAM_BODY_TIMEOUT_MS === 0`؛ استریم ساکت با fetch پیش‌فرض می‌میرد، با MCP fetch زنده می‌ماند | ✅ |
+| K-07 | `src/ai/__tests__/phase-k-shutdown.test.ts` | `cancelTask` → `waitForAll` در < ۲s برمی‌گردد | ✅ (نیمه؛ SIGKILL زنده نیست) |
+| K-08 | `src/ai/__tests__/phase-k-xss.test.ts` | payload `<script>`/`onerror`؛ markdown escape-first؛ هیچ `${…}` در `innerHTML` بدون `escapeHtml`/`renderMarkdown` | ✅ |
+| K-09 | `src/ai/__tests__/phase-k-r0-reverify.test.ts` | R0-07 کلید به baseURL سفارشی نمی‌رود؛ R0-09 `.git`/`.ai-runtime` دست‌نخورده؛ R0-10 `git_reset --hard` خارج از workspace را رد می‌کند | ✅ |
+| K-09 (اصلی) | `r0-07-key-leak.test.ts`، `r0-09-protected-paths.test.ts`، `r0-10-outside-workspace.test.ts` | همان قراردادها، فایل‌های hardening اولیه | ✅ همزمان با K-09 |
+| K-01/K-02/K-05 | — | تست خودکار در این محیط ممکن نیست | چک‌لیست مالک در `audit/baseline/` |
 
 ---
 
@@ -254,9 +268,9 @@
 
 ### ۴.۱ — ماتریس ۱۴۵یافتهٔ S1 → ردیف‌های این سند
 
-**۲۱ مورد 🟢 (رفع‌شده، مرجع تاریخی):** R0-01..R0-05، R0-06..R0-12، R1-01، R1-02، R1-04..R1-10، R1-05(superseded)، R1-06، R1-07، R1-08، R1-09، R1-10. (خارج از دامنهٔ اجرا؛ در git log با کامیت‌های fix(R0-*)/fix(R1-*) قابل ردیابی‌اند.)
+**۲۱ مورد 🟢 (رفع‌شده پیش از این سند، مرجع تاریخی):** R0-01..R0-05، R0-06..R0-12، R1-01، R1-02، R1-04..R1-10، R1-05(superseded)، R1-06، R1-07، R1-08، R1-09، R1-10. در git log با کامیت‌های `fix(R0-*)`/`fix(R1-*)`. R0-07/09/10 در K-09 دوباره سبز شدند.
 
-**۱۲۴ مورد باز → ردیف‌ها:**
+**۱۲۴ مورد که در تألیف سند باز بودند — همه از طریق ردیف‌های A–J بسته شده‌اند.** نگاشت پایدار (S1 → ردیف این سند) برای ردپا:
 
 | S1 | ردیف این سند |
 |---|---|
@@ -298,13 +312,13 @@
 | DEBT-003/004 | I-08 | |
 | DEBT-005 | I-07 | |
 | TEST-001 | I-01 | |
-| POT-001 | K-08 | |
-| POT-002 | K-01 | |
-| POT-003 | K-05 | |
-| POT-005 | K-06 | |
-| REL-004 | K-07 | |
+| POT-001 | K-08 🟢 | `phase-k-xss.test.ts` |
+| POT-002 | K-01 ⛔ | مالک / کلید واقعی |
+| POT-003 | K-05 🟡 | تصمیم دیپلوی |
+| POT-005 | K-06 🟢 | `phase30-p10-fetch.test.ts` + `phase-k-sse-scale.test.ts` |
+| REL-004 | K-07 🟡 | `phase-k-shutdown.test.ts` (نه SIGKILL زنده) |
 | §۱۱ LOW (readEntries full scan) | F-09 | |
-| R0-09/R0-10/R0-07 re-verify | K-09 | |
+| R0-09/R0-10/R0-07 re-verify | K-09 🟢 | `phase-k-r0-reverify.test.ts` + r0-07/09/10 |
 
 ### ۴.۳ — یافته‌های S3 (ممیزی integration) → ردیف‌ها
 
@@ -316,7 +330,7 @@
 | F-0004 | A-08 |
 | F-0005 | A-01 |
 | F-0006 | A-01 |
-| F-0007 | F-10 |
+| F-0007 | F-10 + K-04 🟢 (سقف ۳۲ / بافر ۲۰۰) |
 | F-0008 | A-01 |
 | F-0009 | A-01 |
 | F-0010 | I-08 (doc drift) |
@@ -329,18 +343,18 @@
 
 | منبع | ردیف |
 |---|---|
-| S4:P1 (provider واقعی) ⛔ | K-01 |
-| S4:P8 (windows-leg) 🟡 | K-02 |
+| S4:P1 (provider واقعی) ⛔ | K-01 (باز؛ چک‌لیست `K01_OWNER_CHECKLIST.md`) |
+| S4:P8 (windows-leg) 🟡 | K-02 (باز؛ `K02_CI_WINDOWS.md`) |
 | S4:باگ‌های N..AM (رفع‌شده) | مرجع تاریخی؛ تست‌های موجود سبز می‌مانند |
 | S4:P10 جانبی (step events) | قبلاً در AC/AD رفع شده — خارج |
-| S5:UNKNOWN-0001 | K-04 |
-| S5:UNKNOWN-0002 | K-05 |
-| S5:UNKNOWN-0003 | K-01 |
-| S5:UNKNOWN-0004 | K-03 |
+| S5:UNKNOWN-0001 | K-04 🟢 پذیرش مکتوب سقف SSE |
+| S5:UNKNOWN-0002 | K-05 🟡 (`K05_BIND_OWNER.md`) |
+| S5:UNKNOWN-0003 | K-01 ⛔ |
+| S5:UNKNOWN-0004 | K-03 🟡 (`k03-SUMMARY.md`) |
 
-### ۴.۵ — شمارش نهایی ردیف‌های باز
+### ۴.۵ — شمارش نهایی ردیف‌های باز (پس از v27.17.15)
 
-| فاز | ردیف‌ها | شمار |
+| فاز | ردیف‌ها | شمار باز |
 |---|---|---|
 | A | A-01..A-08 | ۰ 🟢 |
 | B | B-01..B-22 | ۰ 🟢 |
@@ -350,34 +364,35 @@
 | F | F-01..F-10 | ۰ 🟢 |
 | G | G-01..G-18 | ۰ 🟢 |
 | H | H-01..H-14 | ۰ 🟢 |
-| I | I-01..I-08 | ۸ |
-| J | J-01..J-09 | ۹ |
-| K | K-01..K-09 | ۹ |
-| | **جمع** | **۲۶** |
+| I | I-01..I-08 | ۰ 🟢 |
+| J | J-01..J-09 | ۰ 🟢 |
+| K | K-01، K-02، K-03، K-05، K-07 | ۵ 🟡 |
+| | **جمع باز** | **۵** (P0 = K-01) |
+
+K-04 / K-06 / K-08 / K-09 در همین فاز 🟢 شدند.
 
 ---
 
 ## §۵ — ترتیب اجرا (DAG)
 
 ```
-A (امنیت) ──┬─→ B (state) ─→ C (runtime) ─┬─→ F (perf) ─→ H (UI) ─→ J (features)
-            │                             └─→ G (CLI/server) ─┘
-K-03 (baseline سبز) ──→ همهٔ فازها (پیش‌نیاز اعتبار تست)
-K-01/K-02 موازی با هر فاز (بیرونی)
-D (ابزارها) پس از C-01 (abortSignal ابزارها)
-E (context) پس از I-01 (fake LLM واکنش‌گرا)
-I-01 زودهنگام؛ I-02 مستمر؛ I-08/I-07 انتهایی
+A 🟢 ─→ B 🟢 ─→ C 🟢 ─┬─→ F 🟢 ─→ H 🟢 ─→ J 🟢
+                     └─→ G 🟢 ─┘
+D 🟢 پس از C-01 · E 🟢 · I 🟢
+K-04/K-06/K-08/K-09 🟢 (این شاخه)
+K-03 🟡 recorded (نه کاملاً سبز) · K-07 🟡 نیمه
+K-01 ⛔ / K-02 🟡 / K-05 🟡 ── موازی، ورودی مالک/CI
 ```
 
-**قواعد اجرا (از S1 حفظ شد):** هر فاز = یک مرحلهٔ اجرا؛ تست fail-سپس-pass پیش از رفع؛ `tsc --noEmit` + `vitest run` + `npm run e2e` سبز؛ کامیت و push جدا per فاز؛ تیک 🟢 در همین سند؛ ورودی در `CHANGELOG.md`.
+**قواعد اجرا (از S1 حفظ شد):** هر فاز = یک مرحلهٔ اجرا؛ تست fail-سپس-pass پیش از رفع؛ `tsc --noEmit` + `vitest run` + `npm run e2e` سبز؛ کامیت و push جدا per فاز؛ تیک 🟢 در همین سند؛ ورودی در `CHANGELOG.md`. K-03 فعلاً با خروجی مکتوب در `audit/baseline/` ثبت است، نه با suite تمام‌سبز.
 
 ## §۶ — معیار پذیرش کل سند
 
-1. همهٔ ردیف‌های P0 (۲۳ ردیف) 🟢 شوند؛ P1/P2 یا 🟢 یا با دلیل مکتوب «پذیرفته‌شده/کنارگذاشته» در همین فایل.
-2. K-01 تا K-03 بسته شوند (سبز واقعی روی provider و ماتریس و workspace).
-3. شمارش تست‌های regression جدید ≥ تعداد ردیف‌های رفع‌شده (I-02).
-4. اندازه‌گیری‌های F قبل/بعد ثبت شود؛ کاهش توکن ابزارهای coder ≥ ۶۰٪.
-5. `CHANGELOG.md` برای هر فاز یک ورودی؛ این سند تنها مرجع status باشد (سندهای منبع freeze شوند با ارجاع به اینجا).
+1. همهٔ ردیف‌های P0 داخل‌ریپو 🟢 شدند. تنها P0 باز **K-01** است (کلید واقعی — خارج از sandbox).
+2. K-01 تا K-03 هنوز بسته نیستند: K-03 baseline ثبت شد ولی vitest/e2e تمام‌سبز نیست؛ K-01/K-02 ورودی مالک/CI می‌خواهند.
+3. I-02 پوشش A–H دارد؛ J و K فایل تست مستقل per-ID دارند (`phase-j-*.test.ts`، `phase-k-*.test.ts`).
+4. اندازه‌گیری‌های F در فاز F ثبت شد.
+5. `CHANGELOG.md` برای هر فاز یک ورودی (A…J کامل؛ K = `[27.17.15]` جزئی)؛ این سند تنها مرجع status است.
 
 ## §۷ — جدول وضعیت اجرا (برای تیک‌زدن)
 
@@ -391,9 +406,9 @@ I-01 زودهنگام؛ I-02 مستمر؛ I-08/I-07 انتهایی
 | F | 🟢 | 2026-09-27 | 366a4e0 |
 | G | 🟢 | 2026-09-27 | 720c267 |
 | H | 🟢 | 2026-09-27 | f8b0bb1 |
-| I | 🟢 | 2026-09-27 | |
-| J | ⬜ | | |
-| K | ⬜ | | |
+| I | 🟢 | 2026-09-27 | `d4f4cb7` |
+| J | 🟢 | 2026-09-27 | `5a4b51e` |
+| K | 🟡 جزئی | 2026-09-27 | `b2a8acb` (K-04/06/08/09 🟢؛ K-01/02/03/05/07 باز) |
 
 ---
 *پایان سند. هر تغییر وضعیت فقط با ویرایش همین فایل و کامیت مرتبط.*
