@@ -78,7 +78,7 @@ describe('openai provider — key lookup', () => {
   });
 
   it('says which variables to set when there is no key', () => {
-    expect(() => openaiProviderFactory.create(cfg(), {})).toThrow(/HOTL_API_KEY \(or OPENAI_API_KEY\)/);
+    expect(() => openaiProviderFactory.create(cfg(), {})).toThrow(/HOTL_API_KEY \(OPENAI_API_KEY is not sent to a custom baseURL\)/);
   });
 
   it('builds a Chat Completions model when api=chat', () => {
