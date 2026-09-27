@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { environmentBullets } from '../environment-context.js';
 import { randomUUID } from 'node:crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { NoObjectGeneratedError, generateObject } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from '../runtime/llm-timeout.js';
 import { isAbortError, throwIfAborted } from '../runtime/abort.js';
@@ -59,6 +60,8 @@ export interface PlannerConfig {
 }
 
 export const SESSION_HISTORY_LIMIT = 5;
+
+const sessionHistoryStore = new AsyncLocalStorage<{ block?: string }>();
 
 export function formatSessionHistory(
   interactions: Array<{
@@ -528,9 +531,17 @@ export class Planner {
     this.config = config;
   }
 
-  /** B-15: replace the session-history block for the next planning call. */
-  setSessionHistory(block: string | undefined): void {
-    this.config.sessionHistory = block;
+  /**
+   * B-15: the session-history block for the planning calls of ONE run.
+   * Held per async call chain, not on the (shared) planner — the web server
+   * plans several runs at once and each must see only its own session.
+   */
+  withSessionHistory<T>(block: string | undefined, fn: () => T): T {
+    return sessionHistoryStore.run({ block }, fn);
+  }
+
+  private sessionHistory(): string | undefined {
+    return sessionHistoryStore.getStore()?.block ?? this.config.sessionHistory;
   }
 
   /**
@@ -555,7 +566,7 @@ export class Planner {
       userRequest,
       this.config.projectRoot,
       mode,
-      this.config.sessionHistory,
+      this.sessionHistory(),
       this.catalogBlock(),
     );
 
@@ -682,7 +693,7 @@ export class Planner {
       userRequest,
       clarifications,
       this.config.projectRoot,
-      this.config.sessionHistory,
+      this.sessionHistory(),
       this.catalogBlock(),
       example ? formatPlanExample(example) : undefined,
     );

@@ -1,6 +1,7 @@
 import path from 'node:path';
 import fs from 'node:fs';
 import { z } from 'zod';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { registryLayersFor, type RegistryScope } from './registries/layout.js';
 import { EventBus } from './runtime/event-bus.js';
 import type { EnvSource } from './env.js';
@@ -339,7 +340,16 @@ export class Orchestrator {
   readonly rateLimiter: RateLimiter;
   readonly usageAggregator: UsageAggregator;
   /** J-03: per-run budget; set for the duration of `run()`. */
-  private activeBudget?: BudgetTracker;
+  /**
+   * Per-run state for the web server, which runs several goals on one
+   * Orchestrator at once: kept per async call chain, never on the instance.
+   */
+  private readonly runContext = new AsyncLocalStorage<{ budget?: BudgetTracker }>();
+
+  /** J-03: the budget of the run this call belongs to (none outside a run). */
+  private get activeBudget(): BudgetTracker | undefined {
+    return this.runContext.getStore()?.budget;
+  }
   readonly observabilityLogger: ObservabilityLogger;
   readonly acceptanceChecker: AcceptanceChecker;
   readonly finalReviewer: FinalReviewer;
@@ -967,11 +977,11 @@ export class Orchestrator {
     const ov = requested?.modelId !== undefined
       ? { ...requested, modelId: this.useModel(requested.modelId) }
       : requested;
-    this.activeBudget = undefined;
+    let budget: BudgetTracker | undefined;
     if (ov?.budget) {
       const parsed = parseBudget(ov.budget);
       if ('error' in parsed) throw new Error(parsed.error);
-      this.activeBudget = new BudgetTracker(parsed);
+      budget = new BudgetTracker(parsed);
     }
 
     if (options?.sessionId && !this.sessionStore.getSession(options.sessionId)) {
@@ -984,9 +994,23 @@ export class Orchestrator {
     const interaction = this.sessionStore.addInteraction(sessionId, userRequest);
     this.observabilityLogger.logSessionCreated(sessionId);
     const sessionForHistory = this.sessionStore.getSession(sessionId);
-    this.planner.setSessionHistory(
-      sessionForHistory ? formatSessionHistory(sessionForHistory.interactions) : undefined,
+    const historyBlock = sessionForHistory
+      ? formatSessionHistory(sessionForHistory.interactions)
+      : undefined;
+    return this.runContext.run({ budget }, () =>
+      this.planner.withSessionHistory(historyBlock, () =>
+        this.runInSession(userRequest, options, ov, sessionId, interaction),
+      ),
     );
+  }
+
+  private async runInSession(
+    userRequest: string,
+    options: OrchestratorRunOptions,
+    ov: RunOverrides | undefined,
+    sessionId: string,
+    interaction: ReturnType<SessionStore['addInteraction']>,
+  ): Promise<OrchestratorResult> {
 
     this.observabilityLogger.log({
       eventType: 'system:info',

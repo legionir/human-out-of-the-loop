@@ -74,3 +74,48 @@ describe('R-09 — a cancelled confirmation never re-plans', () => {
     expect(spy).toHaveBeenCalledTimes(2);
   });
 });
+
+describe('R-10 — session history is per run, not shared planner state', () => {
+  let root: string;
+  let orch: Orchestrator;
+  beforeEach(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-review-'));
+    orch = new Orchestrator({ projectRoot: root, persistent: false });
+    await orch.initialize();
+  });
+  afterEach(async () => {
+    await orch.shutdown();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('two concurrent runs in different sessions each see only their own history', async () => {
+    const store = orch.sessionStore;
+    const sA = store.createSession();
+    const sB = store.createSession();
+    for (const [sid, text] of [
+      [sA, 'secret alpha project'],
+      [sB, 'bravo work'],
+    ] as const) {
+      const i = store.addInteraction(sid, text)!;
+      store.updateInteraction(sid, i.id, { outcome: 'success', completedAt: Date.now() });
+    }
+    const planner = (orch as unknown as {
+      planner: { plan: (...a: unknown[]) => unknown; sessionHistory: () => string | undefined };
+    }).planner;
+    const seen: Record<string, string | undefined> = {};
+    vi.spyOn(planner, 'plan').mockImplementation((async (request: string) => {
+      await new Promise((r) => setTimeout(r, request === 'A' ? 30 : 0));
+      seen[request] = planner.sessionHistory();
+      return planResult(request);
+    }) as never);
+    const cancel = async () => ({ confirmed: false, cancelled: true });
+    await Promise.all([
+      orch.run('A', { sessionId: sA, confirmCallback: cancel }),
+      orch.run('B', { sessionId: sB, confirmCallback: cancel }),
+    ]);
+    expect(seen.A).toContain('secret alpha project');
+    expect(seen.A).not.toContain('bravo work');
+    expect(seen.B).toContain('bravo work');
+    expect(seen.B).not.toContain('secret alpha project');
+  });
+});
