@@ -5,6 +5,26 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.17] — 2026-09-27 — Real provider runs and a green CI matrix
+
+Found by running the CLI against a real OpenAI-compatible gateway (`real-provider.yml`) and by the first real Actions runs of the CI matrix. Suite: **vitest 1693/1693** (also with `TMPDIR` behind a symlink), **e2e 209/209**; CI green on ubuntu/macos/windows × node 22/24/26.
+
+**Security**
+- Checkpoints copied the project's `.env` into `.ai-runtime/checkpoints` — the provider key ended up in run artifacts. Credential files (`.env`, `.env.*` except `.env.example`) are never snapshotted.
+
+**Fixed**
+- File tools refused every path when the project root was reached through a symlink (macOS `/var`, Windows 8.3 `RUNNER~1`): allowed roots now include their real paths, and a checked path is returned under the root as the caller spelled it (relative paths and `.git`/`.ai-runtime` protection stay right). git's `--show-toplevel` is expressed the same way.
+- A gateway answering HTTP 200 with a body that is not a response (`upstream_error: temporarily unavailable`) ended the run at planning. Structured calls retry it up to 3 times with backoff (`HOTL_UNREADABLE_RETRY_MS`), and the error names the status and the start of the body.
+- Auto mode: a request whose chat answer only points at `@plan` (a Persian "create a file" request did this) is now planned instead of asking the user to retype it.
+- Checkpoint rollback decided "new file" by mtime (a file written in the capture's millisecond survived); the manifest lists the files present at capture.
+- `hootl usage --json` printed prose on an empty project; it prints `{ plans: [], totals }`.
+- Windows: a rename onto a file briefly held open (EPERM/EACCES/EBUSY) is retried.
+- `real-provider.yml`: reads `HOTL_MODEL`/`HOTL_API_STYLE` from secrets too; accepts model names with dots; the leak check matches keys literally and names the file.
+
+**Tests**
+- A CLI command matrix runs every read-only command on a fresh project, plus the unknown-id paths.
+- The suite is portable to Windows (POSIX-path assumptions removed).
+
 ## [27.17.16] — 2026-09-27 — Code review of phases A–K: fixes
 
 A review of the A–K fixes (tracked as phase **R** in `docs/UNIFIED_EXECUTION_PLAN.md`) found defects the fixes introduced or left open. All are fixed with regression tests (`src/ai/__tests__/review-fixes.test.ts` plus the phase test files named below). Suite: tsc clean, **vitest 1670/1670** (also under three shuffled orders), **e2e 209/209**.
