@@ -17,7 +17,10 @@ import {
   getReadySteps,
 } from '../schemas/plan.js';
 import type { AcceptanceChecker } from './acceptance-checker.js';
+import type { Task } from '../schemas/task.js';
 import { mergeReplannedSteps } from './replan-merge.js';
+
+const ACCEPTANCE_MARK = '[Acceptance:';
 
 // ─── Types ────────────────────────────────────────────────────────
 
@@ -51,6 +54,8 @@ export interface PlanRuntimeConfig {
    * runtime's own state updates.
    */
   acceptanceChecker?: AcceptanceChecker;
+  /** B-10: persistence failures are reported instead of swallowed. */
+  onPersistError?: (err: unknown) => void;
 }
 
 export interface PlanExecutionResult {
@@ -67,6 +72,8 @@ export interface PlanExecutionResult {
     failureType?: 'technical' | 'quality';
   }>;
   replanningAttempts: number;
+  /** B-10: at least one persist failed during this run. */
+  persistenceDegraded?: boolean;
 }
 
 // ─── PlanRuntime ─────────────────────────────────────────────────
@@ -96,6 +103,9 @@ export class PlanRuntime {
   private cancelled = false;
   /** Phase 20 (CORR-04): steps already judged — never check twice */
   private readonly acceptanceChecked = new Set<string>();
+  /** B-10 */
+  private persistFailures = 0;
+  persistenceDegraded = false;
 
   constructor(config: PlanRuntimeConfig) {
     this.config = config as Required<
@@ -120,6 +130,9 @@ export class PlanRuntime {
     plan.status = 'running';
     this.persist(plan);
     this.notify(plan, 'plan:started');
+    // B-08: a crash after a step was stored `done` but before judgment
+    // left it unjudged. Resume must judge, not skip.
+    await this.runAcceptanceChecks(plan);
 
     // 2. Main execution loop
     while (!(await this.shouldExitOrReplan(plan))) {
@@ -162,12 +175,9 @@ export class PlanRuntime {
           continue; // Re-evaluate with the patched plan
         }
 
-        // Steps are running — wait for them
-        await this.config.taskRuntime.waitForAll();
-        this.syncStepStatuses(plan);
-        // Phase 20 (CORR-04): explicit acceptance hook (deterministic)
-        await this.runAcceptanceChecks(plan);
-        this.persist(plan);
+        // Steps are running — wait for them, persisting each completion
+        // immediately (B-14) and judging before the next persist (B-08).
+        await this.drainRunningSteps(plan);
         continue;
       }
 
@@ -177,14 +187,10 @@ export class PlanRuntime {
       // Use allSettled so one failure doesn't block others
       await Promise.allSettled(dispatchPromises);
 
-      // 5. Wait for all dispatched tasks to complete
-      await this.config.taskRuntime.waitForAll();
-
-      // 6. Sync statuses from TaskRuntime back to PlanSteps
-      this.syncStepStatuses(plan);
-      // Phase 20 (CORR-04): explicit acceptance hook (deterministic)
-      await this.runAcceptanceChecks(plan);
-      this.persist(plan);
+      // 5–6. Wait for EACH task to complete, persist + judge immediately
+      // so a crash mid-wave does not re-run finished work and does not
+      // leave an unjudged `done` on disk.
+      await this.drainRunningSteps(plan);
       this.notify(plan, 'plan:steps-updated');
     }
 
@@ -393,10 +399,20 @@ export class PlanRuntime {
     for (const step of plan.steps) {
       if (step.status !== 'done') continue;
       if (this.acceptanceChecked.has(step.id)) continue;
+      if (step.resultSummary?.includes(ACCEPTANCE_MARK)) {
+        this.acceptanceChecked.add(step.id);
+        continue;
+      }
       if (!step.taskId) continue;
 
-      const task = this.config.taskRuntime.getResult(step.taskId);
-      if (!task) continue;
+      const task =
+        this.config.taskRuntime.getResult(step.taskId) ??
+        ({
+          id: step.taskId,
+          status: 'completed',
+          summary: step.resultSummary ?? '',
+          result: step.resultSummary ?? '',
+        } as Task);
 
       // Mark as checked BEFORE awaiting so an interleaved re-entry
       // (e.g. resume) cannot double-judge the same step.
@@ -557,6 +573,10 @@ ${plan.steps
 Produce a new plan that:
 1. Keeps completed steps as-is (status "done").
 2. Replaces failed steps with new approaches or decomposes them further.
+   Every failed step MUST have a replacement: either reuse its id or set
+   replacesStepId to the failed step's id on the new step so dependants
+   are rewired. A re-plan that leaves a failed step with no replacement
+   is rejected.
 3. Preserves the original goal.
 `.trim();
 
@@ -673,22 +693,58 @@ Produce a new plan that:
 
   // ── Private: helpers ──────────────────────────────────────────
 
+  /**
+   * B-14: wait until every currently-running step is terminal, persisting
+   * (and judging) after EACH completion so a crash mid-wave keeps finished
+   * work and does not store unjudged `done`.
+   */
+  private async drainRunningSteps(plan: Plan): Promise<void> {
+    while (plan.steps.some((s) => s.status === 'running')) {
+      const ids = plan.steps
+        .filter((s) => s.status === 'running' && s.taskId)
+        .map((s) => s.taskId!);
+      const waitForAny = this.config.taskRuntime.waitForAny?.bind(this.config.taskRuntime);
+      if (waitForAny) await waitForAny(ids);
+      else await this.config.taskRuntime.waitForAll();
+      this.syncStepStatuses(plan);
+      await this.runAcceptanceChecks(plan);
+      this.persist(plan);
+    }
+  }
+
   private persist(plan: Plan): void {
     try {
       // Phase 29: a cancellation that arrives from ANOTHER process is
       // authoritative.  Without this the loop's own (status 'running')
       // writes raced with `hootl plans cancel` and overwrote it, so the
       // run finished as 'completed' and the human's cancel was lost.
-      if (plan.id) {
-        const stored = this.config.planStore.load(plan.id);
-        if (stored?.status === 'cancelled' && plan.status !== 'cancelled') {
-          plan.status = 'cancelled';
+      if (plan.id && this.config.planStore.update) {
+        const saved = this.config.planStore.update(plan.id, (stored) => {
+          if (stored.status === 'cancelled' && plan.status !== 'cancelled') {
+            plan.status = 'cancelled';
+          }
+          return structuredClone(plan);
+        });
+        if (!saved) this.config.planStore.save(plan);
+      } else {
+        if (plan.id) {
+          const stored = this.config.planStore.load(plan.id);
+          if (stored?.status === 'cancelled' && plan.status !== 'cancelled') {
+            plan.status = 'cancelled';
+          }
         }
+        this.config.planStore.save(plan);
       }
-      this.config.planStore.save(plan);
-    } catch {
-      // Persistence failure should not crash the loop
-      // In production, this goes to the observability log (Phase 14)
+      this.persistFailures = 0;
+    } catch (err) {
+      this.persistFailures += 1;
+      this.persistenceDegraded = true;
+      this.config.onPersistError?.(err);
+      if (this.persistFailures >= 5) {
+        this.config.onPersistError?.(
+          new Error(`[PlanRuntime] ${this.persistFailures} consecutive persist failures`),
+        );
+      }
     }
   }
 
@@ -736,6 +792,7 @@ Produce a new plan that:
       totalSteps: plan.steps.length,
       incompleteSteps,
       replanningAttempts: this.replanningCount,
+      ...(this.persistenceDegraded ? { persistenceDegraded: true } : {}),
     };
   }
 }

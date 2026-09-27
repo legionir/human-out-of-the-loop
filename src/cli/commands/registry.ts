@@ -97,6 +97,7 @@ export interface ModelsCommandOptions extends RegistryCommandOptions {
 export async function modelsCommand(opts: ModelsCommandOptions): Promise<number> {
   const root = resolveProjectRoot(opts);
   if (!root) return 2;
+  prepareCliEnvironment(root);
   if (opts.remote) return remoteModelsCommand(root, opts);
   const loaded = loadRegistries(root);
   return render(opts, {
@@ -111,6 +112,7 @@ export async function modelsCommand(opts: ModelsCommandOptions): Promise<number>
 export async function personasCommand(opts: RegistryCommandOptions): Promise<number> {
   const root = resolveProjectRoot(opts);
   if (!root) return 2;
+  prepareCliEnvironment(root);
   const loaded = loadRegistries(root);
   return render(opts, {
     kind: 'personas',
@@ -129,6 +131,7 @@ export async function personasCommand(opts: RegistryCommandOptions): Promise<num
 export async function skillsCommand(opts: RegistryCommandOptions): Promise<number> {
   const root = resolveProjectRoot(opts);
   if (!root) return 2;
+  prepareCliEnvironment(root);
   const loaded = loadRegistries(root);
   return render(opts, {
     kind: 'skills',
@@ -142,6 +145,7 @@ export async function skillsCommand(opts: RegistryCommandOptions): Promise<numbe
 export async function toolsCommand(opts: ToolsCommandOptions): Promise<number> {
   const root = resolveProjectRoot(opts);
   if (!root) return 2;
+  prepareCliEnvironment(root);
   const loaded = loadRegistries(root);
   const rows: Array<Array<string | number>> = loaded.tools.map((t) => [
     t.id,

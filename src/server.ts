@@ -25,6 +25,7 @@ import { envDefaultModelId } from './cli/utils/registries.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import type { Server as HttpServer } from 'node:http';
 import express, { type Express } from 'express';
 import { Orchestrator } from './ai/orchestrator.js';
 import { loadDotEnv, loadGlobalConfig } from './cli/utils/config.js';
@@ -84,6 +85,8 @@ export interface CreatedServer {
   ctx: ServerContext;
   /** Stop the orchestrator (call on server shutdown / in tests). */
   close: () => Promise<void>;
+  /** B-12: the listening HTTP server, when started via startServer(). */
+  server?: HttpServer;
 }
 
 export function createApp(options: ServerOptions = {}): CreatedServer {
@@ -256,13 +259,38 @@ export async function startServer(options: ServeOptions = {}): Promise<CreatedSe
   const { app, ctx, close } = createApp(options);
   const port = options.port ?? Number(process.env.HOTL_PORT ?? 3000);
 
-  await new Promise<void>((resolve, reject) => {
-    const server = app.listen(port, host, () => resolve());
+  const httpServer: HttpServer = await new Promise((resolve, reject) => {
+    const server = app.listen(port, host, () => resolve(server));
     server.on('error', reject);
   });
   // eslint-disable-next-line no-console
   console.log(`[hotl-ui] http://${host === '0.0.0.0' ? 'localhost' : host}:${port}  (project root: ${ctx.projectRoot})`);
-  return { app, ctx, close };
+
+  let shuttingDown = false;
+  const shutdown = async (): Promise<void> => {
+    if (shuttingDown) {
+      process.exit(1);
+    }
+    shuttingDown = true;
+    for (const run of ctx.runs.values()) {
+      if (run.ttlTimer) {
+        clearTimeout(run.ttlTimer);
+        run.ttlTimer = undefined;
+      }
+      run.abortController?.abort();
+      run.confirmResolver?.({ confirmed: false, feedback: 'server shutting down' });
+      run.clarificationResolver?.(null);
+    }
+    for (const id of ctx.orchestrator.livePlanIds()) {
+      await ctx.orchestrator.cancelPlan(id).catch(() => undefined);
+    }
+    await close();
+    await new Promise<void>((resolve, reject) => {
+      httpServer.close((err) => (err ? reject(err) : resolve()));
+    });
+  };
+
+  return { app, ctx, close: shutdown, server: httpServer };
 }
 
 // ─── Entry point ─────────────────────────────────────────────────
@@ -330,12 +358,11 @@ if (isDirectlyInvoked()) {
   const options = parseArgs(process.argv);
   startServer(options)
     .then(({ close }) => {
-      const shutdown = async (): Promise<void> => {
-        await close();
-        process.exit(0);
+      const onSignal = (): void => {
+        void close().then(() => process.exit(0), () => process.exit(1));
       };
-      process.on('SIGINT', () => void shutdown());
-      process.on('SIGTERM', () => void shutdown());
+      process.on('SIGINT', onSignal);
+      process.on('SIGTERM', onSignal);
     })
     .catch((err) => {
       // eslint-disable-next-line no-console

@@ -437,6 +437,35 @@ export class TaskRuntime {
    * Useful for graceful shutdown and testing.
    * Loops until no pending or running tasks remain (handles queued tasks that start after others complete).
    */
+  /**
+   * B-14: resolve as soon as ANY of `taskIds` is terminal so the plan
+   * loop can persist that step without waiting for the rest of the wave.
+   */
+  async waitForAny(taskIds: string[]): Promise<void> {
+    const terminal = new Set(['completed', 'failed', 'cancelled']);
+    const ids = taskIds.filter(Boolean);
+    if (ids.length === 0) return;
+    while (true) {
+      let anyRunning = false;
+      for (const id of ids) {
+        const task = this.tasks.get(id);
+        if (task && terminal.has(task.status)) return;
+        if (this.runningPromises.has(id) || task?.status === 'running' || task?.status === 'pending') {
+          anyRunning = true;
+        }
+      }
+      if (!anyRunning) return;
+      const promises = ids
+        .map((id) => this.runningPromises.get(id))
+        .filter((p): p is Promise<AgentRunResult> => p !== undefined);
+      if (promises.length === 0) {
+        await new Promise((r) => setTimeout(r, 15));
+        continue;
+      }
+      await Promise.race(promises);
+    }
+  }
+
   async waitForAll(): Promise<void> {
     // Loop until quiescent — pending tasks may become running after each batch completes
     while (true) {

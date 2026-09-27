@@ -263,6 +263,12 @@ export class Repl {
     }
     void this.refreshRemoteModels();
     this.printBanner();
+    const onTerm = (): void => {
+      this.exit();
+    };
+    process.on('SIGTERM', onTerm);
+    process.on('SIGHUP', onTerm);
+    try {
     while (!this.closed) {
       // Phase 32: a goal's status line (or a thinking block) must never run
       // into the prompt the user is about to type into.
@@ -287,6 +293,10 @@ export class Repl {
       } else {
         await this.handle(result.line);
       }
+    }
+    } finally {
+      process.removeListener('SIGTERM', onTerm);
+      process.removeListener('SIGHUP', onTerm);
     }
   }
 

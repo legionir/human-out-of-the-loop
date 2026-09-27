@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { ModelConfig } from '../schemas/model-config.js';
 
 /**
@@ -37,6 +38,8 @@ export function envEndpoint(env: EnvLike, known: ReadonlyArray<ModelConfig>): En
   const baseURL = nonEmpty(env.HOTL_BASE_URL);
   const name = nonEmpty(env.HOTL_MODEL);
   if (!baseURL && !name) return {};
+  // B-22: HOTL_BASE_URL alone must not displace the global defaultModel.
+  if (!name) return {};
 
   const style = nonEmpty(env.HOTL_API_STYLE)?.toLowerCase();
   const api = style === 'responses' || style === 'chat' ? style : baseURL ? 'chat' : undefined;
@@ -102,20 +105,39 @@ export function parseModelSpec(spec: string): { provider?: string; name: string 
 }
 
 /** The registry id a spec is stored under (ids allow only [a-z0-9_-]). */
-export function modelIdForSpec(spec: string): string {
+export function modelIdForSpec(
+  spec: string,
+  known: ReadonlyArray<Pick<ModelConfig, 'id' | 'provider' | 'model'>> = [],
+): string {
   const trimmed = spec.trim();
+  if (!trimmed) return ENV_MODEL_ID;
   if (REGISTRY_ID.test(trimmed)) return trimmed;
+  const { provider, name } = parseModelSpec(trimmed);
+  if (!name.trim()) return ENV_MODEL_ID;
   const slug = trimmed
     .toLowerCase()
     .replace(/[^a-z0-9_-]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return slug || ENV_MODEL_ID;
+  const id = slug || ENV_MODEL_ID;
+  const existing = known.find((m) => m.id === id);
+  if (existing) {
+    const wantProvider = provider ?? 'openai';
+    if (existing.provider !== wantProvider || existing.model !== name) {
+      const suffix = createHash('sha256').update(trimmed).digest('hex').slice(0, 8);
+      return `${id}-${suffix}`;
+    }
+  }
+  return id;
 }
 
 /** The config a runtime spec registers (when its id is not registered yet). */
-export function runtimeModelConfig(spec: string, env: EnvLike): ModelConfig {
+export function runtimeModelConfig(
+  spec: string,
+  env: EnvLike,
+  known: ReadonlyArray<Pick<ModelConfig, 'id' | 'provider' | 'model'>> = [],
+): ModelConfig {
   const { provider, name } = parseModelSpec(spec.trim());
-  const id = modelIdForSpec(spec);
+  const id = modelIdForSpec(spec, known);
   const description = `Selected at runtime (${spec.trim()})`;
   if (provider === 'anthropic' || provider === 'local') {
     return { id, provider, model: name, description };

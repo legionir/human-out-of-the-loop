@@ -40,6 +40,9 @@ function projectRootFor(opts: PlansCommandOptions): string {
 export async function plansListCommand(opts: PlansCommandOptions): Promise<number> {
   const store = planStoreFor(opts);
   const ids = store.list();
+  for (const w of store.loadWarnings) {
+    err(color.warn(`Skipped corrupt plan file ${w.file}: ${w.error}`));
+  }
 
   if (ids.length === 0) {
     out(color.dim('No plans found (persistent mode stores plans in .ai-runtime/plans).'));
@@ -186,6 +189,11 @@ export async function plansResumeCommand(planId: string, opts: PlansCommandOptio
       err(color.dim(`Plan "${planId}" is already completed — nothing to resume.`));
       return 0;
     }
+    try {
+      orchestrator.reconcileAbandonedInteractions();
+    } catch {
+      // best-effort
+    }
     const result = await orchestrator.resumePlan(planId);
     if (!result) {
       err(color.failed(`Plan "${planId}" not found (or not resumable).`));
@@ -198,7 +206,11 @@ export async function plansResumeCommand(planId: string, opts: PlansCommandOptio
       ? 0
       : 1;
   } catch (e) {
-    err(color.failed(`Error: ${e instanceof Error ? e.message : String(e)}`));
+    const message = e instanceof Error ? e.message : String(e);
+    err(color.failed(`Error: ${message}`));
+    if (e && typeof e === 'object' && 'status' in e && (e as { status?: number }).status === 409) {
+      return 1;
+    }
     return 1;
   } finally {
     await orchestrator.shutdown();

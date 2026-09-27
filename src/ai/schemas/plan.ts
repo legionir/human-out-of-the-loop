@@ -47,6 +47,11 @@ export const PlanStepSchema = z.object({
   resultSummary: z.string().optional(),
   /** Task id from TaskRuntime (populated when dispatched) */
   taskId: z.string().optional(),
+  /**
+   * B-05: when this step is a re-plan replacement, the id of the failed
+   * step it supersedes. Dependants of that id are rewired onto this step.
+   */
+  replacesStepId: z.string().min(1).optional(),
 });
 
 export type PlanStep = z.infer<typeof PlanStepSchema>;

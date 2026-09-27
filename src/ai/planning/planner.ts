@@ -44,6 +44,28 @@ export interface PlannerConfig {
   projectRoot?: string;
   /** Token usage of every planning call (assessment, generation, re-planning). */
   onUsage?: LlmUsageReporter;
+  /** B-15: compact block of recent session turns injected into prompts. */
+  sessionHistory?: string;
+}
+
+export const SESSION_HISTORY_LIMIT = 5;
+
+export function formatSessionHistory(
+  interactions: Array<{
+    userRequest: string;
+    outcome?: string;
+    reviewSummary?: string;
+    completedAt?: number;
+  }>,
+  limit = SESSION_HISTORY_LIMIT,
+): string {
+  const done = interactions.filter((i) => i.completedAt).slice(-limit);
+  if (done.length === 0) return '';
+  const lines = done.map((i) => {
+    const summary = (i.reviewSummary ?? '').replace(/\s+/g, ' ').slice(0, 240);
+    return `- User: ${i.userRequest.slice(0, 200)}\n  Outcome: ${i.outcome ?? 'unknown'}${summary ? `\n  Summary: ${summary}` : ''}`;
+  });
+  return `RECENT SESSION HISTORY (oldest first):\n${lines.join('\n')}`;
 }
 
 /**
@@ -167,7 +189,8 @@ export function buildProjectContext(projectRoot: string | undefined): string {
 export function buildAssessmentPrompt(
   userRequest: string,
   projectRoot?: string,
-  mode: RunMode = DEFAULT_RUN_MODE
+  mode: RunMode = DEFAULT_RUN_MODE,
+  sessionHistory?: string,
 ): string {
   const context = buildProjectContext(projectRoot);
   const note = context
@@ -194,7 +217,7 @@ USER REQUEST:
 """
 ${userRequest}
 """
-
+${sessionHistory ? `\n${sessionHistory}\n` : ''}
 Set kind="plan" or kind="answer" or kind="clarify" and fill the matching field:
 - "plan": the complete execution plan (goal + steps with personas, skills, tools and acceptance criteria);
 - "answer": your reply to the user, written for them (not a summary of this decision);
@@ -211,7 +234,8 @@ A request that is a question about the project, its files, or the runtime is kin
 export function buildPlanPrompt(
   userRequest: string,
   clarifications?: Record<string, string>,
-  projectRoot?: string
+  projectRoot?: string,
+  sessionHistory?: string,
 ): string {
   const context = buildProjectContext(projectRoot);
   let prompt = `
@@ -224,6 +248,10 @@ USER REQUEST:
 ${userRequest}
 """
 `.trim();
+
+  if (sessionHistory) {
+    prompt += `\n\n${sessionHistory}`;
+  }
 
   if (clarifications && Object.keys(clarifications).length > 0) {
     prompt += `\n\nCLARIFICATIONS PROVIDED BY USER:\n`;
@@ -479,6 +507,11 @@ export class Planner {
     this.config = config;
   }
 
+  /** B-15: replace the session-history block for the next planning call. */
+  setSessionHistory(block: string | undefined): void {
+    this.config.sessionHistory = block;
+  }
+
   /**
    * Phase 1: Assess whether the request is clear enough.
    * Uses generateObject for guaranteed schema compliance.
@@ -498,7 +531,12 @@ export class Planner {
     const agent = this.buildPlannerAgent(modelId);
 
     const language = detectLanguage(userRequest);
-    const assessmentPrompt = buildAssessmentPrompt(userRequest, this.config.projectRoot, mode);
+    const assessmentPrompt = buildAssessmentPrompt(
+      userRequest,
+      this.config.projectRoot,
+      mode,
+      this.config.sessionHistory,
+    );
 
     try {
       const { object, usage } = await withStructuredRetry<{
@@ -611,7 +649,12 @@ export class Planner {
     throwIfAborted(abortSignal, 'Plan generation');
     const agent = this.buildPlannerAgent(modelId);
 
-    const prompt = buildPlanPrompt(userRequest, clarifications, this.config.projectRoot);
+    const prompt = buildPlanPrompt(
+      userRequest,
+      clarifications,
+      this.config.projectRoot,
+      this.config.sessionHistory,
+    );
 
     const { object, usage } = await withStructuredRetry<{ object: Plan; usage: unknown }>(
       async () => {

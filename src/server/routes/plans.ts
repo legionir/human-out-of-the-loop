@@ -15,6 +15,7 @@ import { Router } from 'express';
 import type { LogEntry } from '../../ai/runtime/observability-logger.js';
 import { findRunByPlanId, sendOwnerForbidden } from '../run-control.js';
 import type { RunState, ServerContext } from '../types.js';
+import { PlanLiveOwnerError } from '../../ai/runtime/plan-owner.js';
 
 export function plansRouter(ctx: ServerContext): Router {
   const router = Router();
@@ -67,11 +68,22 @@ export function plansRouter(ctx: ServerContext): Router {
     }
     const owner = findRunByPlanId(ctx, req.params.id);
     if (owner && sendOwnerForbidden(ctx, req, res, owner.ownerToken)) return;
+    if (ctx.orchestrator.hasLiveOwner(req.params.id)) {
+      res.status(409).json({
+        error: `Plan "${req.params.id}" is already running.`,
+        code: 'PLAN_LIVE_OWNER',
+      });
+      return;
+    }
     // Fire-and-track: resume executes in the background; progress flows
     // through the SSE stream for this plan id.
     ctx.orchestrator
       .resumePlan(req.params.id)
       .catch((err: unknown) => {
+        if (err instanceof PlanLiveOwnerError) {
+          ctx.hub.emit(req.params.id, 'plan:error', { message: err.message, code: err.code });
+          return;
+        }
         ctx.hub.emit(
           req.params.id,
           'plan:error',

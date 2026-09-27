@@ -23,6 +23,11 @@ export interface SkillRegistryOptions {
   toolRegistry: ToolRegistry;
 }
 
+export interface SkillUnknownToolWarning {
+  skillId: string;
+  missing: string[];
+}
+
 // ─── SkillRegistry ───────────────────────────────────────────────
 
 /**
@@ -40,6 +45,12 @@ export class SkillRegistry {
   private readonly metadata: Registry<Skill>;
   private readonly resolved = new Map<string, ResolvedSkill>();
   private readonly toolRegistry: ToolRegistry;
+  /**
+   * B-19: when MCP servers are configured, missing tool ids are deferred
+   * (the server may be down at startup) instead of failing the whole load.
+   */
+  private allowUnknownTools = false;
+  readonly unknownToolWarnings: SkillUnknownToolWarning[] = [];
 
   constructor(options: SkillRegistryOptions) {
     this.metadata = createRegistry<Skill>({
@@ -47,6 +58,10 @@ export class SkillRegistry {
       label: 'SkillRegistry',
     });
     this.toolRegistry = options.toolRegistry;
+  }
+
+  setAllowUnknownTools(value: boolean): void {
+    this.allowUnknownTools = value;
   }
 
   // ── Registration ──────────────────────────────────────────────
@@ -80,7 +95,7 @@ export class SkillRegistry {
     const resolved: ResolvedSkill = {
       ...skill,
       resolvedInstructions,
-      resolvedTools: [...skill.tools],
+      resolvedTools: skill.tools.filter((t) => this.toolRegistry.hasDefinition(t)),
     };
     this.resolved.set(skill.id, resolved);
 
@@ -154,6 +169,10 @@ export class SkillRegistry {
       }
     }
     if (missing.length > 0) {
+      if (this.allowUnknownTools) {
+        this.unknownToolWarnings.push({ skillId: skill.id, missing });
+        return;
+      }
       throw new Error(
         `[SkillRegistry] Skill "${skill.id}" references unknown tool(s): ` +
           `[${missing.join(', ')}]. ` +

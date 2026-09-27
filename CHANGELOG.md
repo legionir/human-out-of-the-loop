@@ -5,6 +5,32 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.5] — 2026-09-27 — Phase B: orchestration, stores, registry
+
+Closes every open row of **Phase B** in `docs/UNIFIED_EXECUTION_PLAN.md` (B-01…B-22).
+
+- **B-01 — resume vs live owner.** In-process live-plan set plus a pid/heartbeat owner file. A second `resume` (API 409, CLI error) is refused until the owner dies or the heartbeat goes stale.
+- **B-02 — resume closes the right interaction.** Match `planIds.includes(planId)` first; never close another plan's open turn.
+- **B-03 — store load validates.** `PlanSchema`/`SessionSchema.safeParse`; corrupt files skipped with warnings; API list stays 200.
+- **B-04 — duplicate step ids.** Feasibility gate already rejected them; regression test kept.
+- **B-05 — re-plan `replacesStepId`.** Dependants are rewired onto the replacement; a failed step with no replacement rejects the merge.
+- **B-06 — reconcile.** `initialize` and `plans resume` close pending interactions whose plans are already terminal/draft.
+- **B-07 — failed plan paths update the session.** Feasibility, cycles, and reject all complete the interaction; textual confirmation feedback triggers a re-plan up to the clarification ceiling.
+- **B-08 / B-14 — persist per completion, judge before the next write.** `waitForAny` drains a wave one task at a time; resume judges `done` steps that never got an `[Acceptance:` mark.
+- **B-09 — `PlanStore.update(id, fn)`** locked read-modify-write (File + Memory + scrubbing wrapper).
+- **B-10 — persist failures.** Logged via `logSystemError`; `persistenceDegraded` on the review after consecutive failures.
+- **B-11 — pre-hash filenames.** `list()`/`load()`/`delete()` migrate `plan_foo.json` onto the sha256 name.
+- **B-12 — web server shutdown.** HTTP `server.close()`, cancel live plans, resolve waits as cancelled; a second signal hard-exits.
+- **B-13 — CLI SIGTERM/SIGHUP.** `hootl run` and the REPL treat them like the first Ctrl-C.
+- **B-15 — session history.** Last 5 completed turns injected into planner prompts.
+- **B-16 — corrupt registry JSON fails `initialize`.** Missing default-model keys are reported, not swallowed.
+- **B-17 — duplicate ids inside one layer** error even with `override`.
+- **B-18 — persona `allowedTools`** must name a real tool (`*` / `mcp:` allowed).
+- **B-19 — MCP down does not fail skill load.** Missing tools are dropped with a warning when MCP servers are configured.
+- **B-20 — CLI/runtime loader parity.** Registry commands call `prepareCliEnvironment`; `/api/mcp` uses the same layer merge as the CLI.
+- **B-21 — model slug collisions** get a hash suffix; empty specs stay `InvalidModelError`.
+- **B-22 — `HOTL_BASE_URL` alone** no longer displaces global `defaultModel`.
+
 ## [27.17.4] — 2026-09-27 — Phase A: web-server auth, project trust, cancel-during-planning
 
 Closes every open row of **Phase A** in `docs/UNIFIED_EXECUTION_PLAN.md` (A-01…A-08).

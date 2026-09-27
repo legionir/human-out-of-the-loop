@@ -16,7 +16,7 @@ import type { ThoughtSink } from './runtime/thought-stream.js';
 import { CancellationManager } from './runtime/cancellation-manager.js';
 import { RateLimiter } from './runtime/rate-limiter.js';
 import { UsageAggregator } from './runtime/usage-aggregator.js';
-import { envEndpoint, modelIdForSpec, runtimeModelConfig } from './models/env-endpoint.js';
+import { envEndpoint, modelIdForSpec, parseModelSpec, runtimeModelConfig } from './models/env-endpoint.js';
 import { listRemoteModels, type RemoteModelList } from './models/list-models.js';
 import type { LlmUsageReport } from './runtime/llm-usage.js';
 import { MemorySessionStore, FileSessionStore, type SessionStore } from './runtime/session-store.js';
@@ -36,7 +36,13 @@ import { ToolRegistry } from './registries/tool-registry.js';
 import { ModelRegistry } from './registries/model-registry.js';
 import { AgentRegistry } from './registries/agent-registry.js';
 
-import { Planner } from './planning/planner.js';
+import { Planner, formatSessionHistory } from './planning/planner.js';
+import {
+  PlanLiveOwnerError,
+  tryAcquirePlanOwner,
+  isPlanOwnerAlive,
+  type PlanOwnerHandle,
+} from './runtime/plan-owner.js';
 import { runFeasibilityGate } from './planning/feasibility-gate.js';
 import { detectCycles, type CycleDetectionResult } from './planning/cycle-detector.js';
 import {
@@ -160,6 +166,8 @@ export interface RunOverrides {
   maxSteps?: number;
   maxReplanningAttempts?: number;
 }
+
+export { PlanLiveOwnerError } from './runtime/plan-owner.js';
 
 /** U3: thrown when a per-run `modelId` is not in the ModelRegistry. */
 export class InvalidModelError extends Error {
@@ -330,6 +338,9 @@ export class Orchestrator {
   private readonly defaultModelSpec: string;
 
   private initialized = false;
+  /** B-01: in-process live plans + on-disk owner handles. */
+  private readonly livePlans = new Set<string>();
+  private readonly planOwnerHandles = new Map<string, PlanOwnerHandle>();
 
   constructor(config: OrchestratorConfig) {
     // Phase 22: validate FIRST — out-of-range config throws a ZodError
@@ -595,11 +606,15 @@ export class Orchestrator {
   private registerModelSpec(spec: string): string {
     const trimmed = spec.trim();
     if (!trimmed) throw new InvalidModelError(spec, this.modelRegistry.listConfigs().map((m) => m.id));
-    if (this.modelRegistry.hasConfig(trimmed)) return trimmed;
-    const id = modelIdForSpec(trimmed);
-    if (!this.modelRegistry.hasConfig(id)) {
-      this.modelRegistry.replaceConfig(runtimeModelConfig(trimmed, this.env));
+    const parsed = parseModelSpec(trimmed);
+    if (!parsed.name.trim()) {
+      throw new InvalidModelError(spec, this.modelRegistry.listConfigs().map((m) => m.id));
     }
+    if (this.modelRegistry.hasConfig(trimmed)) return trimmed;
+    const known = this.modelRegistry.listConfigs();
+    const id = modelIdForSpec(trimmed, known);
+    if (this.modelRegistry.hasConfig(id)) return id;
+    this.modelRegistry.replaceConfig(runtimeModelConfig(trimmed, this.env, known));
     return id;
   }
 
@@ -709,6 +724,26 @@ export class Orchestrator {
       this.env
     );
     this.mcpConnector = mcp.connector;
+    // B-16: malformed mcp-servers JSON fails startup; a down server does not.
+    const mcpJsonErrors = mcp.configErrors.filter(
+      (e) => !/Directory (does not exist|not found)/i.test(e.error),
+    );
+    if (mcpJsonErrors.length > 0) {
+      throw new Error(
+        `[Orchestrator] Invalid mcp-servers registry entries: ` +
+          mcpJsonErrors.map((e) => `${e.file}: ${e.error}`).join('; '),
+      );
+    }
+    if (mcp.connectionResults.length > 0) {
+      // B-19: skills may reference tools from servers that failed to connect.
+      this.skillRegistry.setAllowUnknownTools(true);
+      for (const c of mcp.connectionResults.filter((r) => !r.success)) {
+        this.observabilityLogger.logSystemError(
+          'mcp-connection',
+          `MCP server "${c.id}" unavailable: ${c.error ?? 'connection failed'}`,
+        );
+      }
+    }
 
     // Catalog tools must exist before skills load (skills cross-validate
     // their tool references against the ToolRegistry).
@@ -724,12 +759,21 @@ export class Orchestrator {
         'skill'
       );
     }
+    for (const w of this.skillRegistry.unknownToolWarnings) {
+      this.observabilityLogger.logSystemError(
+        'skill-tools',
+        `Skill "${w.skillId}" references unavailable tool(s) [${w.missing.join(', ')}] (MCP server may be down); those tools were dropped.`,
+      );
+    }
 
     this.modelRegistry.registerProvider(openaiProviderFactory);
     this.modelRegistry.registerProvider(anthropicProviderFactory);
     this.modelRegistry.registerProvider(localProviderFactory);
     for (const layer of forEachLayer('models')) {
-      this.modelRegistry.loadConfigsFromDirectory(layer.dir, false, layer.override);
+      assertEntriesValid(
+        this.modelRegistry.loadConfigsFromDirectory(layer.dir, false, layer.override).errors,
+        'model',
+      );
     }
     // HOTL_BASE_URL / HOTL_MODEL: an endpoint from the environment, on top
     // of every registry layer.
@@ -746,9 +790,23 @@ export class Orchestrator {
         `Some models could not be resolved: ${err instanceof Error ? err.message : String(err)}`
       );
     }
+    try {
+      this.modelRegistry.resolve(this.config.defaultModelId);
+    } catch (err) {
+      this.observabilityLogger.logSystemError(
+        'default-model',
+        `Default model "${this.config.defaultModelId}" could not be resolved (missing API key?): ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
 
     for (const layer of forEachLayer('agents.json')) {
-      this.agentRegistry.loadFromFile(layer.dir, layer.override);
+      const loaded = this.agentRegistry.loadFromFile(layer.dir, layer.override);
+      const real = loaded.errors.filter((e) => !/File not found/i.test(e));
+      if (real.length > 0) {
+        throw new Error(
+          `[Orchestrator] Invalid agent registry entries: ${real.join('; ')}`,
+        );
+      }
     }
 
     const delegateDeps: DelegateTaskDeps = {
@@ -779,6 +837,27 @@ export class Orchestrator {
       modelRegistry: this.modelRegistry,
     });
 
+    // B-18: after every tool source is registered (local, catalog, MCP,
+    // delegate, task-control). "*" and "mcp:" prefixes are allowed.
+    const unknownPersonaTools: string[] = [];
+    for (const persona of this.personaRegistry.list()) {
+      for (const toolId of persona.allowedTools) {
+        if (toolId === '*' || toolId.startsWith('mcp:')) continue;
+        if (!this.toolRegistry.hasDefinition(toolId)) {
+          unknownPersonaTools.push(`${persona.id}:${toolId}`);
+        }
+      }
+    }
+    if (unknownPersonaTools.length > 0) {
+      this.observabilityLogger.logSystemError(
+        'persona-tools',
+        `Persona allowedTools reference unknown tool(s): ${unknownPersonaTools.join(', ')}`,
+      );
+      throw new Error(
+        `[Orchestrator] Persona allowedTools reference unknown tool(s): ${unknownPersonaTools.join(', ')}`,
+      );
+    }
+
     this.observabilityLogger.subscribeToEventBus(this.eventBus);
 
     this.streamingManager.start();
@@ -802,6 +881,7 @@ export class Orchestrator {
       );
     }
 
+    this.reconcileAbandonedInteractions();
     this.initialized = true;
     this.observabilityLogger.log({
       eventType: 'system:info',
@@ -837,6 +917,10 @@ export class Orchestrator {
       options?.sessionId ?? this.sessionStore.createSession(options?.sessionLabel);
     const interaction = this.sessionStore.addInteraction(sessionId, userRequest);
     this.observabilityLogger.logSessionCreated(sessionId);
+    const sessionForHistory = this.sessionStore.getSession(sessionId);
+    this.planner.setSessionHistory(
+      sessionForHistory ? formatSessionHistory(sessionForHistory.interactions) : undefined,
+    );
 
     this.observabilityLogger.log({
       eventType: 'system:info',
@@ -1131,6 +1215,14 @@ export class Orchestrator {
         .map((e) => `[${e.stepId}] ${e.field}: ${e.message}`)
         .join('\n');
       this.observabilityLogger.logPlanFailed(plan, `Feasibility gate failed:\n${errorMsg}`);
+      if (interaction) {
+        this.sessionStore.updateInteraction(sessionId, interaction.id, {
+          outcome: 'failure',
+          reviewSummary: `Plan failed feasibility check:\n${errorMsg}`,
+          planIds: plan.id ? [plan.id] : interaction.planIds,
+          completedAt: Date.now(),
+        });
+      }
 
       return {
         kind: 'plan',
@@ -1167,6 +1259,14 @@ export class Orchestrator {
     if (cycleCheck.hasCycle) {
       const cycleMsg = `Circular dependency detected: ${cycleCheck.cyclePath?.join(' → ')}`;
       this.observabilityLogger.logPlanFailed(plan, cycleMsg);
+      if (interaction) {
+        this.sessionStore.updateInteraction(sessionId, interaction.id, {
+          outcome: 'failure',
+          reviewSummary: cycleMsg,
+          planIds: plan.id ? [plan.id] : interaction.planIds,
+          completedAt: Date.now(),
+        });
+      }
 
       return {
         kind: 'plan',
@@ -1204,41 +1304,81 @@ export class Orchestrator {
         '🛑 Run cancelled during planning — no further model calls will be made.',
       );
     }
-    const confirmation = await options.confirmCallback(planText, plan);
-    if (!confirmation.confirmed) {
-      if (interaction) {
-        this.sessionStore.updateInteraction(sessionId, interaction.id, {
-          outcome: 'cancelled',
-          reviewSummary: `Plan was not confirmed by user. Feedback: ${confirmation.feedback ?? 'none'}`,
-          planIds: [plan.id ?? 'unknown'],
-          completedAt: Date.now(),
-        });
+    let confirmation = await options.confirmCallback(planText, plan);
+    let feedbackRound = 0;
+    while (!confirmation.confirmed) {
+      const fb = confirmation.feedback?.trim();
+      const hardReject = !fb || /^user rejected the plan\.?$/i.test(fb);
+      if (hardReject || feedbackRound >= this.config.maxClarificationRounds) {
+        if (interaction) {
+          this.sessionStore.updateInteraction(sessionId, interaction.id, {
+            outcome: 'cancelled',
+            reviewSummary: `Plan was not confirmed by user. Feedback: ${confirmation.feedback ?? 'none'}`,
+            planIds: [plan.id ?? 'unknown'],
+            completedAt: Date.now(),
+          });
+        }
+        return {
+          kind: 'plan',
+          review: {
+            planId: plan.id ?? 'unknown',
+            goal: plan.goal,
+            outcome: 'cancelled',
+            acceptedFindings: [],
+            rejectedFindings: [],
+            incompleteSteps: [],
+            finalSummary: `Plan was not confirmed by user. Feedback: ${confirmation.feedback ?? 'none'}`,
+            usage: emptyReviewUsage,
+          },
+          report: `🛑 Plan cancelled by user.\nFeedback: ${confirmation.feedback ?? 'none'}`,
+          planId: plan.id ?? 'unknown',
+          sessionId,
+          executionResult: {
+            planId: plan.id ?? 'unknown',
+            status: 'cancelled',
+            completedSteps: 0,
+            failedSteps: 0,
+            totalSteps: plan.steps.length,
+            incompleteSteps: [],
+            replanningAttempts: 0,
+          },
+        };
       }
-      return {
-        kind: 'plan',
-        review: {
-          planId: plan.id ?? 'unknown',
-          goal: plan.goal,
-          outcome: 'cancelled',
-          acceptedFindings: [],
-          rejectedFindings: [],
-          incompleteSteps: [],
-          finalSummary: `Plan was not confirmed by user. Feedback: ${confirmation.feedback ?? 'none'}`,
-          usage: emptyReviewUsage,
-        },
-        report: `🛑 Plan cancelled by user.\nFeedback: ${confirmation.feedback ?? 'none'}`,
-        planId: plan.id ?? 'unknown',
-        sessionId,
-        executionResult: {
-          planId: plan.id ?? 'unknown',
-          status: 'cancelled',
-          completedSteps: 0,
-          failedSteps: 0,
-          totalSteps: plan.steps.length,
-          incompleteSteps: [],
-          replanningAttempts: 0,
-        },
-      };
+      feedbackRound++;
+      const revised = await this.planner.plan(
+        `${userRequest}\n\nPLANNER FEEDBACK FROM USER (revise the plan accordingly):\n${fb}`,
+        plan.id,
+        runModelId,
+        'plan',
+        abortSignal,
+      );
+      if (!revised.isClear || !revised.plan) {
+        confirmation = { confirmed: false, feedback: fb };
+        continue;
+      }
+      const keepId: string | undefined = plan.id;
+      const keepSession: string | undefined = plan.sessionId;
+      Object.assign(plan, revised.plan);
+      plan.id = keepId;
+      plan.sessionId = keepSession;
+      plan.status = 'draft';
+      this.planStore.save(plan);
+      const reFeas = runFeasibilityGate(plan, {
+        personaRegistry: this.personaRegistry,
+        skillRegistry: this.skillRegistry,
+        toolRegistry: this.toolRegistry,
+      });
+      if (!reFeas.feasible) {
+        confirmation = { confirmed: false, feedback: fb };
+        continue;
+      }
+      const reCycle = detectCycles(plan);
+      if (reCycle.hasCycle) {
+        confirmation = { confirmed: false, feedback: fb };
+        continue;
+      }
+      const nextText = formatPlanForUser(summarizePlan(plan));
+      confirmation = await options.confirmCallback(nextText, plan);
     }
 
     plan.status = 'confirmed';
@@ -1319,15 +1459,23 @@ export class Orchestrator {
       // Phase 20 (CORR-04): explicit acceptance hook instead of the old
       // EventBus-subscription wiring (wireAcceptanceChecker removed).
       acceptanceChecker: this.acceptanceChecker,
+      onPersistError: (err) => {
+        this.observabilityLogger.logSystemError(
+          'plan-persist',
+          err instanceof Error ? err.message : String(err),
+        );
+      },
     });
 
     this.cancellationManager.registerRuntime(plan.id!, planRuntime);
+    this.claimPlan(plan.id!);
 
     let executionResult: PlanExecutionResult;
     try {
       executionResult = await planRuntime.execute(plan);
     } finally {
       this.cancellationManager.unregisterRuntime(plan.id!);
+      this.releasePlan(plan.id!);
     }
 
     this.observabilityLogger.logPlanCompleted(plan);
@@ -1337,6 +1485,7 @@ export class Orchestrator {
     // Per plan: a long-lived orchestrator (the web server) would otherwise
     // report the sum of every run it has ever made.
     review.usage = this.planUsage(plan.id);
+    if (executionResult.persistenceDegraded) review.persistenceDegraded = true;
 
     const report = formatFinalReview(review);
 
@@ -1582,6 +1731,69 @@ export class Orchestrator {
     return this.usageAggregator.getSummary();
   }
 
+  /** B-01: true when this process or another live owner holds the plan. */
+  hasLiveOwner(planId: string): boolean {
+    if (this.livePlans.has(planId)) return true;
+    if (!this.config.persistent) return false;
+    return isPlanOwnerAlive(path.join(this.config.runtimeDir, 'plans'), planId);
+  }
+
+  livePlanIds(): string[] {
+    return [...this.livePlans];
+  }
+
+  claimPlan(planId: string): void {
+    if (this.livePlans.has(planId)) {
+      throw new PlanLiveOwnerError(planId, process.pid);
+    }
+    if (this.config.persistent) {
+      const handle = tryAcquirePlanOwner(path.join(this.config.runtimeDir, 'plans'), planId);
+      if (!handle) {
+        throw new PlanLiveOwnerError(planId);
+      }
+      this.planOwnerHandles.set(planId, handle);
+    }
+    this.livePlans.add(planId);
+  }
+
+  releasePlan(planId: string): void {
+    this.livePlans.delete(planId);
+    this.planOwnerHandles.get(planId)?.release();
+    this.planOwnerHandles.delete(planId);
+  }
+
+  /**
+   * B-06: close pending interactions whose plans are already terminal / draft.
+   */
+  reconcileAbandonedInteractions(): void {
+    const terminal = new Set(['completed', 'cancelled', 'failed-partial', 'draft']);
+    for (const sessionId of this.sessionStore.listSessions()) {
+      const session = this.sessionStore.getSession(sessionId);
+      if (!session) continue;
+      for (const interaction of session.interactions) {
+        if (interaction.completedAt) continue;
+        const ids = interaction.planIds ?? [];
+        if (ids.length === 0) continue;
+        const plans = ids.map((id) => this.planStore.load(id)).filter((p): p is NonNullable<typeof p> => Boolean(p));
+        if (plans.length === 0) continue;
+        if (!plans.every((p) => terminal.has(p.status))) continue;
+        const cancelled = plans.every((p) => p.status === 'cancelled' || p.status === 'draft');
+        for (const p of plans) {
+          if (p.status === 'draft' && p.id) {
+            p.status = 'cancelled';
+            p.completedAt = p.completedAt ?? Date.now();
+            this.planStore.save(p);
+          }
+        }
+        this.sessionStore.updateInteraction(sessionId, interaction.id, {
+          outcome: cancelled ? 'cancelled' : plans.some((p) => p.status === 'failed-partial') ? 'failure' : 'success',
+          reviewSummary: interaction.reviewSummary ?? 'Reconciled after the owning process exited.',
+          completedAt: Date.now(),
+        });
+      }
+    }
+  }
+
   async resumePlan(planId: string): Promise<OrchestratorResult | undefined> {
     const plan = this.planStore.load(planId);
     if (!plan) return undefined;
@@ -1589,6 +1801,12 @@ export class Orchestrator {
     // at plan time, rejected before execution) must not become
     // resumable without confirmation.
     if (plan.status === 'draft') return undefined;
+    // B-01: a live owner still executing this plan — never re-dispatch.
+    if (this.hasLiveOwner(planId)) {
+      throw new PlanLiveOwnerError(planId, process.pid);
+    }
+    this.reconcileAbandonedInteractions();
+    this.claimPlan(planId);
 
     const planRuntime = new PlanRuntime({
       taskRuntime: this.taskRuntime,
@@ -1609,6 +1827,12 @@ export class Orchestrator {
       defaultModelId: this.config.defaultModelId,
       // Phase 20 (CORR-04): same explicit acceptance hook on resume
       acceptanceChecker: this.acceptanceChecker,
+      onPersistError: (err) => {
+        this.observabilityLogger.logSystemError(
+          'plan-persist',
+          err instanceof Error ? err.message : String(err),
+        );
+      },
     });
 
     // Phase 30 (P2 follow-up): a step that is still 'running' on disk belongs
@@ -1620,7 +1844,12 @@ export class Orchestrator {
       .filter((step) => step.status === 'running' && step.taskId !== undefined)
       .map((step) => ({ stepId: step.id, taskId: step.taskId! }));
 
-    const executionResult = await planRuntime.resume(planId);
+    let executionResult: PlanExecutionResult;
+    try {
+      executionResult = await planRuntime.resume(planId);
+    } finally {
+      this.releasePlan(planId);
+    }
     // R1-10: `resume()` persists its own freshly-loaded plan object, which
     // is NOT the same reference as `plan` above — reload so the review sees
     // the post-resume step statuses instead of the pre-resume snapshot.
@@ -1635,9 +1864,12 @@ export class Orchestrator {
     // one whose request is this plan's goal).
     if (plan.sessionId) {
       const session = this.sessionStore.getSession(plan.sessionId);
+      const openList = (session?.interactions ?? []).filter((i) => !i.completedAt);
+      // B-02: match the interaction that already lists this planId first;
+      // never close another plan's open interaction.
       const open =
-        session?.interactions.find((i) => !i.completedAt && i.userRequest === plan.goal) ??
-        [...(session?.interactions ?? [])].reverse().find((i) => !i.completedAt);
+        openList.find((i) => (i.planIds ?? []).includes(planId)) ??
+        openList.find((i) => i.userRequest === plan.goal && (i.planIds ?? []).length === 0);
       if (open) {
         const known = open.planIds ?? [];
         this.sessionStore.updateInteraction(plan.sessionId, open.id, {
@@ -1672,6 +1904,14 @@ export class Orchestrator {
   }
 
   async shutdown(): Promise<void> {
+    for (const id of [...this.livePlans]) {
+      try {
+        await this.cancelPlan(id);
+      } catch {
+        // best-effort
+      }
+      this.releasePlan(id);
+    }
     // Phase 20 (CORR-02): let in-flight tasks finish BEFORE
     // unsubscribing — otherwise their completion events are lost.
     await this.taskRuntime.waitForAll();

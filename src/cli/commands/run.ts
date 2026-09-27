@@ -294,6 +294,8 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     void orchestratorRef.cancelPlan(currentPlanId).catch(() => undefined);
   };
   process.on('SIGINT', onSigint);
+  process.on('SIGTERM', onSigint);
+  process.on('SIGHUP', onSigint);
 
   const confirmCallback: (
     planText: string,
@@ -454,6 +456,8 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     return { exitCode: 1 };
   } finally {
     process.removeListener('SIGINT', onSigint);
+    process.removeListener('SIGTERM', onSigint);
+    process.removeListener('SIGHUP', onSigint);
     // ...including an error path that left a thinking block open.
     reasoning.close();
     activity.stop();

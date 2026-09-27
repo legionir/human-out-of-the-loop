@@ -73,6 +73,10 @@ export class ScrubbingPlanStore implements PlanStore {
   exists(planId: string): boolean {
     return this.inner.exists(planId);
   }
+
+  update(planId: string, fn: (plan: Plan) => Plan): Plan | undefined {
+    return this.inner.update(planId, (plan) => this.clean(fn(plan)));
+  }
 }
 
 /** Env var NAMES that mark their value as a credential. */

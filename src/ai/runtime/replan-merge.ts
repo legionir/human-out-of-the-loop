@@ -15,11 +15,19 @@
  *      completed steps" rule dropped the replacement entirely.  A colliding
  *      replacement now gets a `~replan<n>` id and dependants are rewired.
  *
- * Dependencies on a kept FAILED step are dropped: the step is terminal but
- * not `done`, so such an edge can never be satisfied — that is the deadlock
- * re-planning exists to avoid.
+ * B-05: a replacement may also declare `replacesStepId` (a new id that
+ * supersedes a failed step). Dependants of the old id are redirected onto
+ * the replacement. A failed step with no replacement at all is rejected —
+ * dropping those edges used to leave later steps with nothing to wait on.
  */
 import type { PlanStep } from '../schemas/plan.js';
+
+export class ReplanMergeError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReplanMergeError';
+  }
+}
 
 export function mergeReplannedSteps(
   currentSteps: PlanStep[],
@@ -31,10 +39,14 @@ export function mergeReplannedSteps(
 
   // R1-06: a pending step the model forgot to re-list is still live work,
   // not something the re-plan implicitly cancelled. Keep it unless the
-  // revised plan explicitly replaces it (same id present in revisedSteps).
+  // revised plan explicitly replaces it (same id present in revisedSteps
+  // or named via replacesStepId).
   const revisedIds = new Set(revisedSteps.map((s) => s.id));
+  const replacedExplicitly = new Set(
+    revisedSteps.map((s) => s.replacesStepId).filter((id): id is string => Boolean(id)),
+  );
   const forgottenPending = currentSteps.filter(
-    (s) => s.status === 'pending' && !revisedIds.has(s.id)
+    (s) => s.status === 'pending' && !revisedIds.has(s.id) && !replacedExplicitly.has(s.id),
   );
 
   const renames = new Map<string, string>();
@@ -42,6 +54,18 @@ export function mergeReplannedSteps(
   const replacementSteps: PlanStep[] = [];
 
   for (const step of revisedSteps) {
+    const targetFailedId =
+      step.replacesStepId && keptById.get(step.replacesStepId)?.status === 'failed'
+        ? step.replacesStepId
+        : undefined;
+
+    if (targetFailedId && !takenIds.has(step.id)) {
+      renames.set(targetFailedId, step.id);
+      takenIds.add(step.id);
+      replacementSteps.push(step);
+      continue;
+    }
+
     if (!takenIds.has(step.id)) {
       takenIds.add(step.id);
       replacementSteps.push(step);
@@ -64,6 +88,14 @@ export function mergeReplannedSteps(
     renames.set(step.id, replacementId);
     takenIds.add(replacementId);
     replacementSteps.push({ ...step, id: replacementId });
+  }
+
+  const failedIds = currentSteps.filter((s) => s.status === 'failed').map((s) => s.id);
+  const unreplaced = failedIds.filter((id) => !renames.has(id) && !replacedExplicitly.has(id));
+  if (unreplaced.length > 0) {
+    throw new ReplanMergeError(
+      `re-plan did not replace failed step(s): ${unreplaced.join(', ')}`,
+    );
   }
 
   // R1-05: a kept FAILED step that got an actual replacement (the `renames`

@@ -72,6 +72,8 @@ export const ReviewSchema = z.object({
       totalTokens: z.number(),
     })
     .default({ totalPromptTokens: 0, totalCompletionTokens: 0, totalTokens: 0 }),
+  /** B-10: at least one plan/session persist failed during the run. */
+  persistenceDegraded: z.boolean().optional(),
 });
 
 export type Review = z.infer<typeof ReviewSchema>;
