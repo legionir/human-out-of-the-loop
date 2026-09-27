@@ -843,6 +843,10 @@ ${userRequest}
 """
 
 Answer the request above directly, in the user's language. Use the read-only tools if you need to check something in the project — read, never guess. If the request needs files to change or several steps of work, say so in a sentence or two and point the user at \`@plan <request>\`; never pretend you did it.
+
+End your reply with a final line, exactly as shown, with no other text on that line:
+[[NEEDS_PLAN: true]]   — if THIS request needs a plan (files to change, commands to run, several steps) and you just said so
+[[NEEDS_PLAN: false]]  — for every other reply, including one that merely mentions \`@plan\` as an example or explanation
 `.trim();
   }
 

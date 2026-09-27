@@ -301,12 +301,27 @@ export function createCliConfirmCallback(): (planText: string) => Promise<{ conf
 
 
 /**
- * The answer prompt tells the chat model to point the user at `@plan` when a
- * request needs files changed; an answer that does so is a deferral, not an
- * answer.
+ * The answer prompt (`buildAnswerPrompt`) requires the chat model to end its
+ * reply with an explicit, unambiguous marker — `[[NEEDS_PLAN: true]]` or
+ * `[[NEEDS_PLAN: false]]` — instead of leaving auto mode to guess from the
+ * prose whether the answer "defers to `@plan`".
+ *
+ * A substring match on `@plan` used to do that guessing and broke on any
+ * reply that merely *mentioned* `@plan` as an example (e.g. explaining what
+ * tools are available) — it escalated a perfectly good answer into a plan
+ * for a request that was never plannable, producing a garbage plan.
+ *
+ * A model that ignores the instruction and omits the marker defaults to
+ * `false` (never escalate) — the safe direction, since an answer that really
+ * needed a plan still tells the user so in its own words.
  */
-export function defersToPlan(answer: string): boolean {
-  return /(^|[\s`'"(«])@plan\b/.test(answer);
+export function extractNeedsPlan(text: string): { needsPlan: boolean; answer: string } {
+  const match = /\n?\s*\[\[NEEDS_PLAN:\s*(true|false)\s*\]\]\s*$/i.exec(text);
+  if (!match) return { needsPlan: false, answer: text };
+  return {
+    needsPlan: match[1]!.toLowerCase() === 'true',
+    answer: text.slice(0, match.index).trim(),
+  };
 }
 
 export class Orchestrator {
@@ -1117,6 +1132,10 @@ export class Orchestrator {
         },
       };
     };
+    // Set only when auto mode escalated an answer to a plan (see below) — the
+    // answer the model already produced, used as a fallback if the plan this
+    // request escalates into turns out infeasible.
+    let fallbackAnswer: string | undefined;
     let planningResult;
     try {
       throwIfAborted(abortSignal);
@@ -1157,14 +1176,16 @@ export class Orchestrator {
         mode,
         escalateToPlan: mode === 'auto',
       });
-      if (answered !== 'escalate') return answered;
-      // Auto mode: the assessment called this a conversation, but the answer
-      // itself says the request needs work (it points at `@plan`, as the
-      // answer prompt tells it to).  Found on a real Persian request: the
-      // user was asked to retype it with @plan.  Plan it instead.
+      if (!('escalate' in answered)) return answered;
+      // Auto mode: the assessment called this a conversation, but the model
+      // explicitly marked its own reply `[[NEEDS_PLAN: true]]` (see
+      // `buildAnswerPrompt` / `extractNeedsPlan`).  Plan the request instead,
+      // keeping the answer as a fallback in case the plan turns out to be
+      // infeasible (e.g. the request was actually just informational).
+      fallbackAnswer = answered.fallbackAnswer;
       this.observabilityLogger.log({
         eventType: 'system:info',
-        message: 'Auto mode: the answer deferred to @plan — planning the request instead.',
+        message: 'Auto mode: the answer said it needs a plan — planning the request instead.',
         level: 'info',
       });
       try {
@@ -1398,6 +1419,54 @@ export class Orchestrator {
       const errorMsg = feasibility.errors
         .map((e) => `[${e.stepId}] ${e.field}: ${e.message}`)
         .join('\n');
+      // Auto mode escalated a chat answer into this plan (the model said it
+      // needed one), but the plan the model then produced for it doesn't
+      // hold up — most often because the request was actually informational
+      // and there was nothing real to plan.  The user already has a good
+      // answer; show that instead of a raw feasibility-gate error.
+      if (fallbackAnswer) {
+        this.observabilityLogger.log({
+          eventType: 'system:info',
+          message: 'Escalated plan failed the feasibility gate — falling back to the chat answer.',
+          level: 'info',
+          payload: { errorMsg },
+        });
+        const body = fallbackAnswer;
+        const report = `💬 Answer\n\n${body}`;
+        if (interaction) {
+          this.sessionStore.updateInteraction(sessionId, interaction.id, {
+            outcome: 'success',
+            reviewSummary: body,
+            planIds: plan.id ? [plan.id] : interaction.planIds,
+            completedAt: Date.now(),
+          });
+        }
+        return {
+          kind: 'answer',
+          review: {
+            planId: 'none',
+            goal: userRequest,
+            outcome: 'success',
+            acceptedFindings: [],
+            rejectedFindings: [],
+            incompleteSteps: [],
+            finalSummary: body,
+            usage: this.totalReviewUsage(),
+          },
+          report,
+          planId: 'none',
+          sessionId,
+          executionResult: {
+            planId: 'none',
+            status: 'completed',
+            completedSteps: 0,
+            failedSteps: 0,
+            totalSteps: 0,
+            incompleteSteps: [],
+            replanningAttempts: 0,
+          },
+        };
+      }
       this.observabilityLogger.logPlanFailed(plan, `Feasibility gate failed:\n${errorMsg}`);
       if (interaction) {
         this.sessionStore.updateInteraction(sessionId, interaction.id, {
@@ -1751,11 +1820,16 @@ export class Orchestrator {
     draft?: string;
     mode: RunMode;
     /**
-     * Return `'escalate'` (before recording anything) when the answer only
-     * defers the request to `@plan` — auto mode then plans it.
+     * Return an `escalate` result (before recording anything) when the model
+     * explicitly marked its reply `[[NEEDS_PLAN: true]]` — auto mode then
+     * plans the request instead.  The already-produced answer text travels
+     * along as `fallbackAnswer`, so if the resulting plan turns out to be
+     * infeasible (a purely informational request has no real plan), the
+     * caller can fall back to this answer instead of showing a raw
+     * feasibility-gate error.
      */
     escalateToPlan?: boolean;
-  }): Promise<OrchestratorResult | 'escalate'> {
+  }): Promise<OrchestratorResult | { escalate: true; fallbackAnswer: string }> {
     const { userRequest, sessionId, interactionId, modelId, draft, mode } = params;
     const language = detectLanguage(userRequest);
     const toolIds = readOnlyToolIds();
@@ -1791,7 +1865,15 @@ export class Orchestrator {
     // already wrote the reply (auto mode) — the user still gets an answer.
     if (!text && draft) text = draft;
 
-    if (params.escalateToPlan && text && defersToPlan(text)) return 'escalate';
+    let needsPlan = false;
+    if (text) {
+      const extracted = extractNeedsPlan(text);
+      needsPlan = extracted.needsPlan;
+      text = extracted.answer;
+    }
+    if (params.escalateToPlan && text && needsPlan) {
+      return { escalate: true, fallbackAnswer: text };
+    }
 
     const body = text ?? `The request could not be answered: ${errors.join('; ')}`;
     const report = `💬 Answer\n\n${body}`;

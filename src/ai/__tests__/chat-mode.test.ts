@@ -10,7 +10,7 @@ vi.mock('ai', async () => {
 });
 
 import { generateObject, generateText } from 'ai';
-import { Orchestrator, defersToPlan } from '../orchestrator.js';
+import { Orchestrator, extractNeedsPlan } from '../orchestrator.js';
 import { parseRunMode } from '../modes.js';
 import {
   buildAssessmentPrompt,
@@ -417,7 +417,7 @@ describe('v27.17.0 — a greeting is answered, not planned', () => {
         },
       } as never);
     mockGenerateText.mockResolvedValueOnce({
-      text: 'برای این کار باید فایل بسازم؛ لطفاً با `@plan یک فایل بساز` اجرا کنید.',
+      text: 'برای این کار باید فایل بسازم؛ لطفاً با `@plan یک فایل بساز` اجرا کنید.\n[[NEEDS_PLAN: true]]',
       usage: { inputTokens: 10, outputTokens: 8, totalTokens: 18 },
       steps: [],
     } as never);
@@ -434,11 +434,22 @@ describe('v27.17.0 — a greeting is answered, not planned', () => {
     expect(mockGenerateObject).toHaveBeenCalledTimes(2);
   });
 
-  it('defersToPlan recognises the @plan pointer, not an e-mail-like word', () => {
-    expect(defersToPlan('Run it as `@plan build it`.')).toBe(true);
-    expect(defersToPlan('@plan do it')).toBe(true);
-    expect(defersToPlan('write to me@planet.example')).toBe(false);
-    expect(defersToPlan('Here is the answer.')).toBe(false);
+  it('extractNeedsPlan reads the explicit marker, not any mention of @plan', () => {
+    expect(extractNeedsPlan('Run it as `@plan build it`.\n[[NEEDS_PLAN: true]]')).toEqual({
+      needsPlan: true,
+      answer: 'Run it as `@plan build it`.',
+    });
+    expect(
+      extractNeedsPlan('For changes, use `@plan <request>`.\n[[NEEDS_PLAN: false]]'),
+    ).toEqual({
+      needsPlan: false,
+      answer: 'For changes, use `@plan <request>`.',
+    });
+    // No marker at all (model ignored the instruction) never escalates.
+    expect(extractNeedsPlan('Here is the answer.')).toEqual({
+      needsPlan: false,
+      answer: 'Here is the answer.',
+    });
   });
 
   it('@chat (mode chat) never plans, even when the model offers a plan', async () => {
