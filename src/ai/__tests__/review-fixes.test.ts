@@ -290,3 +290,47 @@ describe('R-15 — breaking a stale lock never steals a fresh one', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 });
+
+describe('R-16 — a persona using a down MCP server\'s tools does not block start-up', () => {
+  let root: string;
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'hotl-review-mcp-'));
+    fs.mkdirSync(path.join(root, 'registry', 'personas'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'registry', 'mcp-servers'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, 'registry', 'personas', 'searcher.json'),
+      JSON.stringify({ id: 'searcher', name: 'Searcher', system: 's', allowedTools: ['read_file', 'web_search'] }),
+    );
+    fs.writeFileSync(
+      path.join(root, 'registry', 'mcp-servers', 'down.json'),
+      JSON.stringify({
+        id: 'down',
+        name: 'Down',
+        transport: 'stdio',
+        command: path.join(root, 'no-such-binary'),
+        connectTimeoutMs: 500,
+      }),
+    );
+  });
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('trusted project, server fails to start → warning, not a crash', async () => {
+    const orch = new Orchestrator({ projectRoot: root, trustedProject: true });
+    await expect(orch.initialize()).resolves.toBeUndefined();
+    await orch.shutdown();
+  });
+
+  it('untrusted project (MCP layer skipped) → warning, not a crash', async () => {
+    const orch = new Orchestrator({ projectRoot: root });
+    await expect(orch.initialize()).resolves.toBeUndefined();
+    await orch.shutdown();
+  });
+
+  it('a plain typo with every MCP server healthy still fails start-up', async () => {
+    fs.rmSync(path.join(root, 'registry', 'mcp-servers', 'down.json'));
+    const orch = new Orchestrator({ projectRoot: root, trustedProject: true });
+    await expect(orch.initialize()).rejects.toThrow(/allowedTools/i);
+  });
+});

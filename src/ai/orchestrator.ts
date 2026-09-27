@@ -810,8 +810,13 @@ export class Orchestrator {
           mcpJsonErrors.map((e) => `${e.file}: ${e.error}`).join('; '),
       );
     }
-    if (mcp.connectionResults.length > 0) {
-      // B-19: skills may reference tools from servers that failed to connect.
+    // B-19: tools of an MCP server that is down — or whose layer was skipped
+    // because the project is untrusted — are missing, and that must not stop
+    // start-up: skills and personas referencing them get a warning instead.
+    const mcpToolsMayBeMissing =
+      mcp.connectionResults.some((r) => !r.success) ||
+      mcpServerLayers.length < allMcpServerLayers.length;
+    if (mcp.connectionResults.length > 0 || mcpToolsMayBeMissing) {
       this.skillRegistry.setAllowUnknownTools(true);
       for (const c of mcp.connectionResults.filter((r) => !r.success)) {
         this.observabilityLogger.logSystemError(
@@ -931,9 +936,10 @@ export class Orchestrator {
     if (unknownPersonaTools.length > 0) {
       this.observabilityLogger.logSystemError(
         'persona-tools',
-        `Persona allowedTools reference unknown tool(s): ${unknownPersonaTools.join(', ')}`,
+        `Persona allowedTools reference unknown tool(s): ${unknownPersonaTools.join(', ')}` +
+          (mcpToolsMayBeMissing ? ' (an MCP server is unavailable — those tools were dropped).' : ''),
       );
-      throw new Error(
+      if (!mcpToolsMayBeMissing) throw new Error(
         `[Orchestrator] Persona allowedTools reference unknown tool(s): ${unknownPersonaTools.join(', ')}`,
       );
     }
