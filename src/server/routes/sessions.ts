@@ -7,6 +7,7 @@
  *   DELETE /api/sessions/:id    → delete
  */
 import { Router } from 'express';
+import { SESSION_LABEL_MAX_CHARS } from '../../ai/runtime/session-limits.js';
 import type { ServerContext } from '../types.js';
 
 export function sessionsRouter(ctx: ServerContext): Router {
@@ -61,8 +62,8 @@ export function sessionsRouter(ctx: ServerContext): Router {
       return;
     }
     const trimmed = label.trim();
-    if (trimmed.length > 120) {
-      res.status(400).json({ error: '"label" must be at most 120 characters.' });
+    if (trimmed.length > SESSION_LABEL_MAX_CHARS) {
+      res.status(400).json({ error: `"label" must be at most ${SESSION_LABEL_MAX_CHARS} characters.` });
       return;
     }
     const updated = ctx.orchestrator.sessionStore.setLabel(req.params.id, trimmed);

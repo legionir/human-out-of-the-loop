@@ -212,8 +212,33 @@ export async function serveHttp(
         res.status(400).json(parsed.response);
         return;
       }
+      if (parsed.batch) {
+        const responses = await server.handleBatch(parsed.batch);
+        res.json(responses);
+        return;
+      }
+      if (!parsed.value) {
+        res.status(400).json(jsonRpcError(null, JSON_RPC_ERRORS.invalidRequest, 'A JSON-RPC message must be an object.'));
+        return;
+      }
       message = parsed.value;
-    } else if (body && typeof body === 'object' && !Array.isArray(body)) {
+    } else if (Array.isArray(body)) {
+      try {
+        const responses = await server.handleBatch(body);
+        res.json(responses);
+      } catch (err) {
+        res
+          .status(500)
+          .json(
+            jsonRpcError(
+              null,
+              JSON_RPC_ERRORS.internalError,
+              err instanceof Error ? err.message : String(err),
+            ),
+          );
+      }
+      return;
+    } else if (body && typeof body === 'object') {
       message = body as Record<string, unknown>;
     } else {
       res

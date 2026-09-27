@@ -5,6 +5,29 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [27.17.10] — 2026-09-27 — Phase G: CLI, REPL, and server
+
+Closes every open row of **Phase G** in `docs/UNIFIED_EXECUTION_PLAN.md` (G-01…G-18).
+
+- **G-01 — Ctrl-C while planning.** REPL aborts only the current goal; `hootl run` still exits 130.
+- **G-02 — non-TTY without `--yes`.** Fail before any LLM call.
+- **G-03 — `/cd`.** Drop the previous project's `.env` keys, load the next, recompute the model.
+- **G-04 — deleted session.** Clear `sessionId` after "Session not found".
+- **G-05 — bracketed paste.** A multi-line paste is one goal.
+- **G-06 — grapheme cursor.** Emoji width 2; ZWNJ / Persian diacritics 0; backspace deletes a cluster.
+- **G-07 — confirm Ctrl-C.** `ExitPromptError` → `{confirmed:false}`.
+- **G-08 — resume.** Shared `evaluatePlanResume`; the server builds a `RunState`.
+- **G-09 — Orchestrator cache.** One instance per `(cwd, model, persistent)` in the REPL.
+- **G-10 — `/run`.** Inherits the REPL model, persistent, yes, and session.
+- **G-11 — JSON-RPC.** Batches return arrays; object `id` is `-32600`.
+- **G-12 — validation.** `plans resume --timeout-ms abc` exits 2; `/config set defaultMode` uses `parseRunMode`.
+- **G-13 — splash.** Any key dismisses it; registry files are cached in the REPL.
+- **G-14 — `/api/usage`.** Numbers come from `observability.jsonl`, same as `hootl usage`.
+- **G-15 — session files.** Compact JSON, per-interaction caps, shared 64-char label limit.
+- **G-16 — `.env`.** `export`, inline comments, quotes, `\n`.
+- **G-17 — config resolve.** One helper for run/REPL/plans/server; `--no-persistent`.
+- **G-18 — baseURL.** Run output prints the provider name, never a custom URL.
+
 ## [27.17.9] — 2026-09-27 — Phase F: efficiency and token use
 
 Closes every open row of **Phase F** in `docs/UNIFIED_EXECUTION_PLAN.md` (F-01…F-10).

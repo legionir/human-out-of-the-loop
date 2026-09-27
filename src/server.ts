@@ -21,14 +21,13 @@
  *   - Credentials live in env vars the provider reads server-side; they
  *     are never serialized to the frontend.
  */
-import { envDefaultModelId } from './cli/utils/registries.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { Server as HttpServer } from 'node:http';
 import express, { type Express } from 'express';
 import { Orchestrator } from './ai/orchestrator.js';
-import { loadDotEnv, loadGlobalConfig } from './cli/utils/config.js';
+import { resolveCliDefaults } from './cli/utils/config.js';
 import { resolveAndMaybePersistTrust } from './cli/utils/trust-project.js';
 import {
   DEFAULT_BIND_HOST,
@@ -75,6 +74,8 @@ export interface ServerOptions {
    * Default 30 minutes; `0` disables. `HOTL_RUN_TTL_MS` overrides.
    */
   runTtlMs?: number;
+  /** F-10: cap on live SSE sockets (default 32, `HOTL_MAX_SSE_CONNECTIONS`). */
+  maxSseConnections?: number;
 }
 
 /** A-05: 30 minutes. Abandoned clarification/confirmation becomes cancelled. */
@@ -95,14 +96,15 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
   // project (then cwd).  Precedence: explicit option/env > global config
   // > project env > built-in default.  loadDotEnv never overwrites a
   // variable already present in the real environment.
-  const globalCfg = loadGlobalConfig();
-  const projectRoot = path.resolve(
-    options.projectRoot ??
-      process.env.HOTL_PROJECT_ROOT ??
-      (globalCfg.projectRoot ? path.resolve(globalCfg.projectRoot) : process.cwd()),
-  );
-  loadDotEnv([projectRoot, process.cwd()]);
-  const model = options.model ?? envDefaultModelId(projectRoot) ?? globalCfg.defaultModel;
+  const defaults = resolveCliDefaults({
+    projectRoot: options.projectRoot,
+    persistent: options.persistent,
+    model: options.model,
+    defaultPersistent: true,
+  });
+  const globalCfg = defaults.global;
+  const projectRoot = defaults.projectRoot;
+  const model = options.model ?? defaults.model;
   const redactKeys = [
     ...(options.redactKeys ?? []),
     ...(process.env.HOTL_REDACT_KEYS
@@ -110,7 +112,7 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
       : []),
   ];
   const runtimeDir = path.join(projectRoot, '.ai-runtime');
-  const persistent = options.persistent ?? globalCfg.persistent ?? true;
+  const persistent = defaults.persistent;
 
   const trustedProject =
     options.trustedProject === true ||
@@ -124,7 +126,14 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
     trustedProject,
   });
 
-  const hub = new SseHub();
+  const maxSse =
+    options.maxSseConnections ??
+    (process.env.HOTL_MAX_SSE_CONNECTIONS
+      ? Number.parseInt(process.env.HOTL_MAX_SSE_CONNECTIONS, 10)
+      : undefined);
+  const hub = new SseHub({
+    maxConnections: Number.isFinite(maxSse) && (maxSse as number) > 0 ? maxSse : undefined,
+  });
 
   // Progress events → SSE (compact payloads only — see stream.ts).
   // Subscribing to the StreamingManager (post-construction) works

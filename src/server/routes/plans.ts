@@ -10,10 +10,13 @@
  *   GET    /api/observability        → observability.jsonl entries
  *                                      (?planId=&tail=)
  */
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs';
 import { Router } from 'express';
 import type { LogEntry } from '../../ai/runtime/observability-logger.js';
+import { evaluatePlanResume } from '../../ai/runtime/resume-guard.js';
 import { findRunByPlanId, sendOwnerForbidden } from '../run-control.js';
+import { getAuthToken } from '../auth.js';
 import type { RunState, ServerContext } from '../types.js';
 import { PlanLiveOwnerError } from '../../ai/runtime/plan-owner.js';
 
@@ -68,18 +71,39 @@ export function plansRouter(ctx: ServerContext): Router {
     }
     const owner = findRunByPlanId(ctx, req.params.id);
     if (owner && sendOwnerForbidden(ctx, req, res, owner.ownerToken)) return;
-    if (ctx.orchestrator.hasLiveOwner(req.params.id)) {
-      res.status(409).json({
-        error: `Plan "${req.params.id}" is already running.`,
-        code: 'PLAN_LIVE_OWNER',
-      });
+    const decision = evaluatePlanResume({
+      found: true,
+      status: plan.status,
+      liveOwner: ctx.orchestrator.hasLiveOwner(req.params.id),
+    });
+    if (decision.action === 'finalize-cancel') {
+      void ctx.orchestrator.cancelPlan(req.params.id).catch(() => undefined);
+      res.status(decision.httpStatus).json({ error: decision.message, code: decision.code });
       return;
     }
-    // Fire-and-track: resume executes in the background; progress flows
-    // through the SSE stream for this plan id.
+    if (decision.action !== 'resume') {
+      res.status(decision.httpStatus).json({ error: decision.message, code: decision.code });
+      return;
+    }
+    const runId = randomUUID();
+    const run: RunState = {
+      runId,
+      planId: req.params.id,
+      state: 'running',
+      createdAt: Date.now(),
+      ownerToken: getAuthToken(req),
+    };
+    ctx.runs.set(runId, run);
     ctx.orchestrator
       .resumePlan(req.params.id)
+      .then((result) => {
+        run.state = 'done';
+        run.report = result?.report;
+        run.outcome = result?.review.outcome;
+      })
       .catch((err: unknown) => {
+        run.state = 'error';
+        run.error = err instanceof Error ? err.message : String(err);
         if (err instanceof PlanLiveOwnerError) {
           ctx.hub.emit(req.params.id, 'plan:error', { message: err.message, code: err.code });
           return;
@@ -90,7 +114,7 @@ export function plansRouter(ctx: ServerContext): Router {
           { message: err instanceof Error ? err.message : String(err) },
         );
       });
-    res.status(202).json({ ok: true, planId: req.params.id });
+    res.status(202).json({ ok: true, planId: req.params.id, runId });
   });
 
   /**

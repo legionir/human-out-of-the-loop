@@ -1,6 +1,6 @@
 {
   "name": "human-out-of-the-loop",
-  "version": "27.17.9",
+  "version": "27.17.10",
   "private": true,
   "type": "module",
   "bin": {

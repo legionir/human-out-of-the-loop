@@ -10,6 +10,7 @@
  */
 import path from 'node:path';
 import { FileSessionStore } from '../../ai/runtime/session-store.js';
+import { SESSION_LABEL_MAX_CHARS } from '../../ai/runtime/session-limits.js';
 import { prepareCliEnvironment } from '../utils/config.js';
 import { color, err, out, renderTable } from '../utils/output.js';
 
@@ -64,8 +65,8 @@ export async function sessionsLabelCommand(
   label: string,
   opts: SessionsCommandOptions,
 ): Promise<number> {
-  if (label.length > 64) {
-    err(color.failed('Label must be at most 64 characters.'));
+  if (label.length > SESSION_LABEL_MAX_CHARS) {
+    err(color.failed(`Label must be at most ${SESSION_LABEL_MAX_CHARS} characters.`));
     return 2;
   }
   const store = storeFor(opts);

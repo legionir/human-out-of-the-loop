@@ -25,7 +25,7 @@ export interface UsageCommandOptions {
   json?: boolean;
 }
 
-interface UsageRow {
+export interface UsageRow {
   planId: string;
   goal: string;
   status: string;
@@ -37,10 +37,19 @@ interface UsageRow {
   taskCount: number;
 }
 
-export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
-  const root = path.resolve(opts.projectRoot ?? process.cwd());
-  prepareCliEnvironment(root);
-
+export function collectProjectUsage(projectRoot: string): {
+  rows: UsageRow[];
+  totals: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    cacheReadTokens: number;
+    cacheWriteTokens: number;
+    taskCount: number;
+  };
+  runtimeDir: string;
+} {
+  const root = path.resolve(projectRoot);
   const runtimeDir = path.join(root, '.ai-runtime');
   const { entries } = readLogEntries(path.join(runtimeDir, 'observability.jsonl'));
   const completed = filterEntries(entries, { eventTypes: ['task:completed', 'llm:usage'] });
@@ -91,6 +100,32 @@ export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
       };
     })
     .sort((a, b) => a.planId.localeCompare(b.planId));
+
+  const totals = rows.reduce(
+    (acc, r) => ({
+      promptTokens: acc.promptTokens + r.promptTokens,
+      completionTokens: acc.completionTokens + r.completionTokens,
+      totalTokens: acc.totalTokens + r.totalTokens,
+      cacheReadTokens: acc.cacheReadTokens + r.cacheReadTokens,
+      cacheWriteTokens: acc.cacheWriteTokens + r.cacheWriteTokens,
+      taskCount: acc.taskCount + r.taskCount,
+    }),
+    {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      taskCount: 0,
+    },
+  );
+  return { rows, totals, runtimeDir };
+}
+
+export async function usageCommand(opts: UsageCommandOptions): Promise<number> {
+  const root = path.resolve(opts.projectRoot ?? process.cwd());
+  prepareCliEnvironment(root);
+  const { rows, totals, runtimeDir } = collectProjectUsage(root);
 
   if (rows.length === 0) {
     out(

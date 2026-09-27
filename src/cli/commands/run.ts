@@ -12,11 +12,11 @@
  *      otherwise: run() → confirm (inquirer, or --yes) → execute → report
  *   4. exit code: 0 success/partial, 1 failure, 2 usage error
  */
-import { envDefaultModelId } from '../utils/registries.js';
 import path from 'node:path';
 import chalk from 'chalk';
 import { ZodError } from 'zod';
 import { Orchestrator, type OrchestratorResult } from '../../ai/orchestrator.js';
+import type { CachedOrchestratorHooks } from '../utils/orchestrator-cache.js';
 import type { Plan } from '../../ai/schemas/plan.js';
 import { FilePlanStore } from '../../ai/runtime/plan-store.js';
 import fs from 'node:fs';
@@ -26,7 +26,7 @@ import {
   promptClarifications,
   type ConfirmationResult,
 } from '../utils/confirm.js';
-import { prepareCliEnvironment } from '../utils/config.js';
+import { resolveCliDefaults } from '../utils/config.js';
 import { resolveAndMaybePersistTrust } from '../utils/trust-project.js';
 import { parseModePrefix, resolveRunMode, modeWords } from '../utils/mode-prefix.js';
 import type { RunMode } from '../../ai/modes.js';
@@ -86,6 +86,21 @@ export interface RunCommandOptions {
    */
   mode?: RunMode | string;
   /**
+   * G-17: force persistence off even when the global config has persistent:true.
+   */
+  noPersistent?: boolean;
+  /**
+   * G-01: when false (REPL) Ctrl-C during planning aborts the goal instead of
+   * `process.exit(130)`.  Default true for `hootl run`.
+   */
+  exitOnInterrupt?: boolean;
+  /** G-09: reuse a live Orchestrator (REPL cache). */
+  orchestrator?: Orchestrator;
+  /** G-09: leave the reused Orchestrator running. */
+  skipShutdown?: boolean;
+  /** G-09: live callback slot on a cached Orchestrator. */
+  runHooks?: CachedOrchestratorHooks;
+  /**
    * A-02: mark this project trusted (persist in global config) so its
    * `registry/mcp-servers` layer is allowed to spawn.
    */
@@ -93,7 +108,7 @@ export interface RunCommandOptions {
 }
 
 /** C3: option validation → undefined when OK, error message otherwise (exit 2). */
-function validateRunOptions(opts: RunCommandOptions): string | undefined {
+export function validateRunOptions(opts: RunCommandOptions): string | undefined {
   if (opts.maxReplans !== undefined && (!Number.isInteger(opts.maxReplans) || opts.maxReplans < 0 || opts.maxReplans > 10)) {
     return '--max-replans must be an integer between 0 and 10';
   }
@@ -161,6 +176,20 @@ export interface RunCommandResult {
   exitCode: number;
   /** The session the run was recorded in (full runs only). */
   sessionId?: string;
+  /** G-04: `--session` pointed at a missing id. */
+  sessionNotFound?: boolean;
+}
+
+/** G-01: first Ctrl-C during planning vs. a confirmed plan. */
+export function planningInterruptAction(opts: {
+  currentPlanId: string | undefined;
+  interruptRequested: boolean;
+  exitOnInterrupt: boolean;
+}): 'exit' | 'abort-planning' | 'cancel-plan' {
+  if (opts.interruptRequested || !opts.currentPlanId) {
+    return opts.exitOnInterrupt || Boolean(opts.currentPlanId) ? 'exit' : 'abort-planning';
+  }
+  return 'cancel-plan';
 }
 
 /**
@@ -210,8 +239,25 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     return { exitCode: 2 };
   }
 
-  const projectRoot = path.resolve(opts.projectRoot ?? process.cwd());
-  const globalConfig = prepareCliEnvironment(projectRoot);
+  const defaults = resolveCliDefaults({
+    projectRoot: opts.projectRoot,
+    persistent: opts.persistent,
+    noPersistent: opts.noPersistent,
+    model: opts.model,
+  });
+  const projectRoot = defaults.projectRoot;
+  const globalConfig = defaults.global;
+
+  // G-02: fail before any paid LLM call.  Confirmation needs a TTY unless
+  // `--yes` (or a dry-run, which never confirms).
+  if (!opts.yes && !opts.dryRun && (!process.stdout.isTTY || !process.stdin.isTTY)) {
+    err(
+      chalk.red(
+        'Interactive confirmation requires a TTY. Re-run with --yes to auto-confirm (CI / Human-Out-Of-Loop mode), or from an interactive terminal.',
+      ),
+    );
+    return { exitCode: 1 };
+  }
 
   const { resolved, invalid: badMode } = resolveRunMode({
     ...(prefixed.mode ? { prefix: prefixed.mode } : {}),
@@ -229,8 +275,8 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     return { exitCode: 2 };
   }
 
-  const persistent = opts.persistent ?? globalConfig.persistent ?? false;
-  const model = opts.model ?? envDefaultModelId(projectRoot) ?? globalConfig.defaultModel;
+  const persistent = defaults.persistent;
+  const model = defaults.model;
 
   // ── Phase 32: tell the user the run is alive, and stream its thinking ──
   //
@@ -277,12 +323,22 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
   let currentPlanId: string | undefined;
   let interruptRequested = false;
   let orchestratorRef: Orchestrator | undefined;
+  const abortController = new AbortController();
+  const exitOnInterrupt = opts.exitOnInterrupt !== false;
   const onSigint = (): void => {
     if (!orchestratorRef) return;
-    if (interruptRequested || !currentPlanId) {
+    const action = planningInterruptAction({ currentPlanId, interruptRequested, exitOnInterrupt });
+    if (action === 'abort-planning') {
+      abortController.abort();
+      out(color.warn('\n⏹  Planning cancelled.'));
+      return;
+    }
+    if (action === 'exit') {
       out(color.warn('\n⏹  Interrupted again — exiting now.'));
       if (currentPlanId) finalizeCancelledPlan(projectRoot, currentPlanId);
-      process.exit(130);
+      abortController.abort();
+      if (exitOnInterrupt) process.exit(130);
+      return;
     }
     interruptRequested = true;
     out(
@@ -291,7 +347,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
           '\n   The step in flight finishes; press Ctrl-C again to leave now.',
       ),
     );
-    void orchestratorRef.cancelPlan(currentPlanId).catch(() => undefined);
+    void orchestratorRef.cancelPlan(currentPlanId!).catch(() => undefined);
   };
   process.on('SIGINT', onSigint);
   process.on('SIGTERM', onSigint);
@@ -331,24 +387,30 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
 
   const trustedProject = resolveAndMaybePersistTrust(projectRoot, opts.trustProject === true);
 
-  const orchestrator = new Orchestrator({
-    projectRoot,
-    persistent,
+  const extraOrch = {
     trustedProject,
-    ...(model ? { defaultModelId: model } : {}),
     ...(opts.timeoutMs !== undefined ? { agentTimeoutMs: opts.timeoutMs } : {}),
     ...(opts.maxSteps !== undefined ? { maxSteps: opts.maxSteps } : {}),
-    // C3: execution-control passthrough
     ...(opts.maxReplans !== undefined ? { maxReplanningAttempts: opts.maxReplans } : {}),
     ...(opts.maxDelegationDepth !== undefined ? { maxDelegationDepth: opts.maxDelegationDepth } : {}),
-    onProgress: (event: ProgressEvent) => renderer(event),
-    // Phase 32: the model's thinking text, streamed (always absent when the
-    // terminal cannot show it, which keeps every non-interactive run — and
-    // the tests over them — on the non-streaming call path).
-    ...(showThinking ? { onThought: reasoning } : {}),
-    // v27.17.3: every tool call is logged (type, name, input, status).
-    onToolCall: toolLog,
-  });
+  };
+  if (opts.runHooks) {
+    opts.runHooks.onProgress = (event: ProgressEvent) => renderer(event);
+    if (showThinking) opts.runHooks.onThought = reasoning;
+    opts.runHooks.onToolCall = toolLog;
+  }
+
+  const orchestrator =
+    opts.orchestrator ??
+    new Orchestrator({
+      projectRoot,
+      persistent,
+      ...extraOrch,
+      ...(model ? { defaultModelId: model } : {}),
+      onProgress: (event: ProgressEvent) => renderer(event),
+      ...(showThinking ? { onThought: reasoning } : {}),
+      onToolCall: toolLog,
+    });
   orchestratorRef = orchestrator;
 
   try {
@@ -369,7 +431,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
             : 'Sessions are only stored with --persistent (or persistent:true in the global config).',
         ),
       );
-      return { exitCode: 2 };
+      return { exitCode: 2, sessionNotFound: true };
     }
 
     // Any model spec runs — a registered id, `<provider>:<name>`, or a
@@ -377,8 +439,8 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     // which one, so a typo is visible before the first call fails.
     const active = orchestrator.modelRegistry.getConfig(orchestrator.config.defaultModelId);
     if (active && active.description?.startsWith('Selected at runtime')) {
-      const where = (active.config?.baseURL as string | undefined) ?? `the ${active.provider} API`;
-      out(color.dim(`Model: ${active.model} (not in the registry) via ${where}`));
+      // G-18: never print a custom baseURL (it may be an internal gateway).
+      out(color.dim(`Model: ${active.model} (not in the registry) via the ${active.provider} API`));
     }
 
     // Say which mode is in force when the user (or their config) chose it —
@@ -411,6 +473,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     // ── Full run (Human-Out-Of-Loop after confirmation) ───────
     const result: OrchestratorResult = await orchestrator.run(requested, {
       sessionId: opts.session,
+      abortSignal: abortController.signal,
       // v27.17.0: auto (default) / chat / plan — the prefix in the goal wins.
       mode: resolved.mode,
       // C3: label the NEW session (--label is rejected with --session)
@@ -461,6 +524,6 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     // ...including an error path that left a thinking block open.
     reasoning.close();
     activity.stop();
-    await orchestrator.shutdown();
+    if (!opts.skipShutdown) await orchestrator.shutdown();
   }
 }

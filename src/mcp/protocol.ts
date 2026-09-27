@@ -87,14 +87,54 @@ export function isRequest(value: unknown): value is JsonRpcRequest {
 }
 
 export type ParsedMessage =
-  { ok: true; value: Record<string, unknown> } | { ok: false; response: JsonRpcResponse };
+  | { ok: true; value: Record<string, unknown>; batch?: undefined }
+  | { ok: true; value?: undefined; batch: Record<string, unknown>[] }
+  | { ok: false; response: JsonRpcResponse };
+
+export function isJsonRpcId(value: unknown): value is JsonRpcId {
+  return value === null || typeof value === 'string' || typeof value === 'number';
+}
+
+/** Validate one JSON-RPC object (used for single messages and batch items). */
+export function parseRequestObject(value: unknown): ParsedMessage {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {
+      ok: false,
+      response: jsonRpcError(
+        null,
+        JSON_RPC_ERRORS.invalidRequest,
+        'A JSON-RPC message must be an object.',
+      ),
+    };
+  }
+  const message = value as Record<string, unknown>;
+  if ('id' in message && !isJsonRpcId(message.id)) {
+    return {
+      ok: false,
+      response: jsonRpcError(
+        null,
+        JSON_RPC_ERRORS.invalidRequest,
+        'JSON-RPC id must be a string, number, or null.',
+      ),
+    };
+  }
+  if (message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
+    return {
+      ok: false,
+      response: jsonRpcError(
+        isJsonRpcId(message.id) ? message.id : null,
+        JSON_RPC_ERRORS.invalidRequest,
+        'Not a JSON-RPC 2.0 request: expected { jsonrpc: "2.0", method, … }.',
+      ),
+    };
+  }
+  return { ok: true, value: message };
+}
 
 /**
  * Parse one protocol frame (a line on stdio, a body over HTTP).
  *
- * The error responses come back already built, because the id is unknown at
- * this point and JSON-RPC says it must be `null` — the client matches the
- * failure to the call by order.
+ * G-11: a JSON array is a batch (MCP 2025-03-26); an object `id` is `-32600`.
  */
 export function parseMessage(text: string): ParsedMessage {
   const trimmed = text.trim();
@@ -117,28 +157,20 @@ export function parseMessage(text: string): ParsedMessage {
       ),
     };
   }
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return {
-      ok: false,
-      response: jsonRpcError(
-        null,
-        JSON_RPC_ERRORS.invalidRequest,
-        'A JSON-RPC message must be an object.'
-      ),
-    };
+  if (Array.isArray(value)) {
+    if (value.length === 0) {
+      return {
+        ok: false,
+        response: jsonRpcError(
+          null,
+          JSON_RPC_ERRORS.invalidRequest,
+          'JSON-RPC batch must not be empty.',
+        ),
+      };
+    }
+    return { ok: true, batch: value as Record<string, unknown>[] };
   }
-  const message = value as Record<string, unknown>;
-  if (message.jsonrpc !== '2.0' || typeof message.method !== 'string') {
-    return {
-      ok: false,
-      response: jsonRpcError(
-        typeof message.id === 'string' || typeof message.id === 'number' ? message.id : null,
-        JSON_RPC_ERRORS.invalidRequest,
-        'Not a JSON-RPC 2.0 request: expected { jsonrpc: "2.0", method, … }.'
-      ),
-    };
-  }
-  return { ok: true, value: message };
+  return parseRequestObject(value);
 }
 
 /**

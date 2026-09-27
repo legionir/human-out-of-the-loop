@@ -15,6 +15,7 @@ import {
   negotiateProtocolVersion,
   packageVersion,
   parseMessage,
+  parseRequestObject,
   toolInputJsonSchema,
   type JsonRpcId,
   type JsonRpcResponse,
@@ -452,10 +453,31 @@ export class McpServer {
     }
   }
 
+  /** Handle a parsed JSON-RPC batch (MCP 2025-03-26). */
+  async handleBatch(items: unknown[]): Promise<JsonRpcResponse[]> {
+    const responses: JsonRpcResponse[] = [];
+    for (const item of items) {
+      const parsed = parseRequestObject(item);
+      if (!parsed.ok) {
+        responses.push(parsed.response);
+        continue;
+      }
+      if (!parsed.value) continue;
+      const response = await this.handle(parsed.value);
+      if (response) responses.push(response);
+    }
+    return responses;
+  }
+
   /** Handle one wire frame (a stdio line): parse, dispatch, serialise. */
   async handleFrame(frame: string): Promise<string[]> {
     const parsed = parseMessage(frame);
     if (!parsed.ok) return [JSON.stringify(parsed.response)];
+    if (parsed.batch) {
+      const responses = await this.handleBatch(parsed.batch);
+      return [JSON.stringify(responses)];
+    }
+    if (!parsed.value) return [];
     const response = await this.handle(parsed.value);
     return response === null ? [] : [JSON.stringify(response)];
   }

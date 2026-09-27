@@ -15,6 +15,7 @@
  */
 import { Router } from 'express';
 import type { Task } from '../../ai/schemas/task.js';
+import { collectProjectUsage } from '../../cli/commands/usage.js';
 import { sendOwnerForbidden } from '../run-control.js';
 import type { ServerContext } from '../types.js';
 
@@ -41,17 +42,63 @@ export function usageRouter(ctx: ServerContext): Router {
 
   router.get('/api/usage', (req, res) => {
     const { planId } = req.query as { planId?: string };
+    const fromLog = collectProjectUsage(ctx.projectRoot);
+    const empty = {
+      promptTokens: 0,
+      completionTokens: 0,
+      totalTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      taskCount: 0,
+    };
     if (planId !== undefined) {
       if (typeof planId !== 'string' || planId.trim() === '') {
         res.status(400).json({ error: '"planId" must be a non-empty string when present.' });
         return;
       }
-      const usage = ctx.orchestrator.usageAggregator.getPlanUsage(planId);
+      const row = fromLog.rows.find((r) => r.planId === planId);
+      const usage = row
+        ? {
+            promptTokens: row.promptTokens,
+            completionTokens: row.completionTokens,
+            totalTokens: row.totalTokens,
+            cacheReadTokens: row.cacheReadTokens,
+            cacheWriteTokens: row.cacheWriteTokens,
+            taskCount: row.taskCount,
+          }
+        : ctx.orchestrator.usageAggregator.getPlanUsage(planId);
       res.json({ planId, ...usage });
       return;
     }
-    // No planId → server-wide aggregate (in-memory; see the module note).
-    res.json(ctx.orchestrator.usageAggregator.getSummary());
+    // G-14: durable numbers from observability.jsonl (same as `hootl usage`).
+    // Overlay in-memory totals when the log is still empty for this process.
+    const live = ctx.orchestrator.usageAggregator.getSummary();
+    const totals = fromLog.rows.length > 0 ? fromLog.totals : empty;
+    const totalTokens = fromLog.rows.length > 0 ? totals.totalTokens : live.totalTokens;
+    const byPlan: Record<string, { promptTokens: number; completionTokens: number; totalTokens: number; count: number }> =
+      {};
+    if (fromLog.rows.length > 0) {
+      for (const row of fromLog.rows) {
+        byPlan[row.planId] = {
+          promptTokens: row.promptTokens,
+          completionTokens: row.completionTokens,
+          totalTokens: row.totalTokens,
+          count: row.taskCount,
+        };
+      }
+    } else {
+      Object.assign(byPlan, live.byPlan);
+    }
+    res.json({
+      ...live,
+      promptTokens: fromLog.rows.length > 0 ? totals.promptTokens : live.totalPromptTokens,
+      completionTokens: fromLog.rows.length > 0 ? totals.completionTokens : live.totalCompletionTokens,
+      totalTokens,
+      taskCount: fromLog.rows.length > 0 ? totals.taskCount : live.taskCount,
+      byPlan,
+      plans: fromLog.rows,
+      totals,
+    });
   });
 
   router.get('/api/runs/:runId/tasks', (req, res) => {

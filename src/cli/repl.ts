@@ -19,14 +19,18 @@ import chalk from 'chalk';
 import { CommanderError } from 'commander';
 import { runCommand } from './commands/run.js';
 import { DEFAULT_RUN_MODE, RUN_MODES, parseRunMode, type RunMode } from '../ai/modes.js';
+import { resolveRunMode } from './utils/mode-prefix.js';
 import { envDefaultModelId, loadRegistries } from './utils/registries.js';
 import {
   globalConfigPath,
   loadDotEnv,
   loadGlobalConfig,
+  resolveCliDefaults,
   saveGlobalConfig,
+  unsetEnvKeys,
   type GlobalCliConfig,
 } from './utils/config.js';
+import { OrchestratorCache } from './utils/orchestrator-cache.js';
 import { resolveAndMaybePersistTrust } from './utils/trust-project.js';
 import { color, err, out, renderTable } from './utils/output.js';
 import type { Command } from 'commander';
@@ -113,7 +117,11 @@ const CONFIG_KEYS: Record<string, (v: string) => GlobalCliConfig[keyof GlobalCli
   defaultModel: (v) => v,
   persistent: (v) => parseOnOff(v),
   projectRoot: (v) => v,
-  defaultMode: (v) => v,
+  defaultMode: (v) => {
+    const mode = parseRunMode(v);
+    if (!mode) throw new Error(`Unknown mode "${v}". Use ${RUN_MODES.join(', ')}.`);
+    return mode;
+  },
 };
 
 export function parseOnOff(value: string | undefined): boolean {
@@ -173,6 +181,7 @@ export interface InteractiveArgs {
   projectRoot?: string;
   model?: string;
   persistent?: boolean;
+  noPersistent?: boolean;
   yes?: boolean;
   splash?: boolean;
   /** A-02: persist this directory as a trusted project. */
@@ -208,6 +217,10 @@ export function parseInteractiveArgs(args: string[]): InteractiveArgs | undefine
       case '--persistent':
         result.persistent = true;
         break;
+      case '--no-persistent':
+        result.persistent = false;
+        result.noPersistent = true;
+        break;
       case '--yes':
         result.yes = true;
         break;
@@ -225,28 +238,33 @@ export function parseInteractiveArgs(args: string[]): InteractiveArgs | undefine
 }
 
 export function initialState(cwd: string = process.cwd(), args: InteractiveArgs = {}): ReplState {
-  const config = loadGlobalConfig();
-  const root = args.projectRoot
-    ? path.resolve(cwd, args.projectRoot)
-    : config.projectRoot
-      ? path.resolve(cwd, config.projectRoot)
-      : cwd;
-  // The project's .env may carry HOTL_MODEL / HOTL_BASE_URL.
-  loadDotEnv([root]);
+  const defaults = resolveCliDefaults({
+    projectRoot: args.projectRoot,
+    persistent: args.noPersistent ? false : args.persistent,
+    noPersistent: args.noPersistent,
+    model: args.model,
+    cwd,
+  });
+  const root = defaults.projectRoot;
   if (args.trustProject) resolveAndMaybePersistTrust(root, true);
   return {
     cwd: root,
-    model: args.model ?? envDefaultModelId(root) ?? config.defaultModel,
-    persistent: args.persistent ?? config.persistent ?? false,
+    model: defaults.model,
+    persistent: defaults.persistent,
     autoConfirm: args.yes ?? false,
     verbose: false,
     // The env var first (it is per-shell), then the saved config.
-    mode: parseRunMode(process.env.HOTL_MODE) ?? parseRunMode(config.defaultMode) ?? DEFAULT_RUN_MODE,
+    mode: parseRunMode(process.env.HOTL_MODE) ?? parseRunMode(defaults.global.defaultMode) ?? DEFAULT_RUN_MODE,
   };
 }
 
 export class Repl {
   readonly state: ReplState;
+  readonly orchestrators = new OrchestratorCache();
+  /** Keys applied from the active project's `.env` (dropped on `/cd`). */
+  private projectEnvKeys = new Set<string>();
+  private registriesCache?: ReturnType<typeof loadRegistries>;
+  private registriesCwd?: string;
   private readonly history: string[] = [];
   private pendingExit = false;
   private closed = false;
@@ -257,10 +275,14 @@ export class Repl {
 
   /** Splash, banner, then the prompt loop.  Resolves when the user leaves. */
   async start(opts: { splash?: boolean } = {}): Promise<void> {
-    this.enterDirectory(this.state.cwd);
+    this.enterDirectory(this.state.cwd, { recomputeModel: false });
     const output = (this.opts.output ?? process.stdout) as NodeJS.WriteStream;
     if (opts.splash !== false) {
-      await showSplash(output, { ms: 3000, subtitle: 'plan once, confirm once — then out of the loop' });
+      await showSplash(output, {
+        ms: 3000,
+        subtitle: 'plan once, confirm once — then out of the loop',
+        input: (this.opts.input ?? process.stdin) as NodeJS.ReadStream,
+      });
     }
     void this.refreshRemoteModels();
     this.printBanner();
@@ -357,7 +379,7 @@ export class Repl {
 
   /** Registered models first, then what the providers serve. */
   private modelChoices(): Array<[string, string?]> {
-    const registry = loadRegistries(this.state.cwd).models;
+    const registry = this.cachedRegistries().models;
     const choices: Array<[string, string?]> = registry.map((m) => [m.id, `${m.provider}:${m.model}`]);
     for (const m of this.remoteModels) {
       if (!choices.some(([v]) => v === m.spec)) choices.push([m.spec, `from ${m.source}`]);
@@ -395,6 +417,7 @@ export class Repl {
   private exit(): void {
     if (this.closed) return;
     this.closed = true;
+    void this.orchestrators.invalidate();
     out(color.dim('Bye.'));
   }
 
@@ -422,6 +445,11 @@ export class Repl {
   }
 
   private async goal(goal: string): Promise<void> {
+    const cached = this.orchestrators.acquire({
+      cwd: this.state.cwd,
+      model: this.state.model,
+      persistent: this.state.persistent,
+    });
     const result = await runCommand(goal, {
       projectRoot: this.state.cwd,
       persistent: this.state.persistent,
@@ -430,11 +458,16 @@ export class Repl {
       verbose: this.state.verbose,
       // A `@chat`/`@plan` prefix inside the line still wins inside runCommand.
       mode: this.state.mode,
+      exitOnInterrupt: false,
+      orchestrator: cached.orchestrator,
+      skipShutdown: true,
+      runHooks: cached.hooks,
       // A session only exists on disk in persistent mode; an in-memory
       // run cannot continue one that lived in an earlier orchestrator.
       ...(this.state.persistent && this.state.sessionId ? { session: this.state.sessionId } : {}),
     });
-    if (this.state.persistent && result.sessionId) this.state.sessionId = result.sessionId;
+    if (result.sessionNotFound) this.state.sessionId = undefined;
+    else if (this.state.persistent && result.sessionId) this.state.sessionId = result.sessionId;
   }
 
   private async command(text: string): Promise<void> {
@@ -491,9 +524,22 @@ export class Repl {
       case 'config':
         return this.config(args);
       default:
+        if (name === 'run') return this.passthroughRun(args);
         if (PASSTHROUGH.includes(name)) return this.passthrough([name, ...args]);
         err(color.failed(`Unknown command /${name}.`) + color.dim('  Type /help for the list.'));
     }
+  }
+
+  /** G-10: `/run` inherits the REPL's model / persistent / yes / session. */
+  private async passthroughRun(args: string[]): Promise<void> {
+    const injected: string[] = [];
+    const has = (flag: string): boolean => args.includes(flag);
+    if (this.state.model && !has('--model')) injected.push('--model', this.state.model);
+    if (this.state.persistent && !has('--persistent')) injected.push('--persistent');
+    if (this.state.autoConfirm && !has('--yes')) injected.push('--yes');
+    if (this.state.sessionId && !has('--session')) injected.push('--session', this.state.sessionId);
+    if (!has('--project-root')) injected.push('--project-root', this.state.cwd);
+    return this.passthrough(['run', ...args, ...injected]);
   }
 
   /** Run a regular subcommand in the active directory. */
@@ -513,12 +559,24 @@ export class Repl {
 
   // ── built-ins ────────────────────────────────────────────────
 
-  private enterDirectory(dir: string): void {
+  private cachedRegistries(): ReturnType<typeof loadRegistries> {
+    if (this.registriesCache && this.registriesCwd === this.state.cwd) return this.registriesCache;
+    this.registriesCache = loadRegistries(this.state.cwd);
+    this.registriesCwd = this.state.cwd;
+    return this.registriesCache;
+  }
+
+  private enterDirectory(dir: string, opts: { recomputeModel?: boolean } = {}): void {
     process.chdir(dir);
     this.state.cwd = process.cwd();
-    // The project's .env (API keys) applies from now on; the real
-    // environment still wins, as everywhere else.
-    loadDotEnv([this.state.cwd]);
+    unsetEnvKeys(this.projectEnvKeys);
+    this.projectEnvKeys = new Set(loadDotEnv([this.state.cwd]));
+    this.registriesCache = undefined;
+    this.registriesCwd = undefined;
+    void this.orchestrators.invalidate();
+    if (opts.recomputeModel !== false) {
+      this.state.model = envDefaultModelId(this.state.cwd) ?? loadGlobalConfig().defaultModel;
+    }
   }
 
   private changeDirectory(target: string | undefined): void {
@@ -540,7 +598,7 @@ export class Repl {
       // A fresh look at what the providers serve.
       await this.refreshRemoteModels();
       const current = this.state.model ?? DEFAULT_MODEL;
-      const registry = loadRegistries(this.state.cwd).models;
+      const registry = this.cachedRegistries().models;
       out(color.bold('Registered'));
       out(renderTable(['', 'MODEL', 'PROVIDER', 'NAME'], registry.map((m) => [m.id === current ? '●' : '', m.id, m.provider, m.model])));
       if (this.remoteModels.length > 0) {
@@ -552,7 +610,7 @@ export class Repl {
       out(color.dim('\nType "/model " and pick with ↑↓, or /model <name>.  /config set defaultModel <name> saves it.'));
       return;
     }
-    const registry = loadRegistries(this.state.cwd).models;
+    const registry = this.cachedRegistries().models;
     this.state.model = spec;
     const known =
       registry.some((m) => m.id === spec) || this.remoteModels.some((m) => m.spec === spec);
@@ -640,7 +698,7 @@ export class Repl {
   /** `custom (@aur/auto)` — the id, plus the provider model when it differs. */
   private modelLabel(): string {
     const spec = this.state.model ?? DEFAULT_MODEL;
-    const cfg = loadRegistries(this.state.cwd).models.find((m) => m.id === spec || m.id === modelIdForSpec(spec));
+    const cfg = this.cachedRegistries().models.find((m) => m.id === spec || m.id === modelIdForSpec(spec));
     if (!cfg) return spec;
     return cfg.model !== spec && cfg.id === spec ? `${spec} (${cfg.model})` : spec;
   }
@@ -686,6 +744,19 @@ function stripAnsi(text: string): string {
 /** Entry point used by `main()` when `hootl` runs with no arguments in a TTY. */
 export async function startRepl(opts: ReplOptions, args: InteractiveArgs = {}): Promise<number> {
   const splash = args.splash ?? !/^(1|true|yes)$/i.test(process.env.HOTL_NO_SPLASH ?? '');
+  const { resolved, invalid: badMode } = resolveRunMode({
+    env: process.env,
+    config: loadGlobalConfig(),
+  });
+  void resolved;
+  if (badMode) {
+    err(
+      color.failed(
+        `Invalid default mode "${badMode.value}" (${badMode.source === 'env' ? 'HOTL_MODE' : 'defaultMode in the global config'}).`,
+      ),
+    );
+    return 2;
+  }
   await new Repl(opts, initialState(process.cwd(), args)).start({ splash });
   return 0;
 }

@@ -268,6 +268,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .argument('<goal>', 'the goal to achieve, in plain language')
     .option('--project-root <dir>', 'project root (default: current directory)')
     .option('--persistent', 'persist plans/sessions in .ai-runtime (default: global config or off)')
+    .option('--no-persistent', 'do not persist, even if the global config has persistent:true')
     .option('--model <name>', 'model: registered id, provider model name, or provider:name')
     .option('--session <id>', 'continue an existing session')
     .option('--yes', 'auto-confirm the plan without prompting (CI mode)')
@@ -303,6 +304,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
       const result = await runCommand(goal, {
         projectRoot: opts.projectRoot as string | undefined,
         persistent: opts.persistent as boolean | undefined,
+        noPersistent: opts.noPersistent === true,
         model: opts.model as string | undefined,
         session: opts.session as string | undefined,
         yes: opts.yes === true,
@@ -376,7 +378,7 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         '  0  the review outcome is success or partial-success (an answered chat',
         '     request counts as success — nothing was executed, nothing failed)',
         '  1  failure, rejected plan, unanswered clarification, or a runtime error',
-        '  2  invalid usage (unknown model, out-of-range flag value, bad timeout)',
+        '  2  invalid usage (out-of-range flag value, bad timeout, empty goal)',
         '',
         'AFTER THE RUN',
         '  The printed summary includes the session id and plan id; use them with',

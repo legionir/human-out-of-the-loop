@@ -13,6 +13,11 @@
  *     Ctrl-D on an empty line reports `eof`.
  */
 import readline from 'node:readline';
+import {
+  displayWidth,
+  graphemeEndAfter,
+  graphemeStartBefore,
+} from './utils/graphemes.js';
 
 export interface Suggestion {
   /** Text the line becomes when the suggestion is accepted. */
@@ -55,7 +60,9 @@ interface Key {
 
 // eslint-disable-next-line no-control-regex
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
-const visibleLength = (s: string): number => s.replace(ANSI, '').length;
+const visibleLength = (s: string): number => displayWidth(s.replace(ANSI, ''));
+const BRACKET_PASTE_START = '\x1b[200~';
+const BRACKET_PASTE_END = '\x1b[201~';
 
 /** Read one line.  Resolves when the user submits, interrupts or ends input. */
 export function readLine(opts: LineEditorOptions): Promise<ReadResult> {
@@ -93,7 +100,7 @@ export function readLine(opts: LineEditorOptions): Promise<ReadResult> {
     out += prompt + buffer;
 
     const promptLen = visibleLength(prompt);
-    const endPos = promptLen + buffer.length;
+    const endPos = promptLen + displayWidth(buffer);
     // A line that exactly fills the width leaves the cursor in the last
     // column; normalise so the math below matches the terminal.
     const endRow = Math.floor(endPos / cols);
@@ -132,7 +139,7 @@ export function readLine(opts: LineEditorOptions): Promise<ReadResult> {
     }
 
     // Put the cursor back where it belongs.
-    const curPos = promptLen + cursor;
+    const curPos = promptLen + displayWidth(buffer.slice(0, cursor));
     const curRow = Math.floor(curPos / cols);
     const curCol = curPos % cols;
     // After the text the terminal cursor is on row `endRow` (the '\n' above
@@ -157,20 +164,47 @@ export function readLine(opts: LineEditorOptions): Promise<ReadResult> {
     readline.emitKeypressEvents(input);
     const wasRaw = input.isRaw;
     if (input.isTTY) input.setRawMode(true);
+    if (input.isTTY) output.write('\x1b[?2004h');
     input.resume();
+    let pasting = false;
 
     const finish = (result: ReadResult): void => {
       suggestions = [];
       render(true);
       input.removeListener('keypress', onKey);
+      if (input.isTTY) output.write('\x1b[?2004l');
       if (input.isTTY) input.setRawMode(wasRaw ?? false);
       input.pause();
       resolve(result);
     };
 
+    const insertText = (text: string): void => {
+      if (!text) return;
+      buffer = buffer.slice(0, cursor) + text + buffer.slice(cursor);
+      cursor += text.length;
+      menuDismissed = false;
+      selected = 0;
+      scroll = 0;
+      historyIndex = -1;
+    };
+
     const onKey = (str: string | undefined, key: Key = {}): void => {
       const menuOpen = suggestions.length > 0;
       const name = key.name;
+      const sequence = `${key.sequence ?? ''}${str ?? ''}`;
+      if (sequence.includes(BRACKET_PASTE_START)) pasting = true;
+      if (sequence.includes(BRACKET_PASTE_END)) pasting = false;
+      if (sequence.includes(BRACKET_PASTE_START) || sequence.includes(BRACKET_PASTE_END)) {
+        const inner = sequence
+          .replaceAll(BRACKET_PASTE_START, '')
+          .replaceAll(BRACKET_PASTE_END, '')
+          .replace(/\r\n/g, '\n')
+          .replace(/\r/g, '\n');
+        if (inner) insertText(inner);
+        refreshSuggestions();
+        render();
+        return;
+      }
 
       if (key.ctrl && name === 'c') {
         if (buffer.length > 0) {
@@ -189,6 +223,12 @@ export function readLine(opts: LineEditorOptions): Promise<ReadResult> {
         }
         if (cursor < buffer.length) buffer = buffer.slice(0, cursor) + buffer.slice(cursor + 1);
       } else if (name === 'return' || name === 'enter') {
+        if (pasting) {
+          insertText('\n');
+          refreshSuggestions();
+          render();
+          return;
+        }
         if (menuOpen) {
           const choice = suggestions[selected]!;
           // Enter on a highlighted entry that is not what was typed runs it.
@@ -223,21 +263,25 @@ export function readLine(opts: LineEditorOptions): Promise<ReadResult> {
           menuDismissed = true;
         }
       } else if (name === 'left') {
-        cursor = Math.max(0, cursor - 1);
+        cursor = graphemeStartBefore(buffer, cursor);
       } else if (name === 'right') {
-        cursor = Math.min(buffer.length, cursor + 1);
+        cursor = graphemeEndAfter(buffer, cursor);
       } else if (name === 'home' || (key.ctrl && name === 'a')) {
         cursor = 0;
       } else if (name === 'end' || (key.ctrl && name === 'e')) {
         cursor = buffer.length;
       } else if (name === 'backspace') {
         if (cursor > 0) {
-          buffer = buffer.slice(0, cursor - 1) + buffer.slice(cursor);
-          cursor--;
+          const from = graphemeStartBefore(buffer, cursor);
+          buffer = buffer.slice(0, from) + buffer.slice(cursor);
+          cursor = from;
           menuDismissed = false;
         }
       } else if (name === 'delete') {
-        if (cursor < buffer.length) buffer = buffer.slice(0, cursor) + buffer.slice(cursor + 1);
+        if (cursor < buffer.length) {
+          const to = graphemeEndAfter(buffer, cursor);
+          buffer = buffer.slice(0, cursor) + buffer.slice(to);
+        }
       } else if (key.ctrl && name === 'u') {
         buffer = buffer.slice(cursor);
         cursor = 0;
@@ -248,13 +292,14 @@ export function readLine(opts: LineEditorOptions): Promise<ReadResult> {
       } else if (key.ctrl && name === 'l') {
         output.write('\x1b[2J\x1b[3J\x1b[H');
         cursorRow = 0;
-      } else if (str && !key.ctrl && !key.meta && str >= ' ' && !/[\r\n]/.test(str)) {
-        buffer = buffer.slice(0, cursor) + str + buffer.slice(cursor);
-        cursor += str.length;
-        menuDismissed = false;
-        selected = 0;
-        scroll = 0;
-        historyIndex = -1;
+      } else if (str && !key.ctrl && !key.meta) {
+        if (pasting || (str.length > 1 && /[\r\n]/.test(str))) {
+          insertText(str.replace(/\r\n/g, '\n').replace(/\r/g, '\n'));
+        } else if (str >= ' ' && !/[\r\n]/.test(str)) {
+          insertText(str);
+        } else {
+          return;
+        }
       } else {
         return;
       }

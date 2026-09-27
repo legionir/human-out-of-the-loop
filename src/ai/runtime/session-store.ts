@@ -7,6 +7,12 @@ import {
   createSession,
   createInteraction,
 } from '../schemas/session.js';
+import {
+  SESSION_LABEL_MAX_CHARS,
+  SESSION_REVIEW_SUMMARY_MAX_CHARS,
+  SESSION_USER_REQUEST_MAX_CHARS,
+  clipSessionText,
+} from './session-limits.js';
 import { hashedStoreFileName } from './plan-store.js';
 import { atomicWriteFileSync } from './atomic-write.js';
 import { lockPathFor, withFileLockSync } from './file-lock.js';
@@ -110,7 +116,7 @@ export class FileSessionStore implements SessionStore {
       const session = this.getSession(sessionId);
       if (!session) return undefined;
       if (label) {
-        session.label = label;
+        session.label = clipSessionText(label, SESSION_LABEL_MAX_CHARS) ?? label;
       } else {
         delete session.label;
       }
@@ -140,7 +146,7 @@ export class FileSessionStore implements SessionStore {
     if (path.resolve(oldPath) === path.resolve(dest)) return;
     withFileLockSync(lockPathFor(dest), () => {
       if (!fs.existsSync(dest)) {
-        atomicWriteFileSync(dest, JSON.stringify(session, null, 2));
+        atomicWriteFileSync(dest, JSON.stringify(session));
       }
       try {
         if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
@@ -161,7 +167,7 @@ export class FileSessionStore implements SessionStore {
     // Phase 27 (PERS-04): cross-process lock.  Re-entrant, so the
     // read-modify-write helpers below can hold it around read + write.
     withFileLockSync(lockPathFor(filePath), () => {
-      atomicWriteFileSync(filePath, JSON.stringify(snapshot, null, 2));
+      atomicWriteFileSync(filePath, JSON.stringify(snapshot));
     });
     // Phase 27 (PERF-06): keep the list index warm for our own writes.
     if (session.id) this.idByFile.set(path.basename(filePath), session.id);
@@ -244,7 +250,9 @@ export class FileSessionStore implements SessionStore {
       const session = this.getSession(sessionId);
       if (!session) return undefined;
 
-      const interaction = createInteraction(userRequest);
+      const interaction = createInteraction(
+        clipSessionText(userRequest, SESSION_USER_REQUEST_MAX_CHARS) ?? userRequest,
+      );
       session.interactions.push(interaction);
       this.saveSession(session);
       return interaction;
@@ -263,7 +271,11 @@ export class FileSessionStore implements SessionStore {
       const interaction = session.interactions.find((i) => i.id === interactionId);
       if (!interaction) return;
 
-      Object.assign(interaction, updates);
+      const next = { ...updates };
+      if (next.reviewSummary !== undefined) {
+        next.reviewSummary = clipSessionText(next.reviewSummary, SESSION_REVIEW_SUMMARY_MAX_CHARS);
+      }
+      Object.assign(interaction, next);
       this.saveSession(session);
     });
   }
@@ -299,7 +311,7 @@ export class MemorySessionStore implements SessionStore {
     const session = this.getSession(sessionId);
     if (!session) return undefined;
     if (label) {
-      session.label = label;
+      session.label = clipSessionText(label, SESSION_LABEL_MAX_CHARS) ?? label;
     } else {
       delete session.label;
     }
@@ -331,7 +343,9 @@ export class MemorySessionStore implements SessionStore {
     const session = this.getSession(sessionId);
     if (!session) return undefined;
 
-    const interaction = createInteraction(userRequest);
+    const interaction = createInteraction(
+      clipSessionText(userRequest, SESSION_USER_REQUEST_MAX_CHARS) ?? userRequest,
+    );
     session.interactions.push(interaction);
     this.saveSession(session);
     return interaction;
@@ -348,7 +362,11 @@ export class MemorySessionStore implements SessionStore {
     const interaction = session.interactions.find((i) => i.id === interactionId);
     if (!interaction) return;
 
-    Object.assign(interaction, updates);
+    const next = { ...updates };
+    if (next.reviewSummary !== undefined) {
+      next.reviewSummary = clipSessionText(next.reviewSummary, SESSION_REVIEW_SUMMARY_MAX_CHARS);
+    }
+    Object.assign(interaction, next);
     this.saveSession(session);
   }
 

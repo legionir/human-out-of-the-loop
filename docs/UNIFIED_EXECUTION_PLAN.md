@@ -31,12 +31,12 @@
 | D | صحت ابزارها و journal | ۰ 🟢 | ۰ |
 | E | context، prompt و مدل | ۰ 🟢 | ۰ |
 | F | کارایی و مصرف توکن | ۰ 🟢 | ۰ |
-| G | CLI، REPL و سرور | ۱۸ | ۳ |
+| G | CLI، REPL و سرور | ۰ 🟢 | ۰ |
 | H | رابط وب ↔ سرور (UI) | ۱۴ | ۲ |
 | I | تست، CI و مستندات | ۸ | ۱ |
 | J | قابلیت‌های جدید | ۹ | ۰ |
 | K | راستی‌آزمایی بیرونی (نیازمند ورودی کاربر/محیط) | ۹ | ۱ |
-| | **جمع ردیف‌های باز** | **۵۸** | **۲** |
+| | **جمع ردیف‌های باز** | **۴۰** | **۱** |
 
 ---
 
@@ -165,28 +165,28 @@
 | **F-09** 🟢 | P1 | followLog کل فایل را در هر event می‌خواند | خواندن از offset قبلی؛ watch دایرکتوری + ادامه پس از rotate؛ تست rotate. (شامل مسیر وب `/api/observability/stream`) | S1:R6-11؛ S3:F-0011؛ S2:§۱۱ LOW |
 | **F-10** 🟢 | P3 | SSE بدون سقف اتصال | سقف اتصال per-process (پیکربندی). تست با N اتصال ساختگی | S3:F-0007 |
 
-### فاز G — CLI، REPL و سرور 🟡
+### فاز G — CLI، REPL و سرور 🟢 (۲۰۲۶-۰۹-۲۷، v27.17.10)
 
 | ID | Pri | عنوان | رفع / تست | منبع |
 |---|---|---|---|---|
-| **G-01** | P0 | Ctrl-C هنگام پلن‌سازی کل REPL را می‌بندد | فقط goal جاری abort؛ prompt برگردد؛ `hootl run` رفتار فعلی بماند. تست PTY | S1:R6-01 |
-| **G-02** | P0 | محیط غیر TTY بدون `--yes` پس از پلن‌سازی پولی شکست می‌خورد | بررسی پیش از هر فراخوانی LLM. تست: هیچ فراخوانی مدل انجام نشود | S1:R6-14 |
-| **G-03** | P0 | `/cd` مقادیر `.env` پروژهٔ قبلی را نگه می‌دارد | snapshot env؛ حذف مقادیر A؛ بارگذاری B؛ محاسبهٔ مجدد model. تست | S1:R6-05 |
-| **G-04** | P1 | session حذف‌شده goalهای بعدی REPL را می‌شکند | پاک‌کردن sessionId پس از خطا؛ goal بعدی با session جدید. تست | S1:R6-06 |
-| **G-05** | P1 | paste چندخطی دور ریخته می‌شود | bracketed paste فعال. تست: سه خط → یک goal | S1:R6-07 |
-| **G-06** | P1 | مکان‌نما UTF-16 است | grapheme-aware: emoji=۲، ZWNJ/اعراب=۰. تست هر مورد | S1:R6-08 |
-| **G-07** | P1 | Ctrl-C در prompt تأیید «Error» + interaction باز | `ExitPromptError` → `{confirmed:false}`؛ interaction بسته. تست | S1:R6-12 |
-| **G-08** | P1 | ناهمسانی resume میان CLI و سرور | تابع مشترک بررسی وضعیت/override؛ route سرور RunState بسازد. تست برابری | S1:R6-13 |
-| **G-09** | P1 | هر goal در REPL یک Orchestrator تازه | کش per (cwd,model,persistent)؛ MCP یک بار. تست تعداد initialize | S1:R6-16 |
-| **G-10** | P1 | passthrough `/run` وضعیت REPL را نادیده می‌گیرد | استفاده از model/persistent/yes/session جاری. تست | S1:R6-15 |
-| **G-11** | P2 | JSON-RPC: batch و id نامعتبر | آرایه → آرایه پاسخ (2025-03-26)؛ id object → -32600. تست | S1:R6-09 |
-| **G-12** | P2 | خطاهای اعتبارسنجی و متن help | `plans resume --timeout-ms abc` → validateRunOptions؛ `/config set defaultMode` → parseRunMode؛ متن help exit 2. تست هر سه | S1:R6-10 |
-| **G-13** | P2 | splash غیرقابل رد؛ registry با هر کلید | هر کلید رد کند؛ کش registry در REPL. تست | S1:R6-17 |
-| **G-14** | P2 | `/api/usage` فقط همین پروسه را می‌شناسد | ساخت اعداد از `observability.jsonl` مثل CLI. تست برابری با `hootl usage` | S1:R9-13 |
-| **G-15** | P2 | رشد فایل session؛ محدودیت label ناهمسان (۶۴ vs ۱۲۰) | رشد محدود per interaction؛ JSON فشرده؛ محدودیت مشترک. تست | S1:R9-14 |
-| **G-16** | P3 | parser `.env` نحو رایج را اشتباه می‌خواند | پشتیبانی `export`، توضیح درون‌خطی، نقل‌قول، multiline. تست جدول‌محور | S1:R10-08؛ S2:CONF-002؛ S3:-(جدول CONF) |
-| **G-17** | P3 | یک منبع config در نقاط ورود مختلف رفتار متفاوت | resolve مشترک برای run/REPL/plans/server؛ `--no-persistent`. تست برابری | S1:R10-09 |
-| **G-18** | P3 | چاپ baseURL مدل فعال در ترمینال | پس از A-01 بلامانع؛ در غیر این صورت چاپ حذف شود یا فقط نام provider. تست: خروجی run بدون baseURL سفارشی | S3:F-0001 |
+| **G-01** 🟢 | P0 | Ctrl-C هنگام پلن‌سازی کل REPL را می‌بندد | فقط goal جاری abort؛ prompt برگردد؛ `hootl run` رفتار فعلی بماند. تست PTY | S1:R6-01 |
+| **G-02** 🟢 | P0 | محیط غیر TTY بدون `--yes` پس از پلن‌سازی پولی شکست می‌خورد | بررسی پیش از هر فراخوانی LLM. تست: هیچ فراخوانی مدل انجام نشود | S1:R6-14 |
+| **G-03** 🟢 | P0 | `/cd` مقادیر `.env` پروژهٔ قبلی را نگه می‌دارد | snapshot env؛ حذف مقادیر A؛ بارگذاری B؛ محاسبهٔ مجدد model. تست | S1:R6-05 |
+| **G-04** 🟢 | P1 | session حذف‌شده goalهای بعدی REPL را می‌شکند | پاک‌کردن sessionId پس از خطا؛ goal بعدی با session جدید. تست | S1:R6-06 |
+| **G-05** 🟢 | P1 | paste چندخطی دور ریخته می‌شود | bracketed paste فعال. تست: سه خط → یک goal | S1:R6-07 |
+| **G-06** 🟢 | P1 | مکان‌نما UTF-16 است | grapheme-aware: emoji=۲، ZWNJ/اعراب=۰. تست هر مورد | S1:R6-08 |
+| **G-07** 🟢 | P1 | Ctrl-C در prompt تأیید «Error» + interaction باز | `ExitPromptError` → `{confirmed:false}`؛ interaction بسته. تست | S1:R6-12 |
+| **G-08** 🟢 | P1 | ناهمسانی resume میان CLI و سرور | تابع مشترک بررسی وضعیت/override؛ route سرور RunState بسازد. تست برابری | S1:R6-13 |
+| **G-09** 🟢 | P1 | هر goal در REPL یک Orchestrator تازه | کش per (cwd,model,persistent)؛ MCP یک بار. تست تعداد initialize | S1:R6-16 |
+| **G-10** 🟢 | P1 | passthrough `/run` وضعیت REPL را نادیده می‌گیرد | استفاده از model/persistent/yes/session جاری. تست | S1:R6-15 |
+| **G-11** 🟢 | P2 | JSON-RPC: batch و id نامعتبر | آرایه → آرایه پاسخ (2025-03-26)؛ id object → -32600. تست | S1:R6-09 |
+| **G-12** 🟢 | P2 | خطاهای اعتبارسنجی و متن help | `plans resume --timeout-ms abc` → validateRunOptions؛ `/config set defaultMode` → parseRunMode؛ متن help exit 2. تست هر سه | S1:R6-10 |
+| **G-13** 🟢 | P2 | splash غیرقابل رد؛ registry با هر کلید | هر کلید رد کند؛ کش registry در REPL. تست | S1:R6-17 |
+| **G-14** 🟢 | P2 | `/api/usage` فقط همین پروسه را می‌شناسد | ساخت اعداد از `observability.jsonl` مثل CLI. تست برابری با `hootl usage` | S1:R9-13 |
+| **G-15** 🟢 | P2 | رشد فایل session؛ محدودیت label ناهمسان (۶۴ vs ۱۲۰) | رشد محدود per interaction؛ JSON فشرده؛ محدودیت مشترک. تست | S1:R9-14 |
+| **G-16** 🟢 | P3 | parser `.env` نحو رایج را اشتباه می‌خواند | پشتیبانی `export`، توضیح درون‌خطی، نقل‌قول، multiline. تست جدول‌محور | S1:R10-08؛ S2:CONF-002؛ S3:-(جدول CONF) |
+| **G-17** 🟢 | P3 | یک منبع config در نقاط ورود مختلف رفتار متفاوت | resolve مشترک برای run/REPL/plans/server؛ `--no-persistent`. تست برابری | S1:R10-09 |
+| **G-18** 🟢 | P3 | چاپ baseURL مدل فعال در ترمینال | پس از A-01 بلامانع؛ در غیر این صورت چاپ حذف شود یا فقط نام provider. تست: خروجی run بدون baseURL سفارشی | S3:F-0001 |
 
 ### فاز H — رابط وب ↔ سرور (UI) 🟡
 
@@ -389,7 +389,7 @@ I-01 زودهنگام؛ I-02 مستمر؛ I-08/I-07 انتهایی
 | D | 🟢 | 2026-09-27 | 87c3ade |
 | E | 🟢 | 2026-09-27 | 619c739 |
 | F | 🟢 | 2026-09-27 | 366a4e0 |
-| G | ⬜ | | |
+| G | 🟢 | 2026-09-27 | 2b666a8 |
 | H | ⬜ | | |
 | I | ⬜ | | |
 | J | ⬜ | | |

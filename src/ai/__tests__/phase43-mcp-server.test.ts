@@ -99,13 +99,14 @@ describe('Phase 43 — framing and negotiation', () => {
     expect(empty.ok).toBe(false);
 
     const listMessage = parseMessage(JSON.stringify([{ jsonrpc: '2.0', id: 1, method: 'x' }]));
-    expect(listMessage.ok).toBe(false);
+    expect(listMessage.ok).toBe(true);
+    if (listMessage.ok) expect(listMessage.batch).toHaveLength(1);
   });
 
   it('accepts a well-formed request and keeps its id', () => {
     const parsed = parseMessage(frame(7, 'ping'));
     expect(parsed.ok).toBe(true);
-    if (parsed.ok) expect(parsed.value.id).toBe(7);
+    if (parsed.ok && parsed.value) expect(parsed.value.id).toBe(7);
   });
 
   it('negotiates the version: ours if asked for, otherwise the newest we have', () => {
