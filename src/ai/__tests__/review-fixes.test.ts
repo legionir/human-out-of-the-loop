@@ -560,3 +560,16 @@ describe('J-05 — checkpoints stay in the runtime dir; restore only removes new
     fs.rmSync(project, { recursive: true, force: true });
   });
 });
+
+describe('checkpoint never copies credential files', () => {
+  it('skips .env and .env.* but keeps .env.example', async () => {
+    const { listProjectFiles } = await import('../runtime/checkpoint.js');
+    const fsm = await import('node:fs');
+    const os = await import('node:os');
+    const pathm = await import('node:path');
+    const dir = fsm.mkdtempSync(pathm.join(os.tmpdir(), 'ckpt-env-'));
+    for (const f of ['.env', '.env.local', '.env.example', 'a.txt']) fsm.writeFileSync(pathm.join(dir, f), 'x');
+    expect(listProjectFiles(dir)).toEqual(['.env.example', 'a.txt']);
+    fsm.rmSync(dir, { recursive: true, force: true });
+  });
+});

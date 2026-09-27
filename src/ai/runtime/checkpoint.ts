@@ -15,6 +15,11 @@ import path from 'node:path';
 
 const SKIP = new Set(['.git', 'node_modules', '.ai-runtime', 'dist', 'coverage']);
 
+/** `.env`, `.env.local`, … hold credentials and are never copied into a snapshot. */
+function isSecretFile(name: string): boolean {
+  return name === '.env' || (name.startsWith('.env.') && name !== '.env.example');
+}
+
 /** A tree with more files than this is not snapshotted. */
 export const CHECKPOINT_MAX_FILES = 5_000;
 /** …or with more bytes than this. */
@@ -51,7 +56,7 @@ function walkFiles(root: string, dir: string, out: string[]): void {
     if (SKIP.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) walkFiles(root, full, out);
-    else if (entry.isFile()) out.push(path.relative(root, full));
+    else if (entry.isFile() && !isSecretFile(entry.name)) out.push(path.relative(root, full));
   }
 }
 

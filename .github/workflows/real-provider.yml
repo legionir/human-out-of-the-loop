@@ -196,18 +196,19 @@ jobs:
           PY
 
           leak=0
-          if [ -n "${OPENAI_API_KEY:-}" ] && grep -rIl -- "$OPENAI_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
+          if [ -n "${OPENAI_API_KEY:-}" ] && grep -rIlF -- "$OPENAI_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
             echo "::error::The OpenAI API key leaked into .ai-runtime artifacts."
-            grep -rIl -- "$OPENAI_API_KEY" "$root/.ai-runtime" | sed 's|^|  |'
+            grep -rIlF -- "$OPENAI_API_KEY" "$root/.ai-runtime" | sed 's|^|  |'
             leak=1
           fi
-          if [ -n "${HOTL_API_KEY:-}" ] && grep -rIl -- "$HOTL_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
+          if [ -n "${HOTL_API_KEY:-}" ] && grep -rIlF -- "$HOTL_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
             echo "::error::The provider key leaked into .ai-runtime artifacts."
+            grep -rIlF -- "$HOTL_API_KEY" "$root/.ai-runtime" | sed 's|^|  |'
             leak=1
           fi
-          if [ -n "${ANTHROPIC_API_KEY:-}" ] && grep -rIl -- "$ANTHROPIC_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
+          if [ -n "${ANTHROPIC_API_KEY:-}" ] && grep -rIlF -- "$ANTHROPIC_API_KEY" "$root/.ai-runtime" 2>/dev/null | grep -q .; then
             echo "::error::The Anthropic API key leaked into .ai-runtime artifacts."
-            grep -rIl -- "$ANTHROPIC_API_KEY" "$root/.ai-runtime" | sed 's|^|  |'
+            grep -rIlF -- "$ANTHROPIC_API_KEY" "$root/.ai-runtime" | sed 's|^|  |'
             leak=1
           fi
           if [ "$leak" -ne 0 ]; then
