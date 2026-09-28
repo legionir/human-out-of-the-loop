@@ -1,6 +1,6 @@
 import { generateObject, NoObjectGeneratedError } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from './llm-timeout.js';
-import { detectLanguage, languageSection } from '../language.js';
+import { buildAcceptancePrompt } from '../prompts/reviews.js';
 import { reportLlmUsage, type LlmUsageReporter } from './llm-usage.js';
 import { z } from 'zod';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
@@ -89,29 +89,7 @@ export class AcceptanceChecker {
   ): Promise<AcceptanceResult> {
     const reviewerAgent = this.buildReviewerAgent(modelId);
 
-    const prompt = `
-You are verifying whether a completed task meets its acceptance criteria.
-
-${languageSection(step.description, detectLanguage(step.description))}
-
-## Step Description
-${step.description}
-
-## Acceptance Criteria
-${step.acceptanceCriteria}
-
-## Task Output Summary
-${taskResult.summary ?? 'No summary available.'}
-
-## Task Output (full)
-${(taskResult.result ?? 'No result available.').slice(0, ACCEPTANCE_RESULT_CHARS)}
-
-## Task Errors (if any)
-${(taskResult.errors ?? []).length > 0 ? (taskResult.errors ?? []).join('\n') : 'None'}
-
-Evaluate the output against the acceptance criteria and respond with
-a JSON object containing "accepted" (boolean) and "reason" (string).
-`.trim();
+    const prompt = buildAcceptancePrompt(step, taskResult);
 
     const attempt = () =>
       withStructuredRetry(

@@ -1,6 +1,8 @@
-import fs from 'node:fs';
 import path from 'node:path';
-import { environmentBullets } from '../environment-context.js';
+import { buildAssessmentPrompt, buildPlanPrompt, buildAnswerPrompt } from '../prompts/planner.js';
+import { buildProjectContext, projectTopLevelEntries, PROJECT_CONTEXT_MAX_ENTRIES } from '../prompts/project-context.js';
+export { buildAssessmentPrompt, buildPlanPrompt } from '../prompts/planner.js';
+export { buildProjectContext, projectTopLevelEntries, PROJECT_CONTEXT_MAX_ENTRIES } from '../prompts/project-context.js';
 import { randomUUID } from 'node:crypto';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { NoObjectGeneratedError, generateObject } from 'ai';
@@ -16,13 +18,9 @@ import { DEFAULT_RUN_MODE, type RunMode } from '../modes.js';
 import { detectLanguage, type DetectedLanguage } from '../language.js';
 import { DEFAULT_MODEL_ID } from '../models/defaults.js';
 import { withGenerationSettings } from '../models/generation-settings.js';
-import { buildCatalogBlock } from './catalog-prompt.js';
-import {
-  formatPlanExample,
-  loadPlanExamples,
-  planExamplesEnabled,
-  selectPlanExample,
-} from './plan-examples.js';
+import { buildCatalogBlock } from '../prompts/catalog.js';
+import { formatPlanExample } from '../prompts/examples.js';
+import { loadPlanExamples, planExamplesEnabled, selectPlanExample } from './plan-examples.js';
 import {
   PlanModelSchema,
   PlannerAssessmentLlmSchema,
@@ -142,151 +140,7 @@ export function finalizePlan(plan: Plan | PlanModel): Plan {
   };
 }
 
-// ─── Project context (Phase 32) ───────────────────────────────────
-
-/** Directory entries never worth a model's attention (and often huge). */
-const CONTEXT_SKIP = new Set([
-  'node_modules', '.git', '.ai-runtime', 'dist', 'build', 'out', 'coverage',
-  '.next', '.cache', '.venv', '__pycache__', '.turbo', '.svelte-kit',
-]);
-
-/** How many top-level entries the context block lists. */
-export const PROJECT_CONTEXT_MAX_ENTRIES = 40;
-
-/** Shallow listing of `projectRoot`: directories first, heavy ones dropped. */
-export function projectTopLevelEntries(projectRoot: string, max = PROJECT_CONTEXT_MAX_ENTRIES): string[] {
-  try {
-    return fs
-      .readdirSync(projectRoot, { withFileTypes: true })
-      .filter((entry) => !CONTEXT_SKIP.has(entry.name))
-      .map((entry) => (entry.isDirectory() ? `${entry.name}/` : entry.name))
-      .sort((a, b) => {
-        const dirA = a.endsWith('/');
-        const dirB = b.endsWith('/');
-        if (dirA !== dirB) return dirA ? -1 : 1;
-        return a.localeCompare(b);
-      })
-      .slice(0, max);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * The PROJECT CONTEXT block prepended to every planner prompt.
- *
- * It answers the two questions the model otherwise asks the user: *which*
- * project, and *where* it lives.  Paths in a plan are relative to this
- * root, and the file tools refuse to leave it (see path-security.ts).
- */
-export function buildProjectContext(projectRoot: string | undefined): string {
-  if (!projectRoot) return '';
-  const root = path.resolve(projectRoot);
-  const entries = projectTopLevelEntries(root);
-  const lines = [
-    'PROJECT CONTEXT (known — never ask the user for it):',
-    `- project root: ${root}`,
-    // Phase 36: the machine, not just its name — which shell a command will run
-    // in, which separator to build paths with, GNU vs BSD.  The planner writes
-    // the commands the agent will later run, so it needs this at plan time.
-    ...environmentBullets(),
-    '- every path in the plan is relative to that root; read_file/write_file/search_code work inside it and nowhere else',
-    '- the project already exists: questions like "which project?" or "what is the current directory?" are already answered by this block',
-  ];
-  if (entries.length > 0) {
-    lines.push(`- top-level entries: ${entries.join('  ')}`);
-  }
-  if (fs.existsSync(path.join(root, 'package.json'))) {
-    lines.push('- package.json is present (Node.js project)');
-  }
-  return lines.join('\n');
-}
-
-/**
- * The assessment prompt — exported so the PROJECT CONTEXT it carries can
- * be asserted without a model call.
- */
-export function buildAssessmentPrompt(
-  userRequest: string,
-  projectRoot?: string,
-  mode: RunMode = DEFAULT_RUN_MODE,
-  sessionHistory?: string,
-  catalog?: string,
-): string {
-  const context = buildProjectContext(projectRoot);
-  const note = context
-    ? `${context}\n\nA request that only lacks the project, its location or its technology stack is CLEAR: the context above supplies them.\n`
-    : '';
-  // The mode decides what the three kinds mean for this run; without this the
-  // model would happily answer a greeting even when the user typed `@plan`.
-  const modeRule =
-    mode === 'chat'
-      ? 'The user asked for a CONVERSATION: set kind="answer" and put your reply in the "answer" field. Do not plan, and never answer a conversation with kind="clarify" — a greeting, a thank-you or a short remark is answered with kind="answer" like anything else.'
-      : mode === 'plan'
-        ? 'The user asked for a PLAN: real work is expected. Set kind="plan" and provide the full plan, even for a short request — use kind="clarify" only when the request cannot be planned without an answer you cannot infer.'
-        : 'Decide what the request needs:\n' +
-          '- a greeting ("hello", "سلام"), a thank-you, small talk, a question, an explanation, or anything you can answer yourself → kind="answer" with your reply in the "answer" field;\n' +
-          '- real work in this project (files to change, commands to run, several steps) → kind="plan" and provide the full plan;\n' +
-          '- too vague to do either → kind="clarify" and ask.';
-  return `
-You are deciding what to do with the following user request.
-${note ? `\n${note}` : ''}
-${modeRule}
-${catalog ? `\n${catalog}\n` : ''}
-USER REQUEST:
-"""
-${userRequest}
-"""
-${sessionHistory ? `\n${sessionHistory}\n` : ''}
-Set kind="plan" or kind="answer" or kind="clarify" and fill the matching field:
-- "plan": the complete execution plan (goal + steps with personas, skills, tools and acceptance criteria);
-- "answer": your reply to the user, written for them (not a summary of this decision);
-- "clarify": put 1-5 specific, answerable questions in the "needsClarification" array — never an empty list.
-
-A request that is a question about the project, its files, or the runtime is kind="answer"; when it can only be answered by reading the project, say what you need in the answer — do not invent file contents.
-Assign only persona, skill and tool ids from the catalog above — never invent ids.
-`.trim();
-}
-
-/**
- * The plan-generation prompt (same PROJECT CONTEXT, plus the answers the
- * user gave during clarification).
- */
-export function buildPlanPrompt(
-  userRequest: string,
-  clarifications?: Record<string, string>,
-  projectRoot?: string,
-  sessionHistory?: string,
-  catalog?: string,
-  example?: string,
-): string {
-  const context = buildProjectContext(projectRoot);
-  let prompt = `
-Decompose the following user request into a detailed execution plan.
-${context ? `\n${context}\n` : ''}
-${catalog ? `${catalog}\n` : ''}
-USER REQUEST:
-"""
-${userRequest}
-"""
-`.trim();
-
-  if (sessionHistory) {
-    prompt += `\n\n${sessionHistory}`;
-  }
-
-  if (example) {
-    prompt += `\n\n${example}`;
-  }
-
-  if (clarifications && Object.keys(clarifications).length > 0) {
-    prompt += `\n\nCLARIFICATIONS PROVIDED BY USER:\n`;
-    for (const [q, a] of Object.entries(clarifications)) {
-      prompt += `Q: ${q}\nA: ${a}\n\n`;
-    }
-  }
-  return prompt;
-}
+// Project context and planner prompt builders live under ../prompts/.
 
 /**
  * The names a model has used for "the questions I need answered before I can
@@ -834,20 +688,7 @@ export class Planner {
    * from the `chat` persona (read-only tools, "never claim you did something").
    */
   buildAnswerPrompt(userRequest: string): string {
-    const context = buildProjectContext(this.config.projectRoot);
-    return `
-${context ? `${context}\n` : ''}
-USER REQUEST:
-"""
-${userRequest}
-"""
-
-Answer the request above directly, in the user's language. Use the read-only tools if you need to check something in the project — read, never guess. If the request needs files to change or several steps of work, say so in a sentence or two and point the user at \`@plan <request>\`; never pretend you did it.
-
-End your reply with a final line, exactly as shown, with no other text on that line:
-[[NEEDS_PLAN: true]]   — if THIS request needs a plan (files to change, commands to run, several steps) and you just said so
-[[NEEDS_PLAN: false]]  — for every other reply, including one that merely mentions \`@plan\` as an example or explanation
-`.trim();
+    return buildAnswerPrompt(userRequest, this.config.projectRoot);
   }
 
   /**

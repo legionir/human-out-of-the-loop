@@ -6,7 +6,8 @@ import { withLlmTimeout, withStructuredRetry } from '../runtime/llm-timeout.js';
 import { reportLlmUsage } from '../runtime/llm-usage.js';
 import { DEFAULT_MODEL_ID } from '../models/defaults.js';
 import { withGenerationSettings } from '../models/generation-settings.js';
-import { buildCatalogBlock } from './catalog-prompt.js';
+import { buildCatalogBlock } from '../prompts/catalog.js';
+import { buildStructuredPlanPrompt } from '../prompts/planner.js';
 
 /**
  * Generate a Plan using AI SDK's `generateObject` for guaranteed
@@ -46,23 +47,7 @@ export async function generatePlanStructured(
     toolRegistry: config.toolRegistry,
   });
 
-  let prompt = `
-Decompose the following user request into a detailed execution plan.
-
-${catalog}
-
-USER REQUEST:
-"""
-${userRequest}
-"""
-`.trim();
-
-  if (clarifications && Object.keys(clarifications).length > 0) {
-    prompt += `\n\nCLARIFICATIONS:\n`;
-    for (const [q, a] of Object.entries(clarifications)) {
-      prompt += `Q: ${q}\nA: ${a}\n\n`;
-    }
-  }
+  const prompt = buildStructuredPlanPrompt(userRequest, catalog, clarifications);
 
   const { object, usage } = await withStructuredRetry(() =>
     withLlmTimeout(

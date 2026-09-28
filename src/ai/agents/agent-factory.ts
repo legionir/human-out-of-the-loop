@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
-import { buildEnvironmentContext } from '../environment-context.js';
-import { languageSection, type DetectedLanguage } from '../language.js';
+import { buildEnvironmentContext } from '../prompts/environment.js';
+import { languageSection } from '../prompts/language.js';
+import { buildSystemPrompt as buildCentralSystemPrompt } from '../prompts/system.js';
+import type { DetectedLanguage } from '../language.js';
 import type { Tool, LanguageModel } from 'ai';
 import type { AgentRegistry, CrossRegistryRefs } from '../registries/agent-registry.js';
 import type { AgentDefinition } from '../schemas/agent-definition.js';
@@ -233,7 +235,7 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
 
   // ── 4. Combine instructions with budget awareness ───────────
 
-  const { systemPrompt, trimmingLog, contextBudgetExceeded } = buildSystemPrompt({
+  const { systemPrompt, trimmingLog, contextBudgetExceeded } = buildCentralSystemPrompt({
     persona,
     skills,
     budgetChars,
@@ -270,164 +272,8 @@ export function createAgent(options: CreateAgentOptions): ResolvedAgent {
   };
 }
 
-// ─── Instruction builder with trimming ───────────────────────────
-
-interface BuildPromptOptions {
-  persona: Persona;
-  skills: ResolvedSkill[];
-  budgetChars: number;
-  allowedToolIds: ReadonlySet<string>;
-}
-
-/**
- * Drop SKILL.md sections that instruct tools the agent is not allowed to use
- * (E-06). Sections are split on `## ` headings; a section is kept only when
- * every skill-declared tool it names is in `allowedTools`.
- */
-export function filterSkillInstructions(
-  markdown: string,
-  allowedTools: ReadonlySet<string>,
-  skillToolIds: readonly string[]
-): string {
-  const disallowed = skillToolIds.filter((id) => !allowedTools.has(id));
-  if (disallowed.length === 0) return markdown;
-  const patterns = disallowed.map((id) => new RegExp(`\\b${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`));
-  const sections = markdown.split(/(?=^## )/m);
-  const kept = sections.filter((section) => !patterns.some((pattern) => pattern.test(section)));
-  const text = kept.join('').trim();
-  return text.length > 0 ? text : markdown;
-}
-
-interface BuildPromptResult {
-  systemPrompt: string;
-  trimmingLog: TrimmingRecord[];
-  contextBudgetExceeded: boolean;
-}
-
-/**
- * Build the combined system prompt from persona + skills.
- *
- * Trimming strategy (when over budget):
- *   1. persona.system is NEVER trimmed (always included in full).
- *   2. Skills are sorted by priority ascending (lowest first).
- *   3. Lowest-priority skills are truncated/removed one by one
- *      until the total fits within the budget.
- *   4. If even persona.system alone exceeds the budget, it is
- *      included as-is (we never silently drop the persona) and
- *      a flag is set.
- */
-function buildSystemPrompt(opts: BuildPromptOptions): BuildPromptResult {
-  const { persona, skills, budgetChars, allowedToolIds } = opts;
-  const trimmingLog: TrimmingRecord[] = [];
-
-  const personaSection = `# Persona: ${persona.name}\n\n${persona.system}`;
-  const personaLength = personaSection.length;
-
-  // If persona alone exceeds budget, include it anyway (never trim persona)
-  if (personaLength >= budgetChars) {
-    for (const skill of skills) {
-      trimmingLog.push({
-        skillId: skill.id,
-        originalLength: skill.resolvedInstructions.length,
-        trimmedLength: 0,
-        reason: 'context-budget',
-      });
-    }
-    return {
-      systemPrompt: personaSection,
-      trimmingLog,
-      contextBudgetExceeded: true,
-    };
-  }
-
-  // Sort skills by priority ascending (lowest priority = trimmed first)
-  const sortedSkills = [...skills].sort(
-    (a, b) => (a.priority ?? 50) - (b.priority ?? 50)
-  );
-
-  // Calculate total length
-  const skillSections = sortedSkills.map((skill) => {
-    const instructions = filterSkillInstructions(
-      skill.resolvedInstructions,
-      allowedToolIds,
-      skill.resolvedTools
-    );
-    return {
-      skill,
-      text: `\n\n# Skill: ${skill.name}\n\n${instructions}`,
-    };
-  });
-
-  let totalLength = personaLength;
-  for (const s of skillSections) {
-    totalLength += s.text.length;
-  }
-
-  // If within budget, no trimming needed
-  if (totalLength <= budgetChars) {
-    const fullPrompt = personaSection + skillSections.map((s) => s.text).join('');
-    return {
-      systemPrompt: fullPrompt,
-      trimmingLog: [],
-      contextBudgetExceeded: false,
-    };
-  }
-
-  // ── Trimming loop ───────────────────────────────────────────
-  // Remove lowest-priority skills one by one until we fit
-
-  let remainingBudget = budgetChars - personaLength;
-  const includedSections: string[] = [];
-
-  // Process from highest priority to lowest (include high-priority first)
-  const byPriorityDesc = [...skillSections].sort(
-    (a, b) => (b.skill.priority ?? 50) - (a.skill.priority ?? 50)
-  );
-
-  for (const section of byPriorityDesc) {
-    if (section.text.length <= remainingBudget) {
-      includedSections.push(section.text);
-      remainingBudget -= section.text.length;
-    } else {
-      // Try truncating this skill's instructions
-      const header = `\n\n# Skill: ${section.skill.name}\n\n`;
-      const availableForContent = remainingBudget - header.length;
-
-      if (availableForContent > 100) {
-        // Truncate with an ellipsis marker
-        const truncated =
-          section.skill.resolvedInstructions.slice(0, availableForContent - 50) +
-          '\n\n[... instructions truncated due to context budget ...]';
-        const truncatedText = header + truncated;
-        includedSections.push(truncatedText);
-        remainingBudget -= truncatedText.length;
-
-        trimmingLog.push({
-          skillId: section.skill.id,
-          originalLength: section.skill.resolvedInstructions.length,
-          trimmedLength: truncated.length,
-          reason: 'context-budget',
-        });
-      } else {
-        // Not enough room even for a truncated version — skip entirely
-        trimmingLog.push({
-          skillId: section.skill.id,
-          originalLength: section.skill.resolvedInstructions.length,
-          trimmedLength: 0,
-          reason: 'context-budget',
-        });
-      }
-    }
-  }
-
-  const finalPrompt = personaSection + includedSections.join('');
-
-  return {
-    systemPrompt: finalPrompt,
-    trimmingLog,
-    contextBudgetExceeded: trimmingLog.length > 0,
-  };
-}
+// Compatibility export; system prompt construction lives in src/ai/prompts/system.ts.
+export { filterSkillInstructions } from '../prompts/system.js';
 
 // ─── Agent Cache ──────────────────────────────────────────────────
 
