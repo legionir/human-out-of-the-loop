@@ -12,6 +12,10 @@
 
 This disposition is acceptable only while scope/path selection is a trusted-host responsibility. If the threat model requires the loader itself to authenticate project-vs-builtin provenance or treats its caller as untrusted, this remains a code-level blocker before any Runtime integration; root-bound APIs or equivalent host-authority binding will be needed.
 
+## Profile-ID collision/precedence clarification
+
+The old baseline statement that project entries override matching package entries describes the existing non-Profile registry layering; it is not an approved Workflow Profile override rule. The owner-confirmed Profile selection order is explicit user selection, then an explicitly opted-in project Profile, then built-in default, but it does not define what happens when the same Profile ID exists in multiple scopes. The Phase 2 registry and tests currently reject duplicate IDs across scopes. Keep this fail-closed behavior; do not infer project-over-package override. The same-ID collision rule remains an owner decision for Phase 2 acceptance unless confirmed as final.
+
 ## Filesystem race boundary
 
 Profile-file opening rejects non-regular files and uses `O_NOFOLLOW`/`O_NONBLOCK` where supported. It compares pre-open `lstat`, descriptor `fstat`, and post-open path identity (`dev`/`ino`), reads at most the byte cap plus one, and decodes UTF-8 fatally. Tests cover file replacement and POSIX FIFO behavior.
