@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 8
-  source: "prompts/composite/Forensic Security & Threat Audit.md"
+  source: "../../personas/forensic-security-threat-audit.json"
   language: "en"
   spec: "composites/forensic-security-threat-audit.json"
   generated: true

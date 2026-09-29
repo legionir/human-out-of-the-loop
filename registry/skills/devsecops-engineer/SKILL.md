@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "DevOps"
   seniority: "Senior"
-  source: "prompts/implementation/devsecops-engineer.md"
+  source: "../../personas/devsecops-engineer.json"
   language: "en"
 ---
 

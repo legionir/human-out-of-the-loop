@@ -5,7 +5,7 @@ metadata:
   version: "1"
   type: "COMPOSITE"
   typeLabel: "Composite"
-  source: "prompts/composite/Forensic Codebase Review & Audit.md"
+  source: "../../personas/forensic-codebase-review-audit.json"
   language: "en"
   generated: false
 ---

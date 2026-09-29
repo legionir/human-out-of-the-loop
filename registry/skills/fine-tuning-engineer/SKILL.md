@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "AI"
   seniority: "Senior"
-  source: "prompts/implementation/fine-tuning-engineer.md"
+  source: "../../personas/fine-tuning-engineer.json"
   language: "en"
 ---
 

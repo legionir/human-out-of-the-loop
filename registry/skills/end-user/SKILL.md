@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Support"
   seniority: "Junior"
-  source: "prompts/implementation/end-user.md"
+  source: "../../personas/end-user.json"
   language: "en"
 ---
 

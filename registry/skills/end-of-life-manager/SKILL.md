@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Product"
   seniority: "Manager"
-  source: "prompts/audit/end-of-life-manager.md"
+  source: "../../personas/end-of-life-manager.json"
   language: "en"
 ---
 

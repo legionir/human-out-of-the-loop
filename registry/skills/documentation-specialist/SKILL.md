@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Documentation"
   seniority: "Specialist"
-  source: "prompts/implementation/documentation-specialist.md"
+  source: "../../personas/documentation-specialist.json"
   language: "en"
 ---
 

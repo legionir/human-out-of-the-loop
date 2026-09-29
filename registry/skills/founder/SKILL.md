@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Business"
   seniority: "Executive"
-  source: "prompts/audit/founder.md"
+  source: "../../personas/founder.json"
   language: "en"
 ---
 

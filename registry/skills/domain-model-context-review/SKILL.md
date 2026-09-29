@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Domain Model & Context Review.md"
+  source: "../../personas/domain-model-context-review.json"
   language: "en"
   spec: "composites/domain-model-context-review.json"
   generated: true

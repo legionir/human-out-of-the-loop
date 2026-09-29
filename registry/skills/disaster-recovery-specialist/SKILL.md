@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Specialist"
-  source: "prompts/implementation/disaster-recovery-specialist.md"
+  source: "../../personas/disaster-recovery-specialist.json"
   language: "en"
 ---
 

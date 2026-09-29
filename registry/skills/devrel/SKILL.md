@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Specialist"
-  source: "prompts/implementation/devrel.md"
+  source: "../../personas/devrel.json"
   language: "en"
 ---
 

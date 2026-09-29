@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "DevOps"
   seniority: "Specialist"
-  source: "prompts/audit/finops-specialist.md"
+  source: "../../personas/finops-specialist.json"
   language: "en"
 ---
 

@@ -5,7 +5,7 @@ metadata:
   version: "1"
   type: "COMPOSITE"
   typeLabel: "Composite"
-  source: "prompts/composite/Execution Plan Generator.md"
+  source: "../../personas/execution-plan-generator.json"
   language: "en"
   generated: false
 ---

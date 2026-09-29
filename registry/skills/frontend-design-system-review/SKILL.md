@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Frontend & Design System Review.md"
+  source: "../../personas/frontend-design-system-review.json"
   language: "en"
   spec: "composites/frontend-design-system-review.json"
   generated: true
