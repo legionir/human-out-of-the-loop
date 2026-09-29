@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { SUPPORTED_SCHEMA_MAJOR, SUPPORTED_SCHEMA_MINOR, validateWorkflowProfileStructure } from './profile-schema-validator.js';
+import { SUPPORTED_SCHEMA_MAJOR, SUPPORTED_SCHEMA_MINOR, validateWorkflowProfileJson, validateWorkflowProfileStructure } from './profile-schema-validator.js';
 import { validateWorkflowProfileSemantics } from './profile-semantic-validator.js';
 import type {
   WorkflowProfileDiagnostic,

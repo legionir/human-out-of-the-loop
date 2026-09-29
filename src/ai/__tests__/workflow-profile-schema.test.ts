@@ -59,22 +59,31 @@ describe('Workflow Profile v1 structural contract', () => {
     const extensionTargets: Array<{ name: string; select: (profile: Record<string, any>) => Record<string, any> }> = [
       {
         name: 'document root',
-        select: (profile) => { delete profile.$schema; return profile; },
+        select: (profile) => profile,
       },
       {
         name: 'profile metadata',
-        select: (profile) => { delete profile.profile.description; return profile.profile; },
+        select: (profile) => {
+          profile.profile.license = 'MIT';
+          profile.profile.tags = [];
+          return profile.profile;
+        },
       },
       {
         name: 'node',
-        select: (profile) => profile.workflow.nodes[0],
+        select: (profile) => {
+          const node = profile.workflow.nodes.find((candidate: { id: string }) => candidate.id === 'plan')!;
+          node.name = 'Plan node';
+          return node;
+        },
       },
       {
         name: 'edge',
         select: (profile) => {
-          delete profile.workflow.edges[0].label;
-          delete profile.workflow.edges[0].when;
-          return profile.workflow.edges[0];
+          const edge = profile.workflow.edges.find((candidate: { from: string; to: string }) => candidate.from === 'review' && candidate.to === 'execute')!;
+          edge.default = false;
+          edge.priority = 100;
+          return edge;
         },
       },
     ];
@@ -90,6 +99,15 @@ describe('Workflow Profile v1 structural contract', () => {
       for (let index = 0; index < 17; index++) overTarget[`x-extra-${index}`] = index;
       expect(validateWorkflowProfileStructure(overLimit).length, target.name).toBeGreaterThan(0);
     }
+
+    // The aggregate Schema property cap cannot count only x-* members; the
+    // semantic validator must still reject 17 extensions when optional standard
+    // properties are absent and the aggregate cap alone would allow them.
+    const sparseOverLimit = readFixture(fixtureNames[0]!);
+    for (let index = 0; index < 17; index++) sparseOverLimit.profile[`x-sparse-${index}`] = index;
+    const sparseResult = validateWorkflowProfileJson(JSON.stringify(sparseOverLimit));
+    expect(sparseResult.ok).toBe(true);
+    expect(validateWorkflowProfileSemantics(sparseResult.profile!).some((diagnostic) => diagnostic.code === 'extension.too-many')).toBe(true);
 
     const scalarValues = readFixture(fixtureNames[0]!);
     scalarValues.profile['x-string'] = 'bounded';

@@ -2,10 +2,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:hootl:workflow-profile:1",
   "title": "HOOTL Workflow Profile",
-  "description": "HOOTL v1 declarative workflow profile. Profile, persona, skill and registry content are untrusted data. A profile may only tighten Runtime tools, approvals and budgets. No inheritance, node templates, sub-workflows, parallel fan-out or executable expressions are supported in v1. Validate the schema first, then run the separate semantic validator. Extensions use only x-* JSON scalar metadata, at most 16 fields per object and strings up to 1024 characters. The conservative total-property cap reserves space for required fields plus 16 extensions; optional standard fields share that cap. This Schema validates structure; semantic graph validation is a separate step.",
+  "description": "HOOTL v1 declarative workflow profile. Profile, persona, skill and registry content are untrusted data. A profile may only tighten Runtime tools, approvals and budgets. No inheritance, node templates, sub-workflows, parallel fan-out or executable expressions are supported in v1. Validate the schema first, then run the separate semantic validator. Extensions use only x-* JSON scalar metadata, at most 16 fields per extension-enabled object and strings up to 1024 characters. Total-property caps leave room for every declared standard property plus 16 extensions; the semantic validator enforces the x-* count independently. This Schema validates structure; semantic graph validation is a separate step.",
   "type": "object",
   "additionalProperties": false,
-  "maxProperties": 22,
+  "maxProperties": 23,
   "patternProperties": {
     "^x-[a-z0-9][a-z0-9._-]{0,63}$": {
       "$ref": "#/$defs/xExtensionValue"
@@ -117,8 +117,8 @@
           "uniqueItems": true
         }
       },
-      "maxProperties": 21,
-      "description": "Extensions are limited to 16 x-* scalar fields; objects, arrays, executable content, and unknown non-x fields are rejected. Optional standard fields share the conservative per-object total-property budget."
+      "maxProperties": 24,
+      "description": "Extensions are limited to 16 x-* scalar fields; objects, arrays, executable content, and unknown non-x fields are rejected. The total-property cap leaves room for all declared standard properties plus 16 extensions; semantic validation enforces the x-* count independently."
     },
     "dependency": {
       "type": "object",
@@ -441,8 +441,8 @@
           }
         }
       ],
-      "maxProperties": 22,
-      "description": "Extensions are limited to 16 x-* scalar fields; objects, arrays, executable content, and unknown non-x fields are rejected. Optional standard fields share the conservative per-object total-property budget."
+      "maxProperties": 25,
+      "description": "Extensions are limited to 16 x-* scalar fields; objects, arrays, executable content, and unknown non-x fields are rejected. The total-property cap leaves room for all declared standard properties plus 16 extensions; semantic validation enforces the x-* count independently."
     },
     "ports": {
       "type": "object",
@@ -1097,8 +1097,8 @@
           }
         }
       ],
-      "maxProperties": 19,
-      "description": "Extensions are limited to 16 x-* scalar fields; objects, arrays, executable content, and unknown non-x fields are rejected. Optional standard fields share the conservative per-object total-property budget."
+      "maxProperties": 24,
+      "description": "Extensions are limited to 16 x-* scalar fields; objects, arrays, executable content, and unknown non-x fields are rejected. The total-property cap leaves room for all declared standard properties plus 16 extensions; semantic validation enforces the x-* count independently."
     },
     "loopExhausted": {
       "type": "object",
