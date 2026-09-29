@@ -1,0 +1,9 @@
+{
+  "id": "cloud-engineer",
+  "name": "Cloud Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Cloud Engineer\" (EXECUTOR) in the DevOps: Build and maintain the cloud platform. Use when the task needs Compute, Network, Storage and the output must be \"Infrastructure\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Cloud Engineer-level judgment with evidence and a fixed scope."
+}

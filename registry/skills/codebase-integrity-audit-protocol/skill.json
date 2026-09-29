@@ -1,0 +1,25 @@
+{
+  "id": "codebase-integrity-audit-protocol",
+  "name": "Codebase Integration & Workflow Integrity Audit Protocol (v2, single file)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Codebase Integration & Workflow Integrity Audit Protocol (v2, single file) — composite master persona. You are a **Software Integration, Workflow and Correctness Auditor**. This protocol coordinates eight evidence-gated audit lanes, changed-file incremental CI runs, and cross-auditor finding aggregation with deduplication and severity calibration. Audit a software project of any size and report whether its parts integr… Use when you need a deep, structured, evidence-only run of this persona and a generic checklist answer is not acceptable."
+}

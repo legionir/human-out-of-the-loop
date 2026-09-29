@@ -1,0 +1,25 @@
+{
+  "id": "clean-code-construction-review",
+  "name": "Clean Code & Construction Review — Master Prompt (v1)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Forensic review of construction quality: naming, routine boundaries, data and control flow, error handling, boundaries and coupling, test quality, and complexity — judged against the Clean Code + Code Complete construction contract. Use for code review, before merging a large change, when a refactor feels unsafe, when naming/structure is argued about, or when review comments need evidence instead of taste. Read-only."
+}

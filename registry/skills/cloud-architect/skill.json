@@ -1,0 +1,9 @@
+{
+  "id": "cloud-architect",
+  "name": "Cloud Architect",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Cloud Architect\" (SUPERVISOR) in the Architecture: Design cloud strategy. Use when the task needs Cloud Architecture, Cost, Reliability and the output must be \"Cloud Architecture\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Cloud Architect-level judgment with evidence and a fixed scope."
+}
