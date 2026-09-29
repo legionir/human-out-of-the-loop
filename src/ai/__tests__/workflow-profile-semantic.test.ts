@@ -87,6 +87,10 @@ describe('Workflow Profile semantic validation', () => {
     const review = badReviewEnum.workflow.nodes.find((node) => node.kind === 'review')!;
     review.outputs.decision!.enum = ['pass', 'revise'];
     expect(codes(badReviewEnum)).toContain('review.decision-enum-mismatch');
+
+    const missingReviewRoute = fixture();
+    missingReviewRoute.workflow.edges = missingReviewRoute.workflow.edges.filter((edge) => !(edge.from === 'review' && edge.label === 'reject'));
+    expect(codes(missingReviewRoute)).toContain('review.decisions-unrouted');
   });
 
   it('checks end/result parity and sanitized error-route mappings', () => {

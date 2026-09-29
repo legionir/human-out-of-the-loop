@@ -20,6 +20,12 @@ function assertWorkflowProfileScope(scope: unknown, file?: string): asserts scop
   }]);
 }
 
+function projectOptInRequired(file?: string): WorkflowProfileLoadError {
+  return new WorkflowProfileLoadError('Project workflow profiles require explicit opt-in before loading or registration', [{
+    stage: 'read', code: 'project-profile.opt-in-required', message: 'Project profile content was not loaded or registered because explicit opt-in is required', file,
+  }]);
+}
+
 export interface RegisteredWorkflowProfile {
   readonly profile: Readonly<WorkflowProfileDocument>;
   readonly scope: WorkflowProfileScope;
@@ -35,9 +41,15 @@ export class WorkflowProfileLoadError extends Error {
 
 export class WorkflowProfileRegistry {
   private readonly byId = new Map<string, RegisteredWorkflowProfile>();
+  private readonly projectOptIn: boolean;
+
+  constructor(options: { projectOptIn?: boolean } = {}) {
+    this.projectOptIn = options.projectOptIn === true;
+  }
 
   register(entry: RegisteredWorkflowProfile): void {
     assertWorkflowProfileScope((entry as { scope?: unknown }).scope, typeof entry?.file === 'string' ? entry.file : undefined);
+    if (entry.scope === 'project' && this.projectOptIn !== true) throw projectOptInRequired(entry.file);
     const id = entry.profile.profile.id;
     const structuralDiagnostics = validateWorkflowProfileStructure(entry.profile).map((diagnostic) => ({ ...diagnostic, file: entry.file }));
     if (structuralDiagnostics.length) {
@@ -118,7 +130,7 @@ export function readWorkflowProfileUtf8(file: string): string {
     // O_NOFOLLOW closes the lstat/open symlink race where supported. The
     // before/after identity checks below also reject replacement races on
     // platforms where the flag is unavailable.
-    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0);
     fd = fs.openSync(file, flags);
   } catch (error) {
     throw new WorkflowProfileLoadError(`Cannot open workflow profile "${file}": ${error instanceof Error ? error.message : String(error)}`, [{
@@ -165,8 +177,13 @@ function tooLarge(file: string, actualBytes: number): WorkflowProfileLoadError {
   }]);
 }
 
-export function loadWorkflowProfileFile(file: string, scope: WorkflowProfileScope): RegisteredWorkflowProfile {
+export function loadWorkflowProfileFile(
+  file: string,
+  scope: WorkflowProfileScope,
+  options: { projectOptIn?: boolean } = {},
+): RegisteredWorkflowProfile {
   assertWorkflowProfileScope(scope, file);
+  if (scope === 'project' && options.projectOptIn !== true) throw projectOptInRequired(file);
   const text = readWorkflowProfileUtf8(file);
   const structural = validateWorkflowProfileJson(text, file);
   if (!structural.ok || !structural.profile) throw new WorkflowProfileLoadError(`Invalid workflow profile "${file}"`, structural.diagnostics);
@@ -184,11 +201,7 @@ export function loadWorkflowProfileFile(file: string, scope: WorkflowProfileScop
 export function loadWorkflowProfilesFromDirectory(options: WorkflowProfileDirectoryOptions): WorkflowProfileRegistry {
   const { directory, scope, projectOptIn = false } = options;
   assertWorkflowProfileScope(scope, directory);
-  if (scope === 'project' && projectOptIn !== true) {
-    throw new WorkflowProfileLoadError('Project workflow profiles require explicit opt-in before discovery', [{
-      stage: 'read', code: 'project-profile.opt-in-required', message: 'Project profile directory was not read because explicit opt-in is required', file: directory,
-    }]);
-  }
+  if (scope === 'project' && projectOptIn !== true) throw projectOptInRequired(directory);
   let directoryStat: fs.Stats;
   try {
     directoryStat = fs.lstatSync(directory);
@@ -211,7 +224,7 @@ export function loadWorkflowProfilesFromDirectory(options: WorkflowProfileDirect
   }
 
   const jsonEntries = entries.filter((entry) => entry.name.endsWith('.json')).sort((a, b) => a.name.localeCompare(b.name));
-  const registry = new WorkflowProfileRegistry();
+  const registry = new WorkflowProfileRegistry({ projectOptIn: scope === 'project' && projectOptIn === true });
   const diagnostics: WorkflowProfileDiagnostic[] = [];
   for (const entry of jsonEntries) {
     const file = path.join(directory, entry.name);
@@ -220,7 +233,7 @@ export function loadWorkflowProfilesFromDirectory(options: WorkflowProfileDirect
       continue;
     }
     try {
-      registry.register(loadWorkflowProfileFile(file, scope));
+      registry.register(loadWorkflowProfileFile(file, scope, { projectOptIn }));
     } catch (error) {
       diagnostics.push(...(error instanceof WorkflowProfileLoadError ? error.diagnostics : [{ stage: 'read' as const, code: 'file.load-failed', message: error instanceof Error ? error.message : String(error), file }]));
     }

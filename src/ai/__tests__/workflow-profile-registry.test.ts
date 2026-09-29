@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +9,7 @@ import {
   WorkflowProfileRegistry,
   loadWorkflowProfileFile,
   loadWorkflowProfilesFromDirectory,
+  readWorkflowProfileUtf8,
   selectWorkflowProfile,
 } from '../workflow-profiles/profile-registry.js';
 
@@ -95,7 +97,7 @@ describe('Workflow Profile loader and registry', () => {
     fs.writeFileSync(path.join(projectDir, 'project.json'), sourceProfile('shared-id'));
     const builtIn = loadWorkflowProfilesFromDirectory({ directory: builtInDir, scope: 'builtin' }).list()[0]!;
     const project = loadWorkflowProfilesFromDirectory({ directory: projectDir, scope: 'project', projectOptIn: true }).list()[0]!;
-    const registry = new WorkflowProfileRegistry();
+    const registry = new WorkflowProfileRegistry({ projectOptIn: true });
     registry.register(builtIn);
     expect(() => registry.register(project)).toThrow(/duplicate workflow profile id/i);
   });
@@ -147,7 +149,7 @@ describe('Workflow Profile loader and registry', () => {
     fs.writeFileSync(path.join(builtInDir, 'base.json'), sourceProfile('built-in-default'));
     fs.writeFileSync(path.join(projectDir, 'project.json'), sourceProfile('project-default'));
     fs.writeFileSync(path.join(selectedDir, 'selected.json'), sourceProfile('user-choice'));
-    const registry = new WorkflowProfileRegistry();
+    const registry = new WorkflowProfileRegistry({ projectOptIn: true });
     for (const entry of loadWorkflowProfilesFromDirectory({ directory: builtInDir, scope: 'builtin' }).list()) registry.register(entry);
     for (const entry of loadWorkflowProfilesFromDirectory({ directory: projectDir, scope: 'project', projectOptIn: true }).list()) registry.register(entry);
     for (const entry of loadWorkflowProfilesFromDirectory({ directory: selectedDir, scope: 'user-selected' }).list()) registry.register(entry);
@@ -200,6 +202,21 @@ describe('Workflow Profile loader and registry', () => {
     expect(() => loadWorkflowProfilesFromDirectory({ directory: dir, scope: 'bypass' as any })).toThrow(invalidScope);
   });
 
+  it('requires project opt-in before direct loading, registration, and exposure', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'project-profile.json');
+    fs.writeFileSync(file, sourceProfile('project-opt-in'));
+    expect(() => loadWorkflowProfileFile(file, 'project')).toThrow(/opt-in/i);
+
+    const loaded = loadWorkflowProfileFile(file, 'project', { projectOptIn: true });
+    expect(() => new WorkflowProfileRegistry().register(loaded)).toThrow(/opt-in/i);
+
+    const optedInRegistry = new WorkflowProfileRegistry({ projectOptIn: true });
+    optedInRegistry.register(loaded);
+    expect(optedInRegistry.get('project-opt-in')?.scope).toBe('project');
+    expect(() => selectWorkflowProfile(optedInRegistry, { requestedProfileId: 'project-opt-in', projectOptIn: false })).toThrow(/opt-in/i);
+  });
+
   it('rejects a path replacement race between lstat and open', () => {
     const dir = tempDir();
     const file = path.join(dir, 'race.json');
@@ -228,6 +245,34 @@ describe('Workflow Profile loader and registry', () => {
       openSpy.mockRestore();
       if (fs.existsSync(file) && fs.lstatSync(file).isSymbolicLink()) fs.unlinkSync(file);
       if (fs.existsSync(backup)) fs.renameSync(backup, file);
+    }
+  });
+
+  it.skipIf(process.platform === 'win32' || !fs.constants.O_NONBLOCK)('does not block when a checked profile path is replaced by a FIFO', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'fifo-race.json');
+    fs.writeFileSync(file, sourceProfile('fifo-race'));
+    const realOpenSync = fs.openSync.bind(fs);
+    let swapped = false;
+    const openSpy = vi.spyOn(fs, 'openSync').mockImplementation(((pathArg: fs.PathLike, flags: string | number, mode?: number) => {
+      if (!swapped && path.resolve(String(pathArg)) === path.resolve(file)) {
+        swapped = true;
+        fs.unlinkSync(file);
+        execFileSync('mkfifo', [file]);
+        const numericFlags = typeof flags === 'number' ? flags : 0;
+        // Do not risk hanging this runner if a regression omits O_NONBLOCK.
+        if ((numericFlags & fs.constants.O_NONBLOCK) === 0) throw new Error('loader did not request nonblocking open');
+      }
+      return realOpenSync(pathArg, flags as any, mode);
+    }) as typeof fs.openSync);
+    try {
+      expect(() => readWorkflowProfileUtf8(file)).toThrow(expect.objectContaining({
+        diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'file.not-regular' })]),
+      }));
+      expect(swapped).toBe(true);
+    } finally {
+      openSpy.mockRestore();
+      if (fs.existsSync(file)) fs.unlinkSync(file);
     }
   });
 
