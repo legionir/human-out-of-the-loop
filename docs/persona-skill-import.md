@@ -1,6 +1,6 @@
 # واردسازی Persona و Skill از مخزن `legionir/persona`
 
-ابزار [`scripts/import-persona-library.mjs`](../../scripts/import-persona-library.mjs) تبدیل کتابخانهٔ پین‌شدهٔ Persona/Skill به قالب registry پروژهٔ HOOTL را بازتولید می‌کند. این همان importer سیستماتیکی است که برای انتقال قبلی به‌کار رفت؛ این فایل کتابخانه را به‌تنهایی کپی نمی‌کند و عمدی است که قبل از نوشتن، mapping و مجوزها را اعتبارسنجی کند.
+ابزار [`scripts/import-persona-library.mjs`](../scripts/import-persona-library.mjs) تبدیل کتابخانهٔ پین‌شدهٔ Persona/Skill به قالب registry پروژهٔ HOOTL را بازتولید می‌کند. این همان importer سیستماتیکی است که برای انتقال قبلی به‌کار رفت؛ این فایل کتابخانه را به‌تنهایی کپی نمی‌کند و عمدی است که قبل از نوشتن، mapping و مجوزها را اعتبارسنجی کند.
 
 ## منبع و پیش‌نیاز
 
