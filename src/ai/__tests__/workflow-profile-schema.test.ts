@@ -31,6 +31,9 @@ describe('Workflow Profile v1 structural contract', () => {
   it('reports malformed JSON separately from schema-version and structural errors', () => {
     expect(validateWorkflowProfileJson('{', 'broken.json').diagnostics[0]?.stage).toBe('parse');
     expect(validateWorkflowProfileJson('{"schemaVersion":"1.0.0","schemaVersion":"1.0.0"}', 'duplicate.json').diagnostics[0]?.code).toBe('json.duplicate-key');
+    const duplicatePort = validateWorkflowProfileJson('{"workflow":{"nodes":[{"inputs":{"request":1,"request":2}}]}}', 'duplicate-port.json');
+    expect(duplicatePort.diagnostics[0]?.code).toBe('json.duplicate-key');
+    expect(duplicatePort.diagnostics[0]?.path).toBe('/workflow/nodes/0/inputs/request');
     const unknownVersion = validateWorkflowProfileJson(JSON.stringify({ schemaVersion: '2.0.0' }), 'future.json');
     expect(unknownVersion.diagnostics[0]?.stage).toBe('schema-version');
     const invalid = readFixture(fixtureNames[0]!);

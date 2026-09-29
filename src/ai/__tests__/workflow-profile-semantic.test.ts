@@ -57,6 +57,16 @@ describe('Workflow Profile semantic validation', () => {
     expect(codes(mismatch)).toContain('mapping.type-mismatch');
   });
 
+  it('rejects unreachable nodes and end nodes', () => {
+    const unreachableNode = fixture();
+    unreachableNode.workflow.edges = unreachableNode.workflow.edges.filter((edge) => edge.to !== 'clarify');
+    expect(codes(unreachableNode)).toContain('node.unreachable');
+
+    const unreachableEnd = fixture();
+    unreachableEnd.workflow.edges = unreachableEnd.workflow.edges.filter((edge) => edge.to !== 'rejected');
+    expect(codes(unreachableEnd)).toContain('end.unreachable');
+  });
+
   it('validates condition/review enums, finite-domain exhaustiveness, and permits deterministic overlap', () => {
     const incomplete = fixture();
     incomplete.workflow.edges.splice(0, 1);
@@ -180,6 +190,18 @@ describe('Workflow Profile semantic validation', () => {
     const edge = profile.workflow.edges.find((candidate) => candidate.from === 'plan' && candidate.to === 'execute')!;
     edge.loop = { maxIterations: 2, counterId: 'second-pass', onExhausted: { strategy: 'fail' } };
     profile.policies.execution.maxNodeVisits = 30;
+    expect(codes(profile)).toContain('budget.static-node-visits');
+  });
+
+  it('multiplies overlapping bounded-loop limits and accepts the exact visit bound', () => {
+    const profile = fixture('bounded-review-fix.example.json');
+    const innerTransition = profile.workflow.edges.find((edge) => edge.from === 'fix' && edge.to === 'review')!;
+    innerTransition.loop = { maxIterations: 2, counterId: 'review-pass', onExhausted: { strategy: 'fail' } };
+    profile.policies.execution.maxNodeVisits = 54; // 6 nodes × (1 + 2) × (1 + 2)
+    expect(codes(profile)).not.toContain('workflow.unbounded-cycle');
+    expect(codes(profile)).not.toContain('budget.static-node-visits');
+
+    profile.policies.execution.maxNodeVisits = 53;
     expect(codes(profile)).toContain('budget.static-node-visits');
   });
 });
