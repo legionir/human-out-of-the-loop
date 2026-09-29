@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Data"
   seniority: "Senior"
-  source: "prompts/implementation/data-engineer.md"
+  source: "../../personas/data-engineer.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "AI"
   seniority: "Specialist"
-  source: "prompts/implementation/data-scientist.md"
+  source: "../../personas/data-scientist.json"
   language: "en"
 ---
 

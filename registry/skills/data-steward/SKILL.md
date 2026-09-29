@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Data"
   seniority: "Specialist"
-  source: "prompts/implementation/data-steward.md"
+  source: "../../personas/data-steward.json"
   language: "en"
 ---
 

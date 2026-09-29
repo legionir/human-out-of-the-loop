@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Data"
   seniority: "Specialist"
-  source: "prompts/implementation/database-administrator-dba.md"
+  source: "../../personas/database-administrator-dba.json"
   language: "en"
 ---
 

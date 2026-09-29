@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Security"
   seniority: "Specialist"
-  source: "prompts/implementation/database-security-specialist.md"
+  source: "../../personas/database-security-specialist.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Design"
   seniority: "Senior"
-  source: "prompts/implementation/designops-engineer.md"
+  source: "../../personas/designops-engineer.json"
   language: "en"
 ---
 

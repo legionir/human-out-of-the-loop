@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Cost & FinOps Audit.md"
+  source: "../../personas/cost-finops-audit.json"
   language: "en"
   spec: "composites/cost-finops-audit.json"
   generated: true

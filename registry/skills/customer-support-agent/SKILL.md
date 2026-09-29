@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Support"
   seniority: "Mid"
-  source: "prompts/implementation/customer-support-agent.md"
+  source: "../../personas/customer-support-agent.json"
   language: "en"
 ---
 

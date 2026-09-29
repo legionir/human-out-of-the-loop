@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Data & Database Integrity Audit.md"
+  source: "../../personas/data-database-integrity-audit.json"
   language: "en"
   spec: "composites/data-integrity-audit.json"
   generated: true

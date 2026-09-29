@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 7
-  source: "prompts/composite/DevOps Audit.md"
+  source: "../../personas/devops-audit.json"
   language: "en"
   spec: "composites/devops-audit.json"
   generated: true

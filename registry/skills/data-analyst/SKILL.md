@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Analytics"
   seniority: "Senior"
-  source: "prompts/implementation/data-analyst.md"
+  source: "../../personas/data-analyst.json"
   language: "en"
 ---
 

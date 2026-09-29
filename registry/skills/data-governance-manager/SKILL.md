@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Data"
   seniority: "Manager"
-  source: "prompts/audit/data-governance-manager.md"
+  source: "../../personas/data-governance-manager.json"
   language: "en"
 ---
 
