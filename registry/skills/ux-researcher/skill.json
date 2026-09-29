@@ -1,0 +1,11 @@
+{
+  "id": "ux-researcher",
+  "name": "UX Researcher",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "fetch"
+  ],
+  "priority": 50,
+  "description": "Persona \"UX Researcher\" (EXECUTOR) in the Analytics: Discover user needs. Use when the task needs Interviews, Testing, Analysis and the output must be \"Research Report\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need UX Researcher-level judgment with evidence and a fixed scope."
+}

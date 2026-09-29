@@ -1,0 +1,9 @@
+{
+  "id": "translator",
+  "name": "Translator",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Translator\" (EXECUTOR) in the Documentation: Accurate, natural translation. Use when the task needs Translation, Terminology and the output must be \"Translated Content\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 3 execution steps, and the final Quality Gate. Use when you need Translator-level judgment with evidence and a fixed scope."
+}
