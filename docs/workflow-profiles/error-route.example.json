@@ -6,9 +6,6 @@
     "name": "Explicit error route",
     "description": "Structural fixture for explicit, typed, sanitized onError routing. Dependency digests are structural placeholders; resolve real component content and replace them before activation.",
     "version": "1.0.0",
-    "runtime": {
-      "minVersion": "1.0.0"
-    },
     "author": "HOOTL",
     "tags": [
       "fixture",

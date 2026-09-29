@@ -64,7 +64,6 @@
         "id",
         "name",
         "version",
-        "runtime",
         "author"
       ],
       "properties": {
@@ -86,15 +85,18 @@
         "runtime": {
           "type": "object",
           "additionalProperties": false,
+          "description": "Optional, non-operative compatibility metadata. Phase 2 validates its shape only and defines no authoritative Workflow Runtime version or compatibility check. It must not be used to authorize execution. A version contract and enforcement are required before Runtime integration.",
           "required": [
             "minVersion"
           ],
           "properties": {
             "minVersion": {
-              "$ref": "#/$defs/semver"
+              "$ref": "#/$defs/semver",
+              "description": "Syntax-only metadata in Phase 2; not compared with an installed runtime."
             },
             "maxVersion": {
-              "$ref": "#/$defs/semver"
+              "$ref": "#/$defs/semver",
+              "description": "Syntax-only metadata in Phase 2; not compared with an installed runtime."
             }
           }
         },

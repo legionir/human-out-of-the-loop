@@ -6,9 +6,6 @@
     "name": "Default workflow (structural sample)",
     "description": "Structural sample only. Not yet verified against current HOOTL behavior; Phase 7 must derive the actual baseline flow from code and tests before this can be called the default profile. Dependency digests are structural placeholders; resolve real component content and replace them before activation.",
     "version": "1.0.0",
-    "runtime": {
-      "minVersion": "1.0.0"
-    },
     "author": "HOOTL"
   },
   "dependencies": [

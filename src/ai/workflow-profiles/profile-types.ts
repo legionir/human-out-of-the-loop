@@ -14,7 +14,7 @@ export interface WorkflowProfileDocument {
     id: string;
     name: string;
     version: string;
-    runtime: { minVersion: string; maxVersion?: string };
+    runtime?: { minVersion: string; maxVersion?: string };
     author: string;
     [key: string]: unknown;
   };

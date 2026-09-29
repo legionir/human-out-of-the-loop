@@ -6,9 +6,6 @@
     "name": "Bounded review/fix loop",
     "description": "Fixture: fix, review, then a data-only condition node routes to success or to a bounded fix loop that ends in a handoff when exhausted. Dependency digests are structural placeholders; resolve real component content and replace them before activation.",
     "version": "1.0.0",
-    "runtime": {
-      "minVersion": "1.0.0"
-    },
     "author": "HOOTL",
     "tags": [
       "fixture",

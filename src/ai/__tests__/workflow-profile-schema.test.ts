@@ -22,6 +22,20 @@ describe('Workflow Profile v1 structural contract', () => {
     expect(validateWorkflowProfileStructure(readFixture(fixtureNames[0]!))).toEqual([]);
   });
 
+  it('keeps Workflow Runtime compatibility metadata optional and non-operative in Phase 2', () => {
+    const profileWithoutRuntime = readFixture(fixtureNames[0]!);
+    delete profileWithoutRuntime.profile.runtime;
+    const noRuntimeResult = validateWorkflowProfileJson(JSON.stringify(profileWithoutRuntime));
+    expect(noRuntimeResult.ok, JSON.stringify(noRuntimeResult.diagnostics)).toBe(true);
+    expect(validateWorkflowProfileSemantics(noRuntimeResult.profile!)).toEqual([]);
+
+    const profileWithUnresolvedRuntimeMetadata = readFixture(fixtureNames[0]!);
+    profileWithUnresolvedRuntimeMetadata.profile.runtime = { minVersion: '999.0.0' };
+    const unresolvedResult = validateWorkflowProfileJson(JSON.stringify(profileWithUnresolvedRuntimeMetadata));
+    expect(unresolvedResult.ok, JSON.stringify(unresolvedResult.diagnostics)).toBe(true);
+    expect(validateWorkflowProfileSemantics(unresolvedResult.profile!)).toEqual([]);
+  });
+
   it.each(fixtureNames)('accepts %s structurally and semantically', (name) => {
     const result = validateWorkflowProfileJson(fs.readFileSync(path.join(fixturesDirectory, name), 'utf8'), name);
     expect(result.ok, JSON.stringify(result.diagnostics)).toBe(true);
