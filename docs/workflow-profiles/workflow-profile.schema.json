@@ -1261,7 +1261,7 @@
     },
     "result": {
       "type": "array",
-      "description": "Exactly one entry per end node. Each fromNode must be an end node, port must be one of its outputs, outcome must equal config.outcome, and every end node must be represented. The end config explicitly maps emitted output ports to input ports.",
+      "description": "Exactly one entry per end node. Each fromNode must be an end node, port must be one of its outputs, outcome must equal config.outcome, and every end node must be represented. The end config explicitly maps emitted output ports to input ports. The separate semantic validator enforces the v1 result.kind-to-port.type table: response -> string|number|integer|boolean|object|array; artifact -> artifact|file; proposal|handoff -> object. Port type any is not accepted for any result kind.",
       "minItems": 1,
       "maxItems": 20,
       "items": {

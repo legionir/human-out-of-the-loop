@@ -11,6 +11,15 @@ const PORT_POINTER = /^\/([a-zA-Z][a-zA-Z0-9_-]{0,63})$/;
 const ERROR_POINTER = /^\/(?:failure\/(?:category|code|retryable)|node\/(?:id|attempt)|inputs\/[a-zA-Z][a-zA-Z0-9_-]{0,63})$/;
 const MAX_MCP_TOOL_ID_BYTES = 256;
 
+// Closed Phase 2 contract: result.kind is a semantic output category, not an
+// authorization signal. Opaque `any` ports are intentionally excluded.
+const RESULT_KIND_PORT_TYPES: Record<string, readonly string[]> = {
+  response: ['string', 'number', 'integer', 'boolean', 'object', 'array'],
+  artifact: ['artifact', 'file'],
+  proposal: ['object'],
+  handoff: ['object'],
+};
+
 function isRecord(value: unknown): value is Record<string, any> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
@@ -422,7 +431,12 @@ export function validateWorkflowProfileSemantics(profile: WorkflowProfileDocumen
     else {
       const endConfig = end.config as Record<string, any>;
       if (result.outcome !== endConfig.outcome) addDiagnostic('result.outcome-mismatch', `Result outcome must match end node "${end.id}" config.outcome`, `/result/${index}/outcome`, end.id);
-      if (!end.outputs[result.port]) addDiagnostic('result.port-missing', `Result port "${result.port}" is not declared on end node "${end.id}"`, `/result/${index}/port`, end.id);
+      const resultPort = end.outputs[result.port];
+      if (!resultPort) {
+        addDiagnostic('result.port-missing', `Result port "${result.port}" is not declared on end node "${end.id}"`, `/result/${index}/port`, end.id);
+      } else if (!RESULT_KIND_PORT_TYPES[result.kind]?.includes(resultPort.type)) {
+        addDiagnostic('result.kind-type-mismatch', `Result kind "${result.kind}" is incompatible with end port type "${resultPort.type}"`, `/result/${index}/kind`, end.id);
+      }
     }
   }
   for (const end of ends) {

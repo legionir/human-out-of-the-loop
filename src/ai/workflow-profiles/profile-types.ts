@@ -7,6 +7,16 @@ export interface ProfileDependency {
   digest: string;
 }
 
+export type WorkflowResultKind = 'response' | 'artifact' | 'proposal' | 'handoff';
+export type WorkflowResultOutcome = 'success' | 'rejected' | 'handoff' | 'cancelled';
+
+export interface WorkflowResult {
+  fromNode: string;
+  port: string;
+  kind: WorkflowResultKind;
+  outcome: WorkflowResultOutcome;
+}
+
 export interface WorkflowProfileDocument {
   $schema?: string;
   schemaVersion: string;
@@ -25,7 +35,7 @@ export interface WorkflowProfileDocument {
     edges: WorkflowEdge[];
   };
   policies: Record<string, any>;
-  result: Array<Record<string, any>>;
+  result: WorkflowResult[];
   [key: string]: unknown;
 }
 

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { validateWorkflowProfileJson } from '../workflow-profiles/profile-schema-validator.js';
 import { validateWorkflowProfileSemantics } from '../workflow-profiles/profile-semantic-validator.js';
-import type { WorkflowProfileDocument } from '../workflow-profiles/profile-types.js';
+import type { WorkflowProfileDocument, WorkflowResultKind } from '../workflow-profiles/profile-types.js';
 
 const fixtures = path.resolve(process.cwd(), 'docs/workflow-profiles');
 function fixture(name = 'default-workflow-profile.example.json'): WorkflowProfileDocument {
@@ -91,6 +91,42 @@ describe('Workflow Profile semantic validation', () => {
     const missingReviewRoute = fixture();
     missingReviewRoute.workflow.edges = missingReviewRoute.workflow.edges.filter((edge) => !(edge.from === 'review' && edge.label === 'reject'));
     expect(codes(missingReviewRoute)).toContain('review.decisions-unrouted');
+  });
+
+  it('enforces the closed result-kind to end-port type mapping', () => {
+    const allowed: Record<string, string[]> = {
+      response: ['string', 'number', 'integer', 'boolean', 'object', 'array'],
+      artifact: ['artifact', 'file'],
+      proposal: ['object'],
+      handoff: ['object'],
+    };
+    const allPortTypes = ['string', 'number', 'integer', 'boolean', 'object', 'array', 'artifact', 'file', 'any'];
+
+    for (const [kind, acceptedTypes] of Object.entries(allowed)) {
+      for (const type of acceptedTypes) {
+        const profile = fixture();
+        profile.result[0]!.kind = kind as WorkflowResultKind;
+        const end = profile.workflow.nodes.find((node) => node.id === profile.result[0]!.fromNode)!;
+        end.outputs[profile.result[0]!.port]!.type = type;
+        end.inputs.result!.type = type;
+        expect(codes(profile)).not.toContain('result.kind-type-mismatch');
+      }
+      for (const type of allPortTypes.filter((candidate) => !acceptedTypes.includes(candidate))) {
+        const profile = fixture();
+        profile.result[0]!.kind = kind as WorkflowResultKind;
+        const end = profile.workflow.nodes.find((node) => node.id === profile.result[0]!.fromNode)!;
+        end.outputs[profile.result[0]!.port]!.type = type;
+        end.inputs.result!.type = type;
+        expect(codes(profile)).toContain('result.kind-type-mismatch');
+      }
+    }
+
+    const mismatch = fixture();
+    mismatch.workflow.nodes.find((node) => node.id === 'finish')!.outputs.response!.type = 'file';
+    mismatch.workflow.nodes.find((node) => node.id === 'finish')!.inputs.result!.type = 'file';
+    expect(validateWorkflowProfileJson(JSON.stringify(mismatch)).ok).toBe(true);
+    const diagnostic = validateWorkflowProfileSemantics(mismatch).find((item) => item.code === 'result.kind-type-mismatch');
+    expect(diagnostic).toMatchObject({ stage: 'semantic', path: '/result/0/kind', nodeId: 'finish' });
   });
 
   it('checks end/result parity and sanitized error-route mappings', () => {
