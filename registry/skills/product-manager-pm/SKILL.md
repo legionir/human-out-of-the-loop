@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Product"
   seniority: "Manager"
-  source: "prompts/audit/product-manager-pm.md"
+  source: "../../personas/product-manager-pm.json"
   language: "en"
 ---
 

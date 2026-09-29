@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Growth"
   seniority: "Manager"
-  source: "prompts/audit/procurement-manager.md"
+  source: "../../personas/procurement-manager.json"
   language: "en"
 ---
 

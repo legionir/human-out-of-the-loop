@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Growth"
   seniority: "Specialist"
-  source: "prompts/implementation/procurement-specialist.md"
+  source: "../../personas/procurement-specialist.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "DevOps"
   seniority: "Senior"
-  source: "prompts/implementation/release-engineer.md"
+  source: "../../personas/release-engineer.json"
   language: "en"
 ---
 

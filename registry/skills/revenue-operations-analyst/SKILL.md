@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Growth"
   seniority: "Senior"
-  source: "prompts/implementation/revenue-operations-analyst.md"
+  source: "../../personas/revenue-operations-analyst.json"
   language: "en"
 ---
 

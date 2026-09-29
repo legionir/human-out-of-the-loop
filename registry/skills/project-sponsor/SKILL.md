@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Business"
   seniority: "Specialist"
-  source: "prompts/audit/project-sponsor.md"
+  source: "../../personas/project-sponsor.json"
   language: "en"
 ---
 

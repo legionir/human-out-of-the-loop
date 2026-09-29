@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "HR"
   seniority: "Mid"
-  source: "prompts/implementation/recruiter.md"
+  source: "../../personas/recruiter.json"
   language: "en"
 ---
 

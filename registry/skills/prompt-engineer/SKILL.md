@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "AI"
   seniority: "Senior"
-  source: "prompts/implementation/prompt-engineer.md"
+  source: "../../personas/prompt-engineer.json"
   language: "en"
 ---
 

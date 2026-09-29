@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "AI"
   seniority: "Senior"
-  source: "prompts/implementation/rag-retrieval-engineer.md"
+  source: "../../personas/rag-retrieval-engineer.json"
   language: "en"
 ---
 

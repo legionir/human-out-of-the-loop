@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Software"
   seniority: "Specialist"
-  source: "prompts/audit/product-owner-post-release.md"
+  source: "../../personas/product-owner-post-release.json"
   language: "en"
 ---
 

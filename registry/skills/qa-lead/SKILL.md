@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Project"
   seniority: "Lead"
-  source: "prompts/audit/qa-lead.md"
+  source: "../../personas/qa-lead.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Business"
   seniority: "Specialist"
-  source: "prompts/audit/product-visionary.md"
+  source: "../../personas/product-visionary.json"
   language: "en"
 ---
 

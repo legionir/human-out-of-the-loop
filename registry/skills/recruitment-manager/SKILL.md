@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "HR"
   seniority: "Manager"
-  source: "prompts/audit/recruitment-manager.md"
+  source: "../../personas/recruitment-manager.json"
   language: "en"
 ---
 

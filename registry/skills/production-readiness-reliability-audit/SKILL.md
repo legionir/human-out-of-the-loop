@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 7
-  source: "prompts/composite/Production Readiness & Reliability Audit.md"
+  source: "../../personas/production-readiness-reliability-audit.json"
   language: "en"
   spec: "composites/production-readiness-reliability-audit.json"
   generated: true

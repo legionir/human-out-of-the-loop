@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Analytics"
   seniority: "Lead"
-  source: "prompts/audit/product-analyst-lead.md"
+  source: "../../personas/product-analyst-lead.json"
   language: "en"
 ---
 

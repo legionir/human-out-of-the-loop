@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Senior"
-  source: "prompts/implementation/refactoring-engineer.md"
+  source: "../../personas/refactoring-engineer.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "DevOps"
   seniority: "Manager"
-  source: "prompts/audit/release-manager.md"
+  source: "../../personas/release-manager.json"
   language: "en"
 ---
 
