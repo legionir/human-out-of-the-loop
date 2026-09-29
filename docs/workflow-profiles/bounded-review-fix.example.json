@@ -179,6 +179,10 @@
           "matched": {
             "type": "boolean",
             "required": true
+          },
+          "severity": {
+            "type": "integer",
+            "required": true
           }
         },
         "config": {

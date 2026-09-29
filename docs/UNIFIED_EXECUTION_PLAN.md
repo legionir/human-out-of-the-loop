@@ -525,4 +525,10 @@ This update supersedes the initial D-WP open-decision statuses in §8 while pres
 
 **Evidence:** `Orchestrator.run()` delegates through private `runInSession()` and is composite; `PlanRuntime` exposes `execute/resume/cancel` and owns DAG scheduling. `mcp-connector.ts` concatenates prefix and raw name without normalization, but `ToolDefinitionSchema` currently applies the restricted local-ID regex to MCP IDs; source-aware validation is therefore a required Phase 2/3 change. Current profile schema/examples occupy 35,763 / 10,107 / 7,461 / 4,002 bytes, all below the approved 1 MiB cap. Boundary tests and live/fixture MCP compatibility tests remain future implementation work.
 
-**Current gate:** Phase 1 stays 🟡 pending PR #8 review/merge (Step 5). Step 3 is 🟢 and Step 4 is 🟢 for the approved read-only design spike; adapter integration is not implemented or claimed. Phase 2 and Runtime code remain 🔴; do not start them until Phase 1's review/merge gate is complete. PR #8 contains documentation and declarative contract/fixture updates only; no file or branch deletion is authorized or performed.
+**Current gate at that historical update:** Phase 1 was 🟡 pending PR #8 review/merge (Step 5). This gate is superseded by the append-only completion note below; no prior history is removed.
+
+### 8.2 — Phase 1 post-merge completion and Phase 2 status (2026-09-29 20:38 GMT+3:30; append-only)
+
+PR #8 merged to `main` as `ee3fa3f67d695a251974d5bb94ce53ab6e605b5a`; post-merge CI run `36601818036` completed successfully. Phase 1 Step 5 and its Gate are 🟢. The PR #8 source branch remains intact; no artifact was deleted. The Phase 2 implementation is being prepared as a separate branch/PR based on this `main` head.
+
+The related planning-time failure/lifecycle defect is recorded as **separate, not yet implemented work**: retain the entire transcript/context after planning failure; Retry resends the last user message verbatim with its conversation history; repeat failures preserve history and show Retry/Abort again; Abort stops the active attempt, retains history and the last message, and permits a new request. This is not part of the Workflow Profile Phase 2 code scope and must not be reported as implemented.
