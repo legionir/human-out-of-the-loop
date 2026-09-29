@@ -109,4 +109,19 @@ describe('Workflow Profile loader and registry', () => {
     expect(() => selectWorkflowProfile(registry, { requestedProfileId: '', builtInDefaultProfileId: 'built-in-default' })).toThrow(/not discovered/i);
     expect(() => selectWorkflowProfile(registry, { projectOptIn: true, projectDefaultProfileId: '', builtInDefaultProfileId: 'built-in-default' })).toThrow(/not discovered/i);
   });
+
+  it('keeps nested loop selections bounded by multiplying independent counter limits', () => {
+    const dir = tempDir();
+    const profile = JSON.parse(sourceProfile('nested-loops')) as Record<string, any>;
+    const inner = profile.workflow.edges.find((edge: Record<string, any>) => edge.from === 'execute' && edge.to === 'review');
+    if (!inner) throw new Error('fixture is missing execute-to-review edge');
+    inner.loop = { maxIterations: 2, counterId: 'inner-review-loop', onExhausted: { strategy: 'fail' } };
+    profile.policies.execution.maxNodeVisits = 30;
+    const file = path.join(dir, 'nested.json');
+    fs.writeFileSync(file, JSON.stringify(profile));
+    let caught: unknown;
+    try { loadWorkflowProfileFile(file, 'builtin'); } catch (error) { caught = error; }
+    expect(caught).toBeInstanceOf(WorkflowProfileLoadError);
+    expect((caught as WorkflowProfileLoadError).diagnostics.map((item) => item.code)).toContain('budget.static-node-visits');
+  });
 });
