@@ -138,4 +138,71 @@ describe('Workflow Profile loader and registry', () => {
     expect(() => selectWorkflowProfile(registry, { requestedProfileId: 'project-default', projectOptIn: false, builtInDefaultProfileId: 'built-in-default' })).toThrow(/opt-in/i);
     expect(() => selectWorkflowProfile(registry, { projectOptIn: true, projectDefaultProfileId: 'user-choice', builtInDefaultProfileId: 'built-in-default' })).toThrow(/not project-scoped/i);
   });
+
+  it('rejects semantically invalid files at the direct loader boundary', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'semantic-invalid.json');
+    const profile = JSON.parse(sourceProfile('semantic-invalid')) as Record<string, any>;
+    profile.workflow.startNode = 'not-present';
+    fs.writeFileSync(file, JSON.stringify(profile));
+    try {
+      loadWorkflowProfileFile(file, 'builtin');
+      throw new Error('expected semantic validation to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(WorkflowProfileLoadError);
+      expect((error as WorkflowProfileLoadError).diagnostics.map((item) => item.code)).toContain('workflow.start-missing');
+    }
+  });
+
+  it('rejects unsupported schema versions through the direct loader boundary', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'unsupported-version.json');
+    const profile = JSON.parse(sourceProfile('unsupported-version')) as Record<string, any>;
+    profile.schemaVersion = '2.0.0';
+    fs.writeFileSync(file, JSON.stringify(profile));
+    try {
+      loadWorkflowProfileFile(file, 'builtin');
+      throw new Error('expected unsupported schema version to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(WorkflowProfileLoadError);
+      expect((error as WorkflowProfileLoadError).diagnostics[0]?.code).toBe('schema-version.unsupported');
+    }
+  });
+
+  it('reports missing paths and non-regular files as read-stage diagnostics', () => {
+    const dir = tempDir();
+    const missing = path.join(dir, 'missing.json');
+    try {
+      loadWorkflowProfileFile(missing, 'builtin');
+      throw new Error('expected missing file to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(WorkflowProfileLoadError);
+      expect((error as WorkflowProfileLoadError).diagnostics[0]?.code).toBe('file.unreadable');
+    }
+
+    const nestedDirectory = path.join(dir, 'directory.json');
+    fs.mkdirSync(nestedDirectory);
+    try {
+      loadWorkflowProfileFile(nestedDirectory, 'builtin');
+      throw new Error('expected non-regular path to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(WorkflowProfileLoadError);
+      expect((error as WorkflowProfileLoadError).diagnostics[0]?.code).toBe('file.not-regular');
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('rejects symbolic links instead of following them', () => {
+    const dir = tempDir();
+    const target = path.join(dir, 'target.json');
+    const link = path.join(dir, 'linked.json');
+    fs.writeFileSync(target, sourceProfile('symlink-target'));
+    fs.symlinkSync(target, link, 'file');
+    try {
+      loadWorkflowProfileFile(link, 'builtin');
+      throw new Error('expected symbolic link to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(WorkflowProfileLoadError);
+      expect((error as WorkflowProfileLoadError).diagnostics[0]?.code).toBe('file.not-regular');
+    }
+  });
 });

@@ -207,4 +207,114 @@ describe('Workflow Profile semantic validation', () => {
     profile.policies.execution.maxNodeVisits = 53;
     expect(codes(profile)).toContain('budget.static-node-visits');
   });
+
+  it('rejects predicate operators and values incompatible with their source port', () => {
+    const profile = fixture();
+    const route = profile.workflow.edges.find((edge) => edge.from === 'request')!;
+    route.when = { path: '/needsClarification', operator: 'contains', value: 'yes' };
+    expect(codes(profile)).toContain('predicate.type-mismatch');
+  });
+
+  it('requires a default for open conditional domains and rejects mixed predicate paths', () => {
+    const openDomain = fixture();
+    const requestRoutes = openDomain.workflow.edges.filter((edge) => edge.from !== 'request');
+    const oneRoute = structuredClone(openDomain.workflow.edges.find((edge) => edge.from === 'request')!);
+    oneRoute.when = { path: '/request', operator: 'exists' };
+    openDomain.workflow.edges = [...requestRoutes, oneRoute];
+    expect(codes(openDomain)).toContain('route.open-domain-no-default');
+
+    const mixedPaths = fixture();
+    mixedPaths.workflow.edges.find((edge) => edge.from === 'request' && edge.to === 'clarify')!.when!.path = '/request';
+    expect(codes(mixedPaths)).toContain('route.mixed-predicate-port');
+  });
+
+  it('rejects multiple defaults and implicit fallback edges', () => {
+    const multipleDefaults = fixture();
+    const requestRoutes = multipleDefaults.workflow.edges.filter((edge) => edge.from === 'request');
+    for (const edge of requestRoutes) edge.default = true;
+    expect(codes(multipleDefaults)).toContain('route.multiple-defaults');
+
+    const implicitFallback = fixture();
+    const route = structuredClone(implicitFallback.workflow.edges.find((edge) => edge.from === 'request' && edge.to === 'plan')!);
+    delete route.when;
+    implicitFallback.workflow.edges.push(route);
+    expect(codes(implicitFallback)).toContain('route.implicit-fallback');
+  });
+
+  it('validates error-route destination, target ports, sanitized inputs, types, and required mappings', () => {
+    const missingTarget = fixture('error-route.example.json');
+    missingTarget.workflow.nodes.find((node) => node.id === 'work')!.onError = { strategy: 'route', routeTo: 'missing', routeMap: { category: '/failure/category', request: '/inputs/request' } };
+    expect(codes(missingTarget)).toContain('error-route.target-missing');
+
+    const missingTargetPort = fixture('error-route.example.json');
+    missingTargetPort.workflow.nodes.find((node) => node.id === 'work')!.onError = { strategy: 'route', routeTo: 'failure', routeMap: { unknown: '/failure/category' } };
+    expect(codes(missingTargetPort)).toContain('error-route.target-port-missing');
+
+    const missingFailedInput = fixture('error-route.example.json');
+    missingFailedInput.workflow.nodes.find((node) => node.id === 'work')!.onError = { strategy: 'route', routeTo: 'failure', routeMap: { category: '/failure/category', request: '/inputs/absent' } };
+    expect(codes(missingFailedInput)).toContain('error-route.input-pointer-missing');
+
+    const wrongType = fixture('error-route.example.json');
+    wrongType.workflow.nodes.find((node) => node.id === 'work')!.onError = { strategy: 'route', routeTo: 'failure', routeMap: { category: '/failure/category', request: '/failure/category' } };
+    expect(codes(wrongType)).toContain('error-route.type-mismatch');
+
+    const missingRequired = fixture('error-route.example.json');
+    missingRequired.workflow.nodes.find((node) => node.id === 'work')!.onError = { strategy: 'route', routeTo: 'failure', routeMap: { category: '/failure/category' } };
+    expect(codes(missingRequired)).toContain('error-route.required-input-missing');
+  });
+
+  it('rejects duplicate results and invalid or incomplete end emits', () => {
+    const duplicateResult = fixture();
+    duplicateResult.result.push(structuredClone(duplicateResult.result[0]!));
+    expect(codes(duplicateResult)).toContain('result.duplicate');
+
+    const unknownOutput = fixture();
+    unknownOutput.workflow.nodes.find((node) => node.id === 'finish')!.config.emit = { unknown: 'result' };
+    expect(codes(unknownOutput)).toContain('end.emit-output-unknown');
+
+    const unknownInput = fixture();
+    unknownInput.workflow.nodes.find((node) => node.id === 'finish')!.config.emit = { response: 'unknown' };
+    expect(codes(unknownInput)).toContain('end.emit-input-unknown');
+
+    const wrongEmitType = fixture();
+    wrongEmitType.workflow.nodes.find((node) => node.id === 'finish')!.inputs.result!.type = 'string';
+    expect(codes(wrongEmitType)).toContain('end.emit-type-mismatch');
+  });
+
+  it('rejects missing/wrong-kind starts, missing edge sources, and edges back to start', () => {
+    const missingStart = fixture();
+    missingStart.workflow.startNode = 'absent';
+    expect(codes(missingStart)).toContain('workflow.start-missing');
+
+    const wrongStartKind = fixture();
+    wrongStartKind.workflow.startNode = 'plan';
+    expect(codes(wrongStartKind)).toContain('workflow.start-kind');
+
+    const missingSource = fixture();
+    missingSource.workflow.edges[0]!.from = 'absent';
+    expect(codes(missingSource)).toContain('edge.source-missing');
+
+    const targetsStart = fixture();
+    const edge = structuredClone(targetsStart.workflow.edges.find((candidate) => candidate.from === 'clarify')!);
+    edge.to = 'request';
+    targetsStart.workflow.edges.push(edge);
+    expect(codes(targetsStart)).toContain('edge.to-start');
+  });
+
+  it('accepts a structurally valid positive retry policy and rejects malformed dependency pins', () => {
+    const retry = fixture();
+    const planner = retry.workflow.nodes.find((node) => node.id === 'plan')!;
+    planner.onError = { strategy: 'retry', maxAttempts: 3, backoffSeconds: 1, retryOn: ['technical'] };
+    const validatedRetry = validateWorkflowProfileJson(JSON.stringify(retry));
+    expect(validatedRetry.ok).toBe(true);
+    expect(codes(retry)).toEqual([]);
+
+    const badDigest = fixture();
+    badDigest.dependencies[0]!.digest = 'sha256:not-hex';
+    expect(validateWorkflowProfileJson(JSON.stringify(badDigest)).ok).toBe(false);
+
+    const badVersion = fixture();
+    badVersion.dependencies[0]!.version = 'v1';
+    expect(validateWorkflowProfileJson(JSON.stringify(badVersion)).ok).toBe(false);
+  });
 });
