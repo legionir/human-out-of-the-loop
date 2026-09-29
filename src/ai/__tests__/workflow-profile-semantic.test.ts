@@ -63,6 +63,9 @@ describe('Workflow Profile semantic validation', () => {
     expect(codes(unreachableNode)).toContain('node.unreachable');
 
     const unreachableEnd = fixture();
+    // Prevent the bounded loop's exhaustion route from keeping this end reachable.
+    const loop = unreachableEnd.workflow.edges.find((edge) => edge.loop)!;
+    loop.loop!.onExhausted = { strategy: 'fail' };
     unreachableEnd.workflow.edges = unreachableEnd.workflow.edges.filter((edge) => edge.to !== 'rejected');
     expect(codes(unreachableEnd)).toContain('end.unreachable');
   });
