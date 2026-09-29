@@ -106,5 +106,7 @@ describe('Workflow Profile loader and registry', () => {
     expect(selectWorkflowProfile(registry, { projectOptIn: true, projectDefaultProfileId: 'project-default', builtInDefaultProfileId: 'built-in-default' }).profile.profile.id).toBe('project-default');
     expect(selectWorkflowProfile(registry, { builtInDefaultProfileId: 'built-in-default' }).profile.profile.id).toBe('built-in-default');
     expect(() => selectWorkflowProfile(registry, { requestedProfileId: 'project-default', projectOptIn: false, builtInDefaultProfileId: 'built-in-default' })).toThrow(/opt-in/i);
+    expect(() => selectWorkflowProfile(registry, { requestedProfileId: '', builtInDefaultProfileId: 'built-in-default' })).toThrow(/not discovered/i);
+    expect(() => selectWorkflowProfile(registry, { projectOptIn: true, projectDefaultProfileId: '', builtInDefaultProfileId: 'built-in-default' })).toThrow(/not discovered/i);
   });
 });

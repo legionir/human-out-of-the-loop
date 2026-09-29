@@ -200,9 +200,11 @@ export function selectWorkflowProfile(
     return selected;
   };
 
-  if (options.requestedProfileId) return requireEligible(options.requestedProfileId, 'explicitly selected');
-  if (options.projectOptIn && options.projectDefaultProfileId) return requireEligible(options.projectDefaultProfileId, 'project default');
-  if (options.builtInDefaultProfileId) {
+  // A supplied choice is authoritative even when malformed; never treat an
+  // explicit empty ID as if the caller had selected nothing and silently fall back.
+  if (options.requestedProfileId !== undefined) return requireEligible(options.requestedProfileId, 'explicitly selected');
+  if (options.projectOptIn === true && options.projectDefaultProfileId !== undefined) return requireEligible(options.projectDefaultProfileId, 'project default');
+  if (options.builtInDefaultProfileId !== undefined) {
     const fallback = requireEligible(options.builtInDefaultProfileId, 'built-in default');
     if (fallback.scope !== 'builtin') throw new WorkflowProfileLoadError(`Fallback profile "${fallback.profile.profile.id}" is not built-in`, [{
       stage: 'semantic', code: 'selection.default-not-builtin', message: 'Built-in fallback must come from the built-in scope', profileId: fallback.profile.profile.id, file: fallback.file,
