@@ -1,0 +1,9 @@
+{
+  "id": "domain-expert-sme",
+  "name": "Domain Expert (SME)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Domain Expert (SME)\" (SUPERVISOR) in the Analytics: Guarantee correctness of domain logic. Use when the task needs Domain Rules, Validation and the output must be \"Domain Decisions\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Domain Expert (SME)-level judgment with evidence and a fixed scope."
+}

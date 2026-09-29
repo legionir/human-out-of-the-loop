@@ -1,0 +1,9 @@
+{
+  "id": "enterprise-architect",
+  "name": "Enterprise Architect",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Enterprise Architect\" (SUPERVISOR) in the Architecture: Alignment with enterprise architecture. Use when the task needs Standards, Governance and the output must be \"Architecture Decisions\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Enterprise Architect-level judgment with evidence and a fixed scope."
+}

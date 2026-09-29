@@ -1,0 +1,9 @@
+{
+  "id": "devsecops-engineer",
+  "name": "DevSecOps Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"DevSecOps Engineer\" (EXECUTOR) in the DevOps: Automated Security Verification. Use when the task needs SAST, DAST, SCA, Secrets, Container Security and the output must be \"Security Pipeline, Findings\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need DevSecOps Engineer-level judgment with evidence and a fixed scope."
+}

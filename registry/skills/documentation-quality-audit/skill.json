@@ -1,0 +1,25 @@
+{
+  "id": "documentation-quality-audit",
+  "name": "Documentation Quality Audit — Master Prompt (v1)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Evidence-based audit of documentation as a working system: whether a reader can find the right page, trust it, and act on it. Covers the content inventory and its structure, accuracy against the current code and behaviour, findability through navigation and search, duplication and contradiction between overlapping pages, worked examples and copy-paste readiness, terminology and voice consistency, accessibility of the documentation itself, and the lifecycle that keeps it true — ownership, review cadence, staleness signals, and retirement. Use before a docs launch, when support load suggests the docs are failing, or when an accuracy claim is made. Read-only."
+}

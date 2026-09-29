@@ -1,0 +1,9 @@
+{
+  "id": "external-auditor",
+  "name": "External Auditor",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"External Auditor\" (SUPERVISOR) in the Audit: Independent Assurance. Use when the task needs External Audit and the output must be \"Independent Audit Report\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need External Auditor-level judgment with evidence and a fixed scope."
+}

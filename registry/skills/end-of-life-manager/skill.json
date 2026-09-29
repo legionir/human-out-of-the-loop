@@ -1,0 +1,9 @@
+{
+  "id": "end-of-life-manager",
+  "name": "End-of-Life Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"End-of-Life Manager\" (SUPERVISOR) in the Product: Manage safe product retirement. Use when the task needs Retirement Plan, Communication and the output must be \"EOL Plan\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need End-of-Life Manager-level judgment with evidence and a fixed scope."
+}

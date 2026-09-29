@@ -1,0 +1,16 @@
+{
+  "id": "devops-manager",
+  "name": "DevOps Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"DevOps Manager\" (SUPERVISOR) in the DevOps: Guarantee stable, secure, repeatable delivery in the DevOps process. Use when the task needs Team management, CI/CD standards, environment/secret management, monitoring and incident response, alignment with development/security and the output must be \"Pipeline report, environment standard, incident state\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need DevOps Manager-level judgment with evidence and a fixed scope."
+}
