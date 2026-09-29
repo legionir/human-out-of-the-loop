@@ -517,3 +517,12 @@ K-01 ⛔ / K-02 🟡 / K-05 🟡 / K-10 🟡 ── موازی، ورودی ما
 
 ---
 *پایان سند. هر تغییر وضعیت فقط با ویرایش همین فایل و کامیت مرتبط.*
+
+
+### 8.1 — Workflow Profiles owner-decision update (2026-09-29 19:38 GMT+3:30; append-only)
+
+This update supersedes the initial D-WP open-decision statuses in §8 while preserving that historical record. Pouya Rahimi confirmed: Ajv + Draft 2020-12 structural validation separate from semantic validation; required content-digest pins (version optional and recorded only when available); one active profile per run with explicit selection > opted-in project > built-in default; digest-bound approval that grants no tool/effect permission; strictest per-dimension Runtime/user-session/profile budget; exact MCP IDs with a 256 UTF-8-byte cap and source-aware validation; a 1 MiB UTF-8-byte profile-file cap before parse; and an outer profile graph that delegates every inner Plan DAG to the existing `PlanRuntime` through an owner-approved narrow internal adapter (no second scheduler or public/generic Orchestrator facade). The Profile Schema and three structural fixtures were updated to reflect the digest and tool-ID contract; fixture digests are placeholders, not activation-ready pins.
+
+**Evidence:** `Orchestrator.run()` delegates through private `runInSession()` and is composite; `PlanRuntime` exposes `execute/resume/cancel` and owns DAG scheduling. `mcp-connector.ts` concatenates prefix and raw name without normalization, but `ToolDefinitionSchema` currently applies the restricted local-ID regex to MCP IDs; source-aware validation is therefore a required Phase 2/3 change. Current profile schema/examples occupy 35,763 / 10,107 / 7,461 / 4,002 bytes, all below the approved 1 MiB cap. Boundary tests and live/fixture MCP compatibility tests remain future implementation work.
+
+**Current gate:** Phase 1 stays 🟡 pending PR #8 review/merge (Step 5). Step 3 is 🟢 and Step 4 is 🟢 for the approved read-only design spike; adapter integration is not implemented or claimed. Phase 2 and Runtime code remain 🔴; do not start them until Phase 1's review/merge gate is complete. PR #8 contains documentation and declarative contract/fixture updates only; no file or branch deletion is authorized or performed.

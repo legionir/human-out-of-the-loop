@@ -22,7 +22,7 @@
 
 پیش از پیاده‌سازی، وضعیت دقیق کد، نقاط اتصال موجود، اسناد اجرایی و وابستگی‌های باز را تثبیت کن. قرارداد باید Workflow Profile را لایهٔ پیکربندی روی Runtime فعلی تعریف کند، نه موتور اجرای موازی. خروجی این فاز تصمیم‌های ثبت‌شده، دامنهٔ نسخهٔ اول و به‌روزرسانی غیرمخرب طرح اجرایی پروژه است.
 
-**وضعیت اجرا (2026-09-29):** شواهد baseline و معماری در `docs/workflow-profiles/PHASE1_BASELINE.md` ثبت شده است. Steps 1–2 تکمیل‌شده در branch این فازند؛ Steps 3–5 و Gate کل Phase 1 زرد می‌مانند تا تصمیم‌های مالک دربارهٔ validator/versioning/trust/approval/budget و seam معماری ثبت و PR این فاز بررسی/ادغام شود. Phase 2 فعلاً مجاز به شروع نیست.
+**وضعیت اجرا (به‌روزرسانی 2026-09-29 19:38 GMT+3:30):** Steps 1–4 سبز هستند؛ Step 5 و Gate کل Phase 1 تا review/merge این PR زرد می‌مانند. تصمیم‌های مالک و شواهد در `docs/workflow-profiles/PHASE1_BASELINE.md` افزوده شده‌اند. Phase 2 تا بسته‌شدن Gate مجاز به شروع نیست.
 
 ### [🟢] Step 1: تعیین baseline، branch و وابستگی PRها
 
@@ -32,13 +32,13 @@
 
 مسیر واقعی جریان درخواست و اجرای کار را از entry pointها تا `Orchestrator`، `Planner`، `PlanRuntime`، `AgentRuntime`، `TaskRuntime`، Acceptance/Review، registryها، storeها و CLI/server دنبال کن. قرارداد `Plan` و `PlanStep` فعلی، DAG و CycleDetector، تأیید plan، re-plan، resume/cancel، `Persona.allowedTools` و لایه‌بندی registry پکیج/پروژه را ثبت کن. دستورات تست/typecheck/lint/build را از `package.json` و CI استخراج و baseline را اجرا کن؛ شکست‌های قبلی را بدون بازتولید به baseline نسبت نده. **شواهد اجراشده:** CI run `36577591299` روی SHA مبنا unit/integration را اجرا کرد، اما Windows Node 22/24 شکست خورد؛ علت به baseline یا regression نسبت داده نشده و در `PHASE1_BASELINE.md` با test names ثبت شده است. این Phase1 ادعای اجرای محلی کامل ندارد.
 
-### [🟡] Step 3: تثبیت قرارداد v1 و ثبت نیازمندی‌ها/تصمیم‌ها
+### [🟢] Step 3: تثبیت قرارداد v1 و ثبت نیازمندی‌ها/تصمیم‌ها
 
-Schema را با semantics مشترک این سند نهایی کن: seven node kinds؛ Profile مستقل و بدون inheritance؛ v1 بدون Template/Sub-workflow/parallelism؛ mapping و predicate فقط به port سطح اول؛ priority صعودی و سپس ترتیب تعریف با first-match، حداکثر یک default برای هر source و fail-closed در نبود match؛ bounded loops و exhaustion؛ خطای `fail`، retry با `maxAttempts` به‌معنای کل invocationها شامل بار اول، دسته‌های `retryOn` و backoff ثابت، یا `route` مستقیم به `routeTo` با `routeMap` صریح؛ denial/cancellation/approval-denial غیرقابل‌retry و غیرقابل-route؛ و end output با emit صریح. از Phase 1 برای هر الزام شناسهٔ پایدار `R-xxx` بساز و ماتریس requirement→phase/step→test را از همان ابتدا نگه دار. هم‌زمان Decision/Unknown Register بساز که برای هر مورد وضعیت، شواهد لازم، مسئول تصمیم و مهلت (پیش از کدام گام) را ثبت کند. **Unknown / Requires Verification:** canonical schema/validator integration، قرارداد نسخه‌ای واقعی registry، precedence و trust scope پروفایل‌ها، semantics approval و waiting/resume در CLI/server، بودجهٔ Profile در برابر AgentRuntime، فرمت واقعی tool IDs، و limit امن اندازهٔ فایل. هر unknown اثرگذار را از مخزن resolve کن یا صریحاً به‌صورت blocked 🟡 نگه دار؛ مقدار/قرارداد را حدس نزن. ثبت فعلی D-WP-001…008، مالک، توصیهٔ غیرمصوب و dependent gate در `docs/workflow-profiles/PHASE1_BASELINE.md` است؛ تصمیم‌های D-WP-001…005 و D-WP-008 هنوز مالک‌خواه‌اند.
+Schema را با semantics مشترک این سند نهایی کن: seven node kinds؛ Profile مستقل و بدون inheritance؛ v1 بدون Template/Sub-workflow/parallelism؛ mapping و predicate فقط به port سطح اول؛ priority صعودی و سپس ترتیب تعریف با first-match، حداکثر یک default برای هر source و fail-closed در نبود match؛ bounded loops و exhaustion؛ خطای `fail`، retry با `maxAttempts` به‌معنای کل invocationها شامل بار اول، دسته‌های `retryOn` و backoff ثابت، یا `route` مستقیم به `routeTo` با `routeMap` صریح؛ denial/cancellation/approval-denial غیرقابل‌retry و غیرقابل-route؛ و end output با emit صریح. از Phase 1 برای هر الزام شناسهٔ پایدار `R-xxx` بساز و ماتریس requirement→phase/step→test را از همان ابتدا نگه دار. هم‌زمان Decision/Unknown Register بساز که برای هر مورد وضعیت، شواهد لازم، مسئول تصمیم و مهلت (پیش از کدام گام) را ثبت کند. **ثبت وضعیت (2026-09-29):** Unknown register اولیه پوشش canonical schema/validator، registry versioning, precedence/trust, approval/wait/resume, budgets, tool IDs و file-size limit را داشت. Pouya تصمیم‌های D-WP-001…008 را تأیید کرد؛ قرارداد نهایی، موارد اجرایی باقی‌مانده و شواهد در `docs/workflow-profiles/PHASE1_BASELINE.md` ثبت شده‌اند. تنها جزئیات فنی لازم پیش از dependent implementation (از جمله قالب قطعی ورودی digest برای هر dependency kind و تست registry واقعی MCP) به‌عنوان verification هدف‌دار Phase 2/3 باقی است؛ مقدار یا رفتار ناشناخته نباید حدس زده شود.
 
-### [🟡] Step 4: حل seam بین workflow بیرونی و Plan DAG داخلی
+### [🟢] Step 4: حل seam بین workflow بیرونی و Plan DAG داخلی
 
-به‌صورت read-only/آزمایشی، یک spike محدود و قابل‌بازگشت روی PlanRuntime واقعی اجرا/طراحی کن: آیا state machine بیرونی می‌تواند intake→plan→execute→review و یک بازگشت bounded را بدون flatten کردن Plan DAG، duplicate scheduler یا تغییر semantics PlanRuntime هدایت کند؟ Workflow Profile گراف کنترل بیرونی است؛ PlanRuntime همچنان DAG وابستگی درونی هر plan را اجرا می‌کند. ثبت کن کدام lifecycle (approval، re-plan، cancellation، resume، resource lock و status) در Runtime مشترک می‌ماند. نتیجهٔ spike و شواهد را در Decision Register ثبت کن؛ اگر reuse امن/واقعی ممکن نیست، فازهای وابسته را متوقف کن تا تصمیم معماری مالک ثبت شود، نه اینکه engine موازی بسازی. هر feature flag موجود و نقطهٔ مناسب آن را نیز از کد بیاب؛ flag تازه باید default-off باشد. **یافتهٔ baseline:** `Orchestrator.run()` composite است و facade مرحله‌ای عمومی ندارد؛ `PlanRuntime.execute()` تنها اجرای DAG داخلیِ plan تأییدشده را بر عهده دارد. پس seam عملیاتی هنوز اثبات نشده؛ D-WP-008 مسدودکننده است و Phase 4/5 تا تصمیم مالک متوقف می‌مانند. Profile flag موجودی یافت نشد؛ `HOTL_NO_PACKAGE_REGISTRY` flag اجرای Profile نیست. شواهد کامل در `PHASE1_BASELINE.md`.
+به‌صورت read-only/آزمایشی، یک spike محدود و قابل‌بازگشت روی PlanRuntime واقعی اجرا/طراحی کن: آیا state machine بیرونی می‌تواند intake→plan→execute→review و یک بازگشت bounded را بدون flatten کردن Plan DAG، duplicate scheduler یا تغییر semantics PlanRuntime هدایت کند؟ Workflow Profile گراف کنترل بیرونی است؛ PlanRuntime همچنان DAG وابستگی درونی هر plan را اجرا می‌کند. ثبت کن کدام lifecycle (approval، re-plan، cancellation، resume، resource lock و status) در Runtime مشترک می‌ماند. نتیجهٔ spike و شواهد را در Decision Register ثبت کن؛ اگر reuse امن/واقعی ممکن نیست، فازهای وابسته را متوقف کن تا تصمیم معماری مالک ثبت شود، نه اینکه engine موازی بسازی. هر feature flag موجود و نقطهٔ مناسب آن را نیز از کد بیاب؛ flag تازه باید default-off باشد. **یافته و تصمیم (2026-09-29):** `Orchestrator.run()` composite است و facade مرحله‌ای عمومی ندارد؛ `PlanRuntime.execute()` تنها اجرای DAG داخلیِ plan تأییدشده را بر عهده دارد. مالک seam موردنیاز را تأیید کرد: adapter داخلی و محدود به سرویس‌های فعلی، بدون API عمومی/generic و بدون scheduler دوم؛ PlanRuntime همچنان scheduler یگانهٔ DAG داخلی است. این Step یک read-only design spike است، نه اثبات integration اجرایی؛ آزمون اتصال واقعی در فازهای Runtime مربوط انجام می‌شود. Profile flag موجودی یافت نشد؛ `HOTL_NO_PACKAGE_REGISTRY` flag اجرای Profile نیست. شواهد کامل در `PHASE1_BASELINE.md`.
 
 ### [🟡] Step 5: ثبت traceability و plan در مرجع پروژه
 
@@ -47,7 +47,7 @@ Schema را با semantics مشترک این سند نهایی کن: seven node 
 **Acceptance criteria:**
 baseline branch/commit و وضعیت PRها ثبت شده؛ مسیرهای واقعی و تست‌های موجود با شواهد مشخص‌اند؛ قرارداد نسخهٔ اول و مرز Runtime ثبت شده؛ همهٔ unknownهای اثرگذار حل یا صریحاً برای تصمیم مالک علامت‌گذاری شده‌اند؛ ناسازگاری DAG/loop راه‌حل تأییدشده دارد؛ دامنهٔ profiling به طرح canonical مخزن افزوده شده بدون حذف traceability یا تغییر ناموجه رفتار موجود.
 
-**Gate evaluation (2026-09-29):** branch/commit/PRها و dependencyها ثبت شد؛ مسیرهای کد و CI در baseline report مستند است؛ semantics v1 از schema/plan موجود استخراج شد؛ requirements و Unknown Register اولیه ثبت شد. **معیار «راه‌حل seam با تأیید مالک» احراز نشده است.** D-WP-001…005 و D-WP-008 هنوز نیازمند تصمیم Pouya هستند؛ D-WP-006/007 پیش از loader باید با شواهد تکمیل شوند. Step 5 نیز تا review/merge PR این فاز 🟡 می‌ماند. بنابراین Phase 1 🟡 است و Phase 2 تا بستن این gate شروع نمی‌شود.
+**Initial Gate evaluation at PR authoring (2026-09-29, before owner decisions):** branch/commit/PRها و dependencyها ثبت شد؛ مسیرهای کد و CI در baseline report مستند است؛ semantics v1 از schema/plan موجود استخراج شد؛ requirements و Unknown Register اولیه ثبت شد. **معیار «راه‌حل seam با تأیید مالک» احراز نشده است.** D-WP-001…005 و D-WP-008 هنوز نیازمند تصمیم Pouya هستند؛ D-WP-006/007 پیش از loader باید با شواهد تکمیل شوند. Step 5 نیز تا review/merge PR این فاز 🟡 می‌ماند. بنابراین Phase 1 🟡 است و Phase 2 تا بستن این gate شروع نمی‌شود.
 
 ---
 
@@ -57,7 +57,7 @@ baseline branch/commit و وضعیت PRها ثبت شده؛ مسیرهای وا�
 
 ### [🔴] Step 1: افزودن Schema و fixtures مطابق semantics v1
 
-JSON Schema Draft 2020-12، نمونهٔ پیش‌فرض ساختاری و fixtures شاخه/condition/approval/loop/error-route را اضافه کن. `schemaVersion` را از Profile semver جدا نگه دار؛ `$schema` و فقط namespace توسعهٔ `x-*` را با policy محدود مجاز کن؛ schema version diagnostic را از parse/validation جدا کن. همهٔ limitهای صریح nodes/edges/dependencies/ports/maps/values را نگه دار و loader-level byte cap را بر اساس baseline اندازهٔ registry ثبت/تصویب کن (هیچ سقف فایل حدسی نگذار). Schema باید v1 exclusionهای no-inheritance/no-templates/no-sub-workflows/no-parallelism را مستند کند. هر نمونه از Schema و سپس semantic test suite عبور کند؛ نمونهٔ default تا Phase 7 صرفاً structural sample بماند.
+JSON Schema Draft 2020-12، نمونهٔ پیش‌فرض ساختاری و fixtures شاخه/condition/approval/loop/error-route را اضافه کن. `schemaVersion` را از Profile semver جدا نگه دار؛ `$schema` و فقط namespace توسعهٔ `x-*` را با policy محدود مجاز کن؛ schema version diagnostic را از parse/validation جدا کن. همهٔ limitهای صریح nodes/edges/dependencies/ports/maps/values را نگه دار و loader-level cap مصوب 1 MiB (1,048,576 UTF-8 bytes) را پیش از parse enforce کن و تست دقیقاً روی cap و cap+1 اضافه کن؛ این مقدار با تصمیم ثبت‌شدهٔ مالک تعیین شده است. Schema باید v1 exclusionهای no-inheritance/no-templates/no-sub-workflows/no-parallelism را مستند کند. هر نمونه از Schema و سپس semantic test suite عبور کند؛ نمونهٔ default تا Phase 7 صرفاً structural sample بماند.
 
 ### [🔴] Step 2: هم‌ترازکردن اعتبارسنجی runtime و JSON Schema
 
@@ -82,14 +82,14 @@ JSON Schema مطابق Draft 2020-12 و همهٔ fixtures معتبرند؛ schem
 
 ### [🔴] Step 1: ساخت resolver برای وابستگی‌های Profile
 
-در registry/factory موجود، ارجاع‌های هر Profile را resolve کن؛ نسخهٔ دقیق و digest اختیاری را اعمال و missing، duplicate، ambiguous، ناسازگار، غیرفعال یا integrity-mismatch را پیش از activation رد کن. با AgentDefinition فعلی (Persona + Skills + Model) هماهنگ شو و متن‌ها را در Profile کپی نکن. برای Rubric و Model Profile، اگر منبع حقیقت موجود نیست، طبق تصمیم ثبت‌شده به قرارداد موجود وصل شو یا design decision لازم را متوقف/ثبت کن؛ ساخت registry موازی بدون تصمیم ممنوع است. Artifactها در run به نسخه/digest resolve شده pin شوند.
+در registry/factory موجود، ارجاع‌های هر Profile را resolve کن؛ digest محتوای دقیق برای هر dependency الزامی است و نسخهٔ دقیق registry فقط در صورت موجود بودن ثبت می‌شود، اما جای digest را نمی‌گیرد. missing digest، mismatch، duplicate، ambiguous، ناسازگار یا غیرفعال را پیش از activation رد کن. با AgentDefinition فعلی (Persona + Skills + Model) هماهنگ شو و متن‌ها را در Profile کپی نکن. برای Rubric و Model Profile، اگر منبع حقیقت موجود نیست، طبق تصمیم ثبت‌شده به قرارداد موجود وصل شو یا design decision لازم را متوقف/ثبت کن؛ ساخت registry موازی بدون تصمیم ممنوع است. Artifactها در run به digest resolve‌شده pin شوند؛ version metadata را هرجا موجود است ثبت کن.
 
 ### [🔴] Step 2: تعریف و اعمال Toolsetهای نام‌دار
 
 ابتدا بررسی کن Toolset مستقل در مخزن وجود دارد یا نه؛ اگر ندارد، فقط پس از تصمیم Phase 1 حداقل registry نام‌دار و نسخه‌دار از tool IDs واقعی بساز. ابزار مؤثر برابر intersectionِ Runtime-permitted، Persona.allowedTools و Toolset است، سپس deny list آن را کمتر می‌کند. Toolset هرگز ابزار غایب/غیرفعال یا خارج از مجوز را اضافه نمی‌کند؛ approval و resource limits نیز فقط می‌توانند سخت‌تر شوند. ثبت کن که schema validation مجوز اجرایی محسوب نمی‌شود و authorization در call site واقعی تکرار خواهد شد.
 
 **Acceptance criteria:**
-تمام dependency kindهای v1 به منبع حقیقت موجود/مصوب resolve می‌شوند؛ نسخه و digest پین و هر mismatch پیش از اجرا رد می‌شود؛ Toolset فقط دسترسی را محدود می‌کند؛ هیچ inheritance/template/sub-workflow در schema یا resolver اجرا نمی‌شود؛ تست‌های valid/missing/duplicate/version/digest/ambiguous/denied و scope trust موفق‌اند. هر درخواست Template/Sub-workflow به عنوان deferred future scope با تصمیم و traceability ثبت شده، نه الزام فراموش‌شده.
+تمام dependency kindهای v1 به منبع حقیقت موجود/مصوب resolve می‌شوند؛ digest دقیق برای همه پین و version هرجا موجود است ثبت می‌شود؛ هر mismatch پیش از اجرا رد می‌شود؛ Toolset فقط دسترسی را محدود می‌کند؛ هیچ inheritance/template/sub-workflow در schema یا resolver اجرا نمی‌شود؛ تست‌های valid/missing/duplicate/version/digest/ambiguous/denied و scope trust موفق‌اند. هر درخواست Template/Sub-workflow به عنوان deferred future scope با تصمیم و traceability ثبت شده، نه الزام فراموش‌شده.
 ---
 
 ## [🔴] Phase 4: Workflow graph engine و bounded control-flow
@@ -135,7 +135,7 @@ graphهای خطی، شاخه‌ای و bounded-loop با fake handlerها deter
 
 ### [🔴] Step 3: اتصال approval و رفتارهای خطا
 
-approval node به mechanism interaction/callback موجود متصل شود؛ تصمیم approved/denied/expired و timeout/cancel را مستقل ثبت کند. Side-effect approval باید digest محتوای نمایش‌داده‌شده را ثبت و بلافاصله پیش از effect دوباره تطبیق دهد؛ mismatch=abort. Clarification از approval gate جدا بماند. `fail/retry/route` دقیقاً طبق Phase 4 اجرا شوند؛ route مقصد و mapping فقط همان sanitized failure envelope را می‌گیرند و هیچ مسیر خطا مجوز را گسترش نمی‌دهد. Limit `ask-user` فقط pause/resume معتبر است، نه approval خودکار.
+approval node به mechanism interaction/callback موجود متصل شود؛ تصمیم approved/denied/expired و timeout/cancel را مستقل ثبت کند. تأیید plan به digest همان planی متصل باشد که کاربر دیده است و فقط acknowledgement همان plan محسوب شود؛ این تأیید به‌تنهایی مجوز ابزار یا side effect نیست. پیش از هر effect، authorization مستقل Runtime و هر approval جداگانهٔ لازم دوباره بررسی شود؛ mismatch در digest=abort. Clarification از approval gate جدا بماند. `fail/retry/route` دقیقاً طبق Phase 4 اجرا شوند؛ route مقصد و mapping فقط همان sanitized failure envelope را می‌گیرند و هیچ مسیر خطا مجوز را گسترش نمی‌دهد. Limit `ask-user` فقط pause/resume معتبر است، نه approval خودکار.
 
 ### [🔴] Step 4: تست یکپارچهٔ handlerها و مرز امنیتی
 
@@ -156,18 +156,18 @@ approval node به mechanism interaction/callback موجود متصل شود؛ �
 
 ### [🔴] Step 2: cancellation، timeout و resource budget
 
-`maxDurationSeconds`، `maxNodeVisits`، `maxModelCalls` و `maxToolCalls` را در مسیر واقعی و نه صرفاً config اعمال کن؛ بودجهٔ Profile با سقف‌های AgentRuntime/tool/provider تجمیع شود و هیچ لایه‌ای نتواند بودجه را reset یا افزایش دهد. v1 sub-workflow ندارد، پس aggregate budget فقط در Profile run و PlanRuntime موجود تعریف می‌شود. Unknown Phase 1 دربارهٔ budget accounting باید قبل از این step حل شده باشد. cancellation باید به handler/task فعال برسد، state terminal معتبر ثبت کند و از شروع کار بعدی جلوگیری کند. رفتار limit طبق policy مصوب به fail/handoff/ask-user برود و counters در resume reset نشوند.
+`maxDurationSeconds`، `maxNodeVisits`، `maxModelCalls` و `maxToolCalls` را در مسیر واقعی و نه صرفاً config اعمال کن؛ سقف مؤثر هر بُعد برابر محدودکننده‌ترین مقدار بین Runtime، user/session و Profile است؛ بودجه‌ها جمع نمی‌شوند و هیچ لایه‌ای نمی‌تواند cap یا شمارنده را افزایش/reset کند. v1 sub-workflow ندارد، پس شمارندهٔ run در Profile و PlanRuntime موجود یکپارچه تعریف می‌شود. cancellation باید به handler/task فعال برسد، state terminal معتبر ثبت کند و از شروع کار بعدی جلوگیری کند. رفتار limit طبق policy مصوب به fail/handoff/ask-user برود و counters در resume reset نشوند.
 
 ### [🔴] Step 3: enforce کردن tools و approval در runtime
 
-در نقطهٔ فراخوانی واقعی ابزار، دسترسی مؤثر را دوباره اعمال کن؛ به validation پروفایل اکتفا نکن. ابزار، approval و budget از Runtime، user, Persona, Toolset و Profile فقط به‌صورت strictest/intersection محدود شوند. Profile/workspace override برای default بدون trust/opt-in مصوب رد شود. deny list، سیاست filesystem/network/Git و کنترل approval پابرجا بمانند؛ denial/cancel fail-closed و خارج از profile error routing باشد. Side effect بدون مجوز/approval پیش از اجرا مسدود شود. تغییر policy بین آغاز و resume نباید موجب افزایش اختیار شود.
+در نقطهٔ فراخوانی واقعی ابزار، دسترسی مؤثر را دوباره اعمال کن؛ به validation پروفایل اکتفا نکن. ابزار، approval و budget از Runtime، user, Persona, Toolset و Profile فقط به‌صورت strictest/intersection محدود شوند. Profile/workspace override برای default بدون trust/opt-in مصوب رد شود. deny list، سیاست filesystem/network/Git و کنترل approval پابرجا بمانند؛ denial/cancel fail-closed و خارج از profile error routing باشد. Side effect بدون مجوز و approval مستقل لازمِ Runtime پیش از اجرا مسدود شود؛ digest-bound plan approval به‌تنهایی این gate را برآورده نمی‌کند. تغییر policy بین آغاز و resume نباید موجب افزایش اختیار شود.
 
 ### [🔴] Step 4: رخدادها، audit و خطاهای lifecycle
 
 چرخهٔ profile را از طریق EventBus/observability فعلی گزارش کن: آغاز، node transition، loop، approval، tool/model budget، retry، failure، resume و پایان. اطلاعات حساس، secret، prompt خام و دادهٔ خصوصی را با قواعد redaction موجود ثبت نکن. شکست persistence یا event sink نباید باعث state مبهم یا اجرای دوبارهٔ side effect شود؛ semantics سازگار با تضمین‌های فعلی را ثبت و تست کن.
 
 **Acceptance criteria:**
-workflow پس از restart از state و hash/version درست resume می‌شود یا fail-closed می‌کند؛ cancellation، timeout و تمام budgetها عملاً enforce می‌شوند؛ مجوز ابزار در مرز اجرای واقعی بررسی و هیچ Profile آن را افزایش نمی‌دهد؛ approval digest پیش از side effect دوباره تطبیق می‌شود؛ side effect با نتیجهٔ مبهم خودکار تکرار نمی‌شود؛ رخدادهای lifecycle قابل‌ردیابی و فاقد secret هستند؛ تست crash/resume، stale profile/dependency/digest، policy تغییرکرده، cancellation حین اجرا و failure persistence می‌گذرند؛ تست‌های موجود plan/session/store همچنان سبزند.
+workflow پس از restart از state و hash/version درست resume می‌شود یا fail-closed می‌کند؛ cancellation، timeout و تمام budgetها عملاً enforce می‌شوند؛ مجوز ابزار در مرز اجرای واقعی بررسی و هیچ Profile آن را افزایش نمی‌دهد؛ digest تأیید plan پیش از ادامهٔ آن تطبیق می‌شود و authorization/approval مستقل Runtime برای side effect برقرار است؛ side effect با نتیجهٔ مبهم خودکار تکرار نمی‌شود؛ رخدادهای lifecycle قابل‌ردیابی و فاقد secret هستند؛ تست crash/resume، stale profile/dependency/digest، policy تغییرکرده، cancellation حین اجرا و failure persistence می‌گذرند؛ تست‌های موجود plan/session/store همچنان سبزند.
 
 ---
 
@@ -248,3 +248,20 @@ Schema/author guide، error/retry semantics، first-match/default، loop bound f
 
 **Acceptance criteria:**
 migration/rollback آزموده یا عدم نیاز مستند است؛ CI و semantic/schema/security gates روی head هر PR نتیجهٔ ثبت‌شده دارند؛ traceability برای همهٔ R IDs کامل است؛ هیچ unknown مسدودکننده‌ای بی‌صاحب/بی‌موعد نیست؛ PRها فازبندی و قابل‌بازبینی‌اند؛ regressions از baseline تفکیک شده؛ همهٔ docs/examples با implementation همخوانند؛ rollout default-off است؛ merge/release بدون مجوز انجام نشده است.
+
+---
+
+## Owner decision and evidence update (2026-09-29 19:38 GMT+3:30; append-only)
+
+This addendum updates the current execution state without removing the historical gate notes above. Owner decisions D-WP-001…008 are now recorded as confirmed in `docs/workflow-profiles/PHASE1_BASELINE.md`. The binding outcomes are:
+
+- **D-WP-001:** Ajv / Draft 2020-12 for structural validation; separate semantic validator.
+- **D-WP-002:** exact component-content digest is required; a version is optional and recorded where available but cannot replace the digest; mismatch/missing digest fails closed. The Schema now requires `digest` and makes `version` optional. Deterministic hash input per component kind must be specified and tested before resolver implementation; fixture digests are explicitly placeholders.
+- **D-WP-003:** exactly one active profile per run; explicit user selection > explicitly opted-in project profile > built-in default; no composition; Runtime safety policy remains authoritative.
+- **D-WP-004:** approval binds to the digest of the exact displayed plan and grants no tool/side-effect authorization.
+- **D-WP-005:** effective limits are the strictest per-dimension caps across Runtime, user/session, and profile; no addition, increase, or counter reset.
+- **D-WP-006:** MCP IDs are preserved exactly (prefix plus raw name), never normalized; local ID convention remains unchanged. MCP IDs are nonempty, control-character-free, and capped at 256 UTF-8 bytes; validator matching is exact. The Profile Schema now permits a bounded opaque ID (and documents the semantic UTF-8 byte check); runtime `ToolDefinitionSchema` still requires the local regex for MCP, so source-aware registry validation/tests are required in Phase 2/3.
+- **D-WP-007:** profile-file cap is 1 MiB (1,048,576 UTF-8 bytes), enforced before JSON parsing. Current schema/examples are all under the cap (35,763 / 10,107 / 7,461 / 4,002 bytes); test cap and cap+1 in the loader phase.
+- **D-WP-008:** Profile Runtime controls only the outer graph/counters; `PlanRuntime` is the only inner DAG scheduler. The owner approved a narrow internal adapter, not a public/generic Orchestrator facade or second scheduler. Source inspection confirms `Orchestrator.run()` is composite and calls private `runInSession()`, whereas `PlanRuntime` exposes execute/resume/cancel. The read-only design spike is documented; adapter implementation and integration proof remain later-phase work.
+
+**Current status:** Phase 1 remains 🟡. Step 3 is 🟢: owner decisions are recorded, dependency-digest requirements are in the Schema, and structural examples are updated. Step 4 is 🟢 for the read-only design spike and approved internal-adapter boundary only; implementation/integration proof remains future work. Step 5 stays 🟡 pending review/merge of PR #8. Phase 2 and later remain 🔴. This update is documentation/contract only; it is not authorization to skip gates, implement Runtime in this PR, or merge. The 1 MiB profile cap and MCP ID boundary tests are mandatory future acceptance criteria.

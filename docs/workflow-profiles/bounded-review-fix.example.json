@@ -4,7 +4,7 @@
   "profile": {
     "id": "example.bounded-review-fix",
     "name": "Bounded review/fix loop",
-    "description": "Fixture: fix, review, then a data-only condition node routes to success or to a bounded fix loop that ends in a handoff when exhausted.",
+    "description": "Fixture: fix, review, then a data-only condition node routes to success or to a bounded fix loop that ends in a handoff when exhausted. Dependency digests are structural placeholders; resolve real component content and replace them before activation.",
     "version": "1.0.0",
     "runtime": {
       "minVersion": "1.0.0"
@@ -20,22 +20,26 @@
     {
       "kind": "persona",
       "id": "hootl.executor",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
       "kind": "persona",
       "id": "hootl.reviewer",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
       "kind": "toolset",
       "id": "hootl.default-tools",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
       "kind": "rubric",
       "id": "hootl.default-review",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     }
   ],
   "workflow": {

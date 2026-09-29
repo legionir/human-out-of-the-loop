@@ -4,7 +4,7 @@
   "profile": {
     "id": "hootl.default-sample",
     "name": "Default workflow (structural sample)",
-    "description": "Structural sample only. Not yet verified against current HOOTL behavior; Phase 7 must derive the actual baseline flow from code and tests before this can be called the default profile.",
+    "description": "Structural sample only. Not yet verified against current HOOTL behavior; Phase 7 must derive the actual baseline flow from code and tests before this can be called the default profile. Dependency digests are structural placeholders; resolve real component content and replace them before activation.",
     "version": "1.0.0",
     "runtime": {
       "minVersion": "1.0.0"
@@ -15,27 +15,32 @@
     {
       "kind": "persona",
       "id": "hootl.planner",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
       "kind": "persona",
       "id": "hootl.executor",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
       "kind": "persona",
       "id": "hootl.reviewer",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
       "kind": "toolset",
       "id": "hootl.default-tools",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
       "kind": "rubric",
       "id": "hootl.default-review",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     }
   ],
   "workflow": {
