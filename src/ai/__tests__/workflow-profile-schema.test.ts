@@ -78,6 +78,7 @@ describe('Workflow Profile v1 structural contract', () => {
       {
         name: 'profile metadata',
         select: (profile) => {
+          profile.profile.runtime = { minVersion: '1.0.0' };
           profile.profile.license = 'MIT';
           profile.profile.tags = [];
           return profile.profile;
