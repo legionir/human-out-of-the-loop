@@ -422,6 +422,8 @@
       "policy": "side-effects",
       "requireUserConfirmationFor": [
         "external-write",
+        "file-write",
+        "git-write",
         "irreversible-action"
       ]
     }
