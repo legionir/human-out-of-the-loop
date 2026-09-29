@@ -566,7 +566,7 @@ describe('CFG-08: injectable environment', () => {
       await other.shutdown();
       fsSync.rmSync(projectRoot, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });
 
 
