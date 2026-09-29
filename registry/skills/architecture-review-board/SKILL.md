@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Architecture"
   seniority: "Senior"
-  source: "prompts/audit/architecture-review-board.md"
+  source: "../../personas/architecture-review-board.json"
   language: "en"
 ---
 

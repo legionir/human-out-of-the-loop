@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Support"
   seniority: "Mid"
-  source: "prompts/implementation/beta-tester.md"
+  source: "../../personas/beta-tester.json"
   language: "en"
 ---
 

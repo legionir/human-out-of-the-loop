@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/API & Integration Contract Audit.md"
+  source: "../../personas/api-integration-contract-audit.json"
   language: "en"
   spec: "composites/api-contract-audit.json"
   generated: true

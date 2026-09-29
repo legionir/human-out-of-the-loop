@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Accessibility & WCAG Audit.md"
+  source: "../../personas/accessibility-wcag-audit.json"
   language: "en"
   spec: "composites/accessibility-wcag-audit.json"
   generated: true

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Project"
   seniority: "Specialist"
-  source: "prompts/audit/agile-coach.md"
+  source: "../../personas/agile-coach.json"
   language: "en"
 ---
 

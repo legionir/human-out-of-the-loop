@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "AI"
   seniority: "Lead"
-  source: "prompts/audit/ai-engineer-lead.md"
+  source: "../../personas/ai-engineer-lead.json"
   language: "en"
 ---
 

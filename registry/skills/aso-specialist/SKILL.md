@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Growth"
   seniority: "Specialist"
-  source: "prompts/implementation/aso-specialist.md"
+  source: "../../personas/aso-specialist.json"
   language: "en"
 ---
 

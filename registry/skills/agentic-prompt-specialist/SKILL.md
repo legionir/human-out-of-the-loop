@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "AI"
   seniority: "Specialist"
-  source: "prompts/implementation/agentic-prompt-specialist.md"
+  source: "../../personas/agentic-prompt-specialist.json"
   language: "en"
 ---
 

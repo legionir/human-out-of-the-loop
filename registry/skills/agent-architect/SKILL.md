@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "AI"
   seniority: "Senior"
-  source: "prompts/implementation/agent-architect.md"
+  source: "../../personas/agent-architect.json"
   language: "en"
 ---
 

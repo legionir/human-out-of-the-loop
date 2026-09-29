@@ -189,12 +189,13 @@ function planStore(root = scratchRoot) {
   return { dir, files, plans };
 }
 
-/** A scratch project with the packaged registry pointed at the stub. */
+/** A scratch project with a minimal model overlay; other built-in entries remain package-provided. */
 function makeProject(name, extra = {}) {
   const root = fs.mkdtempSync(path.join(scratchRoot, `${name}-`));
-  fs.cpSync(path.join(REPO, 'registry'), path.join(root, 'registry'), { recursive: true });
   const modelFile = path.join(root, 'registry', 'models', `${MODEL}.json`);
-  const cfg = JSON.parse(fs.readFileSync(modelFile, 'utf-8'));
+  fs.mkdirSync(path.dirname(modelFile), { recursive: true });
+  const packageModel = path.join(REPO, 'registry', 'models', `${MODEL}.json`);
+  const cfg = JSON.parse(fs.readFileSync(packageModel, 'utf-8'));
   cfg.config = { ...(cfg.config ?? {}), baseURL: STUB_URL, temperature: 0 };
   fs.writeFileSync(modelFile, JSON.stringify(cfg, null, 2));
   fs.writeFileSync(path.join(root, '.env'), 'OPENAI_API_KEY=stub-key\nHOTL_API_KEY=stub-key\n');

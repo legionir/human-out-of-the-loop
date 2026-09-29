@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Audit"
   seniority: "Specialist"
-  source: "prompts/audit/audit-specialist.md"
+  source: "../../personas/audit-specialist.json"
   language: "en"
 ---
 

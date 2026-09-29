@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "AI"
   seniority: "Senior"
-  source: "prompts/implementation/ai-safety-alignment-engineer.md"
+  source: "../../personas/ai-safety-alignment-engineer.json"
   language: "en"
 ---
 

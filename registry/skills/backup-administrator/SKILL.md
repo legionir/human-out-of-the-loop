@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Specialist"
-  source: "prompts/implementation/backup-administrator.md"
+  source: "../../personas/backup-administrator.json"
   language: "en"
 ---
 

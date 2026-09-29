@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/AI Agent System Audit & Hardening.md"
+  source: "../../personas/ai-agent-system-audit-hardening.json"
   language: "en"
   spec: "composites/ai-agent-system-audit.json"
   generated: true

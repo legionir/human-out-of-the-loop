@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Design"
   seniority: "Specialist"
-  source: "prompts/implementation/accessibility-specialist.md"
+  source: "../../personas/accessibility-specialist.json"
   language: "en"
 ---
 

@@ -5,7 +5,7 @@ metadata:
   version: "1"
   type: "COMPOSITE"
   typeLabel: "Composite"
-  source: "prompts/composite/Architecture Review & Architecture Audit.md"
+  source: "../../personas/architecture-review-architecture-audit.json"
   language: "en"
   generated: false
 ---
