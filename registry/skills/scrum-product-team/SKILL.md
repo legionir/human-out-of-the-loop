@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Support"
   seniority: "Specialist"
-  source: "prompts/implementation/scrum-product-team.md"
+  source: "../../personas/scrum-product-team.json"
   language: "en"
 ---
 

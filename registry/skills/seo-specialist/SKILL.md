@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Growth"
   seniority: "Specialist"
-  source: "prompts/implementation/seo-specialist.md"
+  source: "../../personas/seo-specialist.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Security"
   seniority: "Senior"
-  source: "prompts/implementation/security-engineer.md"
+  source: "../../personas/security-engineer.json"
   language: "en"
 ---
 

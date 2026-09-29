@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Growth"
   seniority: "Manager"
-  source: "prompts/audit/sales-manager.md"
+  source: "../../personas/sales-manager.json"
   language: "en"
 ---
 

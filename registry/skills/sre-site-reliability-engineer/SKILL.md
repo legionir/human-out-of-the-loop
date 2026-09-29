@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "DevOps"
   seniority: "Senior"
-  source: "prompts/implementation/sre-site-reliability-engineer.md"
+  source: "../../personas/sre-site-reliability-engineer.json"
   language: "en"
 ---
 

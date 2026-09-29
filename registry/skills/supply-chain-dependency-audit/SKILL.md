@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Supply Chain & Dependency Audit.md"
+  source: "../../personas/supply-chain-dependency-audit.json"
   language: "en"
   spec: "composites/supply-chain-sbom-audit.json"
   generated: true

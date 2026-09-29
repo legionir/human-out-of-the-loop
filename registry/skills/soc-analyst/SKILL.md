@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Security"
   seniority: "Senior"
-  source: "prompts/implementation/soc-analyst.md"
+  source: "../../personas/soc-analyst.json"
   language: "en"
 ---
 

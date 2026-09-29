@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Project"
   seniority: "Manager"
-  source: "prompts/audit/risk-manager.md"
+  source: "../../personas/risk-manager.json"
   language: "en"
 ---
 

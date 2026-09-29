@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Architecture"
   seniority: "Senior"
-  source: "prompts/implementation/software-architect.md"
+  source: "../../personas/software-architect.json"
   language: "en"
 ---
 

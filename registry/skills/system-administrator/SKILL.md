@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "DevOps"
   seniority: "Specialist"
-  source: "prompts/implementation/system-administrator.md"
+  source: "../../personas/system-administrator.json"
   language: "en"
 ---
 

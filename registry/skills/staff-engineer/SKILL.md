@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Staff"
-  source: "prompts/implementation/staff-engineer.md"
+  source: "../../personas/staff-engineer.json"
   language: "en"
 ---
 

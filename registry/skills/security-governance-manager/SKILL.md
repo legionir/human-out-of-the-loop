@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Security"
   seniority: "Manager"
-  source: "prompts/audit/security-governance-manager.md"
+  source: "../../personas/security-governance-manager.json"
   language: "en"
 ---
 

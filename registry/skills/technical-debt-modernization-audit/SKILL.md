@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Technical Debt & Modernization Audit.md"
+  source: "../../personas/technical-debt-modernization-audit.json"
   language: "en"
   spec: "composites/technical-debt-modernization-audit.json"
   generated: true

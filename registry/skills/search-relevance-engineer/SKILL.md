@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Senior"
-  source: "prompts/implementation/search-relevance-engineer.md"
+  source: "../../personas/search-relevance-engineer.json"
   language: "en"
 ---
 

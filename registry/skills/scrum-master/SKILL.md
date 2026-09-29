@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Project"
   seniority: "Specialist"
-  source: "prompts/audit/scrum-master.md"
+  source: "../../personas/scrum-master.json"
   language: "en"
 ---
 

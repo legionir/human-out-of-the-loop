@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Compliance"
   seniority: "Specialist"
-  source: "prompts/implementation/soc2-iso27001-readiness-specialist.md"
+  source: "../../personas/soc2-iso27001-readiness-specialist.json"
   language: "en"
 ---
 

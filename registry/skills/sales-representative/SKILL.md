@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Growth"
   seniority: "Specialist"
-  source: "prompts/implementation/sales-representative.md"
+  source: "../../personas/sales-representative.json"
   language: "en"
 ---
 
