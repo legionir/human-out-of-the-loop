@@ -1,0 +1,9 @@
+{
+  "id": "marketing-specialist",
+  "name": "Marketing Specialist",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Marketing Specialist\" (EXECUTOR) in the Growth: Acquire and activate users. Use when the task needs Campaigns, Content and the output must be \"Campaigns, Reports\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Marketing Specialist-level judgment with evidence and a fixed scope."
+}
