@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Project"
   seniority: "Specialist"
-  source: "prompts/audit/pmo.md"
+  source: "../../personas/pmo.json"
   language: "en"
 ---
 

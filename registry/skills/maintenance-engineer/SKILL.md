@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Senior"
-  source: "prompts/implementation/maintenance-engineer.md"
+  source: "../../personas/maintenance-engineer.json"
   language: "en"
 ---
 

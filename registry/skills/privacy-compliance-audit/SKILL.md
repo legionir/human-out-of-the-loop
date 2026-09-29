@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Privacy & Compliance Audit.md"
+  source: "../../personas/privacy-compliance-audit.json"
   language: "en"
   spec: "composites/privacy-compliance-audit.json"
   generated: true

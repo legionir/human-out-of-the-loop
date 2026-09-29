@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "AI"
   seniority: "Senior"
-  source: "prompts/implementation/mlops-engineer.md"
+  source: "../../personas/mlops-engineer.json"
   language: "en"
 ---
 

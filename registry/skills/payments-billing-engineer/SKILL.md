@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Senior"
-  source: "prompts/implementation/payments-billing-engineer.md"
+  source: "../../personas/payments-billing-engineer.json"
   language: "en"
 ---
 

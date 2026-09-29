@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "DevOps"
   seniority: "Senior"
-  source: "prompts/implementation/observability-engineer.md"
+  source: "../../personas/observability-engineer.json"
   language: "en"
 ---
 

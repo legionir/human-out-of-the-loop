@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Testing"
   seniority: "Senior"
-  source: "prompts/implementation/performance-engineer.md"
+  source: "../../personas/performance-engineer.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Mid"
-  source: "prompts/implementation/mobile-developer.md"
+  source: "../../personas/mobile-developer.json"
   language: "en"
 ---
 

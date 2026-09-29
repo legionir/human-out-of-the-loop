@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "DevOps"
   seniority: "Senior"
-  source: "prompts/implementation/platform-engineer.md"
+  source: "../../personas/platform-engineer.json"
   language: "en"
 ---
 

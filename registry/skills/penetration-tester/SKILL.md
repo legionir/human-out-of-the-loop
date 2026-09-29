@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Security"
   seniority: "Mid"
-  source: "prompts/implementation/penetration-tester.md"
+  source: "../../personas/penetration-tester.json"
   language: "en"
 ---
 

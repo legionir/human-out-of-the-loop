@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Software"
   seniority: "Principal"
-  source: "prompts/audit/principal-engineer.md"
+  source: "../../personas/principal-engineer.json"
   language: "en"
 ---
 

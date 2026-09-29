@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Observability & Monitoring Audit.md"
+  source: "../../personas/observability-monitoring-audit.json"
   language: "en"
   spec: "composites/observability-monitoring-audit.json"
   generated: true

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "DevOps"
   seniority: "Senior"
-  source: "prompts/implementation/on-call-engineer.md"
+  source: "../../personas/on-call-engineer.json"
   language: "en"
 ---
 

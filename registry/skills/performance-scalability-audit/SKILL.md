@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Performance & Scalability Audit.md"
+  source: "../../personas/performance-scalability-audit.json"
   language: "en"
   spec: "composites/performance-scalability-audit.json"
   generated: true

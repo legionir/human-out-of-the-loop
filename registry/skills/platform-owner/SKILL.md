@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Operations"
   seniority: "Specialist"
-  source: "prompts/audit/platform-owner.md"
+  source: "../../personas/platform-owner.json"
   language: "en"
 ---
 

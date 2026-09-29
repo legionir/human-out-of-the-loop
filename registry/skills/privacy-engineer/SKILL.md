@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Security"
   seniority: "Senior"
-  source: "prompts/implementation/privacy-engineer.md"
+  source: "../../personas/privacy-engineer.json"
   language: "en"
 ---
 

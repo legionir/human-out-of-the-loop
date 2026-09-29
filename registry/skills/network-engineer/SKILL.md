@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "DevOps"
   seniority: "Senior"
-  source: "prompts/implementation/network-engineer.md"
+  source: "../../personas/network-engineer.json"
   language: "en"
 ---
 

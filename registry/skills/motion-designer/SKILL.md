@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Design"
   seniority: "Specialist"
-  source: "prompts/implementation/motion-designer.md"
+  source: "../../personas/motion-designer.json"
   language: "en"
 ---
 

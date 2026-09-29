@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Testing"
   seniority: "Lead"
-  source: "prompts/audit/performance-engineering-lead.md"
+  source: "../../personas/performance-engineering-lead.json"
   language: "en"
 ---
 
