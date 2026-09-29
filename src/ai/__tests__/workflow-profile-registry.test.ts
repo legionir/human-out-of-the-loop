@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -41,6 +41,26 @@ describe('Workflow Profile loader and registry', () => {
     try {
       loadWorkflowProfileFile(file, 'builtin');
       throw new Error('expected oversize file to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(WorkflowProfileLoadError);
+      expect((error as WorkflowProfileLoadError).diagnostics[0]?.code).toBe('file.too-large');
+    }
+  });
+
+  it('counts non-ASCII UTF-8 bytes at the exact file-size boundary', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'unicode-boundary.json');
+    const profile = JSON.parse(sourceProfile('unicode-boundary')) as Record<string, any>;
+    profile.profile['x-byte-boundary'] = 'é'.repeat(512);
+    const encoded = Buffer.from(JSON.stringify(profile), 'utf8');
+    expect(encoded.byteLength).toBeLessThan(MAX_WORKFLOW_PROFILE_BYTES);
+    fs.writeFileSync(file, Buffer.concat([encoded, Buffer.alloc(MAX_WORKFLOW_PROFILE_BYTES - encoded.byteLength, 0x20)]));
+    expect(loadWorkflowProfileFile(file, 'builtin').profile.profile.id).toBe('unicode-boundary');
+
+    fs.appendFileSync(file, ' ');
+    try {
+      loadWorkflowProfileFile(file, 'builtin');
+      throw new Error('expected UTF-8 byte cap + 1 to fail');
     } catch (error) {
       expect(error).toBeInstanceOf(WorkflowProfileLoadError);
       expect((error as WorkflowProfileLoadError).diagnostics[0]?.code).toBe('file.too-large');
@@ -166,6 +186,48 @@ describe('Workflow Profile loader and registry', () => {
     } catch (error) {
       expect(error).toBeInstanceOf(WorkflowProfileLoadError);
       expect((error as WorkflowProfileLoadError).diagnostics[0]?.code).toBe('schema-version.unsupported');
+    }
+  });
+
+  it('rejects forged scope values at loader, directory and registry boundaries', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'scope.json');
+    fs.writeFileSync(file, sourceProfile('scope-check'));
+    const invalidScope = expect.objectContaining({ diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'scope.invalid' })]) });
+    expect(() => loadWorkflowProfileFile(file, 'bypass' as any)).toThrow(invalidScope);
+    const loaded = loadWorkflowProfileFile(file, 'builtin');
+    expect(() => new WorkflowProfileRegistry().register({ ...loaded, scope: 'bypass' as any })).toThrow(invalidScope);
+    expect(() => loadWorkflowProfilesFromDirectory({ directory: dir, scope: 'bypass' as any })).toThrow(invalidScope);
+  });
+
+  it('rejects a path replacement race between lstat and open', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'race.json');
+    const backup = path.join(dir, 'race-original.json');
+    const target = path.join(dir, 'untrusted-target.json');
+    fs.writeFileSync(file, sourceProfile('race-original'));
+    fs.writeFileSync(target, sourceProfile('race-target'));
+    const realOpenSync = fs.openSync.bind(fs);
+    let swapped = false;
+    const openSpy = vi.spyOn(fs, 'openSync').mockImplementation(((pathArg: fs.PathLike, flags: string | number, mode?: number) => {
+      if (!swapped && path.resolve(String(pathArg)) === path.resolve(file)) {
+        swapped = true;
+        fs.renameSync(file, backup);
+        fs.copyFileSync(target, file);
+        const descriptor = realOpenSync(pathArg, flags as any, mode);
+        fs.unlinkSync(file);
+        fs.renameSync(backup, file);
+        return descriptor;
+      }
+      return realOpenSync(pathArg, flags as any, mode);
+    }) as typeof fs.openSync);
+    try {
+      expect(() => loadWorkflowProfileFile(file, 'builtin')).toThrow(WorkflowProfileLoadError);
+      expect(swapped).toBe(true);
+    } finally {
+      openSpy.mockRestore();
+      if (fs.existsSync(file) && fs.lstatSync(file).isSymbolicLink()) fs.unlinkSync(file);
+      if (fs.existsSync(backup)) fs.renameSync(backup, file);
     }
   });
 

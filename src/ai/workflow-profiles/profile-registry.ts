@@ -10,6 +10,16 @@ import type {
 
 export const MAX_WORKFLOW_PROFILE_BYTES = 1_048_576;
 
+const WORKFLOW_PROFILE_SCOPES: ReadonlySet<string> = new Set(['builtin', 'project', 'user-selected']);
+
+function assertWorkflowProfileScope(scope: unknown, file?: string): asserts scope is WorkflowProfileScope {
+  if (typeof scope === 'string' && WORKFLOW_PROFILE_SCOPES.has(scope)) return;
+  const message = `Invalid workflow profile scope ${JSON.stringify(scope)}; expected builtin, project, or user-selected`;
+  throw new WorkflowProfileLoadError(message, [{
+    stage: 'read', code: 'scope.invalid', message, file,
+  }]);
+}
+
 export interface RegisteredWorkflowProfile {
   readonly profile: Readonly<WorkflowProfileDocument>;
   readonly scope: WorkflowProfileScope;
@@ -27,6 +37,7 @@ export class WorkflowProfileRegistry {
   private readonly byId = new Map<string, RegisteredWorkflowProfile>();
 
   register(entry: RegisteredWorkflowProfile): void {
+    assertWorkflowProfileScope((entry as { scope?: unknown }).scope, typeof entry?.file === 'string' ? entry.file : undefined);
     const id = entry.profile.profile.id;
     const structuralDiagnostics = validateWorkflowProfileStructure(entry.profile).map((diagnostic) => ({ ...diagnostic, file: entry.file }));
     if (structuralDiagnostics.length) {
@@ -69,6 +80,16 @@ export interface WorkflowProfileDirectoryOptions {
   projectOptIn?: boolean;
 }
 
+function sameFileObject(left: fs.Stats, right: fs.Stats): boolean {
+  return left.isFile() && right.isFile() && left.dev === right.dev && left.ino === right.ino;
+}
+
+function changedDuringOpen(file: string): WorkflowProfileLoadError {
+  return new WorkflowProfileLoadError(`Workflow profile path changed while being opened: ${file}`, [{
+    stage: 'read', code: 'file.changed-during-open', message: 'Profile path must continue to identify the same regular file that was checked before opening', file,
+  }]);
+}
+
 function deepFreeze<T>(value: T, seen = new WeakSet<object>()): T {
   if (!value || typeof value !== 'object') return value;
   const object = value as object;
@@ -94,7 +115,11 @@ export function readWorkflowProfileUtf8(file: string): string {
 
   let fd: number;
   try {
-    fd = fs.openSync(file, 'r');
+    // O_NOFOLLOW closes the lstat/open symlink race where supported. The
+    // before/after identity checks below also reject replacement races on
+    // platforms where the flag is unavailable.
+    const flags = fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0);
+    fd = fs.openSync(file, flags);
   } catch (error) {
     throw new WorkflowProfileLoadError(`Cannot open workflow profile "${file}": ${error instanceof Error ? error.message : String(error)}`, [{
       stage: 'read', code: 'file.unreadable', message: `Cannot open profile file: ${error instanceof Error ? error.message : String(error)}`, file,
@@ -105,6 +130,13 @@ export function readWorkflowProfileUtf8(file: string): string {
     if (!stat.isFile()) throw new WorkflowProfileLoadError(`Workflow profile is not a regular file: ${file}`, [{
       stage: 'read', code: 'file.not-regular', message: 'Profile path must be a regular file', file,
     }]);
+    let currentPathStat: fs.Stats;
+    try {
+      currentPathStat = fs.lstatSync(file);
+    } catch {
+      throw changedDuringOpen(file);
+    }
+    if (!sameFileObject(linkStat, stat) || !sameFileObject(stat, currentPathStat)) throw changedDuringOpen(file);
     if (stat.size > MAX_WORKFLOW_PROFILE_BYTES) throw tooLarge(file, stat.size);
 
     const buffer = Buffer.allocUnsafe(MAX_WORKFLOW_PROFILE_BYTES + 1);
@@ -134,6 +166,7 @@ function tooLarge(file: string, actualBytes: number): WorkflowProfileLoadError {
 }
 
 export function loadWorkflowProfileFile(file: string, scope: WorkflowProfileScope): RegisteredWorkflowProfile {
+  assertWorkflowProfileScope(scope, file);
   const text = readWorkflowProfileUtf8(file);
   const structural = validateWorkflowProfileJson(text, file);
   if (!structural.ok || !structural.profile) throw new WorkflowProfileLoadError(`Invalid workflow profile "${file}"`, structural.diagnostics);
@@ -150,6 +183,7 @@ export function loadWorkflowProfileFile(file: string, scope: WorkflowProfileScop
  */
 export function loadWorkflowProfilesFromDirectory(options: WorkflowProfileDirectoryOptions): WorkflowProfileRegistry {
   const { directory, scope, projectOptIn = false } = options;
+  assertWorkflowProfileScope(scope, directory);
   if (scope === 'project' && projectOptIn !== true) {
     throw new WorkflowProfileLoadError('Project workflow profiles require explicit opt-in before discovery', [{
       stage: 'read', code: 'project-profile.opt-in-required', message: 'Project profile directory was not read because explicit opt-in is required', file: directory,
