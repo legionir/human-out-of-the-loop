@@ -14,7 +14,7 @@ const WORKFLOW_PROFILE_SCOPES: ReadonlySet<string> = new Set(['builtin', 'projec
 
 function assertWorkflowProfileScope(scope: unknown, file?: string): asserts scope is WorkflowProfileScope {
   if (typeof scope === 'string' && WORKFLOW_PROFILE_SCOPES.has(scope)) return;
-  const message = `Invalid workflow profile scope ${JSON.stringify(scope)}; expected builtin, project, or user-selected`;
+  const message = 'Invalid workflow profile scope; expected builtin, project, or user-selected';
   throw new WorkflowProfileLoadError(message, [{
     stage: 'read', code: 'scope.invalid', message, file,
   }]);
@@ -48,17 +48,30 @@ export class WorkflowProfileRegistry {
   }
 
   register(entry: RegisteredWorkflowProfile): void {
-    assertWorkflowProfileScope((entry as { scope?: unknown }).scope, typeof entry?.file === 'string' ? entry.file : undefined);
-    if (entry.scope === 'project' && this.projectOptIn !== true) throw projectOptInRequired(entry.file);
-    const id = entry.profile.profile.id;
-    const structuralDiagnostics = validateWorkflowProfileStructure(entry.profile).map((diagnostic) => ({ ...diagnostic, file: entry.file }));
-    if (structuralDiagnostics.length) {
-      throw new WorkflowProfileLoadError(`Structurally invalid workflow profile "${entry.file}"`, structuralDiagnostics);
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new WorkflowProfileLoadError('Invalid workflow profile registry entry', [{
+        stage: 'read', code: 'registry.entry-invalid', message: 'Registry entry must be an object containing scope, file, and profile',
+      }]);
     }
+    const file = typeof entry.file === 'string' && entry.file.length > 0 ? entry.file : undefined;
+    if (file === undefined) {
+      throw new WorkflowProfileLoadError('Invalid workflow profile registry entry', [{
+        stage: 'read', code: 'registry.entry-invalid', message: 'Registry entry must include a non-empty file identifier',
+      }]);
+    }
+    assertWorkflowProfileScope((entry as { scope?: unknown }).scope, file);
+    if (entry.scope === 'project' && this.projectOptIn !== true) throw projectOptInRequired(file);
+    const structuralDiagnostics = validateWorkflowProfileStructure(entry.profile).map((diagnostic) => ({ ...diagnostic, file }));
+    if (structuralDiagnostics.length) {
+      throw new WorkflowProfileLoadError(`Structurally invalid workflow profile "${file}"`, structuralDiagnostics);
+    }
+    // Read profile-controlled values only after structural validation, so a malformed
+    // in-memory caller cannot escape as a raw TypeError before diagnostics are formed.
+    const id = entry.profile.profile.id;
     const version = entry.profile.schemaVersion;
     const match = typeof version === 'string' ? /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(version) : null;
     if (!match || Number(match[1]) !== SUPPORTED_SCHEMA_MAJOR || Number(match[2]) !== SUPPORTED_SCHEMA_MINOR) {
-      throw new WorkflowProfileLoadError(`Unsupported workflow profile schema version ${JSON.stringify(version)}`, [{
+      throw new WorkflowProfileLoadError(`Unsupported workflow profile schema version ${typeof version === 'string' ? version : '<missing or invalid>'}`, [{
         stage: 'schema-version', code: 'schema-version.unsupported',
         message: `Supported contract is ${SUPPORTED_SCHEMA_MAJOR}.${SUPPORTED_SCHEMA_MINOR}.x`,
         profileId: id, file: entry.file, path: '/schemaVersion',

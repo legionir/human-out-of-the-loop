@@ -1,6 +1,6 @@
 # Workflow Profiles — Phase 1 Baseline & Decision Register
 
-**Status:** 🟡 Phase 1 in progress; implementation is intentionally stopped before Phase 2 until the owner decisions below are resolved.
+**Status at initial baseline (historical):** 🟡 Phase 1 was in progress and Phase 2 was blocked pending owner decisions; later completion and superseding status are recorded in §8 and the Phase 1 completion handoff.
 **Baseline:** `main` at `ff7c030afaa20b8a343cdb090b3b2db16384279e` (2026-09-29).
 **Scope:** discovery, design traceability, and a reversible architecture spike only. No Runtime code or existing behavior changed in this phase.
 

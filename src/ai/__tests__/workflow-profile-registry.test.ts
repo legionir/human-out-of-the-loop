@@ -120,6 +120,27 @@ describe('Workflow Profile loader and registry', () => {
     expect(() => new WorkflowProfileRegistry().register({ ...loaded, profile: invalid })).toThrow(/invalid workflow profile/i);
   });
 
+  it('rejects malformed in-memory registry entries with diagnostics instead of raw TypeErrors', () => {
+    const registry = new WorkflowProfileRegistry();
+    const invalidEntries: unknown[] = [
+      undefined,
+      null,
+      'not-an-entry',
+      {},
+      { scope: 'builtin', file: '' },
+      { scope: 'builtin', file: 'missing-profile.json', profile: undefined },
+      { scope: 'builtin', file: 'malformed-profile.json', profile: { profile: undefined } },
+    ];
+
+    for (const entry of invalidEntries) {
+      expect(() => registry.register(entry as any)).toThrow(WorkflowProfileLoadError);
+    }
+    let error: unknown;
+    try { registry.register(undefined as any); } catch (caught) { error = caught; }
+    expect(error).toBeInstanceOf(WorkflowProfileLoadError);
+    expect((error as WorkflowProfileLoadError).diagnostics.map((item) => item.code)).toContain('registry.entry-invalid');
+  });
+
   it('fails closed for the whole directory on malformed, inaccessible, or duplicate profile entries', () => {
     const dir = tempDir();
     fs.writeFileSync(path.join(dir, 'a.json'), sourceProfile('same'));
