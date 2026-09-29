@@ -18,7 +18,7 @@
 
 # Execution Plan
 
-## [🟡] Phase 1: تثبیت baseline و قرارداد معماری پروفایل
+## [🟢] Phase 1: تثبیت baseline و قرارداد معماری پروفایل
 
 پیش از پیاده‌سازی، وضعیت دقیق کد، نقاط اتصال موجود، اسناد اجرایی و وابستگی‌های باز را تثبیت کن. قرارداد باید Workflow Profile را لایهٔ پیکربندی روی Runtime فعلی تعریف کند، نه موتور اجرای موازی. خروجی این فاز تصمیم‌های ثبت‌شده، دامنهٔ نسخهٔ اول و به‌روزرسانی غیرمخرب طرح اجرایی پروژه است.
 
@@ -40,7 +40,7 @@ Schema را با semantics مشترک این سند نهایی کن: seven node 
 
 به‌صورت read-only/آزمایشی، یک spike محدود و قابل‌بازگشت روی PlanRuntime واقعی اجرا/طراحی کن: آیا state machine بیرونی می‌تواند intake→plan→execute→review و یک بازگشت bounded را بدون flatten کردن Plan DAG، duplicate scheduler یا تغییر semantics PlanRuntime هدایت کند؟ Workflow Profile گراف کنترل بیرونی است؛ PlanRuntime همچنان DAG وابستگی درونی هر plan را اجرا می‌کند. ثبت کن کدام lifecycle (approval، re-plan، cancellation، resume، resource lock و status) در Runtime مشترک می‌ماند. نتیجهٔ spike و شواهد را در Decision Register ثبت کن؛ اگر reuse امن/واقعی ممکن نیست، فازهای وابسته را متوقف کن تا تصمیم معماری مالک ثبت شود، نه اینکه engine موازی بسازی. هر feature flag موجود و نقطهٔ مناسب آن را نیز از کد بیاب؛ flag تازه باید default-off باشد. **یافته و تصمیم (2026-09-29):** `Orchestrator.run()` composite است و facade مرحله‌ای عمومی ندارد؛ `PlanRuntime.execute()` تنها اجرای DAG داخلیِ plan تأییدشده را بر عهده دارد. مالک seam موردنیاز را تأیید کرد: adapter داخلی و محدود به سرویس‌های فعلی، بدون API عمومی/generic و بدون scheduler دوم؛ PlanRuntime همچنان scheduler یگانهٔ DAG داخلی است. این Step یک read-only design spike است، نه اثبات integration اجرایی؛ آزمون اتصال واقعی در فازهای Runtime مربوط انجام می‌شود. Profile flag موجودی یافت نشد؛ `HOTL_NO_PACKAGE_REGISTRY` flag اجرای Profile نیست. شواهد کامل در `PHASE1_BASELINE.md`.
 
-### [🟡] Step 5: ثبت traceability و plan در مرجع پروژه
+### [🟢] Step 5: ثبت traceability و plan در مرجع پروژه
 
 پس از شناخت branch هدف، `R-xxx` و Decision/Unknown Register را به مرجع اجرایی canonical مخزن وصل کن (در baseline فعلی `docs/UNIFIED_EXECUTION_PLAN.md` چنین جایگاهی دارد). متن/statusهای موجود را حذف یا بازنویسی نکن؛ source audit، شناسه‌های موجود و مسیرهای تأیید را حفظ کن. همین سند، فازبندی PRها و تصمیم‌های حل‌شده/باز را در مسیر مستندات مناسب قابل‌ردیابی کن. برای هر unknown مالک و موعد لازم پیش از اولین dependent step ثبت شود. **وضعیت 2026-09-29:** جدول traceability اولیه با WP-R-001…013 و register به `docs/UNIFIED_EXECUTION_PLAN.md` به‌شکل append-only افزوده می‌شود؛ سند جزئیات و evidence نیز `docs/workflow-profiles/PHASE1_BASELINE.md` است. این Step تا review/merge این PR زرد است.
 
@@ -51,23 +51,23 @@ baseline branch/commit و وضعیت PRها ثبت شده؛ مسیرهای وا�
 
 ---
 
-## [🔴] Phase 2: قرارداد JSON، بارگذار Profile و اعتبارسنجی معنایی
+## [🟡] Phase 2: قرارداد JSON، بارگذار Profile و اعتبارسنجی معنایی
 
 پیاده‌سازی قرارداد داده‌ای پایدار و قابل‌انتقال برای Profileها و مسیر کشف/بارگذاری آن‌ها بر اساس الگوی registry موجود. این فاز نباید اجرای workflow را فعال کند؛ پروفایل نامعتبر باید پیش از اجرا با خطای تشخیصی و قابل‌اقدام رد شود.
 
-### [🔴] Step 1: افزودن Schema و fixtures مطابق semantics v1
+### [🟡] Step 1: افزودن Schema و fixtures مطابق semantics v1
 
 JSON Schema Draft 2020-12، نمونهٔ پیش‌فرض ساختاری و fixtures شاخه/condition/approval/loop/error-route را اضافه کن. `schemaVersion` را از Profile semver جدا نگه دار؛ `$schema` و فقط namespace توسعهٔ `x-*` را با policy مالک‌تأییدشده مجاز کن: scalarهای JSON، حداکثر ۱۶ فیلد توسعه‌ای در هر object، string حداکثر ۱۰۲۴ نویسه؛ آرایه/object و محتوای اجرایی رد شوند. schema version diagnostic را از parse/validation جدا کن. همهٔ limitهای صریح nodes/edges/dependencies/ports/maps/values را نگه دار و loader-level cap مصوب 1 MiB (1,048,576 UTF-8 bytes) را پیش از parse enforce کن و تست دقیقاً روی cap و cap+1 اضافه کن؛ این مقدار با تصمیم ثبت‌شدهٔ مالک تعیین شده است. Schema باید v1 exclusionهای no-inheritance/no-templates/no-sub-workflows/no-parallelism را مستند کند. هر نمونه از Schema و سپس semantic test suite عبور کند؛ نمونهٔ default تا Phase 7 صرفاً structural sample بماند.
 
-### [🔴] Step 2: هم‌ترازکردن اعتبارسنجی runtime و JSON Schema
+### [🟡] Step 2: هم‌ترازکردن اعتبارسنجی runtime و JSON Schema
 
 مسیر اعتبارسنجی runtime را با روش پذیرفته‌شدهٔ Phase 1 پیاده کن. JSON Schema و validator نباید قراردادهای متناقض داشته باشند: یا یک منبع حقیقت با تولید/مصرف سازگار ایجاد شود یا آزمون parity کامل، اختلاف آن‌ها را آشکار کند. schema validation را از semantic validation جدا کن و خطاها را شامل profile ID، node/edge/field و علت مشخص ساز.
 
-### [🔴] Step 3: افزودن خواندن و کشف Profile در Registry
+### [🟡] Step 3: افزودن خواندن و کشف Profile در Registry
 
 Profileها را از scopeهای تصویب‌شده بخوان و با ترتیب precedence فعلی registry (package سپس project override) هماهنگ کن، مگر تصمیم Phase 1 خلاف آن را مستند کرده باشد. خطای JSON خراب، ID تکراری، profile override مبهم، نسخهٔ schema/Runtime پشتیبانی‌نشده و فایل غیرقابل‌دسترسی را ایمن و قابل‌تشخیص مدیریت کن. دادهٔ بارگذاری‌شده را immutable/validated به لایه‌های بعدی بده و هیچ فایل یا محتوایی را به‌عنوان کد اجرا نکن.
 
-### [🔴] Step 4: Semantic validator و آزمون‌های قراردادی مثبت/منفی
+### [🟡] Step 4: Semantic validator و آزمون‌های قراردادی مثبت/منفی
 
 Semantic validator را مستقل از اجرای مدل/ابزار پیاده کن و برای همهٔ موارد زیر assertion آزمون‌پذیر داشته باش: یکتایی IDهای node و یکتایی dependency `(kind,id)` حتی با نسخهٔ متفاوت؛ یکتایی `counterId`؛ وجود start و endpointها؛ یکتایی نام port در تعریف‌ها؛ هر mapping به port موجود در source/target، عمق دقیقاً یک، پوشش همهٔ required inputs در هر transition و سازگاری `required`/نوع/enum؛ عملگر predicate سازگار با نوع port؛ decision enum برابر دامنهٔ مجاز rubric؛ وجود/قابل‌دسترسی‌بودن end و دقیقاً یک result برای هر end با port/outcome منطبق و emit کامل؛ شرط‌های reachable و routeهای کامل؛ حداکثر یک default/source و تعیین کامل دامنه (پوشش تمام enum/boolean values یا default برای دامنهٔ باز)، درحالی‌که overlap با first-match مجاز و deterministic است؛ error route target/map/type/required-input و ممنوعیت چرخهٔ error-route؛ retry shape، retryOn، attempt count و منع retry/route برای security denial/cancel؛ JSON Pointer سطح‌اول معتبر؛ integrity و نسخهٔ dependency؛ و limitهای اندازه و budget. چرخه‌های گراف کنترلی را با normal edge، exhaustion route و error transition تحلیل کن: در هر دور باید یک loop counter محدود و monotonic مصرف شود؛ مسیرِ بدون مصرف counter درون همان state رد شود. کران محافظه‌کارانه با saturating arithmetic برابر `|nodes| × Π(1 + maxIterations_i)` است؛ profile وقتی رد شود که کران از `maxNodeVisits` بیشتر باشد؛ Runtime نیز `maxNodeVisits` را مستقل و سخت enforce کند. ارجاع‌های خارجی از نظر shape اینجا و resolution واقعی در Phase 3 بررسی شوند. هیچ expression/callback/code پذیرفته نشود.
 
