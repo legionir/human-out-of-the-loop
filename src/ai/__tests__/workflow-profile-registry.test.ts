@@ -80,6 +80,24 @@ describe('Workflow Profile loader and registry', () => {
     expect(() => registry.register(project)).toThrow(/duplicate workflow profile id/i);
   });
 
+  it('revalidates and copies profiles registered through the public registry boundary', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'valid.json');
+    fs.writeFileSync(file, sourceProfile('direct-registration'));
+    const loaded = loadWorkflowProfileFile(file, 'builtin');
+    const callerOwned = structuredClone(loaded.profile);
+    const registry = new WorkflowProfileRegistry();
+    registry.register({ ...loaded, profile: callerOwned });
+    expect(Object.isFrozen(registry.get('direct-registration')?.profile)).toBe(true);
+    expect(Object.isFrozen(callerOwned)).toBe(false);
+    callerOwned.profile.name = 'mutated after register';
+    expect(registry.get('direct-registration')?.profile.profile.name).not.toBe('mutated after register');
+
+    const invalid = structuredClone(loaded.profile) as any;
+    invalid.workflow.startNode = 'missing-node';
+    expect(() => new WorkflowProfileRegistry().register({ ...loaded, profile: invalid })).toThrow(/invalid workflow profile/i);
+  });
+
   it('fails closed for the whole directory on malformed, inaccessible, or duplicate profile entries', () => {
     const dir = tempDir();
     fs.writeFileSync(path.join(dir, 'a.json'), sourceProfile('same'));
@@ -118,5 +136,6 @@ describe('Workflow Profile loader and registry', () => {
     expect(selectWorkflowProfile(registry, { projectOptIn: true, projectDefaultProfileId: 'project-default', builtInDefaultProfileId: 'built-in-default' }).profile.profile.id).toBe('project-default');
     expect(selectWorkflowProfile(registry, { builtInDefaultProfileId: 'built-in-default' }).profile.profile.id).toBe('built-in-default');
     expect(() => selectWorkflowProfile(registry, { requestedProfileId: 'project-default', projectOptIn: false, builtInDefaultProfileId: 'built-in-default' })).toThrow(/opt-in/i);
+    expect(() => selectWorkflowProfile(registry, { projectOptIn: true, projectDefaultProfileId: 'user-choice', builtInDefaultProfileId: 'built-in-default' })).toThrow(/not project-scoped/i);
   });
 });

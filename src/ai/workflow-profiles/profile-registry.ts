@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { validateWorkflowProfileJson } from './profile-schema-validator.js';
+import { SUPPORTED_SCHEMA_MAJOR, SUPPORTED_SCHEMA_MINOR, validateWorkflowProfileStructure } from './profile-schema-validator.js';
 import { validateWorkflowProfileSemantics } from './profile-semantic-validator.js';
 import type {
   WorkflowProfileDiagnostic,
@@ -28,13 +28,31 @@ export class WorkflowProfileRegistry {
 
   register(entry: RegisteredWorkflowProfile): void {
     const id = entry.profile.profile.id;
+    const structuralDiagnostics = validateWorkflowProfileStructure(entry.profile).map((diagnostic) => ({ ...diagnostic, file: entry.file }));
+    if (structuralDiagnostics.length) {
+      throw new WorkflowProfileLoadError(`Structurally invalid workflow profile "${entry.file}"`, structuralDiagnostics);
+    }
+    const version = entry.profile.schemaVersion;
+    const match = typeof version === 'string' ? /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(version) : null;
+    if (!match || Number(match[1]) !== SUPPORTED_SCHEMA_MAJOR || Number(match[2]) !== SUPPORTED_SCHEMA_MINOR) {
+      throw new WorkflowProfileLoadError(`Unsupported workflow profile schema version ${JSON.stringify(version)}`, [{
+        stage: 'schema-version', code: 'schema-version.unsupported',
+        message: `Supported contract is ${SUPPORTED_SCHEMA_MAJOR}.${SUPPORTED_SCHEMA_MINOR}.x`,
+        profileId: id, file: entry.file, path: '/schemaVersion',
+      }]);
+    }
+    const semanticDiagnostics = validateWorkflowProfileSemantics(entry.profile).map((diagnostic) => ({ ...diagnostic, file: entry.file }));
+    if (semanticDiagnostics.length) {
+      throw new WorkflowProfileLoadError(`Semantically invalid workflow profile "${entry.file}"`, semanticDiagnostics);
+    }
     if (this.byId.has(id)) {
       throw new WorkflowProfileLoadError(`Duplicate workflow profile id "${id}"`, [{
         stage: 'semantic', code: 'registry.duplicate-id', message: `Duplicate workflow profile id "${id}"`,
         profileId: id, file: entry.file, path: '/profile/id',
       }]);
     }
-    this.byId.set(id, Object.freeze({ ...entry }));
+    const immutableProfile = deepFreeze(structuredClone(entry.profile));
+    this.byId.set(id, Object.freeze({ ...entry, profile: immutableProfile }));
   }
 
   get(id: string): RegisteredWorkflowProfile | undefined { return this.byId.get(id); }
@@ -202,7 +220,13 @@ export function selectWorkflowProfile(
 
   if (options.requestedProfileId !== undefined) return requireEligible(options.requestedProfileId, 'explicitly selected');
   if (options.projectOptIn === true && options.projectDefaultProfileId !== undefined) {
-    return requireEligible(options.projectDefaultProfileId, 'project default');
+    const projectDefault = requireEligible(options.projectDefaultProfileId, 'project default');
+    if (projectDefault.scope !== 'project') throw new WorkflowProfileLoadError(`Project default profile "${options.projectDefaultProfileId}" is not project-scoped`, [{
+      stage: 'semantic', code: 'selection.default-not-project',
+      message: 'A project default must be registered from the project scope', profileId: options.projectDefaultProfileId,
+      file: projectDefault.file, path: '/profile/id',
+    }]);
+    return projectDefault;
   }
   if (options.builtInDefaultProfileId) {
     const fallback = requireEligible(options.builtInDefaultProfileId, 'built-in default');
