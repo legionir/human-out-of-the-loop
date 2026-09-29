@@ -1,0 +1,9 @@
+{
+  "id": "customer-support-agent",
+  "name": "Customer Support Agent",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Customer Support Agent\" (EXECUTOR) in the Support: Resolve user issues. Use when the task needs Ticket Handling, Communication and the output must be \"Resolution, Ticket\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Customer Support Agent-level judgment with evidence and a fixed scope."
+}

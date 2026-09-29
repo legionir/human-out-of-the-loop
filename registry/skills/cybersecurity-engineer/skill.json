@@ -1,0 +1,9 @@
+{
+  "id": "cybersecurity-engineer",
+  "name": "Cybersecurity Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Cybersecurity Engineer\" (EXECUTOR) in the Security: Reduce cyber risk. Use when the task needs Endpoint, Network, Application Security and the output must be \"Security Status, Incidents\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Cybersecurity Engineer-level judgment with evidence and a fixed scope."
+}

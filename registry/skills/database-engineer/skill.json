@@ -1,0 +1,9 @@
+{
+  "id": "database-engineer",
+  "name": "Database Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Database Engineer\" (EXECUTOR) in the Data: Design the data layer. Use when the task needs Schema, Query, Index and the output must be \"Schema, Queries\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Database Engineer-level judgment with evidence and a fixed scope."
+}

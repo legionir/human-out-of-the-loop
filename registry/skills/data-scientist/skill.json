@@ -1,0 +1,9 @@
+{
+  "id": "data-scientist",
+  "name": "Data Scientist",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Data Scientist\" (EXECUTOR) in the AI: Extract insights and predictive models. Use when the task needs Analysis, Modeling and the output must be \"Analysis, Model\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Data Scientist-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,9 @@
+{
+  "id": "community-manager",
+  "name": "Community Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Community Manager\" (EXECUTOR) in the Support: Build healthy engagement with users. Use when the task needs Community, Feedback and the output must be \"Community Reports\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Community Manager-level judgment with evidence and a fixed scope."
+}

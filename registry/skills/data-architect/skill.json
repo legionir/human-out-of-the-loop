@@ -1,0 +1,9 @@
+{
+  "id": "data-architect",
+  "name": "Data Architect",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Data Architect\" (SUPERVISOR) in the Architecture: Establish data strategy. Use when the task needs Data Architecture, Governance and the output must be \"Data Architecture\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Data Architect-level judgment with evidence and a fixed scope."
+}

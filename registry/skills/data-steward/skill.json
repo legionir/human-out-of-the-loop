@@ -1,0 +1,16 @@
+{
+  "id": "data-steward",
+  "name": "Data Steward",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"Data Steward\" (EXECUTOR) in the Data: Make each data domain correct, defined, and safely reachable. Use when the task needs Business definitions versus what the systems actually store, Quality rules: completeness, accuracy, timeliness, uniqueness per domain, Access requests and whether grants match the stated purpose and the output must be \"Domain Output\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Data Steward-level judgment with evidence and a fixed scope."
+}

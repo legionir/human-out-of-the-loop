@@ -1,0 +1,25 @@
+{
+  "id": "data-database-integrity-audit",
+  "name": "Data & Database Integrity Audit — Master Prompt (v1)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Evidence-based audit of data correctness and persistence: schema and migration safety, constraints and invariants, transactional boundaries, consistency between stores, backup and restore verification, retention and deletion, locking and concurrency effects on data, growth and cost. Use before a migration or schema change, after data corruption or sync issues, when adding a second datastore, or when backups have never been restored. Read-only; never mutate production data."
+}

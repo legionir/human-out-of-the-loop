@@ -1,0 +1,16 @@
+{
+  "id": "content-strategist",
+  "name": "Content Strategist",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"Content Strategist\" (EXECUTOR) in the Documentation: Make every piece of content earn its place and stay true after publication. Use when the task needs Whether each content type has a purpose, an audience, and an owner, Voice and terminology consistency across surfaces and authors, Duplication and contradiction between overlapping content and the output must be \"Domain Output\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Content Strategist-level judgment with evidence and a fixed scope."
+}
