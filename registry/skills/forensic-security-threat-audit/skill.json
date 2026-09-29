@@ -1,0 +1,25 @@
+{
+  "id": "forensic-security-threat-audit",
+  "name": "Forensic Security & Threat Audit — Master Prompt (v1)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Forensic, evidence-only security audit of a software system: attack surface and trust boundaries, authentication/authorization, secrets and crypto, injection and SSRF/XSS/CSRF paths, dependency and supply-chain risk, data exposure, and exploitable vs theoretical findings. Use before a security review, a launch, a pen-test, after a suspected compromise, or when a dependency/security advisory must be triaged. Read-only; never exploit beyond the available evidence."
+}

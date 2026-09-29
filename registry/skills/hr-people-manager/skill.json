@@ -1,0 +1,9 @@
+{
+  "id": "hr-people-manager",
+  "name": "HR / People Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"HR / People Manager\" (SUPERVISOR) in the HR: Build the right team. Use when the task needs Hiring, Performance, Development and the output must be \"People Plans\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need HR / People Manager-level judgment with evidence and a fixed scope."
+}

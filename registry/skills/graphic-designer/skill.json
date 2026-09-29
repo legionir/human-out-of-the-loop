@@ -1,0 +1,9 @@
+{
+  "id": "graphic-designer",
+  "name": "Graphic Designer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Graphic Designer\" (EXECUTOR) in the Design: Create visual assets. Use when the task needs Icons, Illustrations, Banners and the output must be \"Graphic Assets\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Graphic Designer-level judgment with evidence and a fixed scope."
+}
