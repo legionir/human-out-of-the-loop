@@ -74,3 +74,20 @@ Run `36642042670`, attempt 2, completed successfully on head `b49cf7eecfe8855c20
 **Delegated conservative decision — `result.kind` to end-port type:** code and examples did not define a mapping. Under Pouya's standing authorization to apply conservative recommendations, v1 now uses a closed semantic mapping: `response` → `string|number|integer|boolean|object|array`; `artifact` → `artifact|file`; `proposal` and `handoff` → `object`. `any` is rejected for all kinds. This preserves every existing sample (`response/object`, `handoff/object`) and prevents a kind label from blessing an opaque or unrelated output. The JSON Schema remains structural; the separate semantic validator emits `result.kind-type-mismatch` at `/result/{i}/kind` when a declared end-output port falls outside the table. Tests cover accepted/rejected type combinations and verify structural Schema acceptance is separate from semantic rejection. This mapping is a conservative agent disposition under the delegated authority, not evidence of pre-existing Runtime semantics; it does not authorize execution.
 
 **Current implementation status:** the mapping, types, tests and this status clarification are being prepared on top of `b49cf7e`. Fresh CI and final read-only diff review are required on the resulting head. Phase 2 remains 🟡. Before Runtime integration, host-guaranteed stable, trusted, non-attacker-writable roots and the authoritative Runtime compatibility/enforcement contract must still be verified. No file or branch deletion, Runtime integration, Phase 3, approval, or merge is claimed.
+
+
+## Superseding decision and CI status correction (2026-09-30; append-only)
+
+This addendum supersedes conflicting unresolved/"being prepared" statements in earlier historical sections; their chronology is retained.
+
+Pouya delegated remaining design decisions to the agent's conservative recommendations. The final Phase 2 dispositions are:
+
+- Duplicate Profile IDs fail closed globally; no scope overrides another.
+- `profile.runtime` is optional syntax-only, non-operative metadata in Phase 2. No package-version comparison, compatibility claim, or activation authorization is made; the authoritative Runtime compatibility/enforcement contract remains a pre-integration gate.
+- `result.kind` is now implemented as a closed semantic mapping: `response` → `string|number|integer|boolean|object|array`; `artifact` → `artifact|file`; `proposal` and `handoff` → `object`; `any` is rejected. Semantic validation emits `result.kind-type-mismatch`; Schema validation remains structural.
+- Review routing requires every allowed decision to have a selectable first-match route (priority ascending, then definition order), with a valid selected target and mapping. A unique destination per decision is not required. Runtime execution semantics require Phase 4 tests.
+- Trusted-host Option 1 is selected: the trusted host derives scope and supplies the root; the loader does not authenticate provenance. Stable trusted roots not writable by an attacker must be demonstrated before Runtime integration. Directory replacement and same-inode writes are not claimed as prevented.
+
+CI run `36643719995` is on head `316ce64af65b2c3497d56b19cbc97d33f9ca42e1`, attempt 2. Attempt 1 completed 9/10: the sole failure was Windows Node 22 at `G-14 usage API equals CLI jsonl` / `GET /api/usage?planId matches collectProjectUsage`, which timed out after 5 seconds; Profile-specific suites passed. At the latest check, attempt 2 was still `in_progress`; its Windows Node 22 setup/typecheck succeeded and unit/integration was running. The log was not yet available, so no final rerun conclusion is claimed. CI remains a gate.
+
+Phase 2 remains 🟡 pending completion/assessment of that CI attempt, a fresh CI run on any resulting documentation head, and final acceptance. Runtime behavior tests for tie order, retry exhaustion, denial/cancellation routing, nested loops, and hard visit caps belong to Phase 4; Phase 2's acceptance evidence is static validation only. No file or branch deletion, Runtime integration, Phase 3, approval, or merge is claimed.

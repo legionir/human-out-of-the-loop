@@ -65,7 +65,7 @@ JSON Schema Draft 2020-12، نمونهٔ پیش‌فرض ساختاری و fixtu
 
 ### [🟡] Step 3: افزودن خواندن و کشف Profile در Registry
 
-Profileها را مطابق تصمیم قطعی D-WP-003 انتخاب کن: انتخاب صریح کاربر، سپس project profile فقط با opt-in صریح، سپس built-in default؛ در هر اجرا فقط یک Profile فعال است. precedence رجیستری Persona/Skill موجود را به‌عنوان قرارداد Profile تفسیر نکن. پیاده‌سازی Phase 2 شناسهٔ Profile تکراری را بین scopeها fail-closed رد می‌کند؛ این رفتار پیش‌فرض ایمن است، اما اگر مالک override یا disambiguation دیگری بخواهد باید قرارداد را صریحاً مشخص کند. خطای JSON خراب، ID تکراری، نسخهٔ schema/Runtime پشتیبانی‌نشده و فایل غیرقابل‌دسترسی را ایمن و قابل‌تشخیص مدیریت کن. دادهٔ بارگذاری‌شده را immutable/validated به لایه‌های بعدی بده و هیچ فایل یا محتوایی را به‌عنوان کد اجرا نکن.
+Profileها را مطابق تصمیم قطعی D-WP-003 انتخاب کن: انتخاب صریح کاربر، سپس project profile فقط با opt-in صریح، سپس built-in default؛ در هر اجرا فقط یک Profile فعال است. precedence رجیستری Persona/Skill موجود را به‌عنوان قرارداد Profile تفسیر نکن. شناسهٔ Profile تکراری در تمام scopeها با fail-closed رد می‌شود؛ selection precedence مجوز override یا disambiguation نیست. خطای JSON خراب، ID تکراری، نسخهٔ Schema نامعتبر/پشتیبانی‌نشده و فایل غیرقابل‌دسترسی را ایمن و قابل‌تشخیص مدیریت کن. فیلد اختیاری `profile.runtime` در Phase 2 صرفاً metadata نحوی و غیرعملیاتی است و مبنای activation یا مقایسه با نسخهٔ package نیست. دادهٔ بارگذاری‌شده را immutable/validated به لایه‌های بعدی بده و هیچ فایل یا محتوایی را به‌عنوان کد اجرا نکن.
 
 ### [🟡] Step 4: Semantic validator و آزمون‌های قراردادی مثبت/منفی
 
@@ -73,6 +73,8 @@ Semantic validator را مستقل از اجرای مدل/ابزار پیاده 
 
 **Acceptance criteria:**
 JSON Schema مطابق Draft 2020-12 و همهٔ fixtures معتبرند؛ schema/semantic errors تشخیصی و parity پوشش‌داده‌شده دارند؛ تمام موارد مثبت/منفی Step 4 تست شده‌اند، ازجمله duplicate `(kind,id)`، `counterId`، enum/type mismatch، pointer عمیق، default/exhaustiveness، first-match overlap و tie order، result/end mismatch، routeMap، retry exhaustion و nested loops؛ profileهای ناقص/نامعتبر پیش از load/dispatch رد می‌شوند؛ loader byte cap مصوب را قبل از parse enforce می‌کند؛ build/typecheck سبزند.
+
+**مرزبندی شواهد پذیرش:** در Phase 2، first-match، retry exhaustion، loop bounds و `maxNodeVisits` فقط در حد semantics استاتیک/اعتبارسنجی قرارداد بررسی می‌شوند. اثبات رفتار اجرایی اولویت و ترتیب تعریف، exhaustion، denial/cancellation، اجرای nested loop و enforcement سخت visit cap متعلق به Phase 4 است و نباید به‌عنوان تست اجرای Runtime یا شرط تحقق‌یافتهٔ Phase 2 گزارش شود.
 
 ---
 
@@ -352,3 +354,16 @@ The test correction and this status update are now on the working copy for the n
 **Delegated conservative v1 rule for `result.kind`:** after reviewing the Schema, validator, and all examples, no established mapping existed. Applying Pouya's standing delegation, the agent adopts this closed static table: `response` → `string|number|integer|boolean|object|array`; `artifact` → `artifact|file`; `proposal` → `object`; `handoff` → `object`. `any` is disallowed for every kind. This allows every existing sample and rejects unknown/opaque port types; it is a conservative contract, not a claim about an implemented Runtime. The separate semantic validator reports `result.kind-type-mismatch`; structural JSON Schema validation intentionally does not perform this graph-dependent check. Tests cover positive and negative pairs and the structural/semantic boundary.
 
 **Next gate:** fresh full CI on the new implementation head; inspect all changed files and verify no deletions/renames. Phase 2 remains 🟡. Host verification of stable, trusted, non-attacker-writable roots and definition/enforcement of the authoritative Runtime compatibility contract remain mandatory before integration. Runtime execution, Phase 3, merge, and approval remain out of scope.
+
+
+## Phase 2 current evidence and superseding decisions (2026-09-30; append-only)
+
+This addendum supersedes earlier open-decision/status wording in the historical sections above; those records are retained as history and are not the current contract.
+
+- Pouya delegated the remaining design dispositions to the agent's conservative recommendations. Cross-scope duplicate Profile IDs are globally fail-closed. `profile.runtime` is optional, syntax-only, non-operative Phase 2 metadata; the authoritative Runtime compatibility/enforcement contract remains a pre-integration gate.
+- `result.kind` uses the implemented closed semantic mapping: `response` → `string|number|integer|boolean|object|array`; `artifact` → `artifact|file`; `proposal` and `handoff` → `object`; `any` is rejected. It is checked by the semantic validator, not inferred from structural Schema validation.
+- Review routing requires every allowed decision to have a selectable route under priority-then-definition-order first-match, and the selected target/map must be valid. A unique destination per decision is not required. Runtime first-match execution remains Phase 4 evidence.
+- Trusted-host Option 1 is selected: only trusted host code derives scope and supplies the root. The loader does not authenticate provenance. Before Runtime integration, the host must demonstrate stable, trusted, non-attacker-writable roots. No race-free enumeration or same-inode immutability is claimed.
+- CI run `36643719995` is on head `316ce64af65b2c3497d56b19cbc97d33f9ca42e1`, attempt 2. Attempt 1 had 9/10 jobs succeed; Windows Node 22 failed only at `G-14 usage API equals CLI jsonl` / `GET /api/usage?planId matches collectProjectUsage` after a 5-second timeout (124 test files passed, 1 failed; 1,736 tests passed, 16 skipped, 1 failed; Profile suites passed). At the latest check, attempt 2 remained `in_progress`; Windows Node 22 typecheck and setup had passed and unit/integration was still running. Do not classify the failure as unrelated or call CI green until attempt 2 concludes and is assessed.
+- The Phase 2 step acceptance list above covers static semantics; runtime-observed tie ordering, retry exhaustion, denial/cancellation routing, nested-loop execution, and hard visit-cap enforcement are explicitly deferred to Phase 4 tests.
+- PR #9 remains Draft. Final acceptance and a fresh complete CI on the latest resulting head are pending. No merge, approval, Runtime integration, Phase 3 work, file deletion, or branch deletion is authorized or claimed.

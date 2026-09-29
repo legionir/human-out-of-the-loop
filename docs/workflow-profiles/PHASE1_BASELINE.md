@@ -113,3 +113,8 @@ Pouya confirmed that `x-*` extension metadata is limited to JSON scalar values o
 
 The earlier baseline observation that `registryLayersFor()` lets project registry entries override matching package registry IDs describes the pre-existing Persona/Skill-style registries; it is not itself the Workflow Profile ID collision contract. The owner-confirmed Profile selection order is explicit user selection, then an explicitly opted-in project Profile, then built-in default, with exactly one active Profile and no composition. The decision does not specify same-ID collision/override semantics across Profile scopes. Phase 2 currently rejects duplicate Profile IDs across scopes and tests that fail-closed behavior. Do not transfer the old package→project override rule to Profiles. Whether fail-closed duplicate handling is the final Profile contract, or an explicit scoped-ID/override rule is desired, remains an owner decision before Phase 2 acceptance; no override is inferred.
 
+
+
+## 11. Superseding Profile ID collision decision (2026-09-30; append-only)
+
+Section 10 retains the historical state before Pouya's later delegation. Under Pouya's instruction to apply the agent's conservative recommendations, the current Workflow Profile rule is **global fail-closed for duplicate IDs across all scopes**. Selection order (explicit user selection, opted-in project Profile, then built-in default) does not authorize same-ID override or disambiguation. The Phase 2 registry and tests implement this rule. This supersedes only the unresolved-decision sentence in §10; no historical evidence is removed.
