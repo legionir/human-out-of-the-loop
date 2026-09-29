@@ -39,3 +39,13 @@ Directory discovery is still path-based: the root is checked with `lstat` and th
 5. Complete independent acceptance review, verify no file/branch deletions, and keep this PR Draft until all gates close.
 
 No files or branches were deleted as part of this review. No workflow execution, dependency resolution, or Runtime authorization behavior is claimed.
+
+## Current status and owner decision (2026-09-30; append-only)
+
+**Current PR head:** `2a3f725d708858ec867a9fb013587f964ffc2899`. The earlier reviewed-head label above remains historical; this addendum records the current evidence and does not replace that review.
+
+**Trusted-host decision:** Pouya selected Option 1. For Phase 2, trusted host code is responsible for deriving scope and supplying trusted roots from trusted configuration; loader-side provenance authentication is not required in this phase. This is not evidence that the current or future host actually guarantees stable roots. Before Runtime integration, the host must be shown to keep the supplied root and contents stable and non-attacker-writable. Directory-root replacement and in-place same-inode mutation limitations remain open and are not claimed as mitigated.
+
+**CI:** run `36621696802` attempt 1 completed with 9/10 jobs successful; the Windows Node 22 unit/integration job failed. Failed-job-only attempt 2 also failed on Windows Node 22: typecheck passed, while unit/integration reported timeouts in `G-04 deleted session`, `G-09 orchestrator cache`, and `Phase 19`, and `PERF-04` measured about 691 ms against a <500 ms assertion. The other nine jobs succeeded. CI is not green; the available evidence does not establish that these failures are unrelated to the PR.
+
+A separate read-only review of this exact head found no deleted or renamed files. It also found that the plan, acceptance report, and PR description had stale status text; the current addenda correct the decision/evidence trail. **Phase 2 remains 🟡.** Remaining gates: triage CI failures against baseline and affected tests; verify host root-stability guarantees before Runtime integration; settle Runtime version contract, `result.kind`→end-port mapping, duplicate-ID behavior, and review-decision route-target semantics; then complete final acceptance. This update does not authorize Runtime work, Phase 3, PR approval, or merge.
