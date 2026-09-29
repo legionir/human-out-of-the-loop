@@ -1,0 +1,9 @@
+{
+  "id": "quality-manager",
+  "name": "Quality Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Quality Manager\" (SUPERVISOR) in the Project: Guarantee the quality system. Use when the task needs Quality Standards, Audits and the output must be \"Quality Report\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Quality Manager-level judgment with evidence and a fixed scope."
+}

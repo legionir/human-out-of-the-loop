@@ -1,0 +1,9 @@
+{
+  "id": "sales-manager",
+  "name": "Sales Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Sales Manager\" (SUPERVISOR) in the Growth: Increase revenue. Use when the task needs Sales Strategy, Pipeline and the output must be \"Sales Plan\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Sales Manager-level judgment with evidence and a fixed scope."
+}

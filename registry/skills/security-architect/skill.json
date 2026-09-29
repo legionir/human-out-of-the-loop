@@ -1,0 +1,9 @@
+{
+  "id": "security-architect",
+  "name": "Security Architect",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Security Architect\" (SUPERVISOR) in the Architecture: Establish secure-by-design architecture. Use when the task needs Threat Modeling, Trust Boundaries, Security Architecture and the output must be \"Threat Model, Security Architecture\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Security Architect-level judgment with evidence and a fixed scope."
+}
