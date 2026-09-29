@@ -1,0 +1,274 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hootl:workflow-profile:1",
+  "title": "HOOTL Workflow Profile",
+  "description": "Declarative, versioned workflow profile. Execution and security invariants remain enforced by the Runtime.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "profile", "dependencies", "workflow", "policies", "result"],
+  "properties": {
+    "schemaVersion": { "const": "1.0.0" },
+    "profile": { "$ref": "#/$defs/profileMetadata" },
+    "dependencies": {
+      "type": "array",
+      "description": "Exact component versions required by this profile; the resolver checks these references before activation.",
+      "items": { "$ref": "#/$defs/dependency" },
+      "uniqueItems": true
+    },
+    "workflow": { "$ref": "#/$defs/workflow" },
+    "policies": { "$ref": "#/$defs/policies" },
+    "result": { "$ref": "#/$defs/result" }
+  },
+  "$defs": {
+    "profileMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "version", "runtime", "author"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "description": { "type": "string", "maxLength": 2000 },
+        "version": { "$ref": "#/$defs/semver" },
+        "runtime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["minVersion"],
+          "properties": {
+            "minVersion": { "$ref": "#/$defs/semver" },
+            "maxVersion": { "$ref": "#/$defs/semver" }
+          }
+        },
+        "author": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "license": { "type": "string", "maxLength": 100 },
+        "tags": { "type": "array", "items": { "type": "string", "maxLength": 40 }, "uniqueItems": true }
+      }
+    },
+    "dependency": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id", "version"],
+      "properties": {
+        "kind": { "enum": ["persona", "skill", "toolset", "rubric", "model-profile"] },
+        "id": { "$ref": "#/$defs/id" },
+        "version": { "$ref": "#/$defs/semver" }
+      }
+    },
+    "workflow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["startNode", "nodes", "edges"],
+      "properties": {
+        "startNode": { "$ref": "#/$defs/id" },
+        "nodes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } },
+        "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } }
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "goal", "inputs", "outputs", "config"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "type": "string", "maxLength": 120 },
+        "kind": { "enum": ["intake", "planner", "execute", "review", "condition", "approval", "end"] },
+        "goal": { "type": "string", "minLength": 1, "maxLength": 2000 },
+        "inputs": { "$ref": "#/$defs/ports" },
+        "outputs": { "$ref": "#/$defs/ports" },
+        "bindings": { "$ref": "#/$defs/bindings" },
+        "onError": { "$ref": "#/$defs/errorPolicy" },
+        "config": { "type": "object" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "kind": { "enum": ["planner", "execute", "review"] } }, "required": ["kind"] },
+          "then": { "required": ["bindings"], "properties": { "bindings": { "required": ["personaRef"] } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "intake" } }, "required": ["kind"] },
+          "then": { "properties": { "config": { "$ref": "#/$defs/intakeConfig" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "planner" } }, "required": ["kind"] },
+          "then": { "properties": { "config": { "$ref": "#/$defs/plannerConfig" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "execute" } }, "required": ["kind"] },
+          "then": { "properties": { "config": { "$ref": "#/$defs/executeConfig" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "review" } }, "required": ["kind"] },
+          "then": { "properties": { "config": { "$ref": "#/$defs/reviewConfig" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "condition" } }, "required": ["kind"] },
+          "then": { "properties": { "config": { "$ref": "#/$defs/conditionConfig" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "approval" } }, "required": ["kind"] },
+          "then": { "properties": { "config": { "$ref": "#/$defs/approvalConfig" } } }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "end" } }, "required": ["kind"] },
+          "then": { "properties": { "config": { "$ref": "#/$defs/endConfig" } } }
+        }
+      ]
+    },
+    "ports": {
+      "type": "object",
+      "description": "Named data contract for a node. Port compatibility is checked by the semantic validator.",
+      "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$" },
+      "additionalProperties": { "$ref": "#/$defs/port" }
+    },
+    "port": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["string", "number", "integer", "boolean", "object", "array", "file", "artifact", "any"] },
+        "required": { "type": "boolean", "default": false },
+        "description": { "type": "string", "maxLength": 500 }
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "personaRef": { "$ref": "#/$defs/id" },
+        "skillRefs": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
+        "toolsetRef": { "$ref": "#/$defs/id" },
+        "modelProfileRef": { "$ref": "#/$defs/id" }
+      }
+    },
+    "errorPolicy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "strategy": { "enum": ["fail", "retry", "route", "ask-user"] },
+        "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 5 },
+        "failurePort": { "$ref": "#/$defs/id" }
+      }
+    },
+    "intakeConfig": { "type": "object", "additionalProperties": false, "properties": { "classification": { "type": "boolean", "default": false } } },
+    "plannerConfig": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "mode": { "enum": ["decompose", "direct"] }, "maxPlanItems": { "type": "integer", "minimum": 1, "maximum": 100 } }
+    },
+    "executeConfig": {
+      "type": "object", "additionalProperties": false,
+      "properties": { "mode": { "enum": ["assisted", "autonomous"] }, "requireApprovalForSideEffects": { "type": "boolean", "default": true } }
+    },
+    "reviewConfig": {
+      "type": "object", "additionalProperties": false,
+      "required": ["rubricRef"],
+      "properties": { "rubricRef": { "$ref": "#/$defs/id" }, "allowedDecisions": { "type": "array", "items": { "enum": ["pass", "revise", "reject"] }, "minItems": 1, "uniqueItems": true } }
+    },
+    "conditionConfig": {
+      "type": "object", "additionalProperties": false,
+      "required": ["predicate"],
+      "properties": { "predicate": { "$ref": "#/$defs/predicate" } }
+    },
+    "approvalConfig": {
+      "type": "object", "additionalProperties": false,
+      "required": ["prompt", "approvalType"],
+      "properties": { "prompt": { "type": "string", "minLength": 1, "maxLength": 1000 }, "approvalType": { "enum": ["continue", "side-effect", "custom"] } }
+    },
+    "endConfig": {
+      "type": "object", "additionalProperties": false,
+      "required": ["outcome"],
+      "properties": { "outcome": { "enum": ["success", "rejected", "handoff", "cancelled"] } }
+    },
+    "predicate": {
+      "description": "Data-only condition; executable code and expression strings are intentionally unsupported.",
+      "oneOf": [
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["outputPath", "operator"],
+          "properties": { "outputPath": { "$ref": "#/$defs/jsonPointer" }, "operator": { "enum": ["exists", "not-exists"] } }
+        },
+        {
+          "type": "object", "additionalProperties": false,
+          "required": ["outputPath", "operator", "value"],
+          "properties": {
+            "outputPath": { "$ref": "#/$defs/jsonPointer" },
+            "operator": { "enum": ["equals", "not-equals", "in", "not-in", "greater-than", "greater-or-equal", "less-than", "less-or-equal", "contains"] },
+            "value": {}
+          }
+        }
+      ]
+    },
+    "edge": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["from", "to", "map"],
+      "properties": {
+        "from": { "$ref": "#/$defs/id" },
+        "to": { "$ref": "#/$defs/id" },
+        "map": {
+          "type": "object",
+          "description": "Maps target input port names to JSON Pointers in the source node output.",
+          "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$" },
+          "additionalProperties": { "$ref": "#/$defs/jsonPointer" }
+        },
+        "label": { "type": "string", "maxLength": 120 },
+        "when": { "$ref": "#/$defs/predicate" },
+        "loop": {
+          "type": "object", "additionalProperties": false,
+          "required": ["maxIterations"],
+          "properties": { "maxIterations": { "type": "integer", "minimum": 1, "maximum": 20 }, "counterId": { "$ref": "#/$defs/id" } }
+        }
+      }
+    },
+    "policies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["execution", "tools", "approvals"],
+      "properties": {
+        "execution": {
+          "type": "object", "additionalProperties": false,
+          "required": ["maxNodeVisits", "maxDurationSeconds", "maxModelCalls", "maxToolCalls"],
+          "properties": {
+            "maxNodeVisits": { "type": "integer", "minimum": 1, "maximum": 1000 },
+            "maxDurationSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
+            "maxModelCalls": { "type": "integer", "minimum": 0, "maximum": 10000 },
+            "maxToolCalls": { "type": "integer", "minimum": 0, "maximum": 10000 },
+            "onLimit": { "enum": ["fail", "ask-user", "handoff"] }
+          }
+        },
+        "tools": {
+          "type": "object", "additionalProperties": false,
+          "required": ["allowedToolsets"],
+          "properties": {
+            "allowedToolsets": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
+            "deniedTools": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true }
+          }
+        },
+        "approvals": {
+          "type": "object", "additionalProperties": false,
+          "required": ["policy"],
+          "properties": {
+            "policy": { "enum": ["runtime-default", "side-effects", "every-tool-call"] },
+            "requireUserConfirmationFor": { "type": "array", "items": { "enum": ["external-write", "file-write", "network-access", "irreversible-action"] }, "uniqueItems": true }
+          }
+        }
+      }
+    },
+    "result": {
+      "type": "array",
+      "description": "Declared terminal outputs; supports distinct success, rejection, or handoff outcomes.",
+      "minItems": 1,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["fromNode", "port", "kind", "outcome"],
+        "properties": {
+          "fromNode": { "$ref": "#/$defs/id" },
+          "port": { "$ref": "#/$defs/id" },
+          "kind": { "enum": ["response", "artifact", "proposal", "handoff"] },
+          "outcome": { "enum": ["success", "rejected", "handoff", "cancelled"] }
+        }
+      }
+    },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,127}$" },
+    "semver": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$" },
+    "jsonPointer": { "type": "string", "pattern": "^(/(?:[^~/]|~[01])*)*$" }
+  }
+}
