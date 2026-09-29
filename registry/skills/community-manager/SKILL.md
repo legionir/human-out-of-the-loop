@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Support"
   seniority: "Manager"
-  source: "prompts/implementation/community-manager.md"
+  source: "../../personas/community-manager.json"
   language: "en"
 ---
 

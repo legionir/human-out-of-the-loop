@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Project"
   seniority: "Manager"
-  source: "prompts/audit/business-continuity-manager.md"
+  source: "../../personas/business-continuity-manager.json"
   language: "en"
 ---
 

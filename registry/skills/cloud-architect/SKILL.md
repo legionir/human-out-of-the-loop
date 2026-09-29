@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Architecture"
   seniority: "Senior"
-  source: "prompts/audit/cloud-architect.md"
+  source: "../../personas/cloud-architect.json"
   language: "en"
 ---
 

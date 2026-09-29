@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Compliance"
   seniority: "Manager"
-  source: "prompts/audit/contract-manager.md"
+  source: "../../personas/contract-manager.json"
   language: "en"
 ---
 

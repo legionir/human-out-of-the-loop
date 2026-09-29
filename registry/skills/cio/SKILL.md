@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Business"
   seniority: "Executive"
-  source: "prompts/audit/cio.md"
+  source: "../../personas/cio.json"
   language: "en"
 ---
 

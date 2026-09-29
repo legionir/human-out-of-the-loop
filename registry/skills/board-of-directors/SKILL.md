@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Business"
   seniority: "Executive"
-  source: "prompts/audit/board-of-directors.md"
+  source: "../../personas/board-of-directors.json"
   language: "en"
 ---
 

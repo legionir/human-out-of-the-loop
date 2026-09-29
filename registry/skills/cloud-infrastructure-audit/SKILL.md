@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 7
-  source: "prompts/composite/Cloud & Infrastructure Audit.md"
+  source: "../../personas/cloud-infrastructure-audit.json"
   language: "en"
   spec: "composites/cloud-infrastructure-audit.json"
   generated: true

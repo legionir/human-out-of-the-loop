@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Security"
   seniority: "Executive"
-  source: "prompts/audit/ciso.md"
+  source: "../../personas/ciso.json"
   language: "en"
 ---
 

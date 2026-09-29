@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Design"
   seniority: "Executive"
-  source: "prompts/audit/chief-design-officer.md"
+  source: "../../personas/chief-design-officer.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "DevOps"
   seniority: "Senior"
-  source: "prompts/implementation/cloud-engineer.md"
+  source: "../../personas/cloud-engineer.json"
   language: "en"
 ---
 

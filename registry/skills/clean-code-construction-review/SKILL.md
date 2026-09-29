@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Clean Code & Construction Review.md"
+  source: "../../personas/clean-code-construction-review.json"
   language: "en"
   spec: "composites/clean-code-construction-review.json"
   generated: true

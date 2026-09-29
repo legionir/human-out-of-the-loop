@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Compliance"
   seniority: "Senior"
-  source: "prompts/implementation/compliance-evidence-analyst.md"
+  source: "../../personas/compliance-evidence-analyst.json"
   language: "en"
 ---
 

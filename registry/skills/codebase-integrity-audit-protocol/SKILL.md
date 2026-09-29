@@ -5,7 +5,7 @@ metadata:
   version: "1"
   type: "COMPOSITE"
   typeLabel: "Composite"
-  source: "prompts/composite/codebase-integrity-audit-protocol.md"
+  source: "../../personas/codebase-integrity-audit-protocol.json"
   language: "en"
   generated: false
 ---

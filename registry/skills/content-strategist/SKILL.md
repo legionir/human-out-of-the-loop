@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Documentation"
   seniority: "Specialist"
-  source: "prompts/implementation/content-strategist.md"
+  source: "../../personas/content-strategist.json"
   language: "en"
 ---
 

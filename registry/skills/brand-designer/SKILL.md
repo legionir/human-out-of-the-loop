@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Design"
   seniority: "Specialist"
-  source: "prompts/implementation/brand-designer.md"
+  source: "../../personas/brand-designer.json"
   language: "en"
 ---
 

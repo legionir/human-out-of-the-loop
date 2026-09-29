@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Growth"
   seniority: "Director"
-  source: "prompts/audit/community-director.md"
+  source: "../../personas/community-director.json"
   language: "en"
 ---
 

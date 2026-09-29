@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "DevOps"
   seniority: "Senior"
-  source: "prompts/implementation/chaos-engineer.md"
+  source: "../../personas/chaos-engineer.json"
   language: "en"
 ---
 
