@@ -1,0 +1,338 @@
+{
+  "$schema": "./workflow-profile.schema.json",
+  "schemaVersion": "1.0.0",
+  "profile": {
+    "id": "example.bounded-review-fix",
+    "name": "Bounded review/fix loop",
+    "description": "Fixture: fix, review, then a data-only condition node routes to success or to a bounded fix loop that ends in a handoff when exhausted.",
+    "version": "1.0.0",
+    "runtime": {
+      "minVersion": "1.0.0"
+    },
+    "author": "HOOTL",
+    "tags": [
+      "fixture",
+      "loop",
+      "condition"
+    ]
+  },
+  "dependencies": [
+    {
+      "kind": "persona",
+      "id": "hootl.executor",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "persona",
+      "id": "hootl.reviewer",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "toolset",
+      "id": "hootl.default-tools",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "rubric",
+      "id": "hootl.default-review",
+      "version": "1.0.0"
+    }
+  ],
+  "workflow": {
+    "startNode": "request",
+    "nodes": [
+      {
+        "id": "request",
+        "kind": "intake",
+        "goal": "Capture the task.",
+        "inputs": {
+          "request": {
+            "type": "string",
+            "required": true
+          }
+        },
+        "outputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "config": {}
+      },
+      {
+        "id": "fix",
+        "kind": "execute",
+        "goal": "Apply or revise the change, using reviewer feedback when present.",
+        "inputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "feedback": {
+            "type": "string"
+          }
+        },
+        "outputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "result": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "bindings": {
+          "personaRef": "hootl.executor",
+          "toolsetRef": "hootl.default-tools"
+        },
+        "config": {
+          "mode": "assisted",
+          "requireApprovalForSideEffects": true
+        },
+        "onError": {
+          "strategy": "retry",
+          "maxAttempts": 2,
+          "backoffSeconds": 5,
+          "retryOn": [
+            "technical",
+            "rate-limit"
+          ]
+        }
+      },
+      {
+        "id": "review",
+        "kind": "review",
+        "goal": "Rate the result and report the highest severity of remaining findings.",
+        "inputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "result": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "outputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "result": {
+            "type": "object",
+            "required": true
+          },
+          "severity": {
+            "type": "integer",
+            "required": true
+          },
+          "feedback": {
+            "type": "string"
+          }
+        },
+        "bindings": {
+          "personaRef": "hootl.reviewer",
+          "toolsetRef": "hootl.default-tools"
+        },
+        "config": {
+          "rubricRef": "hootl.default-review"
+        }
+      },
+      {
+        "id": "gate",
+        "kind": "condition",
+        "goal": "Accept only results whose remaining severity is below 3.",
+        "inputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "result": {
+            "type": "object",
+            "required": true
+          },
+          "severity": {
+            "type": "integer",
+            "required": true
+          },
+          "feedback": {
+            "type": "string"
+          }
+        },
+        "outputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "result": {
+            "type": "object",
+            "required": true
+          },
+          "feedback": {
+            "type": "string"
+          },
+          "matched": {
+            "type": "boolean",
+            "required": true
+          }
+        },
+        "config": {
+          "predicate": {
+            "path": "/severity",
+            "operator": "less-than",
+            "value": 3
+          }
+        }
+      },
+      {
+        "id": "finish",
+        "kind": "end",
+        "goal": "Return the accepted result.",
+        "inputs": {
+          "result": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "outputs": {
+          "response": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "config": {
+          "outcome": "success",
+          "emit": {
+            "response": "result"
+          }
+        }
+      },
+      {
+        "id": "escalate",
+        "kind": "end",
+        "goal": "Hand the unresolved result to the user.",
+        "inputs": {
+          "result": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "outputs": {
+          "handoff": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "config": {
+          "outcome": "handoff",
+          "emit": {
+            "handoff": "result"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "request",
+        "to": "fix",
+        "map": {
+          "request": "/request"
+        }
+      },
+      {
+        "from": "fix",
+        "to": "review",
+        "map": {
+          "request": "/request",
+          "result": "/result"
+        }
+      },
+      {
+        "from": "review",
+        "to": "gate",
+        "map": {
+          "request": "/request",
+          "result": "/result",
+          "severity": "/severity",
+          "feedback": "/feedback"
+        }
+      },
+      {
+        "from": "gate",
+        "to": "finish",
+        "map": {
+          "result": "/result"
+        },
+        "label": "acceptable",
+        "when": {
+          "path": "/matched",
+          "operator": "equals",
+          "value": true
+        }
+      },
+      {
+        "from": "gate",
+        "to": "fix",
+        "map": {
+          "request": "/request",
+          "feedback": "/feedback"
+        },
+        "label": "needs-fix",
+        "when": {
+          "path": "/matched",
+          "operator": "equals",
+          "value": false
+        },
+        "loop": {
+          "maxIterations": 2,
+          "counterId": "fix-revision",
+          "onExhausted": {
+            "strategy": "route",
+            "to": "escalate",
+            "map": {
+              "result": "/result"
+            }
+          }
+        }
+      }
+    ]
+  },
+  "policies": {
+    "execution": {
+      "maxNodeVisits": 30,
+      "maxDurationSeconds": 1200,
+      "maxModelCalls": 30,
+      "maxToolCalls": 80,
+      "onLimit": "fail"
+    },
+    "tools": {
+      "allowedToolsets": [
+        "hootl.default-tools"
+      ]
+    },
+    "approvals": {
+      "policy": "side-effects",
+      "requireUserConfirmationFor": [
+        "external-write",
+        "file-write",
+        "git-write",
+        "irreversible-action"
+      ]
+    }
+  },
+  "result": [
+    {
+      "fromNode": "finish",
+      "port": "response",
+      "kind": "response",
+      "outcome": "success"
+    },
+    {
+      "fromNode": "escalate",
+      "port": "handoff",
+      "kind": "handoff",
+      "outcome": "handoff"
+    }
+  ]
+}
