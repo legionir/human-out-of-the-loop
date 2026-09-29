@@ -1,98 +1,443 @@
 {
+  "$schema": "./workflow-profile.schema.json",
   "schemaVersion": "1.0.0",
   "profile": {
-    "id": "hootl.default",
-    "name": "Default workflow",
-    "description": "Baseline request, plan, execute, review, and bounded revision workflow.",
+    "id": "hootl.default-sample",
+    "name": "Default workflow (structural sample)",
+    "description": "Structural sample only. Not yet verified against current HOOTL behavior; Phase 7 must derive the actual baseline flow from code and tests before this can be called the default profile.",
     "version": "1.0.0",
-    "runtime": { "minVersion": "1.0.0" },
+    "runtime": {
+      "minVersion": "1.0.0"
+    },
     "author": "HOOTL"
   },
   "dependencies": [
-    { "kind": "persona", "id": "hootl.planner", "version": "1.0.0" },
-    { "kind": "persona", "id": "hootl.executor", "version": "1.0.0" },
-    { "kind": "persona", "id": "hootl.reviewer", "version": "1.0.0" },
-    { "kind": "toolset", "id": "hootl.default-tools", "version": "1.0.0" },
-    { "kind": "rubric", "id": "hootl.default-review", "version": "1.0.0" }
+    {
+      "kind": "persona",
+      "id": "hootl.planner",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "persona",
+      "id": "hootl.executor",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "persona",
+      "id": "hootl.reviewer",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "toolset",
+      "id": "hootl.default-tools",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "rubric",
+      "id": "hootl.default-review",
+      "version": "1.0.0"
+    }
   ],
   "workflow": {
     "startNode": "request",
     "nodes": [
       {
-        "id": "request", "kind": "intake", "goal": "Understand the request and identify missing information.",
-        "inputs": { "request": { "type": "string", "required": true } },
-        "outputs": {
-          "request": { "type": "object", "required": true },
-          "needsClarification": { "type": "boolean", "required": true },
-          "question": { "type": "string" }
+        "id": "request",
+        "kind": "intake",
+        "goal": "Understand the request and identify missing information.",
+        "inputs": {
+          "request": {
+            "type": "string",
+            "required": true
+          }
         },
-        "config": { "classification": true }
-      },
-      {
-        "id": "clarify", "kind": "approval", "goal": "Ask the user for missing information before planning.",
-        "inputs": { "request": { "type": "object", "required": true }, "question": { "type": "string", "required": true } },
-        "outputs": { "request": { "type": "object", "required": true }, "answer": { "type": "string", "required": true } },
-        "config": { "prompt": "Please answer the clarification question to continue.", "approvalType": "custom" }
-      },
-      {
-        "id": "plan", "kind": "planner", "goal": "Create a bounded, actionable plan.",
-        "inputs": { "request": { "type": "object", "required": true }, "clarification": { "type": "string" } },
-        "outputs": { "plan": { "type": "object", "required": true } },
-        "bindings": { "personaRef": "hootl.planner", "skillRefs": [], "toolsetRef": "hootl.default-tools" },
-        "config": { "mode": "decompose", "maxPlanItems": 20 },
-        "onError": { "strategy": "ask-user", "maxAttempts": 1 }
-      },
-      {
-        "id": "execute", "kind": "execute", "goal": "Carry out the plan within granted capabilities.",
-        "inputs": { "plan": { "type": "object", "required": true }, "feedback": { "type": "string" } },
-        "outputs": { "plan": { "type": "object", "required": true }, "result": { "type": "object", "required": true } },
-        "bindings": { "personaRef": "hootl.executor", "skillRefs": [], "toolsetRef": "hootl.default-tools" },
-        "config": { "mode": "assisted", "requireApprovalForSideEffects": true },
-        "onError": { "strategy": "fail", "maxAttempts": 1 }
-      },
-      {
-        "id": "review", "kind": "review", "goal": "Check whether the result satisfies the request and plan.",
-        "inputs": { "plan": { "type": "object", "required": true }, "result": { "type": "object", "required": true } },
         "outputs": {
-          "plan": { "type": "object", "required": true },
-          "result": { "type": "object", "required": true },
-          "decision": { "type": "string", "required": true },
-          "feedback": { "type": "string" }
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "needsClarification": {
+            "type": "boolean",
+            "required": true,
+            "enum": [
+              true,
+              false
+            ]
+          },
+          "question": {
+            "type": "string",
+            "required": true,
+            "description": "Empty string when no clarification is needed."
+          }
         },
-        "bindings": { "personaRef": "hootl.reviewer", "skillRefs": [], "toolsetRef": "hootl.default-tools" },
-        "config": { "rubricRef": "hootl.default-review", "allowedDecisions": ["pass", "revise", "reject"] }
+        "config": {
+          "classification": true
+        }
       },
       {
-        "id": "finish", "kind": "end", "goal": "Return the reviewed result.",
-        "inputs": { "result": { "type": "object", "required": true } },
-        "outputs": { "response": { "type": "object", "required": true } },
-        "config": { "outcome": "success" }
+        "id": "clarify",
+        "kind": "approval",
+        "goal": "Ask the user for missing information before planning.",
+        "inputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "question": {
+            "type": "string",
+            "required": true
+          }
+        },
+        "outputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "question": {
+            "type": "string",
+            "required": true
+          },
+          "answer": {
+            "type": "string",
+            "required": true
+          }
+        },
+        "config": {
+          "prompt": "Please answer the clarification question to continue.",
+          "approvalType": "custom",
+          "responseKind": "text",
+          "show": [
+            "question"
+          ],
+          "timeoutSeconds": 3600
+        }
       },
       {
-        "id": "rejected", "kind": "end", "goal": "Return the result that did not pass review.",
-        "inputs": { "result": { "type": "object", "required": true } },
-        "outputs": { "response": { "type": "object", "required": true } },
-        "config": { "outcome": "rejected" }
+        "id": "plan",
+        "kind": "planner",
+        "goal": "Create a bounded, actionable plan.",
+        "inputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "clarification": {
+            "type": "string"
+          }
+        },
+        "outputs": {
+          "plan": {
+            "type": "object",
+            "required": true
+          },
+          "request": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "bindings": {
+          "personaRef": "hootl.planner",
+          "skillRefs": [],
+          "toolsetRef": "hootl.default-tools"
+        },
+        "config": {
+          "mode": "decompose",
+          "maxPlanItems": 20
+        },
+        "onError": {
+          "strategy": "fail"
+        }
+      },
+      {
+        "id": "execute",
+        "kind": "execute",
+        "goal": "Carry out the plan within granted capabilities.",
+        "inputs": {
+          "plan": {
+            "type": "object",
+            "required": true
+          },
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "feedback": {
+            "type": "string"
+          }
+        },
+        "outputs": {
+          "plan": {
+            "type": "object",
+            "required": true
+          },
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "result": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "bindings": {
+          "personaRef": "hootl.executor",
+          "skillRefs": [],
+          "toolsetRef": "hootl.default-tools"
+        },
+        "config": {
+          "mode": "assisted",
+          "requireApprovalForSideEffects": true
+        },
+        "onError": {
+          "strategy": "fail"
+        }
+      },
+      {
+        "id": "review",
+        "kind": "review",
+        "goal": "Check whether the result satisfies the request and plan.",
+        "inputs": {
+          "plan": {
+            "type": "object",
+            "required": true
+          },
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "result": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "outputs": {
+          "plan": {
+            "type": "object",
+            "required": true
+          },
+          "request": {
+            "type": "object",
+            "required": true
+          },
+          "result": {
+            "type": "object",
+            "required": true
+          },
+          "decision": {
+            "type": "string",
+            "required": true,
+            "enum": [
+              "pass",
+              "revise",
+              "reject"
+            ]
+          },
+          "feedback": {
+            "type": "string"
+          }
+        },
+        "bindings": {
+          "personaRef": "hootl.reviewer",
+          "skillRefs": [],
+          "toolsetRef": "hootl.default-tools"
+        },
+        "config": {
+          "rubricRef": "hootl.default-review",
+          "allowedDecisions": [
+            "pass",
+            "revise",
+            "reject"
+          ]
+        }
+      },
+      {
+        "id": "finish",
+        "kind": "end",
+        "goal": "Return the reviewed result.",
+        "inputs": {
+          "result": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "outputs": {
+          "response": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "config": {
+          "outcome": "success",
+          "emit": {
+            "response": "result"
+          }
+        }
+      },
+      {
+        "id": "rejected",
+        "kind": "end",
+        "goal": "Return the result that did not pass review.",
+        "inputs": {
+          "result": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "outputs": {
+          "response": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "config": {
+          "outcome": "rejected",
+          "emit": {
+            "response": "result"
+          }
+        }
       }
     ],
     "edges": [
-      { "from": "request", "to": "plan", "map": { "request": "/request" }, "when": { "outputPath": "/needsClarification", "operator": "equals", "value": false } },
-      { "from": "request", "to": "clarify", "map": { "request": "/request", "question": "/question" }, "when": { "outputPath": "/needsClarification", "operator": "equals", "value": true } },
-      { "from": "clarify", "to": "plan", "map": { "request": "/request", "clarification": "/answer" } },
-      { "from": "plan", "to": "execute", "map": { "plan": "/plan" } },
-      { "from": "execute", "to": "review", "map": { "plan": "/plan", "result": "/result" } },
-      { "from": "review", "to": "finish", "map": { "result": "/result" }, "label": "pass", "when": { "outputPath": "/decision", "operator": "equals", "value": "pass" } },
-      { "from": "review", "to": "execute", "map": { "plan": "/plan", "feedback": "/feedback" }, "label": "revise", "when": { "outputPath": "/decision", "operator": "equals", "value": "revise" }, "loop": { "maxIterations": 3, "counterId": "review-revision" } },
-      { "from": "review", "to": "rejected", "map": { "result": "/result" }, "label": "reject", "when": { "outputPath": "/decision", "operator": "equals", "value": "reject" } }
+      {
+        "from": "request",
+        "to": "plan",
+        "map": {
+          "request": "/request"
+        },
+        "label": "no-clarification",
+        "when": {
+          "path": "/needsClarification",
+          "operator": "equals",
+          "value": false
+        }
+      },
+      {
+        "from": "request",
+        "to": "clarify",
+        "map": {
+          "request": "/request",
+          "question": "/question"
+        },
+        "label": "needs-clarification",
+        "when": {
+          "path": "/needsClarification",
+          "operator": "equals",
+          "value": true
+        }
+      },
+      {
+        "from": "clarify",
+        "to": "plan",
+        "map": {
+          "request": "/request",
+          "clarification": "/answer"
+        }
+      },
+      {
+        "from": "plan",
+        "to": "execute",
+        "map": {
+          "plan": "/plan",
+          "request": "/request"
+        }
+      },
+      {
+        "from": "execute",
+        "to": "review",
+        "map": {
+          "plan": "/plan",
+          "request": "/request",
+          "result": "/result"
+        }
+      },
+      {
+        "from": "review",
+        "to": "finish",
+        "map": {
+          "result": "/result"
+        },
+        "label": "pass",
+        "when": {
+          "path": "/decision",
+          "operator": "equals",
+          "value": "pass"
+        }
+      },
+      {
+        "from": "review",
+        "to": "execute",
+        "map": {
+          "plan": "/plan",
+          "request": "/request",
+          "feedback": "/feedback"
+        },
+        "label": "revise",
+        "when": {
+          "path": "/decision",
+          "operator": "equals",
+          "value": "revise"
+        },
+        "loop": {
+          "maxIterations": 3,
+          "counterId": "review-revision",
+          "onExhausted": {
+            "strategy": "route",
+            "to": "rejected",
+            "map": {
+              "result": "/result"
+            }
+          }
+        }
+      },
+      {
+        "from": "review",
+        "to": "rejected",
+        "map": {
+          "result": "/result"
+        },
+        "label": "reject",
+        "when": {
+          "path": "/decision",
+          "operator": "equals",
+          "value": "reject"
+        }
+      }
     ]
   },
   "policies": {
-    "execution": { "maxNodeVisits": 30, "maxDurationSeconds": 1800, "maxModelCalls": 40, "maxToolCalls": 100, "onLimit": "ask-user" },
-    "tools": { "allowedToolsets": ["hootl.default-tools"], "deniedTools": [] },
-    "approvals": { "policy": "side-effects", "requireUserConfirmationFor": ["external-write", "irreversible-action"] }
+    "execution": {
+      "maxNodeVisits": 30,
+      "maxDurationSeconds": 1800,
+      "maxModelCalls": 40,
+      "maxToolCalls": 100,
+      "onLimit": "fail"
+    },
+    "tools": {
+      "allowedToolsets": [
+        "hootl.default-tools"
+      ],
+      "deniedTools": []
+    },
+    "approvals": {
+      "policy": "side-effects",
+      "requireUserConfirmationFor": [
+        "external-write",
+        "irreversible-action"
+      ]
+    }
   },
   "result": [
-    { "fromNode": "finish", "port": "response", "kind": "response", "outcome": "success" },
-    { "fromNode": "rejected", "port": "response", "kind": "response", "outcome": "rejected" }
+    {
+      "fromNode": "finish",
+      "port": "response",
+      "kind": "response",
+      "outcome": "success"
+    },
+    {
+      "fromNode": "rejected",
+      "port": "response",
+      "kind": "response",
+      "outcome": "rejected"
+    }
   ]
 }

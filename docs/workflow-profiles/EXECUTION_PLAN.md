@@ -9,9 +9,12 @@
 7. **وضعیت‌ها:** 🔴 یعنی اجرا نشده؛ 🟡 یعنی ناقص، نادرست یا هنوز راستی‌آزمایی‌نشده؛ 🟢 یعنی همهٔ کارها پیاده‌سازی، یکپارچه‌سازی و اعتبارسنجی شده‌اند. بلافاصله بعد از هر گام وضعیت همان گام را به‌روز کن. پس از هر مرحلهٔ اجرایی وضعیت فاز را به‌روز کن. فاز فقط وقتی 🟢 می‌شود که تمام گام‌هایش 🟢 و همهٔ معیارهای پذیرش آن احراز شده باشند. اگر فاز کامل نشد، 🟡 بماند و دقیقاً کار باقی‌مانده و مانع آن ثبت شود. **تعریف Done:** همهٔ گام‌ها اجرا شده‌اند؛ هیچ الزام لازم جا نیفتاده؛ قابلیت‌های قبلی مرتبط سالم‌اند؛ تست‌های لازم پیاده‌سازی و گذرانده شده‌اند؛ نقاط اتصال کار می‌کنند؛ معیارهای پذیرش برقرارند؛ مانع مسدودکنندهٔ شناخته‌شده‌ای باقی نیست و کیفیت تولیدی در دامنهٔ همان فاز تأمین شده است.
 8. این سند را با پیاده‌سازی واقعی همگام نگه دار. هیچ گام یا الزام تکمیل‌شده‌ای را حذف نکن و الزام را بی‌صدا بازنویسی نکن. کار اجباری تازه را با دلیل به فاز مناسب اضافه کن؛ تغییر معماری یا وابستگی را صریحاً در طرح و ترتیب فازها ثبت کن.
 9. دامنهٔ نامرتبط اضافه نکن؛ فازها را نه مصنوعی خرد کن و نه کارهای مستقل یا پرریسک را بیش‌ازحد ادغام کن. ترتیب وابستگی‌ها مقدم است.
-10. از الگوهای اعتبارسنجی، امنیت، TypeScript، تست، خطا، ثبت رخداد، migration و مستندسازی موجود در مخزن پیروی کن. پیش از تغییر، baseline و منبع حقیقت را بیاب. تغییرات را در branch و PR انجام بده؛ `main` را مستقیم تغییر نده. هیچ merge، انتشار یا عبور از تأیید انسانی را بدون مجوز صریح انجام نده.
-11. پروفایل، Persona، Skill، Toolset و سایر محتوای registry **تعریف داده‌ای غیرقابل‌اعتماد** هستند، نه کد یا دستور اجرایی. DSL، eval، عبارت شرطی اجرایی یا کد دلخواه در پروفایل مجاز نیست. Runtime باید قواعد امنیتی نهایی را مستقل از پروفایل اعمال کند.
-12. هیچ پروفایلی نمی‌تواند ابزارهای خارج از مجوز Persona، محدودهٔ اجرای Runtime یا سیاست‌های ایمنی HOOTL را اعطا کند. محدودیت ابزارها فقط می‌تواند دسترسی را کمتر کند، نه بیشتر.
+10. از الگوهای اعتبارسنجی، امنیت، TypeScript، تست، خطا، ثبت رخداد، migration و مستندسازی موجود در مخزن پیروی کن. پیش از تغییر، baseline و منبع حقیقت را بیاب. `main` را مستقیم تغییر نده. هر فاز اجرایی را در branch و PR کوچک و قابل‌بازبینی عرضه کن؛ ترجیحاً یک PR برای هر فاز یا برای فازهای واقعاً وابسته. PR بعدی باید بر مبنای فاز قبلیِ ادغام‌شده یا مبنای صریحاً تأییدشده باشد؛ PR بزرگِ چندفازی نساز. وضعیت، review و CI را پیش از ادامه بررسی کن. PRهای #5 و #6 یا rebase آن‌ها فقط وقتی پیش‌نیازند که Phase 1 وابستگی واقعی را اثبات کند؛ ادغام، انتشار یا عبور از تأیید انسانی بدون مجوز صریح ممنوع است.
+11. پروفایل، Persona، Skill، Toolset و سایر محتوای registry **تعریف داده‌ای غیرقابل‌اعتماد** هستند، نه کد یا دستور اجرایی. DSL، eval، عبارت شرطی اجرایی یا کد دلخواه در پروفایل مجاز نیست. متن این داده‌ها هنگام ورود به prompt باید به‌صورت دادهٔ محصورشده معرفی شود و هرگز system policy یا مجوز را تغییر ندهد.
+12. هیچ پروفایلی نمی‌تواند ابزارها، تأییدها، بودجه‌ها، دسترسی یا محدودیت‌های Runtime/HOOTL را تضعیف یا گسترش دهد. مؤثرترین/سخت‌گیرانه‌ترین سیاست Runtime، کاربر، Persona و پروفایل برنده است؛ کنترل authorization در مرز واقعی ابزار مستقل از validation اجرا می‌شود. Profileهای workspace/project غیرقابل‌اعتمادند؛ override از پروفایل پیش‌فرض نیازمند مسیر trust/opt-in صریح است.
+13. دامنهٔ v1 فقط هفت node kind اعلام‌شده را دارد؛ هیچ inheritance، Node Template، Sub-workflow، recursion، parallelism، fan-out یا join در v1 مجاز نیست. هر افزودن این موارد نیازمند تصمیم معماری و نسخه/فاز جداگانه است و نباید بی‌صدا به schema یا Runtime افزوده شود.
+14. انتخاب مسیر v1 قطعی و مشترک است: predicateها به ترتیب priority صعودی و سپس ترتیب تعریف ارزیابی می‌شوند؛ اولین شرط درست انتخاب می‌شود؛ یک default یکتا فقط در نبود شرط درست اجرا می‌شود؛ در نبود مسیر، اجرای workflow fail-closed می‌شود. هم‌پوشانی شرط‌ها ambiguity محسوب نمی‌شود و باید با first-match تست شود.
+15. فقط وضعیت‌های 🔴/🟡/🟢 به‌کار ببر. «Blocked» وضعیت چهارم نیست: آیتم را 🟡 نگه دار و در همان‌جا `Blocked:`، تصمیم/شواهد لازم، مسئول تصمیم و موعد لازم پیش از گام وابسته را ثبت کن.
 
 # Execution Plan
 
@@ -19,25 +22,25 @@
 
 پیش از پیاده‌سازی، وضعیت دقیق کد، نقاط اتصال موجود، اسناد اجرایی و وابستگی‌های باز را تثبیت کن. قرارداد باید Workflow Profile را لایهٔ پیکربندی روی Runtime فعلی تعریف کند، نه موتور اجرای موازی. خروجی این فاز تصمیم‌های ثبت‌شده، دامنهٔ نسخهٔ اول و به‌روزرسانی غیرمخرب طرح اجرایی پروژه است.
 
-### [🔴] Step 1: تعیین baseline و وضعیت تغییرات موجود
+### [🔴] Step 1: تعیین baseline، branch و وابستگی PRها
 
-ثبت کن روی کدام branch و commit قرار است کار شود؛ `main`، نسخهٔ مرتبط از `docs/UNIFIED_EXECUTION_PLAN.md` و اسناد معماری را بررسی کن؛ وضعیت و تفاوت PRهای باز را دوباره از GitHub بگیر و مشخص کن کدام تغییرات در مبنای منتخب ادغام شده‌اند. در آخرین بررسی این طرح، `main` روی `bbbf6ee` بود و PRهای Draft #5 (تمرکز promptها) و #6 (انتقال Persona/Skillها) باز و ادغام‌نشده بودند؛ این وضعیت را جاری فرض نکن. تصمیم بگیر این PRها پیش‌نیاز واقعی‌اند یا می‌توان با قراردادهای موجود ادامه داد؛ وابستگی فرضی ایجاد نکن.
+ثبت کن روی کدام branch و commit قرار است کار شود؛ `main`، نسخهٔ مرتبط از `docs/UNIFIED_EXECUTION_PLAN.md` و اسناد معماری را بررسی کن؛ وضعیت PR #5 و #6 را از GitHub دوباره بگیر و با مسیرهای prompt و registry در commit مبنا مقایسه کن. PR #7 فعلی فقط ظرف اسناد/قرارداد است و مبنای اجرای بعدی محسوب می‌شود؛ این وضعیت را جاری فرض نکن. مشخص کن #5/#6 پیش‌نیاز واقعی هر فازند یا می‌توان با قراردادهای موجود ادامه داد؛ ادغام/rebase را از اجرای workflow profiles جدا نگه دار و بدون تصمیم مالک تغییر نده. برای اجرای فازهای بعد، PRهای کوچک فازبه‌فاز، CI/review gate هر PR، branch base و وابستگی صریح را ثبت کن؛ یک PR عظیم برای کل فازها نساز.
 
 ### [🔴] Step 2: ردیابی معماری و آزمون‌های baseline
 
 مسیر واقعی جریان درخواست و اجرای کار را از entry pointها تا `Orchestrator`، `Planner`، `PlanRuntime`، `AgentRuntime`، `TaskRuntime`، Acceptance/Review، registryها، storeها و CLI/server دنبال کن. قرارداد `Plan` و `PlanStep` فعلی، DAG و CycleDetector، تأیید plan، re-plan، resume/cancel، `Persona.allowedTools` و لایه‌بندی registry پکیج/پروژه را ثبت کن. دستورات تست/typecheck/lint/build را از `package.json` و CI استخراج و baseline را اجرا کن؛ شکست‌های قبلی را بدون بازتولید به baseline نسبت نده.
 
-### [🔴] Step 3: نهایی‌کردن مرز و معنای قرارداد
+### [🔴] Step 3: تثبیت قرارداد v1 و ثبت نیازمندی‌ها/تصمیم‌ها
 
-پیشنهاد JSON Schema موجود را به‌عنوان پیش‌نویس بررسی و قرارداد نسخهٔ اول را نهایی کن: metadata و سازگاری Runtime؛ نسخهٔ schema و profile؛ Workflow با start، node، edge، port، mapping و خروجی؛ nodeهای محدود `intake`، `planner`، `execute`، `review`، `condition`، `approval` و `end`؛ ارجاع‌های Persona/Skill/Toolset/Rubric/Model Profile؛ خطا، retry و سقف منابع؛ سیاست ابزار/تأیید؛ نتیجهٔ پایانی. شرط‌ها فقط عملگرهای داده‌ای محدود و JSON Pointer باشند. **Unknown / Requires Verification:** روش canonical برای هم‌ترازی JSON Schema با اعتبارسنجی runtime، نسخه‌بندی واقعی اجزای Registry، محل و precedence پروفایل‌های پکیج/پروژه/کاربر، semantics دقیق approval در CLI و server، و اینکه toolset/rubric/model-profile اکنون قرارداد مستقل دارند یا نه. هر مورد را با بررسی مخزن حل کن یا تصمیم لازم را صریح ثبت کن؛ فرض‌های حل‌نشده را پنهان نکن.
+Schema را با semantics مشترک این سند نهایی کن: seven node kinds؛ Profile مستقل و بدون inheritance؛ v1 بدون Template/Sub-workflow/parallelism؛ mapping و predicate فقط به port سطح اول؛ priority صعودی و سپس ترتیب تعریف با first-match، حداکثر یک default برای هر source و fail-closed در نبود match؛ bounded loops و exhaustion؛ خطای `fail`، retry با `maxAttempts` به‌معنای کل invocationها شامل بار اول، دسته‌های `retryOn` و backoff ثابت، یا `route` مستقیم به `routeTo` با `routeMap` صریح؛ denial/cancellation/approval-denial غیرقابل‌retry و غیرقابل-route؛ و end output با emit صریح. از Phase 1 برای هر الزام شناسهٔ پایدار `R-xxx` بساز و ماتریس requirement→phase/step→test را از همان ابتدا نگه دار. هم‌زمان Decision/Unknown Register بساز که برای هر مورد وضعیت، شواهد لازم، مسئول تصمیم و مهلت (پیش از کدام گام) را ثبت کند. **Unknown / Requires Verification:** canonical schema/validator integration، قرارداد نسخه‌ای واقعی registry، precedence و trust scope پروفایل‌ها، semantics approval و waiting/resume در CLI/server، بودجهٔ Profile در برابر AgentRuntime، فرمت واقعی tool IDs، و limit امن اندازهٔ فایل. هر unknown اثرگذار را از مخزن resolve کن یا صریحاً به‌صورت blocked 🟡 نگه دار؛ مقدار/قرارداد را حدس نزن.
 
-### [🔴] Step 4: تثبیت سازگاری با موتور فعلی و دامنهٔ rollout
+### [🔴] Step 4: حل seam بین workflow بیرونی و Plan DAG داخلی
 
-طراحی کن پروفایل‌ها چگونه بر جریان فعلی سوار می‌شوند بدون جایگزین‌کردن Orchestrator/PlanRuntime یا تضعیف چرخهٔ تأیید، re-plan، cancellation و محدودیت‌های ابزار. ناسازگاری مهم را مشخص کن: Plan فعلی مبتنی بر وابستگی‌های DAG است، درحالی‌که Workflow Profile مسیر شرطی و حلقهٔ محدود می‌خواهد. تصمیم اجرایی دربارهٔ adapter/لایهٔ کنترل جریان را مستند کن؛ اگر reuse بدون تغییر معنای فعلی ممکن نیست، پیش از ساخت موتور موازی، تصمیم معماری و اثر سازگاری را ثبت کن. رفتار پیش‌فرض پس از تأیید plan باید همچنان مطابق اصل Human-Out-Of-Loop باشد؛ approval node فقط طبق پروفایل و policy مجاز افزوده شود.
+به‌صورت read-only/آزمایشی، یک spike محدود و قابل‌بازگشت روی PlanRuntime واقعی اجرا/طراحی کن: آیا state machine بیرونی می‌تواند intake→plan→execute→review و یک بازگشت bounded را بدون flatten کردن Plan DAG، duplicate scheduler یا تغییر semantics PlanRuntime هدایت کند؟ Workflow Profile گراف کنترل بیرونی است؛ PlanRuntime همچنان DAG وابستگی درونی هر plan را اجرا می‌کند. ثبت کن کدام lifecycle (approval، re-plan، cancellation، resume، resource lock و status) در Runtime مشترک می‌ماند. نتیجهٔ spike و شواهد را در Decision Register ثبت کن؛ اگر reuse امن/واقعی ممکن نیست، فازهای وابسته را متوقف کن تا تصمیم معماری مالک ثبت شود، نه اینکه engine موازی بسازی. هر feature flag موجود و نقطهٔ مناسب آن را نیز از کد بیاب؛ flag تازه باید default-off باشد.
 
-### [🔴] Step 5: ثبت طرح در مرجع پروژه
+### [🔴] Step 5: ثبت traceability و plan در مرجع پروژه
 
-پس از شناخت branch هدف، scope پروفایل‌ها را به‌صورت epic/فازهای ردیابی‌شده به مرجع اجرایی canonical مخزن اضافه کن (در baseline فعلی `docs/UNIFIED_EXECUTION_PLAN.md` چنین جایگاهی دارد). متن و statusهای موجود را حذف یا بازنویسی نکن؛ source audit، شناسه‌های موجود و مسیرهای تأیید پروژه را حفظ کن. همین سند و تصمیم‌های حل‌شده/باز را در مسیر مستندات مناسب مخزن قابل‌ردیابی کن.
+پس از شناخت branch هدف، `R-xxx` و Decision/Unknown Register را به مرجع اجرایی canonical مخزن وصل کن (در baseline فعلی `docs/UNIFIED_EXECUTION_PLAN.md` چنین جایگاهی دارد). متن/statusهای موجود را حذف یا بازنویسی نکن؛ source audit، شناسه‌های موجود و مسیرهای تأیید را حفظ کن. همین سند، فازبندی PRها و تصمیم‌های حل‌شده/باز را در مسیر مستندات مناسب قابل‌ردیابی کن. برای هر unknown مالک و موعد لازم پیش از اولین dependent step ثبت شود.
 
 **Acceptance criteria:**
 baseline branch/commit و وضعیت PRها ثبت شده؛ مسیرهای واقعی و تست‌های موجود با شواهد مشخص‌اند؛ قرارداد نسخهٔ اول و مرز Runtime ثبت شده؛ همهٔ unknownهای اثرگذار حل یا صریحاً برای تصمیم مالک علامت‌گذاری شده‌اند؛ ناسازگاری DAG/loop راه‌حل تأییدشده دارد؛ دامنهٔ profiling به طرح canonical مخزن افزوده شده بدون حذف traceability یا تغییر ناموجه رفتار موجود.
@@ -48,9 +51,9 @@ baseline branch/commit و وضعیت PRها ثبت شده؛ مسیرهای وا�
 
 پیاده‌سازی قرارداد داده‌ای پایدار و قابل‌انتقال برای Profileها و مسیر کشف/بارگذاری آن‌ها بر اساس الگوی registry موجود. این فاز نباید اجرای workflow را فعال کند؛ پروفایل نامعتبر باید پیش از اجرا با خطای تشخیصی و قابل‌اقدام رد شود.
 
-### [🔴] Step 1: افزودن schema نسخه‌دار و نمونهٔ معتبر
+### [🔴] Step 1: افزودن Schema و fixtures مطابق semantics v1
 
-JSON Schema مطابق Draft 2020-12 را با فیلدهای نهایی Phase 1 اضافه کن. `schemaVersion` را از نسخهٔ مستقل Profile جدا نگه دار؛ `additionalProperties` را برای سطوح قراردادی به‌صورت سخت‌گیرانه تعریف کن؛ محدودیت طول/شناسه/enum و نسخهٔ Runtime را مستند کن. نمونهٔ پروفایل را بساز و یک جریان نمونه شامل شرط، approval و حلقهٔ دارای سقف را به‌صورت fixture داشته باش. محل دقیق فایل‌ها را با convention واقعی مخزن انتخاب کن.
+JSON Schema Draft 2020-12، نمونهٔ پیش‌فرض ساختاری و fixtures شاخه/condition/approval/loop/error-route را اضافه کن. `schemaVersion` را از Profile semver جدا نگه دار؛ `$schema` و فقط namespace توسعهٔ `x-*` را با policy محدود مجاز کن؛ schema version diagnostic را از parse/validation جدا کن. همهٔ limitهای صریح nodes/edges/dependencies/ports/maps/values را نگه دار و loader-level byte cap را بر اساس baseline اندازهٔ registry ثبت/تصویب کن (هیچ سقف فایل حدسی نگذار). Schema باید v1 exclusionهای no-inheritance/no-templates/no-sub-workflows/no-parallelism را مستند کند. هر نمونه از Schema و سپس semantic test suite عبور کند؛ نمونهٔ default تا Phase 7 صرفاً structural sample بماند.
 
 ### [🔴] Step 2: هم‌ترازکردن اعتبارسنجی runtime و JSON Schema
 
@@ -60,62 +63,57 @@ JSON Schema مطابق Draft 2020-12 را با فیلدهای نهایی Phase 1
 
 Profileها را از scopeهای تصویب‌شده بخوان و با ترتیب precedence فعلی registry (package سپس project override) هماهنگ کن، مگر تصمیم Phase 1 خلاف آن را مستند کرده باشد. خطای JSON خراب، ID تکراری، profile override مبهم، نسخهٔ schema/Runtime پشتیبانی‌نشده و فایل غیرقابل‌دسترسی را ایمن و قابل‌تشخیص مدیریت کن. دادهٔ بارگذاری‌شده را immutable/validated به لایه‌های بعدی بده و هیچ فایل یا محتوایی را به‌عنوان کد اجرا نکن.
 
-### [🔴] Step 4: اعتبارسنجی معنایی مستقل از اجرای مدل
+### [🔴] Step 4: Semantic validator و آزمون‌های قراردادی مثبت/منفی
 
-اعتبارسنجی کن: یکتایی شناسهٔ node/port، start node موجود، endpointهای edge، تطابق نام/نوع پورت و mapping، سازگاری خروجی‌ها و terminal resultها، شرط‌های محدود و دارای نوع، مسیرهای reachable، امکان رسیدن مسیرهای مجاز به end، شاخه‌های شرطی کامل، ساختار و سقف retry/loop/budget، و نبود چرخهٔ نامحدود. در این فاز فقط قالب و ارجاع‌های قابل‌شناسایی با registryهای فعلی از نظر ساختاری کنترل شوند؛ resolution نسخه‌ای/وجودی Toolset و سایر قطعات جدید در Phase 3 کامل می‌شود. هر دور فقط وقتی معتبر باشد که edge/loop guard صریح، counter مستقل و max iteration محدود داشته باشد. هیچ expression string یا کد دلخواه پذیرفته نشود.
+Semantic validator را مستقل از اجرای مدل/ابزار پیاده کن و برای همهٔ موارد زیر assertion آزمون‌پذیر داشته باش: یکتایی IDهای node و یکتایی dependency `(kind,id)` حتی با نسخهٔ متفاوت؛ یکتایی `counterId`؛ وجود start و endpointها؛ یکتایی نام port در تعریف‌ها؛ هر mapping به port موجود در source/target، عمق دقیقاً یک، پوشش همهٔ required inputs در هر transition و سازگاری `required`/نوع/enum؛ عملگر predicate سازگار با نوع port؛ decision enum برابر دامنهٔ مجاز rubric؛ وجود/قابل‌دسترسی‌بودن end و دقیقاً یک result برای هر end با port/outcome منطبق و emit کامل؛ شرط‌های reachable و routeهای کامل؛ حداکثر یک default/source و تعیین کامل دامنه (پوشش تمام enum/boolean values یا default برای دامنهٔ باز)، درحالی‌که overlap با first-match مجاز و deterministic است؛ error route target/map/type/required-input و ممنوعیت چرخهٔ error-route؛ retry shape، retryOn، attempt count و منع retry/route برای security denial/cancel؛ JSON Pointer سطح‌اول معتبر؛ integrity و نسخهٔ dependency؛ و limitهای اندازه و budget. چرخه‌های گراف کنترلی را با normal edge، exhaustion route و error transition تحلیل کن: در هر دور باید یک loop counter محدود و monotonic مصرف شود؛ مسیرِ بدون مصرف counter درون همان state رد شود. کران محافظه‌کارانه با saturating arithmetic برابر `|nodes| × Π(1 + maxIterations_i)` است؛ profile وقتی رد شود که کران از `maxNodeVisits` بیشتر باشد؛ Runtime نیز `maxNodeVisits` را مستقل و سخت enforce کند. ارجاع‌های خارجی از نظر shape اینجا و resolution واقعی در Phase 3 بررسی شوند. هیچ expression/callback/code پذیرفته نشود.
 
 **Acceptance criteria:**
-JSON Schema مطابق Draft 2020-12 و sample معتبرند؛ validator runtime و schema parity آزمون‌پذیر دارند؛ registry فقط Profileهای ساختاری معتبر و نسخهٔ schema/Runtime پشتیبانی‌شده را بارگذاری می‌کند؛ خطاهای ساختاری و معنایی graph با محل و علت قابل‌اقدام رد می‌شوند؛ تست‌های مثبت و منفی برای ID تکراری، port mismatch، graph غیرقابل‌دسترسی، خروجی terminal نامعتبر و loop نامحدود موفق‌اند؛ resolution کامل اجزای خارجی به Phase 3 وابسته و صریح است؛ build/typecheckهای مربوطه سبزند.
+JSON Schema مطابق Draft 2020-12 و همهٔ fixtures معتبرند؛ schema/semantic errors تشخیصی و parity پوشش‌داده‌شده دارند؛ تمام موارد مثبت/منفی Step 4 تست شده‌اند، ازجمله duplicate `(kind,id)`، `counterId`، enum/type mismatch، pointer عمیق، default/exhaustiveness، first-match overlap و tie order، result/end mismatch، routeMap، retry exhaustion و nested loops؛ profileهای ناقص/نامعتبر پیش از load/dispatch رد می‌شوند؛ loader byte cap مصوب را قبل از parse enforce می‌کند؛ build/typecheck سبزند.
 
 ---
 
-## [🔴] Phase 3: قطعات قابل‌بازاستفاده و resolution وابستگی‌ها
+## [🔴] Phase 3: resolution قطعات مشترک و مجوزهای مؤثر v1
 
-Profileها باید بتوانند قطعات را بدون کپی prompt یا منطق کنار هم بچینند. این فاز قرارداد Persona/Skill/Toolset/Rubric/Model Profile را به registryهای HOOTL متصل می‌کند و Node Template و Sub-workflow را به شکل محدود، نسخه‌دار و غیرقابل‌اجرای کد عرضه می‌کند.
+این فاز فقط قطعاتی را resolve می‌کند که در schema v1 هستند: Persona، Skill، Toolset، Rubric و Model Profile. هیچ منبع حقیقت موازی نساز. **تصمیم دامنهٔ v1:** inheritance، Node Template و Sub-workflow، recursion و composition تو‌در‌تو خارج از این نسخه‌اند؛ این موارد فقط با RFC، قرارداد/نسخهٔ جدا و approval مالک در scope آینده وارد می‌شوند، نه به‌عنوان step اجرایی این plan.
 
 ### [🔴] Step 1: ساخت resolver برای وابستگی‌های Profile
 
-در لایهٔ registry/factory موجود، ارجاع‌های هر Profile را resolve کن؛ شناسه، نسخهٔ دقیق یا constraint مصوب Phase 1 را اعمال کن و مراجع missing، duplicate، ambiguous، ناسازگار یا غیرفعال را پیش از شروع اجرا رد کن. با AgentDefinition فعلی (Persona + Skills + Model) و AgentFactory هماهنگ شو و منبع موازی برای تعریف Persona/Skill نساز. برای Rubric و Model Profile، اگر Phase 1 منبع حقیقت مستقلی پیدا نکرد، طبق تصمیم ثبت‌شده به قرارداد موجود متصل شو یا کمینهٔ registry لازم را اضافه کن؛ prompt/model config را در Profile کپی نکن. چون ابزارها مجوز دارند، resolution باید intersection این مجموعه‌ها را بسازد: ابزارهای مجاز runtime، `Persona.allowedTools`، Toolset انتخابی و deny list Profile.
+در registry/factory موجود، ارجاع‌های هر Profile را resolve کن؛ نسخهٔ دقیق و digest اختیاری را اعمال و missing، duplicate، ambiguous، ناسازگار، غیرفعال یا integrity-mismatch را پیش از activation رد کن. با AgentDefinition فعلی (Persona + Skills + Model) هماهنگ شو و متن‌ها را در Profile کپی نکن. برای Rubric و Model Profile، اگر منبع حقیقت موجود نیست، طبق تصمیم ثبت‌شده به قرارداد موجود وصل شو یا design decision لازم را متوقف/ثبت کن؛ ساخت registry موازی بدون تصمیم ممنوع است. Artifactها در run به نسخه/digest resolve شده pin شوند.
 
 ### [🔴] Step 2: تعریف و اعمال Toolsetهای نام‌دار
 
-ابتدا بررسی کن آیا Toolset مستقل در مخزن وجود دارد؛ اگر ندارد، قرارداد داده‌ای registry آن را به‌صورت فهرست شناسهٔ ابزارها و metadata نسخه‌دار اضافه کن. Toolset فقط می‌تواند دسترسی را محدودتر کند؛ ابزار ناموجود، غیرفعال یا خارج از Persona هرگز با Toolset مجاز نمی‌شود. برابری با مجوزهای فعلی AgentFactory و `assignedTools` را حفظ کن.
-
-### [🔴] Step 3: افزودن Node Templateهای داده‌ای
-
-قابلیت template را برای پارامتردهی/بازتولید Nodeهای موجود طراحی کن؛ template نوع اجرایی تازه یا کد نمی‌سازد. ورودی‌های template باید schema/port تعریف‌شده داشته باشند، مقداردهی و overrideها محدود و deterministic باشند و پس از expansion، همهٔ nodeها دوباره از validator Phase 2 عبور کنند. IDهای حاصل باید پایدار و بدون collision باشند.
-
-### [🔴] Step 4: افزودن Sub-workflow محدود
-
-تعریف یک graph قابل‌فراخوانی با قرارداد ورودی/خروجی و نسخهٔ صریح اضافه کن. در زمان resolution، مرز ورودی/خروجی را به workflow فراخواننده نگاشت کن؛ recursion، چرخهٔ ارجاع، dependency حل‌نشده و mismatch را رد کن. محدودیت بودجه و مجوزهای caller باید به فرزند منتقل شوند و sub-workflow نتواند policy را گسترش دهد.
+ابتدا بررسی کن Toolset مستقل در مخزن وجود دارد یا نه؛ اگر ندارد، فقط پس از تصمیم Phase 1 حداقل registry نام‌دار و نسخه‌دار از tool IDs واقعی بساز. ابزار مؤثر برابر intersectionِ Runtime-permitted، Persona.allowedTools و Toolset است، سپس deny list آن را کمتر می‌کند. Toolset هرگز ابزار غایب/غیرفعال یا خارج از مجوز را اضافه نمی‌کند؛ approval و resource limits نیز فقط می‌توانند سخت‌تر شوند. ثبت کن که schema validation مجوز اجرایی محسوب نمی‌شود و authorization در call site واقعی تکرار خواهد شد.
 
 **Acceptance criteria:**
-Profile می‌تواند Persona، Skill، Toolset، Rubric، Model Profile و قطعات قابل‌بازاستفادهٔ معتبر را resolve کند؛ template/sub-workflow پس از expansion deterministic و دوباره‌اعتبارسنجی می‌شوند؛ نسخه/مرجع نامعتبر پیش از اجرا خطای دقیق می‌دهد؛ هیچ مسیر ترکیب یا override مجوزی فراتر از `Persona.allowedTools`/Runtime ایجاد نمی‌کند؛ تست‌های مجاز، denied، نسخهٔ ناسازگار، ID collision، recursion و interface mismatch می‌گذرند.
-
+تمام dependency kindهای v1 به منبع حقیقت موجود/مصوب resolve می‌شوند؛ نسخه و digest پین و هر mismatch پیش از اجرا رد می‌شود؛ Toolset فقط دسترسی را محدود می‌کند؛ هیچ inheritance/template/sub-workflow در schema یا resolver اجرا نمی‌شود؛ تست‌های valid/missing/duplicate/version/digest/ambiguous/denied و scope trust موفق‌اند. هر درخواست Template/Sub-workflow به عنوان deferred future scope با تصمیم و traceability ثبت شده، نه الزام فراموش‌شده.
 ---
 
 ## [🔴] Phase 4: Workflow graph engine و bounded control-flow
 
 پیاده‌سازی هستهٔ interpreter برای node/edge، ورودی/خروجی، شرط و حلقهٔ محدود به‌عنوان یک واحد داخلی و قابل‌آزمون. در پایان این فاز هنوز Profile برای کاربر فعال نمی‌شود؛ فقط kernel کامل و پایدار است و اجرای مدل/ابزار به handlerهای فاز بعد وابسته می‌ماند.
 
-### [🔴] Step 1: پیاده‌سازی state machine و data mapping
+### [🔴] Step 1: state machine و انتخاب first-match
 
-کنترل‌جریان profile را با state machine صریح پیاده کن: آغاز graph، resolve ورودی node، dispatch از طریق قرارداد handler، ثبت output و انتخاب edge واجدشرایط. داده از mapping نام‌دار منتقل شود و schema/type پورت در مرزها کنترل شود. انتخاب edge در صورت چند شرط درست باید deterministic و مطابق قرارداد باشد؛ ambiguity باید پیش از dispatch رد شود.
+کنترل‌جریان بیرونی را با state machine صریح پیاده کن: start، resolve input، dispatch handler، اعتبارسنجی/ثبت output و انتخاب edge. انتخاب شرطی فقط مطابق قرارداد مشترک است: conditional edges به‌ترتیب priority صعودی و سپس declaration order؛ اولین predicate درست برنده است، حتی اگر شرط بعدی نیز درست باشد؛ اگر هیچ‌کدام درست نیست، تنها default مجاز اجرا می‌شود؛ بدون match/default fail-closed. ambiguity error تولید نکن. routeMap mapping سطح‌اول را با port type/required کنترل کن. تست کن دو شرط هم‌زمان درست‌اند، priority tie به declaration order می‌رود، default فقط fallback است، default تکراری رد می‌شود، و نبود route fail-closed است.
 
 ### [🔴] Step 2: ارزیابی predicateهای داده‌ای
 
 عملگرهای محدود مصوب را بر خروجی resolveشده پیاده کن؛ JSON Pointer نامعتبر، property مفقود، نوع نامتوافق و value مقایسه‌ناپذیر را طبق semantics ثبت‌شده مدیریت کن. هیچ string expression، eval یا کد دلخواه اجرا نشود. آزمون مرزی برای null، مقدار مفقود، آرایه و object مطابق قرارداد اضافه کن.
 
-### [🔴] Step 3: اجرای loopهای صریح و محدود
+### [🔴] Step 3: اجرای loopهای محدود و کران node visit
 
-edgeهای دارای loop را فقط با `maxIterations` و counter اختصاصی اجرا کن. افزایش counter، ترتیب visit، شرط خروج و پایان به‌علت سقف را صریح کن؛ الگوریتم باید در هر ورودی معتبر terminate کند. cycleهای خارج از loop guard یا حلقهٔ چندمسیرهٔ فاقد bound باید پیش از dispatch رد شوند.
+هر loop counter یکتا، monotonic و run-scoped باشد؛ یک iteration دقیقاً traversal موفق همان edge است. در تلاش بعد از سقف، onExhausted به‌صورت transition مشخص اجرا می‌شود. تمام normal، exhaustion و error-route transitions در cycle analysis بیایند؛ چرخه‌ای که در یک counter-state بدون افزایش counter دور بزند رد شود. semantic validator کران محافظه‌کارانهٔ `|nodes| × Π(1 + maxIterations_i)` را با saturating arithmetic محاسبه و با `maxNodeVisits` مقایسه کند؛ Runtime هم در هر transition hard visit cap را enforce کند تا nested loops یا خطای تحلیل نتواند runaway بسازد. تست nested/overlapping loops، exhaustion route، counter collision و overflow را اضافه کن.
 
-### [🔴] Step 4: قرارداد نتیجه/خطا و seam داخلی handler
+### [🔴] Step 4: اجرای قرارداد error/retry/route
 
-قرارداد typed برای اجرای handler، نتیجهٔ موفق، شاخهٔ انتخابی، خطای فنی/کیفی و توقف تعریف کن. در این فاز فقط fake handlerهای تست برای اثبات kernel مجازند؛ هیچ stub تولیدی یا route عمومی که کار ناتمام را اجرا کند اضافه نکن. node kind یا config ناشناخته fail-closed باشد.
+قرارداد typed خطا را پیاده کن: `fail` خاتمهٔ failure؛ `retry` فقط دسته‌های صریح retryOn را با maxAttempts شامل invocation اول و backoff ثابت تکرار می‌کند و پس از exhaust یا nonretryable fail می‌شود؛ `route` انتقال مستقیم به routeTo با نگاشت target inputها از failure envelope محدود (`failure.category/code/retryable`، `node.id/attempt` و snapshot `inputs.<port>`). raw exception text به node/مدل داده نشود. authorization/approval denial و cancellation همواره fail-closed و خارج از retry/route پروفایل هستند. route transition از normal edges مستقل اما در reachability/budget/cycle graph منظور شود.
+
+### [🔴] Step 5: feature flag و دسترس‌پذیری امن kernel
+
+Feature flag پشتیبانی Profile را بر اساس الگوی موجود اضافه/تطبیق بده؛ پیش‌فرض خاموش باشد. تا زمانی که خاموش است هیچ entry point کاربر نباید Profile را اجرا کند و درخواست‌های legacy تغییر نکنند. تست مثبت opt-in کنترل‌شده و منفی default-off / unknown profile / invalid profile پیش از handler dispatch اضافه کن.
 
 **Acceptance criteria:**
-graphهای خطی، شاخه‌ای و bounded-loop با fake handlerهای تست به‌صورت deterministic اجرا می‌شوند؛ mapping و predicateها قرارداد نوع‌دار دارند؛ تمام چرخه‌ها یا دارای guard/sقف معتبرند یا رد می‌شوند؛ node visit/iteration متناهی است؛ error/result states ساختاریافته‌اند؛ kernel به کاربر عرضه نشده و هیچ موتور موازی مدل/tool ایجاد نشده؛ unit tests و typecheckهای فاز موفق‌اند.
+graphهای خطی، شاخه‌ای و bounded-loop با fake handlerها deterministic هستند؛ first-match/default semantics در overlap/tie/no-match تست شده؛ mapping/predicate/error route نوع‌دار است؛ retry شمارش و پایان قطعی دارد؛ چرخه‌های نامحدود و کران visit ناکافی رد می‌شوند و hard cap Runtime می‌ایستد؛ خطاهای security/cancel قابل route/retry نیستند؛ feature flag default-off است و هیچ مسیر عمومی بدون opt-in وجود ندارد؛ kernel هنوز engine موازی مدل/tool نیست؛ unit tests/typecheck موفق‌اند.
 
 ---
 
@@ -127,17 +125,17 @@ graphهای خطی، شاخه‌ای و bounded-loop با fake handlerهای ت�
 
 پیاده‌سازی intake باید ورودی درخواست و context را به قرارداد port تبدیل کند؛ condition از evaluator Phase 4 استفاده کند؛ end فقط result declaration معتبر را بسازد. Clarification و user-facing result باید با lifecycle و payloadهای entry point موجود سازگار باشند.
 
-### [🔴] Step 2: اتصال planner، execute و review
+### [🔴] Step 2: اتصال planner، execute و review با مرز اعتماد از روز اول
 
-`planner` به Planner/feasibility/cycle flow موجود، `execute` به PlanRuntime/AgentRuntime/TaskRuntime و `review` به Acceptance/Final Review و Rubric مصوب delegate شود. ورودی و خروجی هر adapter با contract بررسی شود؛ handler حق ندارد auth، cancellation، resource lock، re-plan یا status موجود را دور بزند. مدل/toolها از AgentFactory و registries resolve شوند.
+`planner` به Planner/feasibility/cycle flow موجود، `execute` به PlanRuntime/AgentRuntime/TaskRuntime و `review` به Acceptance/Final Review و Rubric مصوب delegate شود. ورودی/خروجی با contract بررسی شود و lifecycle فعلی دور زده نشود. از اولین ارسال `goal`، description، Persona/Skill یا fetch content به مدل، متن را به‌صورت untrusted data محصور کن؛ دستورهای تعبیه‌شده در آن هرگز system policy، tool allowlist، approval، feature flag یا route را تغییر نمی‌دهند. همین‌جا unit/integration adversarial test برای prompt injection در goal/persona/skill/fetched text و تلاش برای tool escalation اضافه کن، نه اینکه به hardening نهایی موکول شود. مدل/tool فقط از registry/factory resolve شوند.
 
 ### [🔴] Step 3: اتصال approval و رفتارهای خطا
 
-approval node به mechanism interaction/callback موجود متصل شود؛ قبل از side effect لازم، تصمیم مجاز/ردشده/منقضی را ثبت کند. خطای فنی، شکست کیفیت، clarification/approval، cancellation و limit را جدا map کن. `fail`، retry محدود، route به failure edge و ask-user فقط در دامنهٔ policy مصوب باشند؛ نتیجهٔ end و status summary با قراردادهای جاری هماهنگ بمانند.
+approval node به mechanism interaction/callback موجود متصل شود؛ تصمیم approved/denied/expired و timeout/cancel را مستقل ثبت کند. Side-effect approval باید digest محتوای نمایش‌داده‌شده را ثبت و بلافاصله پیش از effect دوباره تطبیق دهد؛ mismatch=abort. Clarification از approval gate جدا بماند. `fail/retry/route` دقیقاً طبق Phase 4 اجرا شوند؛ route مقصد و mapping فقط همان sanitized failure envelope را می‌گیرند و هیچ مسیر خطا مجوز را گسترش نمی‌دهد. Limit `ask-user` فقط pause/resume معتبر است، نه approval خودکار.
 
-### [🔴] Step 4: تست یکپارچهٔ handlerها
+### [🔴] Step 4: تست یکپارچهٔ handlerها و مرز امنیتی
 
-تست integration برای هر هفت kind (`intake`، `planner`، `execute`، `review`، `condition`، `approval` و `end`) بنویس؛ node ناشناخته و config بدون handler باید قبل از side effect رد شوند. ثابت کن delegation به orchestrator/runtime مشترک است و handlerها lifecycleهای جاری را تکراری نمی‌سازند.
+تست integration برای هر هفت kind بنویس؛ node/config ناشناخته پیش از side effect رد شود. adversarial tests از Step 2 باید در همان PR/fase سبز باشند و ثابت کنند prompt injection از goal/Persona/Skill/fetch نمی‌تواند system instruction، toolset، approval، route یا budget را تغییر دهد. delegation به runtime مشترک، policy enforcement و lifecycle جاری را اثبات کن.
 
 **Acceptance criteria:**
 تمام هفت kind از طریق قرارداد handler عملیاتی‌اند؛ planner/execute/review به اجزای موجود delegate می‌کنند؛ approval و خطاها نتیجهٔ مشخص دارند؛ output هر node با port قراردادش سازگار است؛ handler ناشناخته fail-closed است؛ تست‌های integration ثابت می‌کنند tool/task lifecycle، auth، PlanRuntime و policyهای موجود دور زده نمی‌شوند.
@@ -150,28 +148,28 @@ approval node به mechanism interaction/callback موجود متصل شود؛ �
 
 ### [🔴] Step 1: پایداری state و resume نسخه‌دار
 
-در store/lifecycle موجود، state لازم برای workflow run را ذخیره کن: profile ID و version، schema/runtime version، node/status فعلی، outputs/handoffs لازم، loop counters، budget counters، approvals و plan/session ارتباط‌یافته. نوشتن باید crash-safe مطابق قرارداد store موجود باشد. resume باید همان snapshot/version را بازیابی کند؛ اگر profile/dependency/version موجود نیست یا integrity mismatch دارد، اجرای side effect را متوقف و خطای امن ارائه کند.
+در store/lifecycle موجود، state لازم برای workflow run را ذخیره کن: profile ID/version و hash از canonical profile bytes، schema/runtime version، resolved dependency versions/digests، node/status فعلی، outputs/handoffs لازم، loop counters، budget counters، approvals (شامل digest مورد تأیید) و plan/session ارتباط‌یافته. نوشتن باید crash-safe مطابق قرارداد store موجود باشد. پیش از resume hash و dependency integrity را تطبیق بده؛ mismatch یا profile/dependency حذف‌شده یعنی توقف پیش از هر side effect. **Unknown / Requires Verification:** تضمین‌های store فعلی برای تشخیص side effect انجام‌شده اما commit‌نشده؛ attempt ID و intent/effect/commit journaling را با قرارداد موجود هماهنگ کن، و اگر نتیجهٔ side effect مبهم است آن را خودکار تکرار نکن.
 
 ### [🔴] Step 2: cancellation، timeout و resource budget
 
-`maxDurationSeconds`، `maxNodeVisits`، `maxModelCalls` و `maxToolCalls` را در مسیر واقعی و نه صرفاً config اعمال کن؛ محدودیت‌ها در sub-workflow هم تجمیع شوند. cancellation باید به handler/task فعال برسد، state terminal معتبر ثبت کند و از شروع کار بعدی جلوگیری کند. رفتار limit طبق policy مصوب به fail/handoff/ask-user برود و counters در resume reset نشوند.
+`maxDurationSeconds`، `maxNodeVisits`، `maxModelCalls` و `maxToolCalls` را در مسیر واقعی و نه صرفاً config اعمال کن؛ بودجهٔ Profile با سقف‌های AgentRuntime/tool/provider تجمیع شود و هیچ لایه‌ای نتواند بودجه را reset یا افزایش دهد. v1 sub-workflow ندارد، پس aggregate budget فقط در Profile run و PlanRuntime موجود تعریف می‌شود. Unknown Phase 1 دربارهٔ budget accounting باید قبل از این step حل شده باشد. cancellation باید به handler/task فعال برسد، state terminal معتبر ثبت کند و از شروع کار بعدی جلوگیری کند. رفتار limit طبق policy مصوب به fail/handoff/ask-user برود و counters در resume reset نشوند.
 
 ### [🔴] Step 3: enforce کردن tools و approval در runtime
 
-در نقطهٔ فراخوانی واقعی ابزار، دسترسی مؤثر را دوباره اعمال کن؛ به validation پروفایل اکتفا نکن. deny list، Persona policy، مجوز ابزارهای خارجی، محدودیت‌های filesystem/network/Git و قواعد approval موجود مستقل از پروفایل پابرجا بمانند. Side effect بدون مجوز یا بدون تأیید لازم باید پیش از اجرا مسدود شود. تغییر policy بین آغاز و resume نباید موجب افزایش اختیار شود.
+در نقطهٔ فراخوانی واقعی ابزار، دسترسی مؤثر را دوباره اعمال کن؛ به validation پروفایل اکتفا نکن. ابزار، approval و budget از Runtime، user, Persona, Toolset و Profile فقط به‌صورت strictest/intersection محدود شوند. Profile/workspace override برای default بدون trust/opt-in مصوب رد شود. deny list، سیاست filesystem/network/Git و کنترل approval پابرجا بمانند؛ denial/cancel fail-closed و خارج از profile error routing باشد. Side effect بدون مجوز/approval پیش از اجرا مسدود شود. تغییر policy بین آغاز و resume نباید موجب افزایش اختیار شود.
 
 ### [🔴] Step 4: رخدادها، audit و خطاهای lifecycle
 
 چرخهٔ profile را از طریق EventBus/observability فعلی گزارش کن: آغاز، node transition، loop، approval، tool/model budget، retry، failure، resume و پایان. اطلاعات حساس، secret، prompt خام و دادهٔ خصوصی را با قواعد redaction موجود ثبت نکن. شکست persistence یا event sink نباید باعث state مبهم یا اجرای دوبارهٔ side effect شود؛ semantics سازگار با تضمین‌های فعلی را ثبت و تست کن.
 
 **Acceptance criteria:**
-workflow پس از restart از state و نسخهٔ درست resume می‌شود یا fail-closed می‌کند؛ cancellation، timeout و تمام budgetها عملاً enforce می‌شوند؛ مجوز ابزار در مرز اجرای واقعی بررسی و هیچ Profile آن را افزایش نمی‌دهد؛ approval پیش از side effect اجباری اجرا می‌شود؛ رخدادهای lifecycle قابل‌ردیابی و فاقد secret هستند؛ تست crash/resume، stale profile، policy تغییرکرده، cancellation حین اجرا و failure persistence می‌گذرند؛ تست‌های موجود plan/session/store همچنان سبزند.
+workflow پس از restart از state و hash/version درست resume می‌شود یا fail-closed می‌کند؛ cancellation، timeout و تمام budgetها عملاً enforce می‌شوند؛ مجوز ابزار در مرز اجرای واقعی بررسی و هیچ Profile آن را افزایش نمی‌دهد؛ approval digest پیش از side effect دوباره تطبیق می‌شود؛ side effect با نتیجهٔ مبهم خودکار تکرار نمی‌شود؛ رخدادهای lifecycle قابل‌ردیابی و فاقد secret هستند؛ تست crash/resume، stale profile/dependency/digest، policy تغییرکرده، cancellation حین اجرا و failure persistence می‌گذرند؛ تست‌های موجود plan/session/store همچنان سبزند.
 
 ---
 
 ## [🔴] Phase 7: پروفایل پیش‌فرض و حفظ رفتار فعلی
 
-جریان فعلی HOOTL را به Profile پیش‌فرض تبدیل کن و به‌صورت افزایشی فعال ساز. درخواست‌هایی که profile انتخاب نمی‌کنند باید همان behavior فعلی را داشته باشند؛ profile جدید تا عبور از parity gate جایگزین مسیر قدیمی نشود.
+جریان فعلی HOOTL را فقط پس از استخراج از کد/تست به Profile پیش‌فرض تبدیل کن. Feature flag در v1 پیش‌فرض خاموش می‌ماند؛ خاموش بودن یعنی مسیر legacy بدون تغییر. Profile فقط با opt-in صریح و پس از parity gate اجرا می‌شود؛ انتخاب implicit/فعال‌سازی عمومی بدون gate ممنوع است.
 
 ### [🔴] Step 1: مدل‌کردن جریان فعلی در Profile پیش‌فرض
 
@@ -179,7 +177,7 @@ workflow پس از restart از state و نسخهٔ درست resume می‌شو�
 
 ### [🔴] Step 2: اتصال default profile به Orchestrator
 
-انتخاب implicit را به default profile resolve کن، اما fallback پنهان یا تغییر رفتار هنگام profile نامعتبر نساز. در صورت نبود profile registry یا فایل پیش‌فرض، مسیر legacy طبق migration تصمیم‌گرفته‌شده عمل کند و diagnostic بدهد. خطای loading نباید باعث اجرای نیمه‌راهی یا بی‌صدا برگشت به ابزارهای گسترده‌تر شود.
+هنگام flag خاموش، هیچ Profileای resolve/dispatch نشود و مسیر legacy فعلی اجرا شود. با flag روشن و default profile صریح/مصوب، Profile resolve شود؛ profile نامعتبر fail-closed و diagnostic بدهد و هرگز silent fallback، اجرای نیمه‌راهی یا گسترش ابزار رخ ندهد. فعال‌سازی پیش‌فرض در محیط/کاربر فقط پس از parity و opt-in/approval ثبت‌شده انجام شود.
 
 ### [🔴] Step 3: اثبات parity و سازگاری دادهٔ موجود
 
@@ -196,7 +194,7 @@ workflow پس از restart از state و نسخهٔ درست resume می‌شو�
 
 ### [🔴] Step 1: فراهم‌کردن مسیر authoring و discovery
 
-طبق scopeهای تصویب‌شدهٔ Phase 1، امکان ساخت و استفاده از Profile سفارشی در registry پروژه یا مسیر دیگر مصوب را فراهم کن. قرارداد فایل، precedence، نام‌گذاری، نسخه‌بندی، نمونه، خطاهای schema/semantic و نحوهٔ override مستند شود. Profileهای کاربر بدون دست‌کاری registry پکیج قابل تعریف باشند.
+طبق scopeهای تصویب‌شدهٔ Phase 1، discovery و authoring Profile سفارشی را فراهم کن. Project/workspace profile untrusted است و نمی‌تواند default را override کند، مگر trust/opt-in صریح طبق قرارداد موجود. Feature flag تا انتخاب کاربر/اپراتور خاموش باقی می‌ماند. precedence، naming، schema/semantic errors و versioning مستند شود؛ registry پکیج دست‌نخورده بماند.
 
 ### [🔴] Step 2: افزودن فهرست/اعتبارسنجی/انتخاب در interfaceهای پشتیبانی‌شده
 
@@ -211,29 +209,38 @@ entry pointهای جاری CLI و server/API را دوباره تأیید و ب�
 
 ---
 
-## [🔴] Phase 9: hardening، migration، rollout و تحویل نهایی
+## [🔴] Phase 9: hardening امنیتی و سنجش منابع
 
-کل قابلیت را در محیط پروژه سخت‌سازی و قابل‌نگهداری کن؛ traceability، امنیت، تست سرتاسری، CI، اسناد و rollout/rollback باید قبل از اعلام تکمیل بسته شوند.
+پس از اتصال handlerها و پیش از rollout، امنیت/adversarial و ظرفیت را با معیارهای مصوب harden کن. مرز اعتماد از Phase 5 برقرار شده؛ این فاز آن را end-to-end می‌بندد و جایگزین تست‌های زودهنگام نیست.
 
-### [🔴] Step 1: سخت‌سازی مرز دستور و داده و آزمون‌های adversarial
+### [🔴] Step 1: آزمون adversarial سرتاسری و policy boundary
 
-محتوای Profile، Persona/Skill و هر دادهٔ بیرونی، به‌ویژه خروجی `fetch`، باید صریحاً به‌عنوان دادهٔ غیرقابل‌اعتماد پردازش شود، نه دستور یا مجوز ابزار. promptهای system/user و مسیرهای prompt centralization موجود را در branch نهایی بررسی کن؛ در نقطهٔ لازم مرز اعتماد را بیان و هر راهی را ببند که متن fetched/profile بتواند system policy را override یا tool call را مجاز کند. تست unit/integration/e2e برای schema و semantic validator، resolver، templates/sub-workflows، هر node kind، شاخه/loop، approval و tool authorization، persistence/recovery و هر entry point اضافه کن. ورودی‌های مخرب را پوشش بده: prompt injection در description/fetch result، تلاش برای اجرای code، path/tool escalation، ارجاع یا نسخهٔ جعلی، graph بسیار بزرگ، fan-out، چرخه، loop limit، output حجیم، secret و فایل خراب؛ اثبات کن دادهٔ خارجی توان تغییر مجوز یا دستور سیستم را ندارد.
+تست end-to-end برای profile/Persona/Skill/fetch injection، اجرای code/eval، tool/path escalation، untrusted workspace override، approval/budget downgrade، forged dependency/version/digest، route abuse، error payload leakage، graph بزرگ، nested/overlapping loops، exhaustion، cancellation، restart و persistence failure اضافه کن. ثابت کن injection هیچ‌گاه system policy، authorization، approval، feature flag یا budget را تغییر نمی‌دهد؛ raw exception/secret وارد route/prompt/log نمی‌شود؛ default-off واقعی است؛ denied/cancelled action هیچ‌وقت retry/routed نمی‌شود. تست‌ها از gateهای مراحل قبلی کپی مبهم نباشند؛ اینجا end-to-end و integration کامل پوشش داده شوند.
 
 ### [🔴] Step 2: ارزیابی performance و منابع
 
-با workflow نمونهٔ نماینده، هزینهٔ load/validation/resolution، تعداد node visit، latency و رشد state را اندازه‌گیری کن. مطمئن شو سقف‌های اجرایی قبل از runaway resource مصرفی مؤثرند، profile سنگین روی همهٔ requestها هزینهٔ غیرضروری تحمیل نمی‌کند و اجرای پیش‌فرض regression محسوس ندارد. معیار performance را با baseline پروژه تعیین و نتیجه ثبت کن؛ عدد دلخواه اختراع نکن.
-
-### [🔴] Step 3: migration و عملیات rollout/rollback
-
-راهنمای upgrade نسخهٔ profile/schema/runtime و رفتار هنگام profile/dependency حذف‌شده یا ناسازگار را بنویس. migration دادهٔ ماندگار، در صورت نیاز، idempotent و rollback-aware باشد؛ اگر migration لازم نیست، شواهد عدم نیاز را ثبت کن. مسیر feature rollout و بازگشت به default/legacy را در config و عملیات موجود مشخص کن؛ downgrade نباید state را بی‌صدا خراب یا execution را تکرار کند.
-
-### [🔴] Step 4: مستندسازی و Gateهای CI
-
-اسناد معماری، schema، author guide، migration/release note، وضعیت طرح اجرایی و traceability requirement-to-test را به‌روز کن. Gateهای موجود را برای schema validation نمونه‌ها، generator/parity checks، typecheck، lint، build، test و security-relevant checks توسعه بده؛ workflow واقعی CI را اجرا/بررسی کن. شکست‌های baseline را با اجرای clean baseline و گزارش جدا از regression تشخیص بده؛ هیچ شکست را صرفاً با عنوان قدیمی یا نامرتبط حذف نکن.
-
-### [🔴] Step 5: بازبینی نهایی مستقل و تحویل
-
-از دید معماری، کدنویسی، QA، امنیت، عملیات و سازگاری محصول، کل دامنه و PR را بازبینی کن. مطابقت هر الزام این سند با کد/test/doc را بررسی کن؛ وضعیت هر فاز/گام را فقط با شواهد نهایی به‌روزرسانی کن. تغییرات را در branch/PR بازبینی‌پذیر نگه دار؛ merge/release فقط با درخواست و مجوز جداگانهٔ مالک.
+با workflow نماینده، load/schema/semantic validation/resolution/run هزینه، node visits، wall time و رشد state را نسبت به baseline اندازه‌گیری کن. اعداد هدف را از baseline و limits مصوب استخراج کن، نه با حدس. prove کن byte cap پیش از parse، counters قبل از call، `maxNodeVisits` hard cap و time/model/tool budgets قبل از runaway موثرند؛ flag خاموش overhead غیرضروری و regression محسوس ندارد. نتیجه و محیط قابل‌بازتولید را ثبت کن.
 
 **Acceptance criteria:**
-suite و gateهای CI روی head نهایی نتیجهٔ ثبت‌شده دارند؛ regressions جدید صفرند و هر baseline failure با شواهد تفکیک شده؛ تست‌های امنیتی و end-to-end موفق‌اند؛ performance در معیارهای مصوب است؛ migration/rollback مستند و آزموده یا عدم نیاز آن مستند است؛ تمام requirementها traceability دارند؛ اسناد و نمونه‌ها همگام‌اند؛ هیچ مانع مسدودکنندهٔ شناخته‌شده‌ای باقی نیست؛ merge/release بدون تأیید صریح انجام نشده است.
+همهٔ security/adversarial E2Eهای تعریف‌شده سبزند؛ هیچ profile/untrusted text مجوز یا policy را تضعیف نمی‌کند؛ default-off و عدم‌اجرای denial/cancel با تست اثبات شده؛ limits قبل از مصرف runaway عمل می‌کنند؛ performance با معیار baseline مصوب سازگار است یا blocker صریح ثبت شده؛ suiteهای قبلی پابرجا هستند.
+
+---
+
+## [🔴] Phase 10: migration، مستندات، CI و تحویل مرحله‌ای
+
+فقط بعد از hardening، compatibility/recovery، مستندات و gateهای PR را کامل کن. rollout باید opt-in، قابل‌ردیابی و rollback-safe باشد؛ merge/release همچنان نیازمند مجوز مالک است.
+
+### [🔴] Step 1: migration و عملیات rollout/rollback
+
+راهنمای upgrade نسخهٔ Profile/schema/Runtime و رفتار profile/dependency حذف‌شده یا ناسازگار را بنویس. migration persistent state اگر لازم است idempotent و rollback-aware باشد؛ اگر لازم نیست شواهد عدم نیاز ثبت کن. Feature flag default-off و opt-in enablement را در config/operations مستند کن؛ downgrade باعث تکرار side effect یا افزایش authorization نشود. دادهٔ run، profile digest/version و approval digest را در resume بررسی کن.
+
+### [🔴] Step 2: مستندات، traceability و Gateهای CI
+
+Schema/author guide، error/retry semantics، first-match/default، loop bound formula، trust/approval/tool policy، explicit v1 exclusions، migration و release notes را با implementation همگام کن. `R-xxx`→phase/step→test/doc matrix و Decision/Unknown Register را نهایی کن. Gateهای CI باید نمونه‌های default/bounded/error-route را با schema و semantic validators بررسی، parity/generator/typecheck/lint/build/test/security check را اجرا کنند؛ شکست baseline با clean baseline تفکیک شود.
+
+### [🔴] Step 3: بازبینی مستقل و PR-by-phase handoff
+
+برای هر فاز PR جدا و قابل‌بازبینی داشته باش؛ description شامل R IDs، تغییر، test evidence، CI head SHA و dependencies باشد. قبل از ساخت/ادامهٔ branch بعدی CI/review و base commit را کنترل کن؛ branchها را فقط طبق ترتیب dependency rebase کن. PR #5/#6 را تنها اگر gate فاز 1 وابستگی واقعی یافته دنبال کن. بازبینی معماری، QA، امنیت، عملیات و compatibility را انجام بده. statusهای plan را فقط با evidence به‌روز کن؛ merge/release بدون درخواست و مجوز مستقل مالک ممنوع است.
+
+**Acceptance criteria:**
+migration/rollback آزموده یا عدم نیاز مستند است؛ CI و semantic/schema/security gates روی head هر PR نتیجهٔ ثبت‌شده دارند؛ traceability برای همهٔ R IDs کامل است؛ هیچ unknown مسدودکننده‌ای بی‌صاحب/بی‌موعد نیست؛ PRها فازبندی و قابل‌بازبینی‌اند؛ regressions از baseline تفکیک شده؛ همهٔ docs/examples با implementation همخوانند؛ rollout default-off است؛ merge/release بدون مجوز انجام نشده است.

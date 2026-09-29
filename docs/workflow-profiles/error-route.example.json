@@ -1,0 +1,190 @@
+{
+  "$schema": "./workflow-profile.schema.json",
+  "schemaVersion": "1.0.0",
+  "profile": {
+    "id": "example.error-route",
+    "name": "Explicit error route",
+    "description": "Structural fixture for explicit, typed, sanitized onError routing.",
+    "version": "1.0.0",
+    "runtime": {
+      "minVersion": "1.0.0"
+    },
+    "author": "HOOTL",
+    "tags": [
+      "fixture",
+      "error-route"
+    ]
+  },
+  "dependencies": [
+    {
+      "kind": "persona",
+      "id": "hootl.executor",
+      "version": "1.0.0"
+    },
+    {
+      "kind": "toolset",
+      "id": "hootl.default-tools",
+      "version": "1.0.0"
+    }
+  ],
+  "workflow": {
+    "startNode": "request",
+    "nodes": [
+      {
+        "id": "request",
+        "kind": "intake",
+        "goal": "Capture the task request.",
+        "inputs": {
+          "request": {
+            "type": "string",
+            "required": true
+          }
+        },
+        "outputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "config": {}
+      },
+      {
+        "id": "work",
+        "kind": "execute",
+        "goal": "Perform the requested work.",
+        "inputs": {
+          "request": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "outputs": {
+          "result": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "bindings": {
+          "personaRef": "hootl.executor",
+          "toolsetRef": "hootl.default-tools"
+        },
+        "config": {
+          "mode": "assisted",
+          "requireApprovalForSideEffects": true
+        },
+        "onError": {
+          "strategy": "route",
+          "routeTo": "failure",
+          "routeMap": {
+            "category": "/failure/category",
+            "request": "/inputs/request"
+          }
+        }
+      },
+      {
+        "id": "success",
+        "kind": "end",
+        "goal": "Return successful work.",
+        "inputs": {
+          "result": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "outputs": {
+          "response": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "config": {
+          "outcome": "success",
+          "emit": {
+            "response": "result"
+          }
+        }
+      },
+      {
+        "id": "failure",
+        "kind": "end",
+        "goal": "Hand off a catchable failure with context.",
+        "inputs": {
+          "category": {
+            "type": "string",
+            "required": true
+          },
+          "request": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "outputs": {
+          "handoff": {
+            "type": "object",
+            "required": true
+          }
+        },
+        "config": {
+          "outcome": "handoff",
+          "emit": {
+            "handoff": "request"
+          }
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "request",
+        "to": "work",
+        "map": {
+          "request": "/request"
+        }
+      },
+      {
+        "from": "work",
+        "to": "success",
+        "map": {
+          "result": "/result"
+        }
+      }
+    ]
+  },
+  "policies": {
+    "execution": {
+      "maxNodeVisits": 10,
+      "maxDurationSeconds": 300,
+      "maxModelCalls": 10,
+      "maxToolCalls": 20,
+      "onLimit": "fail"
+    },
+    "tools": {
+      "allowedToolsets": [
+        "hootl.default-tools"
+      ],
+      "deniedTools": []
+    },
+    "approvals": {
+      "policy": "side-effects",
+      "requireUserConfirmationFor": [
+        "external-write",
+        "file-write",
+        "git-write",
+        "irreversible-action"
+      ]
+    }
+  },
+  "result": [
+    {
+      "fromNode": "success",
+      "port": "response",
+      "kind": "response",
+      "outcome": "success"
+    },
+    {
+      "fromNode": "failure",
+      "port": "handoff",
+      "kind": "handoff",
+      "outcome": "handoff"
+    }
+  ]
+}

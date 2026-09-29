@@ -2,273 +2,1342 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:hootl:workflow-profile:1",
   "title": "HOOTL Workflow Profile",
-  "description": "Declarative, versioned workflow profile. Execution and security invariants remain enforced by the Runtime.",
+  "description": "HOOTL v1 declarative workflow profile. Profile, persona, skill and registry content are untrusted data. A profile may only tighten Runtime tools, approvals and budgets. No inheritance, node templates, sub-workflows, parallel fan-out or executable expressions are supported in v1. Validate the schema first, then run the separate semantic validator.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["schemaVersion", "profile", "dependencies", "workflow", "policies", "result"],
+  "patternProperties": {
+    "^x-": {}
+  },
+  "required": [
+    "schemaVersion",
+    "profile",
+    "dependencies",
+    "workflow",
+    "policies",
+    "result"
+  ],
   "properties": {
-    "schemaVersion": { "const": "1.0.0" },
-    "profile": { "$ref": "#/$defs/profileMetadata" },
+    "$schema": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Optional; allows editor autocompletion."
+    },
+    "schemaVersion": {
+      "type": "string",
+      "pattern": "^1\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+      "description": "Contract version. Major must be 1; the loader rejects unsupported minor versions with a dedicated diagnostic before full validation."
+    },
+    "profile": {
+      "$ref": "#/$defs/profileMetadata"
+    },
     "dependencies": {
       "type": "array",
-      "description": "Exact component versions required by this profile; the resolver checks these references before activation.",
-      "items": { "$ref": "#/$defs/dependency" },
-      "uniqueItems": true
+      "maxItems": 100,
+      "description": "Exact component versions required by this profile. Uniqueness of (kind,id) is enforced by the semantic validator (uniqueItems only detects fully identical objects). Every *Ref used in the workflow must appear here.",
+      "items": {
+        "$ref": "#/$defs/dependency"
+      }
     },
-    "workflow": { "$ref": "#/$defs/workflow" },
-    "policies": { "$ref": "#/$defs/policies" },
-    "result": { "$ref": "#/$defs/result" }
+    "workflow": {
+      "$ref": "#/$defs/workflow"
+    },
+    "policies": {
+      "$ref": "#/$defs/policies"
+    },
+    "result": {
+      "$ref": "#/$defs/result"
+    }
   },
   "$defs": {
     "profileMetadata": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "version", "runtime", "author"],
+      "patternProperties": {
+        "^x-": {}
+      },
+      "required": [
+        "id",
+        "name",
+        "version",
+        "runtime",
+        "author"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "name": { "type": "string", "minLength": 1, "maxLength": 120 },
-        "description": { "type": "string", "maxLength": 2000 },
-        "version": { "$ref": "#/$defs/semver" },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 2000
+        },
+        "version": {
+          "$ref": "#/$defs/semver"
+        },
         "runtime": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["minVersion"],
+          "required": [
+            "minVersion"
+          ],
           "properties": {
-            "minVersion": { "$ref": "#/$defs/semver" },
-            "maxVersion": { "$ref": "#/$defs/semver" }
+            "minVersion": {
+              "$ref": "#/$defs/semver"
+            },
+            "maxVersion": {
+              "$ref": "#/$defs/semver"
+            }
           }
         },
-        "author": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "license": { "type": "string", "maxLength": 100 },
-        "tags": { "type": "array", "items": { "type": "string", "maxLength": 40 }, "uniqueItems": true }
+        "author": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "license": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "tags": {
+          "type": "array",
+          "maxItems": 20,
+          "items": {
+            "type": "string",
+            "maxLength": 40
+          },
+          "uniqueItems": true
+        }
       }
     },
     "dependency": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["kind", "id", "version"],
+      "required": [
+        "kind",
+        "id",
+        "version"
+      ],
       "properties": {
-        "kind": { "enum": ["persona", "skill", "toolset", "rubric", "model-profile"] },
-        "id": { "$ref": "#/$defs/id" },
-        "version": { "$ref": "#/$defs/semver" }
-      }
+        "kind": {
+          "enum": [
+            "persona",
+            "skill",
+            "toolset",
+            "rubric",
+            "model-profile"
+          ]
+        },
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "version": {
+          "$ref": "#/$defs/semver",
+          "description": "Exact version. Ranges are not supported in v1."
+        },
+        "digest": {
+          "$ref": "#/$defs/digest",
+          "description": "Optional content digest; when present the resolver must verify it before activation."
+        }
+      },
+      "description": "Exact component version. The semantic validator rejects duplicate (kind,id) pairs even if their versions differ; an optional digest is verified before activation."
     },
     "workflow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["startNode", "nodes", "edges"],
+      "required": [
+        "startNode",
+        "nodes",
+        "edges"
+      ],
+      "description": "v1 is single-token and sequential (no parallel branches, fan-out or join). Outgoing conditional edges are evaluated by ascending priority, then declaration order; the first matching edge is taken. A single default edge is used only if no conditional edge matches. If no route matches, execution fails closed. Overlap is deterministic, not an ambiguity error. Semantic validation includes normal, loop-exhaustion and error-route transitions.",
       "properties": {
-        "startNode": { "$ref": "#/$defs/id" },
-        "nodes": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/node" } },
-        "edges": { "type": "array", "items": { "$ref": "#/$defs/edge" } }
+        "startNode": {
+          "$ref": "#/$defs/id"
+        },
+        "nodes": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/node"
+          }
+        },
+        "edges": {
+          "type": "array",
+          "maxItems": 300,
+          "items": {
+            "$ref": "#/$defs/edge"
+          }
+        }
       }
     },
     "node": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "kind", "goal", "inputs", "outputs", "config"],
+      "patternProperties": {
+        "^x-": {}
+      },
+      "required": [
+        "id",
+        "kind",
+        "goal",
+        "inputs",
+        "outputs",
+        "config"
+      ],
       "properties": {
-        "id": { "$ref": "#/$defs/id" },
-        "name": { "type": "string", "maxLength": 120 },
-        "kind": { "enum": ["intake", "planner", "execute", "review", "condition", "approval", "end"] },
-        "goal": { "type": "string", "minLength": 1, "maxLength": 2000 },
-        "inputs": { "$ref": "#/$defs/ports" },
-        "outputs": { "$ref": "#/$defs/ports" },
-        "bindings": { "$ref": "#/$defs/bindings" },
-        "onError": { "$ref": "#/$defs/errorPolicy" },
-        "config": { "type": "object" }
+        "id": {
+          "$ref": "#/$defs/id"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "kind": {
+          "enum": [
+            "intake",
+            "planner",
+            "execute",
+            "review",
+            "condition",
+            "approval",
+            "end"
+          ]
+        },
+        "goal": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Untrusted text. If sent to a model it must be delimited as data and can never grant tools or override system policy."
+        },
+        "inputs": {
+          "$ref": "#/$defs/ports"
+        },
+        "outputs": {
+          "$ref": "#/$defs/ports"
+        },
+        "bindings": {
+          "$ref": "#/$defs/bindings"
+        },
+        "onError": {
+          "$ref": "#/$defs/errorPolicy"
+        },
+        "config": {
+          "type": "object"
+        }
       },
       "allOf": [
         {
-          "if": { "properties": { "kind": { "enum": ["planner", "execute", "review"] } }, "required": ["kind"] },
-          "then": { "required": ["bindings"], "properties": { "bindings": { "required": ["personaRef"] } } }
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "planner",
+                  "execute",
+                  "review"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "bindings"
+            ],
+            "properties": {
+              "bindings": {
+                "required": [
+                  "personaRef"
+                ]
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "kind": { "const": "intake" } }, "required": ["kind"] },
-          "then": { "properties": { "config": { "$ref": "#/$defs/intakeConfig" } } }
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "intake",
+                  "condition",
+                  "approval",
+                  "end"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "bindings": false
+            }
+          }
         },
         {
-          "if": { "properties": { "kind": { "const": "planner" } }, "required": ["kind"] },
-          "then": { "properties": { "config": { "$ref": "#/$defs/plannerConfig" } } }
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "end"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "onError": false
+            }
+          }
         },
         {
-          "if": { "properties": { "kind": { "const": "execute" } }, "required": ["kind"] },
-          "then": { "properties": { "config": { "$ref": "#/$defs/executeConfig" } } }
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "intake"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "$ref": "#/$defs/intakeConfig"
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "kind": { "const": "review" } }, "required": ["kind"] },
-          "then": { "properties": { "config": { "$ref": "#/$defs/reviewConfig" } } }
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "planner"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "$ref": "#/$defs/plannerConfig"
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "kind": { "const": "condition" } }, "required": ["kind"] },
-          "then": { "properties": { "config": { "$ref": "#/$defs/conditionConfig" } } }
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "execute"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "$ref": "#/$defs/executeConfig"
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "kind": { "const": "approval" } }, "required": ["kind"] },
-          "then": { "properties": { "config": { "$ref": "#/$defs/approvalConfig" } } }
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "review"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "$ref": "#/$defs/reviewConfig"
+              }
+            }
+          }
         },
         {
-          "if": { "properties": { "kind": { "const": "end" } }, "required": ["kind"] },
-          "then": { "properties": { "config": { "$ref": "#/$defs/endConfig" } } }
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "condition"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "$ref": "#/$defs/conditionConfig"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "approval"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "$ref": "#/$defs/approvalConfig"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "end"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "config": {
+                "$ref": "#/$defs/endConfig"
+              }
+            }
+          }
         }
       ]
     },
     "ports": {
       "type": "object",
-      "description": "Named data contract for a node. Port compatibility is checked by the semantic validator.",
-      "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$" },
-      "additionalProperties": { "$ref": "#/$defs/port" }
+      "maxProperties": 32,
+      "description": "Named data contract. Required inputs must be mapped on every applicable incoming transition. Mappings and predicates address declared top-level ports only in v1; nested object schemas are opaque. Compatibility is checked by the semantic validator.",
+      "propertyNames": {
+        "$ref": "#/$defs/portName"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/port"
+      }
     },
     "port": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["type"],
+      "required": [
+        "type"
+      ],
       "properties": {
-        "type": { "enum": ["string", "number", "integer", "boolean", "object", "array", "file", "artifact", "any"] },
-        "required": { "type": "boolean", "default": false },
-        "description": { "type": "string", "maxLength": 500 }
+        "type": {
+          "enum": [
+            "string",
+            "number",
+            "integer",
+            "boolean",
+            "object",
+            "array",
+            "file",
+            "artifact",
+            "any"
+          ]
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "enum": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/scalar"
+          },
+          "description": "Closed set of scalar values. The semantic validator requires every value to be compatible with the declared port type and uses finite domains for branch exhaustiveness."
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        }
       }
     },
     "bindings": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "personaRef": { "$ref": "#/$defs/id" },
-        "skillRefs": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
-        "toolsetRef": { "$ref": "#/$defs/id" },
-        "modelProfileRef": { "$ref": "#/$defs/id" }
+        "personaRef": {
+          "$ref": "#/$defs/id"
+        },
+        "skillRefs": {
+          "type": "array",
+          "maxItems": 50,
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "uniqueItems": true
+        },
+        "toolsetRef": {
+          "$ref": "#/$defs/id",
+          "description": "Must be listed in policies.tools.allowedToolsets. Effective tools = intersection(Runtime, Persona.allowedTools, Toolset, minus deniedTools)."
+        },
+        "modelProfileRef": {
+          "$ref": "#/$defs/id"
+        }
       }
     },
     "errorPolicy": {
       "type": "object",
       "additionalProperties": false,
+      "required": [
+        "strategy"
+      ],
+      "description": "If omitted, behavior is fail. maxAttempts counts total node invocations including the initial invocation. retry retries only matching retryOn categories with a fixed delay; a non-matching failure or exhausted attempts fails terminally. route transfers control directly to routeTo with only the explicitly mapped, sanitized failure envelope and failed-node input snapshot. Authorization denial, approval denial and cancellation are always terminal fail-closed and cannot be retried or routed by a profile.",
       "properties": {
-        "strategy": { "enum": ["fail", "retry", "route", "ask-user"] },
-        "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 5 },
-        "failurePort": { "$ref": "#/$defs/id" }
-      }
-    },
-    "intakeConfig": { "type": "object", "additionalProperties": false, "properties": { "classification": { "type": "boolean", "default": false } } },
-    "plannerConfig": {
-      "type": "object", "additionalProperties": false,
-      "properties": { "mode": { "enum": ["decompose", "direct"] }, "maxPlanItems": { "type": "integer", "minimum": 1, "maximum": 100 } }
-    },
-    "executeConfig": {
-      "type": "object", "additionalProperties": false,
-      "properties": { "mode": { "enum": ["assisted", "autonomous"] }, "requireApprovalForSideEffects": { "type": "boolean", "default": true } }
-    },
-    "reviewConfig": {
-      "type": "object", "additionalProperties": false,
-      "required": ["rubricRef"],
-      "properties": { "rubricRef": { "$ref": "#/$defs/id" }, "allowedDecisions": { "type": "array", "items": { "enum": ["pass", "revise", "reject"] }, "minItems": 1, "uniqueItems": true } }
-    },
-    "conditionConfig": {
-      "type": "object", "additionalProperties": false,
-      "required": ["predicate"],
-      "properties": { "predicate": { "$ref": "#/$defs/predicate" } }
-    },
-    "approvalConfig": {
-      "type": "object", "additionalProperties": false,
-      "required": ["prompt", "approvalType"],
-      "properties": { "prompt": { "type": "string", "minLength": 1, "maxLength": 1000 }, "approvalType": { "enum": ["continue", "side-effect", "custom"] } }
-    },
-    "endConfig": {
-      "type": "object", "additionalProperties": false,
-      "required": ["outcome"],
-      "properties": { "outcome": { "enum": ["success", "rejected", "handoff", "cancelled"] } }
-    },
-    "predicate": {
-      "description": "Data-only condition; executable code and expression strings are intentionally unsupported.",
-      "oneOf": [
+        "strategy": {
+          "enum": [
+            "fail",
+            "retry",
+            "route"
+          ]
+        },
+        "maxAttempts": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 5,
+          "description": "Total attempts, including the initial call."
+        },
+        "backoffSeconds": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3600,
+          "description": "Fixed delay between eligible retries; no jitter in v1."
+        },
+        "retryOn": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "technical",
+              "timeout",
+              "rate-limit"
+            ]
+          }
+        },
+        "routeTo": {
+          "$ref": "#/$defs/id",
+          "description": "Direct control destination on a catchable failure; does not traverse a normal edge."
+        },
+        "routeMap": {
+          "$ref": "#/$defs/errorRouteMap",
+          "description": "Explicit target-input to sanitized failure-context mapping."
+        }
+      },
+      "allOf": [
         {
-          "type": "object", "additionalProperties": false,
-          "required": ["outputPath", "operator"],
-          "properties": { "outputPath": { "$ref": "#/$defs/jsonPointer" }, "operator": { "enum": ["exists", "not-exists"] } }
+          "if": {
+            "properties": {
+              "strategy": {
+                "const": "fail"
+              }
+            },
+            "required": [
+              "strategy"
+            ]
+          },
+          "then": {
+            "properties": {
+              "maxAttempts": false,
+              "backoffSeconds": false,
+              "retryOn": false,
+              "routeTo": false,
+              "routeMap": false
+            }
+          }
         },
         {
-          "type": "object", "additionalProperties": false,
-          "required": ["outputPath", "operator", "value"],
-          "properties": {
-            "outputPath": { "$ref": "#/$defs/jsonPointer" },
-            "operator": { "enum": ["equals", "not-equals", "in", "not-in", "greater-than", "greater-or-equal", "less-than", "less-or-equal", "contains"] },
-            "value": {}
+          "if": {
+            "properties": {
+              "strategy": {
+                "const": "retry"
+              }
+            },
+            "required": [
+              "strategy"
+            ]
+          },
+          "then": {
+            "required": [
+              "maxAttempts",
+              "backoffSeconds",
+              "retryOn"
+            ],
+            "properties": {
+              "routeTo": false,
+              "routeMap": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "strategy": {
+                "const": "route"
+              }
+            },
+            "required": [
+              "strategy"
+            ]
+          },
+          "then": {
+            "required": [
+              "routeTo",
+              "routeMap"
+            ],
+            "properties": {
+              "maxAttempts": false,
+              "backoffSeconds": false,
+              "retryOn": false
+            }
           }
         }
       ]
     },
+    "intakeConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "classification": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "plannerConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "enum": [
+            "decompose",
+            "direct"
+          ]
+        },
+        "maxPlanItems": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 100
+        }
+      }
+    },
+    "executeConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "`autonomous` never lowers an approval gate: effective approval = strictest of (profile policy, this node, Runtime default).",
+      "properties": {
+        "mode": {
+          "enum": [
+            "assisted",
+            "autonomous"
+          ]
+        },
+        "requireApprovalForSideEffects": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    },
+    "reviewConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rubricRef"
+      ],
+      "properties": {
+        "rubricRef": {
+          "$ref": "#/$defs/id"
+        },
+        "allowedDecisions": {
+          "type": "array",
+          "items": {
+            "enum": [
+              "pass",
+              "revise",
+              "reject"
+            ]
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "If declared, a `decision` output port with the same enum must exist and every allowed decision must be routable by an outgoing edge."
+        }
+      }
+    },
+    "conditionConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "predicate"
+      ],
+      "description": "The predicate is evaluated against the node's INPUTS. The node passes its inputs through unchanged (declare them as outputs too) and emits a boolean output port `matched`; outgoing edges route with `when` on /matched.",
+      "properties": {
+        "predicate": {
+          "$ref": "#/$defs/predicate"
+        }
+      }
+    },
+    "approvalConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prompt",
+        "approvalType",
+        "responseKind"
+      ],
+      "description": "A user-interaction node. responseKind is explicit: decision produces the decision port; text produces answer. Prompt is static text with no interpolation. A side-effect approval must bind to an input port and the Runtime must verify its content digest again before the effect.",
+      "properties": {
+        "prompt": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        },
+        "approvalType": {
+          "enum": [
+            "continue",
+            "side-effect",
+            "custom"
+          ]
+        },
+        "responseKind": {
+          "enum": [
+            "decision",
+            "text"
+          ],
+          "default": "decision",
+          "description": "Required in v1: decision emits a structured approved/denied/expired result; text emits answer."
+        },
+        "bindsTo": {
+          "$ref": "#/$defs/portName",
+          "description": "Input port whose canonical content digest is bound to the approval. Required for approvalType side-effect with responseKind decision; abort before effect if it changes."
+        },
+        "show": {
+          "type": "array",
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/portName"
+          },
+          "description": "Input ports presented to the user (references only, no templating)."
+        },
+        "timeoutSeconds": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 604800
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "responseKind": {
+                "const": "text"
+              }
+            },
+            "required": [
+              "responseKind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "bindsTo": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "approvalType": {
+                "const": "side-effect"
+              }
+            },
+            "required": [
+              "approvalType"
+            ]
+          },
+          "then": {
+            "required": [
+              "responseKind",
+              "bindsTo"
+            ],
+            "properties": {
+              "responseKind": {
+                "const": "decision"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "endConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "outcome",
+        "emit"
+      ],
+      "properties": {
+        "outcome": {
+          "enum": [
+            "success",
+            "rejected",
+            "handoff",
+            "cancelled"
+          ]
+        },
+        "emit": {
+          "type": "object",
+          "minProperties": 1,
+          "maxProperties": 32,
+          "description": "Explicit mapping: output port name -> input port name. Every output port of an end node must be produced here.",
+          "propertyNames": {
+            "$ref": "#/$defs/portName"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/portName"
+          }
+        }
+      }
+    },
+    "predicate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "operator"
+      ],
+      "description": "Data-only predicate over one declared top-level port. No executable expression is accepted. Operator/value compatibility with the referenced port is checked semantically.",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/portPointer"
+        },
+        "operator": {
+          "enum": [
+            "exists",
+            "not-exists",
+            "equals",
+            "not-equals",
+            "in",
+            "not-in",
+            "greater-than",
+            "greater-or-equal",
+            "less-than",
+            "less-or-equal",
+            "contains"
+          ]
+        },
+        "value": {}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "enum": [
+                  "exists",
+                  "not-exists"
+                ]
+              }
+            },
+            "required": [
+              "operator"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "value"
+              ]
+            }
+          },
+          "else": {
+            "required": [
+              "value"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "enum": [
+                  "equals",
+                  "not-equals"
+                ]
+              }
+            },
+            "required": [
+              "operator"
+            ]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "$ref": "#/$defs/scalar"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "enum": [
+                  "in",
+                  "not-in"
+                ]
+              }
+            },
+            "required": [
+              "operator"
+            ]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 50,
+                "items": {
+                  "$ref": "#/$defs/scalar"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "enum": [
+                  "greater-than",
+                  "greater-or-equal",
+                  "less-than",
+                  "less-or-equal"
+                ]
+              }
+            },
+            "required": [
+              "operator"
+            ]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "number"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "operator": {
+                "const": "contains"
+              }
+            },
+            "required": [
+              "operator"
+            ]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": [
+                  "string",
+                  "number",
+                  "boolean"
+                ],
+                "maxLength": 1000
+              }
+            }
+          }
+        }
+      ]
+    },
+    "edgeMap": {
+      "type": "object",
+      "maxProperties": 32,
+      "description": "Maps target input port names to depth-1 pointers (/portName) in the source node output. Nested JSON Pointer traversal is intentionally unsupported in v1.",
+      "propertyNames": {
+        "$ref": "#/$defs/portName"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/portPointer"
+      }
+    },
     "edge": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["from", "to", "map"],
+      "patternProperties": {
+        "^x-": {}
+      },
+      "required": [
+        "from",
+        "to",
+        "map"
+      ],
       "properties": {
-        "from": { "$ref": "#/$defs/id" },
-        "to": { "$ref": "#/$defs/id" },
-        "map": {
-          "type": "object",
-          "description": "Maps target input port names to JSON Pointers in the source node output.",
-          "propertyNames": { "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$" },
-          "additionalProperties": { "$ref": "#/$defs/jsonPointer" }
+        "from": {
+          "$ref": "#/$defs/id"
         },
-        "label": { "type": "string", "maxLength": 120 },
-        "when": { "$ref": "#/$defs/predicate" },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "map": {
+          "$ref": "#/$defs/edgeMap"
+        },
+        "label": {
+          "type": "string",
+          "maxLength": 120
+        },
+        "when": {
+          "$ref": "#/$defs/predicate"
+        },
+        "default": {
+          "type": "boolean",
+          "default": false,
+          "description": "Fallback route for its source node, taken only when no conditional sibling edge matches. At most one default edge per source is allowed; it cannot also declare `when`."
+        },
+        "priority": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1000,
+          "default": 100,
+          "description": "Lower values are evaluated first. Equal priorities preserve declaration order; first-match is deterministic even when predicates overlap."
+        },
         "loop": {
-          "type": "object", "additionalProperties": false,
-          "required": ["maxIterations"],
-          "properties": { "maxIterations": { "type": "integer", "minimum": 1, "maximum": 20 }, "counterId": { "$ref": "#/$defs/id" } }
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxIterations",
+            "counterId",
+            "onExhausted"
+          ],
+          "description": "Bounded transition. One iteration is one successful traversal of this edge; the counter is monotonic for the run and unique across the profile. On the next attempted traversal after maxIterations, execute onExhausted instead.",
+          "properties": {
+            "maxIterations": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 20
+            },
+            "counterId": {
+              "$ref": "#/$defs/id"
+            },
+            "onExhausted": {
+              "$ref": "#/$defs/loopExhausted",
+              "description": "On exhaustion, either fail the run or transfer directly to `to` using `map` against the source node output. This is a control transition and is included in cycle/reachability checks."
+            }
+          }
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "default": {
+                "const": true
+              }
+            },
+            "required": [
+              "default"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "when"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "loopExhausted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "strategy"
+      ],
+      "description": "What happens when the edge would exceed maxIterations. `route` transfers control to `to`, using `map` on the SAME source node output.",
+      "properties": {
+        "strategy": {
+          "enum": [
+            "fail",
+            "route"
+          ]
+        },
+        "to": {
+          "$ref": "#/$defs/id"
+        },
+        "map": {
+          "$ref": "#/$defs/edgeMap"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "strategy": {
+                "const": "route"
+              }
+            },
+            "required": [
+              "strategy"
+            ]
+          },
+          "then": {
+            "required": [
+              "to",
+              "map"
+            ]
+          },
+          "else": {
+            "properties": {
+              "to": false,
+              "map": false
+            }
+          }
+        }
+      ]
     },
     "policies": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["execution", "tools", "approvals"],
+      "required": [
+        "execution",
+        "tools",
+        "approvals"
+      ],
+      "description": "Policies can only tighten Runtime limits. Static visit bound: |nodes| × product(1 + maxIterations for every distinct loop counter), after validating that no cycle can repeat without consuming a finite counter. Saturating arithmetic is required. The semantic validator rejects a profile whose bound exceeds maxNodeVisits; Runtime also enforces maxNodeVisits as a hard stop regardless of static analysis.",
       "properties": {
         "execution": {
-          "type": "object", "additionalProperties": false,
-          "required": ["maxNodeVisits", "maxDurationSeconds", "maxModelCalls", "maxToolCalls"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "maxNodeVisits",
+            "maxDurationSeconds",
+            "maxModelCalls",
+            "maxToolCalls"
+          ],
           "properties": {
-            "maxNodeVisits": { "type": "integer", "minimum": 1, "maximum": 1000 },
-            "maxDurationSeconds": { "type": "integer", "minimum": 1, "maximum": 86400 },
-            "maxModelCalls": { "type": "integer", "minimum": 0, "maximum": 10000 },
-            "maxToolCalls": { "type": "integer", "minimum": 0, "maximum": 10000 },
-            "onLimit": { "enum": ["fail", "ask-user", "handoff"] }
+            "maxNodeVisits": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000
+            },
+            "maxDurationSeconds": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 86400
+            },
+            "maxModelCalls": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "maxToolCalls": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "onLimit": {
+              "enum": [
+                "fail",
+                "ask-user",
+                "handoff"
+              ],
+              "default": "fail",
+              "description": "fail terminates; handoff terminates with a handoff result; ask-user pauses in a resumable waiting-for-user state and does not grant approval or bypass policy. Runtime support must be verified before this value is enabled."
+            }
           }
         },
         "tools": {
-          "type": "object", "additionalProperties": false,
-          "required": ["allowedToolsets"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "allowedToolsets"
+          ],
           "properties": {
-            "allowedToolsets": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true },
-            "deniedTools": { "type": "array", "items": { "$ref": "#/$defs/id" }, "uniqueItems": true }
+            "allowedToolsets": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "$ref": "#/$defs/id"
+              },
+              "uniqueItems": true
+            },
+            "deniedTools": {
+              "type": "array",
+              "maxItems": 200,
+              "items": {
+                "$ref": "#/$defs/toolId"
+              },
+              "uniqueItems": true
+            }
           }
         },
         "approvals": {
-          "type": "object", "additionalProperties": false,
-          "required": ["policy"],
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policy"
+          ],
           "properties": {
-            "policy": { "enum": ["runtime-default", "side-effects", "every-tool-call"] },
-            "requireUserConfirmationFor": { "type": "array", "items": { "enum": ["external-write", "file-write", "network-access", "irreversible-action"] }, "uniqueItems": true }
-          }
+            "policy": {
+              "enum": [
+                "runtime-default",
+                "side-effects",
+                "every-tool-call"
+              ],
+              "description": "Never weaker than the Runtime default."
+            },
+            "requireUserConfirmationFor": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "external-write",
+                  "file-write",
+                  "network-access",
+                  "git-write",
+                  "irreversible-action"
+                ]
+              },
+              "uniqueItems": true
+            }
+          },
+          "description": "Effective approval is the strictest of Runtime default and profile policy; a profile cannot remove a Runtime/user-required approval."
         }
       }
     },
     "result": {
       "type": "array",
-      "description": "Declared terminal outputs; supports distinct success, rejection, or handoff outcomes.",
+      "description": "Exactly one entry per end node. Each fromNode must be an end node, port must be one of its outputs, outcome must equal config.outcome, and every end node must be represented. The end config explicitly maps emitted output ports to input ports.",
       "minItems": 1,
+      "maxItems": 20,
       "items": {
-        "type": "object", "additionalProperties": false,
-        "required": ["fromNode", "port", "kind", "outcome"],
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "fromNode",
+          "port",
+          "kind",
+          "outcome"
+        ],
         "properties": {
-          "fromNode": { "$ref": "#/$defs/id" },
-          "port": { "$ref": "#/$defs/id" },
-          "kind": { "enum": ["response", "artifact", "proposal", "handoff"] },
-          "outcome": { "enum": ["success", "rejected", "handoff", "cancelled"] }
+          "fromNode": {
+            "$ref": "#/$defs/id"
+          },
+          "port": {
+            "$ref": "#/$defs/portName"
+          },
+          "kind": {
+            "enum": [
+              "response",
+              "artifact",
+              "proposal",
+              "handoff"
+            ]
+          },
+          "outcome": {
+            "enum": [
+              "success",
+              "rejected",
+              "handoff",
+              "cancelled"
+            ]
+          }
         }
       }
     },
-    "id": { "type": "string", "pattern": "^[a-z][a-z0-9._-]{1,127}$" },
-    "semver": { "type": "string", "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$" },
-    "jsonPointer": { "type": "string", "pattern": "^(/(?:[^~/]|~[01])*)*$" }
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9._-]{1,127}$",
+      "description": "Provisional v1 identifier pattern. Unknown / Requires Verification: compare with real registry and MCP tool identifiers in Phase 1 before freezing the contract."
+    },
+    "portName": {
+      "type": "string",
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_-]{0,63}$"
+    },
+    "toolId": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._:-]{0,127}$",
+      "description": "Provisional permissive pattern; the real tool id format is an Unknown to verify in Phase 1."
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "scalar": {
+      "type": [
+        "string",
+        "number",
+        "boolean",
+        "null"
+      ],
+      "maxLength": 1000
+    },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\\+[0-9A-Za-z.-]+)?$"
+    },
+    "jsonPointer": {
+      "type": "string",
+      "maxLength": 200,
+      "pattern": "^(/(?:[^~/]|~[01])*)*$"
+    },
+    "portPointer": {
+      "type": "string",
+      "pattern": "^/[a-zA-Z][a-zA-Z0-9_-]{0,63}$",
+      "description": "Depth-1 pointer to one declared port; v1 does not traverse nested object data."
+    },
+    "errorRouteMap": {
+      "type": "object",
+      "maxProperties": 32,
+      "propertyNames": {
+        "$ref": "#/$defs/portName"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/errorRoutePointer"
+      },
+      "description": "Maps target-node input ports to a sanitized failure envelope. Semantic validation verifies source fields, required target inputs and types."
+    },
+    "errorRoutePointer": {
+      "type": "string",
+      "pattern": "^/(?:failure/(?:category|code|retryable)|node/(?:id|attempt)|inputs/[a-zA-Z][a-zA-Z0-9_-]{0,63})$",
+      "description": "Only stable failure metadata and the failed node input snapshot may be routed; raw exception text is not available."
+    }
   }
 }
