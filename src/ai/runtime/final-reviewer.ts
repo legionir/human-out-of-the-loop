@@ -1,6 +1,6 @@
 import { generateObject, NoObjectGeneratedError } from 'ai';
 import { withLlmTimeout, withStructuredRetry } from './llm-timeout.js';
-import { languageSection } from '../language.js';
+import { buildFinalReviewPrompt } from '../prompts/reviews.js';
 import { reportLlmUsage, type LlmUsageReporter } from './llm-usage.js';
 import type { PersonaRegistry } from '../registries/persona-registry.js';
 import type { SkillRegistry } from '../registries/skill-registry.js';
@@ -172,62 +172,7 @@ export class FinalReviewer {
     steps: StepSummary[],
     outcome: Review['outcome']
   ): string {
-    const stepsBlock = steps
-      .map(
-        (s) =>
-          `### Step ${s.id} (persona: ${s.persona})\n` +
-          `Description: ${s.description}\n` +
-          `Acceptance criteria: ${s.acceptanceCriteria}\n` +
-          `Status: ${s.status}` +
-          (s.failureType ? ` (${s.failureType} failure)` : '') +
-          `\nResult: ${s.resultSummary}\n`
-      )
-      .join('\n---\n');
-
-    const incompleteBlock =
-      result.incompleteSteps.length > 0
-        ? `\n## Incomplete Steps\n${result.incompleteSteps
-            .map(
-              (s) =>
-                `- ${s.stepId} (${s.failureType ?? 'unknown'}): ${s.description} — ${s.reason}`
-            )
-            .join('\n')}\n`
-        : '';
-
-    return `
-You are producing the final review of a plan execution.
-
-## User's Goal
-${plan.goal}
-
-${languageSection(plan.goal)}
-
-## Execution Summary
-- Plan id: ${plan.id ?? 'unknown'}
-- Outcome: ${outcome}
-- Completed steps: ${result.completedSteps} / ${result.totalSteps}
-- Failed steps: ${result.failedSteps}
-- Re-planning attempts: ${result.replanningAttempts}
-
-## Step Results
-${stepsBlock}
-${incompleteBlock}
-
-## Your Task
-Produce a structured review as a JSON object. Populate:
-- **acceptedFindings**: Meaningful positive results from completed steps
-  (e.g. successfully implemented features, verified findings, produced
-  reports). Include a stepId, title, description, and severity.
-- **rejectedFindings**: Results that were produced but should NOT be
-  trusted (e.g. steps that failed quality check with specific problems).
-- **incompleteSteps**: Copy the incomplete steps from above.
-- **finalSummary**: A clear 2-4 sentence summary for the user explaining
-  what was accomplished, what wasn't, and any important caveats.
-  If outcome is "failed-partial", explicitly state what remains unfinished.
-  If outcome is "cancelled", state when it was cancelled.
-
-Be honest and specific. Do not invent findings that aren't in the results.
-`.trim();
+    return buildFinalReviewPrompt(plan, result, steps, outcome);
   }
 
   private buildReviewerAgent(modelId?: string): ResolvedAgent {

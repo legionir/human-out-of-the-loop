@@ -9,14 +9,9 @@ import path from 'node:path';
 import type { Plan } from '../schemas/plan.js';
 
 export const PLAN_EXAMPLES_MAX = 20;
-export const PLAN_EXAMPLES_PROMPT_CHARS = 1_200;
-
-export interface PlanExample {
-  goal: string;
-  stepIds: string[];
-  personas: string[];
-  tools: string[];
-}
+import type { PlanExample } from '../prompts/examples.js';
+export type { PlanExample } from '../prompts/examples.js';
+export { PLAN_EXAMPLES_PROMPT_CHARS, formatPlanExample } from '../prompts/examples.js';
 
 export function planExamplesPath(projectRoot: string): string {
   return path.join(projectRoot, '.ai-runtime', 'plan-examples.jsonl');
@@ -84,15 +79,4 @@ export function selectPlanExample(goal: string, examples: PlanExample[]): PlanEx
     }
   }
   return bestScore >= 0.15 ? best : undefined;
-}
-
-export function formatPlanExample(example: PlanExample): string {
-  const body = [
-    'EXAMPLE OF A SUCCESSFUL PLAN (structure only — do not copy ids):',
-    `Goal: ${example.goal}`,
-    `Steps: ${example.stepIds.join(', ')}`,
-    `Personas: ${example.personas.join(', ')}`,
-    `Tools: ${example.tools.join(', ')}`,
-  ].join('\n');
-  return body.length <= PLAN_EXAMPLES_PROMPT_CHARS ? body : `${body.slice(0, PLAN_EXAMPLES_PROMPT_CHARS - 1)}…`;
 }

@@ -163,36 +163,4 @@ export function detectLanguage(text: string): DetectedLanguage | undefined {
  * request needs anyway (English, Spanish, Turkish … are all written with the
  * same letters).
  */
-export function languageInstruction(text: string, detected?: DetectedLanguage): string {
-  const keep =
-    'Keep code, file paths, commands, tool names and identifiers exactly as they are; never translate them.';
-  const language = detected ?? detectLanguage(text);
-  if (!language) {
-    return `Answer in the same language the user wrote their request in. ${keep}`;
-  }
-  if (language.code === 'arabic-script') {
-    return (
-      'The user wrote their request in a language written in the Arabic script ' +
-      '(Persian, Arabic, Urdu and others). ' +
-      'Write everything the user reads — the answer, plan steps, clarification questions, ' +
-      'summaries and reports — in the SAME language as the request; never switch to English. ' +
-      keep
-    );
-  }
-  return (
-    `The user wrote in ${language.name} (${language.native}). ` +
-    `Write everything the user reads — the answer, plan steps, clarification questions, ` +
-    `summaries and reports — in ${language.name}. ` +
-    keep
-  );
-}
-
-/** A ready-to-append prompt section (no leading newline). */
-export function languageSection(text: string, detected?: DetectedLanguage): string {
-  return `## Language\n${languageInstruction(text, detected)}`;
-}
-
-/** The generic rule, for prompts that do not carry one user request. */
-export function genericLanguageInstruction(): string {
-  return languageInstruction('');
-}
+export { languageInstruction, languageSection, genericLanguageInstruction } from './prompts/language.js';

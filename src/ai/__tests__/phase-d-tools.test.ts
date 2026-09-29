@@ -619,6 +619,16 @@ function isAliveNotZombie(pid: number): boolean {
     const status = fs.readFileSync(`/proc/${pid}/status`, 'utf-8');
     return !/^State:\s+Z/m.test(status);
   } catch {
-    return true;
+    // macOS has no /proc. Ask ps for the process state instead; an empty
+    // result means the process exited between kill(pid, 0) and this check.
+    try {
+      const state = execFileSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+      return state.length > 0 && !state.startsWith('Z');
+    } catch {
+      return false;
+    }
   }
 }

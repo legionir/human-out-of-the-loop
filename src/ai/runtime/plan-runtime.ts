@@ -19,7 +19,7 @@ import {
 import type { AcceptanceChecker } from './acceptance-checker.js';
 import { createTaskRecord, type Task } from '../schemas/task.js';
 import { mergeReplannedSteps } from './replan-merge.js';
-import { buildStepPrompt, formatDoneStepSummaries } from './step-prompt.js';
+import { buildStepExecutionPrompt, formatDoneStepSummaries } from '../prompts/steps.js';
 import { DEFAULT_MODEL_ID } from '../models/defaults.js';
 import { extractHandoff } from './handoff.js';
 import { captureCheckpoint, restoreCheckpoint } from './checkpoint.js';
@@ -365,7 +365,7 @@ export class PlanRuntime {
       // Create the task
       const taskId = this.config.taskRuntime.createTask({
         agent,
-        prompt: `${buildStepPrompt(plan, step)}\n\nSummarise your final answer in at most 8 sentences. Do not repeat tool transcripts.`,
+        prompt: buildStepExecutionPrompt(plan, step),
         claimedResources: step.claimedResources,
         planStepId: step.id,
         // Phase 20 (CORR-03): plan id so UsageAggregator can bucket
