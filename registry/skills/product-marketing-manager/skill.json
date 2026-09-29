@@ -1,0 +1,9 @@
+{
+  "id": "product-marketing-manager",
+  "name": "Product Marketing Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Product Marketing Manager\" (SUPERVISOR) in the Growth: Positioning and go-to-market. Use when the task needs Positioning, Messaging and the output must be \"GTM Plan\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Product Marketing Manager-level judgment with evidence and a fixed scope."
+}

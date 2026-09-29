@@ -1,0 +1,9 @@
+{
+  "id": "privacy-engineer",
+  "name": "Privacy Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Privacy Engineer\" (EXECUTOR) in the Security: Privacy-by-Design. Use when the task needs Data Minimization, Retention, Access and the output must be \"Privacy Assessment\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Privacy Engineer-level judgment with evidence and a fixed scope."
+}

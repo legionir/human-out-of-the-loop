@@ -1,0 +1,9 @@
+{
+  "id": "performance-engineer",
+  "name": "Performance Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Performance Engineer\" (EXECUTOR) in the Testing: Guarantee performance. Use when the task needs Profiling, Benchmarking and the output must be \"Performance Report\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Performance Engineer-level judgment with evidence and a fixed scope."
+}

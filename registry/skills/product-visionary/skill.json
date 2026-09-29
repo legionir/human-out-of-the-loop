@@ -1,0 +1,11 @@
+{
+  "id": "product-visionary",
+  "name": "Product Visionary",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "fetch"
+  ],
+  "priority": 50,
+  "description": "Persona \"Product Visionary\" (SUPERVISOR) in the Business: Determine what value the product creates. Use when the task needs Product Vision, Value Proposition and the output must be \"Product Vision\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Product Visionary-level judgment with evidence and a fixed scope."
+}

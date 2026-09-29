@@ -1,0 +1,9 @@
+{
+  "id": "privacy-compliance-officer",
+  "name": "Privacy / Compliance Officer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Privacy / Compliance Officer\" (SUPERVISOR) in the Compliance: Regulatory Compliance. Use when the task needs Compliance, Auditing and the output must be \"Compliance Report\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Privacy / Compliance Officer-level judgment with evidence and a fixed scope."
+}
