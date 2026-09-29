@@ -1,0 +1,9 @@
+{
+  "id": "account-manager",
+  "name": "Account Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Account Manager\" (SUPERVISOR) in the Support: Retain and grow accounts. Use when the task needs Relationship, Renewal, Expansion and the output must be \"Account Plan\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Account Manager-level judgment with evidence and a fixed scope."
+}

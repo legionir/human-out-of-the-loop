@@ -1,0 +1,9 @@
+{
+  "id": "accessibility-specialist",
+  "name": "Accessibility Specialist",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Accessibility Specialist\" (EXECUTOR) in the Design: Guarantee accessibility. Use when the task needs WCAG, Keyboard, Screen Reader and the output must be \"Accessibility Report\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Accessibility Specialist-level judgment with evidence and a fixed scope."
+}

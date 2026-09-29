@@ -1,0 +1,16 @@
+{
+  "id": "ai-safety-alignment-engineer",
+  "name": "AI Safety / Alignment Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"AI Safety / Alignment Engineer\" (EXECUTOR) in the AI: Make the system's failure modes known, bounded, and tested before they are discovered by a user. Use when the task needs Whether the stated safety property has an evaluation that can fail, Prompt-injection and tool-misuse resistance with evidence, not assertion, Refusal and fallback behaviour at the boundary of competence and the output must be \"Domain Output\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need AI Safety / Alignment Engineer-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,3612 @@
+{
+  "sourceRef": "legionir/persona@arena/01a0e347-persona",
+  "sourceCommit": "1168378305da75c97cddb586396d0da258959f14",
+  "personas": 218,
+  "skills": 218,
+  "toolDefinitionsAvailable": 48,
+  "generatedFiles": 657,
+  "personasWithTools": 124,
+  "personasWithoutTools": [
+    "accessibility-specialist",
+    "account-manager",
+    "agile-coach",
+    "ai-ml-engineer",
+    "application-security-engineer",
+    "aso-specialist",
+    "audit-specialist",
+    "backup-administrator",
+    "beta-tester",
+    "bi-analyst",
+    "board-of-directors",
+    "build-engineer",
+    "business-continuity-manager",
+    "change-manager",
+    "cio",
+    "cloud-architect",
+    "cloud-engineer",
+    "community-manager",
+    "contract-manager",
+    "customer-success-manager",
+    "customer-support-agent",
+    "cybersecurity-engineer",
+    "data-analyst",
+    "data-architect",
+    "data-engineer",
+    "data-scientist",
+    "database-administrator-dba",
+    "database-engineer",
+    "decommission-engineer",
+    "deployment-engineer",
+    "design-system-designer",
+    "devsecops-engineer",
+    "disaster-recovery-specialist",
+    "domain-expert-sme",
+    "end-of-life-manager",
+    "end-user",
+    "engineering-manager",
+    "enterprise-architect",
+    "external-auditor",
+    "finance-manager",
+    "finops-specialist",
+    "firmware-engineer",
+    "founder",
+    "graphic-designer",
+    "growth-manager",
+    "hr-people-manager",
+    "incident-manager",
+    "incident-response-engineer",
+    "investor",
+    "ip-copyright-specialist",
+    "load-stress-tester",
+    "localization-specialist",
+    "marketing-specialist",
+    "migration-specialist",
+    "mlops-engineer",
+    "motion-designer",
+    "network-engineer",
+    "observability-engineer",
+    "operations-manager",
+    "partnership-manager",
+    "penetration-tester",
+    "performance-engineer",
+    "performance-engineering-lead",
+    "pmo",
+    "principal-engineer",
+    "privacy-compliance-officer",
+    "privacy-engineer",
+    "procurement-specialist",
+    "product-analyst",
+    "product-designer",
+    "product-manager-pm",
+    "product-marketing-manager",
+    "product-owner-post-release",
+    "program-manager",
+    "project-manager",
+    "project-sponsor",
+    "prompt-engineer",
+    "qa-lead",
+    "quality-manager",
+    "recruiter",
+    "risk-manager",
+    "sales-manager",
+    "sales-representative",
+    "scrum-master",
+    "security-architect",
+    "seo-specialist",
+    "system-architect",
+    "technical-evangelist",
+    "technical-recruiter",
+    "translator",
+    "ui-designer",
+    "ui-ux-research-participants",
+    "ux-designer",
+    "vendor-manager"
+  ],
+  "mappedTools": [
+    "directory_tree",
+    "fetch",
+    "get_file_info",
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "run_command",
+    "run_tests",
+    "search_code",
+    "search_files"
+  ],
+  "unmappedSourceCategories": [
+    "API Client",
+    "API Tools",
+    "ASO Tools",
+    "ATS",
+    "Accessibility Tools",
+    "Agile Tools",
+    "Analytics",
+    "Analytics (no personal data)",
+    "Approved Pentest Tools",
+    "Architecture Repository",
+    "Architecture Tools",
+    "Audit Tools",
+    "BI",
+    "Backlog Tools",
+    "Backup",
+    "Backup Tools",
+    "Beta Tools",
+    "Billing",
+    "Browser DevTools",
+    "Build Tools",
+    "Business Intelligence",
+    "Business Intelligence Tools",
+    "CI/CD",
+    "CRM",
+    "CRM/Procurement Tools",
+    "Cloud",
+    "Cloud CLI",
+    "Cloud Tools",
+    "Code Analysis",
+    "Code Review",
+    "Communication",
+    "Community Tools",
+    "Compiler",
+    "Compliance Tools",
+    "Containers",
+    "Contract Tools",
+    "Cost Tools",
+    "DAST",
+    "DB",
+    "DB Tools",
+    "DR Tools",
+    "Dashboards",
+    "Data Catalogs",
+    "Data Mapping",
+    "Data Quality Tools",
+    "Database Client",
+    "Debugger",
+    "Demo Tools",
+    "Design Tools",
+    "Diagnostics",
+    "Diagram Tools",
+    "Diagramming",
+    "Domain References",
+    "Domain Tools",
+    "Emulator",
+    "Evaluation",
+    "Evaluation Tools",
+    "Experiment Tools",
+    "Financial Reports",
+    "Financial Tools",
+    "Forensic Tools",
+    "Game Engine",
+    "Governance Frameworks",
+    "HR Tools",
+    "Hardware Tools",
+    "IaC",
+    "Incident Tools",
+    "Infrastructure",
+    "Infrastructure as Code",
+    "Knowledge Base",
+    "LLM",
+    "LLM Tools",
+    "License Tools",
+    "Load Testing",
+    "Load Testing Tools",
+    "Load Tools",
+    "Localization Tools",
+    "Logging",
+    "Logs",
+    "ML Frameworks",
+    "MQTT Tools",
+    "Marketing Tools",
+    "Migration Tools",
+    "Modeling",
+    "Modeling Tools",
+    "Monitoring",
+    "Network Tools",
+    "Notebooks",
+    "Observability Tools",
+    "Ops Tools",
+    "Pipeline Tools",
+    "Planning Tools",
+    "Portfolio Tools",
+    "Presentation",
+    "Procurement Tools",
+    "Product Interface",
+    "Profiler",
+    "Profilers",
+    "Programmer",
+    "Project Management",
+    "Project Management Tools",
+    "Project Tools",
+    "Python",
+    "QA/Audit Tools",
+    "Recruitment Tools",
+    "Release Tools",
+    "Reporting",
+    "Reports",
+    "Risk Tools",
+    "Roadmap Tools",
+    "SAST",
+    "SAST/DAST",
+    "SCA",
+    "SDK",
+    "SEO Tools",
+    "SIEM",
+    "SQL",
+    "Scanner",
+    "Scrum Tools",
+    "Security Frameworks",
+    "Security Scanner",
+    "Security Scanners",
+    "Security Tools",
+    "Serial Tools",
+    "Static Analysis",
+    "Statistics",
+    "Strategy Tools",
+    "Support Tools",
+    "Support/CRM",
+    "Technical Tests",
+    "Test Interface",
+    "Test Management Tools",
+    "Translation Tools",
+    "Vector DB",
+    "Vendor",
+    "Workshop Tools"
+  ],
+  "mappings": [
+    {
+      "id": "accessibility-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Accessibility Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "accessibility-wcag-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "account-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "CRM",
+        "Analytics"
+      ],
+      "tools": []
+    },
+    {
+      "id": "agent-architect",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Git",
+        "Diagramming",
+        "Testing",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "run_tests",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "agent-evaluator",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Testing",
+        "Evaluation Tools",
+        "IDE",
+        "Git",
+        "Logging"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "run_tests",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "agent-integration-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Git",
+        "Terminal",
+        "API Client",
+        "Testing"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "run_command",
+        "run_tests",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "agent-safety-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Security Scanner",
+        "IDE",
+        "Git",
+        "Testing",
+        "Monitoring"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "run_tests",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "agentic-prompt-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Git",
+        "Testing",
+        "Logging"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "run_tests",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "agile-coach",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Analytics",
+        "Workshop Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "ai-agent-system-audit-hardening",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "ai-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "LLM",
+        "Vector DB",
+        "IDE",
+        "Git"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "ai-engineer-lead",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Git",
+        "IDE",
+        "Testing",
+        "Logging",
+        "Evaluation Tools",
+        "Monitoring"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "run_tests",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "ai-ml-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Python",
+        "ML Frameworks"
+      ],
+      "tools": []
+    },
+    {
+      "id": "ai-safety-alignment-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "analytics-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "api-integration-contract-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "application-security-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "SAST",
+        "DAST",
+        "SCA",
+        "Code Analysis"
+      ],
+      "tools": []
+    },
+    {
+      "id": "architecture-review-architecture-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "architecture-review-board",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Architecture Tools",
+        "Documentation",
+        "Diagramming",
+        "Analytics"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "aso-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "ASO Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "audit-specialist",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Audit Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "backend-developer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Git",
+        "DB Tools"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "backup-administrator",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Backup Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "beta-tester",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Beta Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "bi-analyst",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Business Intelligence Tools",
+        "SQL"
+      ],
+      "tools": []
+    },
+    {
+      "id": "board-of-directors",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Business Intelligence",
+        "Reports"
+      ],
+      "tools": []
+    },
+    {
+      "id": "brand-designer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "build-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Build Tools",
+        "CI/CD"
+      ],
+      "tools": []
+    },
+    {
+      "id": "business-analyst-ba",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Documentation",
+        "Diagramming"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "business-continuity-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Risk Tools",
+        "Planning Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "business-development-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "CRM",
+        "Research"
+      ],
+      "tools": [
+        "fetch"
+      ]
+    },
+    {
+      "id": "cao",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Audit Tools",
+        "Documentation",
+        "Analytics",
+        "Reporting"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "change-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Project Management Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "chaos-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "chief-design-officer",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Design Tools",
+        "Documentation",
+        "Analytics"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "chief-privacy-officer",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Documentation",
+        "Compliance Tools",
+        "Analytics (no personal data)"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "cio",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Strategy Tools",
+        "Dashboards",
+        "Governance Frameworks",
+        "Project Management"
+      ],
+      "tools": []
+    },
+    {
+      "id": "ciso",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Security Frameworks",
+        "SAST/DAST",
+        "Monitoring",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "clean-code-construction-review",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "cloud-architect",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Architecture Tools",
+        "Cost Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "cloud-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Cloud CLI",
+        "Infrastructure as Code"
+      ],
+      "tools": []
+    },
+    {
+      "id": "cloud-infrastructure-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "cloud-security-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Cloud CLI",
+        "IaC",
+        "SAST/DAST",
+        "Monitoring",
+        "IDE",
+        "Git"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "codebase-integrity-audit-protocol",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "community-director",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Analytics",
+        "Community Tools",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "community-manager",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Community Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "compliance-evidence-analyst",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "content-strategist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "contract-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Contract Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "cost-finops-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "cryptography-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "cto",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Documentation",
+        "Analytics",
+        "Architecture Tools",
+        "Project Management"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "customer-success-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "CRM",
+        "Analytics"
+      ],
+      "tools": []
+    },
+    {
+      "id": "customer-support-agent",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Support Tools",
+        "Knowledge Base"
+      ],
+      "tools": []
+    },
+    {
+      "id": "cybersecurity-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "SIEM",
+        "Security Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "data-analyst",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "SQL",
+        "Business Intelligence",
+        "Analytics"
+      ],
+      "tools": []
+    },
+    {
+      "id": "data-architect",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Architecture Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "data-database-integrity-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "data-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "SQL",
+        "Python",
+        "Pipeline Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "data-governance-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Data Catalogs",
+        "Documentation",
+        "Analytics"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "data-scientist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Python",
+        "Notebooks",
+        "Statistics"
+      ],
+      "tools": []
+    },
+    {
+      "id": "data-steward",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "database-administrator-dba",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "DB Tools",
+        "Monitoring"
+      ],
+      "tools": []
+    },
+    {
+      "id": "database-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "SQL",
+        "DB Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "database-security-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Database Client",
+        "Security Tools",
+        "IDE",
+        "Git",
+        "Testing"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "run_tests",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "decommission-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Infrastructure",
+        "Cloud",
+        "DB",
+        "Monitoring"
+      ],
+      "tools": []
+    },
+    {
+      "id": "deployment-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "CI/CD",
+        "Cloud",
+        "Monitoring"
+      ],
+      "tools": []
+    },
+    {
+      "id": "design-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Design Tools",
+        "Project Management",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "design-system-designer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Design Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "designops-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "desktop-developer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Build Tools"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "development-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Project Management",
+        "Git",
+        "CI/CD",
+        "Code Review",
+        "Monitoring"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "devops-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "devops-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Git",
+        "CI/CD",
+        "Containers",
+        "Cloud"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "devops-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "CI/CD",
+        "Cloud CLI",
+        "Monitoring",
+        "Git",
+        "IaC"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "devrel",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Documentation",
+        "Community Tools"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "devsecops-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "CI/CD",
+        "Security Scanners"
+      ],
+      "tools": []
+    },
+    {
+      "id": "disaster-recovery-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Backup",
+        "DR Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "documentation-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Documentation",
+        "IDE",
+        "Git",
+        "Project Management"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "documentation-quality-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "documentation-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Documentation Tools"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "domain-expert-sme",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Domain References"
+      ],
+      "tools": []
+    },
+    {
+      "id": "domain-model-context-review",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "embedded-developer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Debugger",
+        "Serial Tools"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "embedded-systems-lead",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "IDE",
+        "Debugger",
+        "Testing",
+        "Git",
+        "Hardware Tools"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "run_tests",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "end-of-life-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Project Management",
+        "Analytics"
+      ],
+      "tools": []
+    },
+    {
+      "id": "end-user",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Product Interface"
+      ],
+      "tools": []
+    },
+    {
+      "id": "engineering-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Project Management",
+        "HR Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "enterprise-architect",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Architecture Repository"
+      ],
+      "tools": []
+    },
+    {
+      "id": "execution-plan-generator",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "external-auditor",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Audit Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "finance-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Financial Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "fine-tuning-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "finops-specialist",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Billing",
+        "Analytics"
+      ],
+      "tools": []
+    },
+    {
+      "id": "firmware-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Compiler",
+        "Debugger",
+        "Programmer"
+      ],
+      "tools": []
+    },
+    {
+      "id": "forensic-codebase-review-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "forensic-security-threat-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "founder",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Business Intelligence",
+        "Reports"
+      ],
+      "tools": []
+    },
+    {
+      "id": "frontend-design-system-review",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "frontend-developer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Browser DevTools",
+        "Git"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "full-stack-developer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Git",
+        "DB",
+        "Terminal"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "run_command",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "game-designer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "game-developer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Game Engine",
+        "IDE",
+        "Git"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "graphic-designer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Design Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "growth-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Analytics",
+        "Experiment Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "hr-people-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "HR Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "iam-identity-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "identity-access-management-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "incident-commander",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "incident-forensic-review-postmortem",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "incident-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Incident Tools",
+        "Monitoring"
+      ],
+      "tools": []
+    },
+    {
+      "id": "incident-response-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "SIEM",
+        "Incident Tools",
+        "Logging",
+        "Forensic Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "infrastructure-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Terminal",
+        "Monitoring",
+        "Infrastructure as Code"
+      ],
+      "tools": [
+        "run_command"
+      ]
+    },
+    {
+      "id": "infrastructure-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Cloud CLI",
+        "Monitoring",
+        "IaC",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "investor",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Financial Reports"
+      ],
+      "tools": []
+    },
+    {
+      "id": "iot-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "MQTT Tools",
+        "Cloud Tools"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "ip-copyright-specialist",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "License Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "kyc-aml-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "legacy-modernization-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Migration Tools",
+        "Git",
+        "DB"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "legal-advisor",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Legal Research"
+      ],
+      "tools": [
+        "fetch"
+      ]
+    },
+    {
+      "id": "license-compliance-analysis",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "load-stress-tester",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Load Testing Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "localisation-i18n-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "localization-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Localization Tools",
+        "Documentation",
+        "Project Management"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "localization-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Localization Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "maintenance-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Git",
+        "CI/CD"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "marketing-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Marketing Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "migration-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Migration Tools",
+        "DB"
+      ],
+      "tools": []
+    },
+    {
+      "id": "mlops-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "CI/CD",
+        "Containers",
+        "Monitoring"
+      ],
+      "tools": []
+    },
+    {
+      "id": "mobile-developer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "SDK",
+        "Emulator"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "motion-designer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Design Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "network-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Network Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "observability-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Observability Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "observability-monitoring-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "on-call-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Monitoring",
+        "Logs",
+        "Terminal"
+      ],
+      "tools": [
+        "run_command"
+      ]
+    },
+    {
+      "id": "operations-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Ops Tools",
+        "Monitoring"
+      ],
+      "tools": []
+    },
+    {
+      "id": "partnership-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "CRM",
+        "Project Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "payments-billing-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "penetration-tester",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Approved Pentest Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "performance-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Profilers",
+        "Load Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "performance-engineering-lead",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Profiler",
+        "Load Testing",
+        "Monitoring",
+        "Analytics"
+      ],
+      "tools": []
+    },
+    {
+      "id": "performance-scalability-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "platform-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "platform-owner",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Monitoring",
+        "Cloud CLI",
+        "Documentation",
+        "Analytics"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "pmo",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Project Management Tools",
+        "Audit Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "principal-engineer",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Architecture Tools",
+        "Analytics"
+      ],
+      "tools": []
+    },
+    {
+      "id": "privacy-compliance-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "privacy-compliance-officer",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Audit Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "privacy-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Data Mapping",
+        "Audit Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "procurement-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "CRM/Procurement Tools",
+        "Documentation",
+        "Analytics"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "procurement-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Procurement Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "product-analyst",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Analytics",
+        "SQL"
+      ],
+      "tools": []
+    },
+    {
+      "id": "product-analyst-lead",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Analytics",
+        "BI",
+        "SQL",
+        "Data Quality Tools",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "product-designer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Design Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "product-manager-pm",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Analytics",
+        "Roadmap Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "product-marketing-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Marketing Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "product-owner-po",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Project Management",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "product-owner-post-release",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Analytics",
+        "Backlog Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "product-visionary",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Research",
+        "Analytics"
+      ],
+      "tools": [
+        "fetch"
+      ]
+    },
+    {
+      "id": "production-readiness-reliability-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "program-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Portfolio Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "project-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Project Management Tools",
+        "Reports"
+      ],
+      "tools": []
+    },
+    {
+      "id": "project-sponsor",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Project Management Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "prompt-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "LLM Tools",
+        "Evaluation"
+      ],
+      "tools": []
+    },
+    {
+      "id": "qa-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Test Tools",
+        "CI/CD"
+      ],
+      "tools": [
+        "run_tests"
+      ]
+    },
+    {
+      "id": "qa-lead",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Test Management Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "quality-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "QA/Audit Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "rag-retrieval-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "recruiter",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Recruitment Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "recruitment-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "ATS",
+        "Documentation",
+        "Analytics"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "refactoring-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Git",
+        "Static Analysis"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "release-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "CI/CD",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "release-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "CI/CD",
+        "Git",
+        "Release Tools",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "revenue-operations-analyst",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "risk-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Risk Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "sales-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "CRM"
+      ],
+      "tools": []
+    },
+    {
+      "id": "sales-representative",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "CRM",
+        "Communication"
+      ],
+      "tools": []
+    },
+    {
+      "id": "scrum-master",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Scrum Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "scrum-product-team",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Agile Tools",
+        "Git",
+        "CI/CD"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "search-relevance-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "security-architect",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Modeling",
+        "Security Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "security-auditor",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Audit Tools",
+        "Documentation",
+        "Analytics",
+        "Scanner"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "security-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Security Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "security-governance-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Governance Frameworks",
+        "Documentation",
+        "Analytics"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "seo-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "SEO Tools",
+        "Analytics"
+      ],
+      "tools": []
+    },
+    {
+      "id": "service-owner",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Monitoring",
+        "Dashboards",
+        "Documentation",
+        "Project Management"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "soc-analyst",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "SIEM",
+        "Logging",
+        "Monitoring",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "soc2-iso27001-readiness-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Domain Tools",
+        "Git"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "software-architect",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Git",
+        "Diagram Tools"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "software-design-architecture-review",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "software-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Git",
+        "Terminal",
+        "Tests"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "run_command",
+        "run_tests",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "solution-architect",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Architecture Tools",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "sre-site-reliability-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Monitoring",
+        "Logs",
+        "Terminal"
+      ],
+      "tools": [
+        "run_command"
+      ]
+    },
+    {
+      "id": "staff-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Git",
+        "Profilers"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "supply-chain-dependency-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "support-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Support/CRM",
+        "Monitoring",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "system-administrator",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Terminal",
+        "Monitoring"
+      ],
+      "tools": [
+        "run_command"
+      ]
+    },
+    {
+      "id": "system-architect",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Modeling Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "technical-debt-modernization-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "technical-evangelist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Presentation",
+        "Demo Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "technical-lead-tech-lead",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Git",
+        "IDE",
+        "CI/CD"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "technical-project-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Git",
+        "CI/CD",
+        "Project Management Tools"
+      ],
+      "tools": [
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status"
+      ]
+    },
+    {
+      "id": "technical-recruiter",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "ATS",
+        "Technical Tests"
+      ],
+      "tools": []
+    },
+    {
+      "id": "technical-support-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Logs",
+        "Terminal",
+        "Diagnostics"
+      ],
+      "tools": [
+        "run_command"
+      ]
+    },
+    {
+      "id": "technical-writer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Documentation",
+        "Git"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "test-automation-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Automation Frameworks",
+        "CI/CD"
+      ],
+      "tools": [
+        "run_tests"
+      ]
+    },
+    {
+      "id": "test-engineer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Test Tools"
+      ],
+      "tools": [
+        "run_tests"
+      ]
+    },
+    {
+      "id": "testing-quality-assurance-audit",
+      "kind": "COMPOSITE",
+      "allowedCategories": [],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "third-party-integration-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "API Tools",
+        "Git"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "tool-developer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "IDE",
+        "Git",
+        "Terminal",
+        "Testing",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "run_command",
+        "run_tests",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "translator",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Translation Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "ui-designer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Design Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "ui-ux-research-participants",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Test Interface"
+      ],
+      "tools": []
+    },
+    {
+      "id": "ux-designer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Design Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "ux-researcher",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Research Tools"
+      ],
+      "tools": [
+        "fetch"
+      ]
+    },
+    {
+      "id": "ux-writer-content-designer",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Documentation Tools"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    },
+    {
+      "id": "vendor-manager",
+      "kind": "SUPERVISOR",
+      "allowedCategories": [
+        "Vendor",
+        "Contract Tools"
+      ],
+      "tools": []
+    },
+    {
+      "id": "vulnerability-management-specialist",
+      "kind": "EXECUTOR",
+      "allowedCategories": [
+        "Security Scanner",
+        "SAST/DAST",
+        "SCA",
+        "IDE",
+        "Git",
+        "Documentation"
+      ],
+      "tools": [
+        "directory_tree",
+        "get_file_info",
+        "git_branch_list",
+        "git_diff",
+        "git_log",
+        "git_remote_list",
+        "git_show",
+        "git_status",
+        "list_allowed_directories",
+        "list_directory",
+        "list_directory_with_sizes",
+        "read_file",
+        "read_multiple_files",
+        "search_code",
+        "search_files"
+      ]
+    }
+  ]
+}

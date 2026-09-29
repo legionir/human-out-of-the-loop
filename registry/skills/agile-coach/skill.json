@@ -1,0 +1,9 @@
+{
+  "id": "agile-coach",
+  "name": "Agile Coach",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Agile Coach\" (SUPERVISOR) in the Project: Improve Organizational Agility. Use when the task needs Coaching, Process Improvement and the output must be \"Improvement Plan\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Agile Coach-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,9 @@
+{
+  "id": "ai-ml-engineer",
+  "name": "AI/ML Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"AI/ML Engineer\" (EXECUTOR) in the AI: Build and integrate models. Use when the task needs Modeling, Training, Inference and the output must be \"Model, Metrics\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need AI/ML Engineer-level judgment with evidence and a fixed scope."
+}

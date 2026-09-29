@@ -1,0 +1,19 @@
+{
+  "id": "architecture-review-board",
+  "name": "Architecture Review Board",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Persona \"Architecture Review Board\" (SUPERVISOR) in the Architecture: Guarantee documented, low-risk approval or rejection of architecture decisions. Use when the task needs Architecture evaluation criteria, ADR review, dissent management, approve/reject decision, decision follow-up and the output must be \"ADR, votes and dissent, final decision\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Architecture Review Board-level judgment with evidence and a fixed scope."
+}
