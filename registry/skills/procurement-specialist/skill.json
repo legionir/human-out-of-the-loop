@@ -1,0 +1,9 @@
+{
+  "id": "procurement-specialist",
+  "name": "Procurement Specialist",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Procurement Specialist\" (EXECUTOR) in the Growth: Provide needed resources. Use when the task needs Vendor, Purchasing and the output must be \"Purchase Orders\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Procurement Specialist-level judgment with evidence and a fixed scope."
+}

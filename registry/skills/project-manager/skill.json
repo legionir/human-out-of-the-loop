@@ -1,0 +1,9 @@
+{
+  "id": "project-manager",
+  "name": "Project Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Project Manager\" (SUPERVISOR) in the Project: Successful project delivery. Use when the task needs Planning, Scheduling, Risk, Coordination and the output must be \"Plans, Status Reports\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Project Manager-level judgment with evidence and a fixed scope."
+}

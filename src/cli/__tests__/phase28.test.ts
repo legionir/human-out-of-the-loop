@@ -346,15 +346,20 @@ describe('phase 28 — registry layering', () => {
     expect(loaded.personas.find((p) => p.id === 'coder')?.name).toBe('Project Coder');
     expect(loaded.tools.find((t) => t.id === 'read_file')?.name).toBe('Read File (project)');
     // …packaged siblings survive, and project-only entries are added.
-    expect(loaded.personas.map((p) => p.id).sort()).toEqual([
-      'architect',
-      'chat',
-      'coder',
-      'house',
-      'judge',
-      'planner',
-      'reviewer',
-    ]);
+    const loadedPersonaIds = loaded.personas.map((p) => p.id);
+    expect(loadedPersonaIds).toEqual(
+      expect.arrayContaining([
+        'architect',
+        'chat',
+        'coder',
+        'house',
+        'judge',
+        'planner',
+        'reviewer',
+        'accessibility-specialist',
+      ]),
+    );
+    expect(new Set(loadedPersonaIds).size).toBe(loadedPersonaIds.length);
     expect(loaded.skills.length).toBeGreaterThan(0); // from the package layer
     expect(loaded.tools.map((t) => t.id).sort()).toEqual([
       // the original four + the phases 33-35 filesystem set + phase 38's trio

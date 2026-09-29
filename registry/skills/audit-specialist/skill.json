@@ -1,0 +1,9 @@
+{
+  "id": "audit-specialist",
+  "name": "Audit Specialist",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Audit Specialist\" (SUPERVISOR) in the Audit: Verify Compliance and Quality. Use when the task needs Audit, Evidence Review and the output must be \"Audit Report\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Audit Specialist-level judgment with evidence and a fixed scope."
+}

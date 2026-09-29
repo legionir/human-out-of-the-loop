@@ -1,0 +1,9 @@
+{
+  "id": "database-administrator-dba",
+  "name": "Database Administrator (DBA)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Database Administrator (DBA)\" (EXECUTOR) in the Data: Database availability and integrity. Use when the task needs Backup, Access, Performance and the output must be \"DB Config, Backup\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Database Administrator (DBA)-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,19 @@
+{
+  "id": "embedded-developer",
+  "name": "Embedded Developer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Persona \"Embedded Developer\" (EXECUTOR) in the Software: Execute device logic. Use when the task needs Device Logic, Hardware Interface and the output must be \"Firmware\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Embedded Developer-level judgment with evidence and a fixed scope."
+}

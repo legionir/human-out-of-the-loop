@@ -1,0 +1,9 @@
+{
+  "id": "scrum-master",
+  "name": "Scrum Master",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Scrum Master\" (SUPERVISOR) in the Project: Optimize Team Flow. Use when the task needs Facilitation, Blocker Removal and the output must be \"Sprint Reports, Action Items\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Scrum Master-level judgment with evidence and a fixed scope."
+}

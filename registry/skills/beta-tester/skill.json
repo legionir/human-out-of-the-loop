@@ -1,0 +1,9 @@
+{
+  "id": "beta-tester",
+  "name": "Beta Tester",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Beta Tester\" (EXECUTOR) in the Support: Discover issues before release. Use when the task needs Real-world Testing and the output must be \"Bug Reports, Feedback\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Beta Tester-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,9 @@
+{
+  "id": "technical-evangelist",
+  "name": "Technical Evangelist",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Technical Evangelist\" (EXECUTOR) in the Software: Increase technical adoption. Use when the task needs Talks, Demos, Content and the output must be \"Technical Content\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Technical Evangelist-level judgment with evidence and a fixed scope."
+}

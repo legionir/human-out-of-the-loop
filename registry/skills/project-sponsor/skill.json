@@ -1,0 +1,9 @@
+{
+  "id": "project-sponsor",
+  "name": "Project Sponsor",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Project Sponsor\" (SUPERVISOR) in the Business: Guarantee project support. Use when the task needs Funding, Resources, Escalation and the output must be \"Approval, Resources\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 3 execution steps, and the final Quality Gate. Use when you need Project Sponsor-level judgment with evidence and a fixed scope."
+}

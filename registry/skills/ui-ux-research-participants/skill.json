@@ -1,0 +1,9 @@
+{
+  "id": "ui-ux-research-participants",
+  "name": "UI/UX Research Participants",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"UI/UX Research Participants\" (EXECUTOR) in the Support: Provide user feedback. Use when the task needs Usability Testing and the output must be \"Feedback\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 3 execution steps, and the final Quality Gate. Use when you need UI/UX Research Participants-level judgment with evidence and a fixed scope."
+}

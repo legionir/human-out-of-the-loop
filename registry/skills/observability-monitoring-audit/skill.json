@@ -1,0 +1,25 @@
+{
+  "id": "observability-monitoring-audit",
+  "name": "Observability & Monitoring Audit — Master Prompt (v1)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Evidence-based audit of observability: whether the signals needed to detect, diagnose, and recover from failure actually exist and actually fire. Covers metric and log coverage against real failure modes, cardinality and label hygiene, trace completeness and sampling, alert rule quality and routing, dashboard usefulness during an incident, on-call readiness and escalation paths, SLO definition and error-budget behaviour, and telemetry cost and retention. Use before an on-call rotation change, after an incident that was diagnosed too slowly, or when a monitoring claim is made about a new service. Read-only."
+}

@@ -1,0 +1,9 @@
+{
+  "id": "program-manager",
+  "name": "Program Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Program Manager\" (SUPERVISOR) in the Product: Portfolio / program coordination. Use when the task needs Cross-project Coordination and the output must be \"Program Plan\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Program Manager-level judgment with evidence and a fixed scope."
+}

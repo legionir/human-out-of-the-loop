@@ -1,0 +1,9 @@
+{
+  "id": "firmware-engineer",
+  "name": "Firmware Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Firmware Engineer\" (EXECUTOR) in the Software: Control hardware through firmware. Use when the task needs Drivers, Protocols, Firmware and the output must be \"Firmware Binary, Source\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 6 execution steps, and the final Quality Gate. Use when you need Firmware Engineer-level judgment with evidence and a fixed scope."
+}

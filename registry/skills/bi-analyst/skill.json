@@ -1,0 +1,9 @@
+{
+  "id": "bi-analyst",
+  "name": "BI Analyst",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"BI Analyst\" (EXECUTOR) in the Analytics: Provide management visibility. Use when the task needs Dashboards, KPIs and the output must be \"Dashboards\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need BI Analyst-level judgment with evidence and a fixed scope."
+}

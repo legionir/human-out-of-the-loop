@@ -1,0 +1,9 @@
+{
+  "id": "product-owner-post-release",
+  "name": "Product Owner (Post-Release)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Product Owner (Post-Release)\" (SUPERVISOR) in the Software: Manage the value of the product in production. Use when the task needs Backlog, Feedback, Prioritization and the output must be \"Updated Backlog/Roadmap\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Product Owner (Post-Release)-level judgment with evidence and a fixed scope."
+}

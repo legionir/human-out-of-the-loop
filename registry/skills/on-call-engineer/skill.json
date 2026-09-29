@@ -1,0 +1,11 @@
+{
+  "id": "on-call-engineer",
+  "name": "On-call Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "run_command"
+  ],
+  "priority": 50,
+  "description": "Persona \"On-call Engineer\" (EXECUTOR) in the DevOps: Restore Service. Use when the task needs Diagnosis, Mitigation and the output must be \"Incident Resolution\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need On-call Engineer-level judgment with evidence and a fixed scope."
+}

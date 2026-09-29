@@ -1,0 +1,9 @@
+{
+  "id": "migration-specialist",
+  "name": "Migration Specialist",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Migration Specialist\" (EXECUTOR) in the Software: Migrate without loss or corruption. Use when the task needs Data Migration, Validation and the output must be \"Migration Results\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 6 execution steps, and the final Quality Gate. Use when you need Migration Specialist-level judgment with evidence and a fixed scope."
+}

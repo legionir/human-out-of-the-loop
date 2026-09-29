@@ -1,0 +1,11 @@
+{
+  "id": "test-automation-engineer",
+  "name": "Test Automation Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "run_tests"
+  ],
+  "priority": 50,
+  "description": "Persona \"Test Automation Engineer\" (EXECUTOR) in the Testing: Automate Quality Verification. Use when the task needs Automated Tests, Frameworks and the output must be \"Automated Test Suite\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Test Automation Engineer-level judgment with evidence and a fixed scope."
+}

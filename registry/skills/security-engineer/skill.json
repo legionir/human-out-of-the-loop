@@ -1,0 +1,16 @@
+{
+  "id": "security-engineer",
+  "name": "Security Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"Security Engineer\" (EXECUTOR) in the Security: Reduce security risk. Use when the task needs Security Controls, Hardening and the output must be \"Security Controls\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Security Engineer-level judgment with evidence and a fixed scope."
+}

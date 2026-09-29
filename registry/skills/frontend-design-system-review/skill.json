@@ -1,0 +1,25 @@
+{
+  "id": "frontend-design-system-review",
+  "name": "Frontend & Design System Review — Master Prompt (v1)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Forensic review of visual and interaction consistency: design tokens, the shared component library and its prop APIs, page shells and templates, state coverage, forms, tables, typography, colour, iconography, motion, responsiveness, accessibility, theming, and the mechanical enforcement that keeps the system coherent — judged against the Unified Design System Doctrine. Use for frontend code review, before adding a new page or component, when a design system exists on paper but not in code, when screens drift apart, or when review comments need evidence instead of taste. Read-only."
+}

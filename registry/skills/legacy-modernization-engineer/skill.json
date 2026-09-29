@@ -1,0 +1,16 @@
+{
+  "id": "legacy-modernization-engineer",
+  "name": "Legacy Modernization Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"Legacy Modernization Engineer\" (EXECUTOR) in the Software: Reduce legacy risk. Use when the task needs Migration, Re-architecture and the output must be \"Modernized System\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 6 execution steps, and the final Quality Gate. Use when you need Legacy Modernization Engineer-level judgment with evidence and a fixed scope."
+}

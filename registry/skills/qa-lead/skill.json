@@ -1,0 +1,9 @@
+{
+  "id": "qa-lead",
+  "name": "QA Lead",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"QA Lead\" (SUPERVISOR) in the Project: Guarantee the QA strategy. Use when the task needs Test Strategy, Quality Gates and the output must be \"QA Sign-off\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need QA Lead-level judgment with evidence and a fixed scope."
+}

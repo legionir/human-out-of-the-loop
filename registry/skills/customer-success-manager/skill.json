@@ -1,0 +1,9 @@
+{
+  "id": "customer-success-manager",
+  "name": "Customer Success Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Customer Success Manager\" (SUPERVISOR) in the Support: Maximize Customer Value. Use when the task needs Onboarding, Adoption, Retention and the output must be \"Success Plan\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Customer Success Manager-level judgment with evidence and a fixed scope."
+}

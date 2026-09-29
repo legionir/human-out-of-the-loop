@@ -1,0 +1,9 @@
+{
+  "id": "ip-copyright-specialist",
+  "name": "IP / Copyright Specialist",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"IP / Copyright Specialist\" (SUPERVISOR) in the Compliance: Protect IP. Use when the task needs Licensing, Copyright and the output must be \"IP Report\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need IP / Copyright Specialist-level judgment with evidence and a fixed scope."
+}

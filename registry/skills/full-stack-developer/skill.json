@@ -1,0 +1,26 @@
+{
+  "id": "full-stack-developer",
+  "name": "Full-Stack Developer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "run_command",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Persona \"Full-Stack Developer\" (EXECUTOR) in the Software: Deliver an end-to-end feature. Use when the task needs Frontend, Backend, Integration and the output must be \"Feature Implementation\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Full-Stack Developer-level judgment with evidence and a fixed scope."
+}

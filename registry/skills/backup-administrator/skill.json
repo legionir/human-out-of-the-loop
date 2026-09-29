@@ -1,0 +1,9 @@
+{
+  "id": "backup-administrator",
+  "name": "Backup Administrator",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Backup Administrator\" (EXECUTOR) in the Software: Guarantee recoverability. Use when the task needs Backup, Retention, Restore and the output must be \"Backup Status, Restore Evidence\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Backup Administrator-level judgment with evidence and a fixed scope."
+}

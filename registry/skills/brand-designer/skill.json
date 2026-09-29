@@ -1,0 +1,16 @@
+{
+  "id": "brand-designer",
+  "name": "Brand Designer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"Brand Designer\" (EXECUTOR) in the Design: Make the brand recognisable and applicable without a designer in the room. Use when the task needs Whether brand rules are documented well enough to be applied without the author, Consistency of logo, colour, type, and voice across every surface, Accessibility of the brand palette and of the approved combinations and the output must be \"Domain Output\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Brand Designer-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,9 @@
+{
+  "id": "incident-manager",
+  "name": "Incident Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Incident Manager\" (SUPERVISOR) in the Project: Restore Service Safely. Use when the task needs Coordination, Communication, Timeline and the output must be \"Incident Report, Timeline\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Incident Manager-level judgment with evidence and a fixed scope."
+}

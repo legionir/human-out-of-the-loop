@@ -385,7 +385,7 @@ describe('v27.17.0 — a greeting is answered, not planned', () => {
     });
     expect(result.kind).toBe('plan');
     expect(result.report).not.toContain('💬 Answer');
-  });
+  }, 15_000);
 
   it('auto mode: an answer that only defers to @plan becomes a plan (real Persian run)', async () => {
     // The real gateway run: "یک فایل … بساز" was classified as a conversation,

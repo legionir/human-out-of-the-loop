@@ -1,0 +1,9 @@
+{
+  "id": "technical-recruiter",
+  "name": "Technical Recruiter",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Technical Recruiter\" (EXECUTOR) in the HR: Recruit technical talent. Use when the task needs Technical Screening Coordination and the output must be \"Candidate Assessment\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Technical Recruiter-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,16 @@
+{
+  "id": "revenue-operations-analyst",
+  "name": "Revenue Operations (RevOps) Analyst",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"Revenue Operations (RevOps) Analyst\" (EXECUTOR) in the Growth: Make one revenue number that sales, finance, and product all recognise. Use when the task needs Whether pipeline, booking, and revenue definitions agree across systems, Forecast model: inputs, assumptions, and its measured accuracy, CRM hygiene: required fields, duplicates, and stale records and the output must be \"Domain Output\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Revenue Operations (RevOps) Analyst-level judgment with evidence and a fixed scope."
+}

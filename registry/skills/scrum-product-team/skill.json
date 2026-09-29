@@ -1,0 +1,16 @@
+{
+  "id": "scrum-product-team",
+  "name": "Scrum Product Team",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"Scrum Product Team\" (EXECUTOR) in the Support: Deliver a valuable increment. Use when the task needs Development, Testing, Collaboration and the output must be \"Increment\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Scrum Product Team-level judgment with evidence and a fixed scope."
+}

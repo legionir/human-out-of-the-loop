@@ -1,0 +1,9 @@
+{
+  "id": "prompt-engineer",
+  "name": "Prompt Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Prompt Engineer\" (EXECUTOR) in the AI: Optimize model behaviour. Use when the task needs Prompt Design, Evaluation and the output must be \"Prompts, Evaluation Results\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Prompt Engineer-level judgment with evidence and a fixed scope."
+}

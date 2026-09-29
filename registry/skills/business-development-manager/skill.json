@@ -1,0 +1,11 @@
+{
+  "id": "business-development-manager",
+  "name": "Business Development Manager",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "fetch"
+  ],
+  "priority": 50,
+  "description": "Persona \"Business Development Manager\" (SUPERVISOR) in the Growth: Develop business opportunities. Use when the task needs Partnerships, Market Expansion and the output must be \"Partnership Opportunities\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Business Development Manager-level judgment with evidence and a fixed scope."
+}

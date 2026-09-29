@@ -1,0 +1,11 @@
+{
+  "id": "sre-site-reliability-engineer",
+  "name": "SRE (Site Reliability Engineer)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "run_command"
+  ],
+  "priority": 50,
+  "description": "Persona \"SRE (Site Reliability Engineer)\" (EXECUTOR) in the DevOps: Maintain production health. Use when the task needs Monitoring, Incident, Reliability and the output must be \"Incident Report, SLO Report\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need SRE (Site Reliability Engineer)-level judgment with evidence and a fixed scope."
+}

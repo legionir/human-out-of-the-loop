@@ -1,0 +1,11 @@
+{
+  "id": "test-engineer",
+  "name": "Test Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "run_tests"
+  ],
+  "priority": 50,
+  "description": "Persona \"Test Engineer\" (EXECUTOR) in the Testing: Detect defects. Use when the task needs Test Cases, Regression and the output must be \"Test Results\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Test Engineer-level judgment with evidence and a fixed scope."
+}

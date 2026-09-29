@@ -1,0 +1,9 @@
+{
+  "id": "data-analyst",
+  "name": "Data Analyst",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Data Analyst\" (EXECUTOR) in the Analytics: Turn data into insight. Use when the task needs Reporting, Analysis and the output must be \"Analysis, Dashboard\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Data Analyst-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,9 @@
+{
+  "id": "load-stress-tester",
+  "name": "Load/Stress Tester",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Load/Stress Tester\" (EXECUTOR) in the Testing: Discover capacity and failure points. Use when the task needs Load, Stress, Capacity and the output must be \"Load Report\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Load/Stress Tester-level judgment with evidence and a fixed scope."
+}

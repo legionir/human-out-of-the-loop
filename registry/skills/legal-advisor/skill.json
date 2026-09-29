@@ -1,0 +1,11 @@
+{
+  "id": "legal-advisor",
+  "name": "Legal Advisor",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "fetch"
+  ],
+  "priority": 50,
+  "description": "Persona \"Legal Advisor\" (SUPERVISOR) in the Compliance: Reduce legal risk. Use when the task needs Contracts, Terms, IP and the output must be \"Legal Assessment\"; this skill enforces the domain, the authority (APPROVE / REJECT / RECOMMEND / DEFER / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Legal Advisor-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "qa-engineer",
+  "name": "QA Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "run_tests"
+  ],
+  "priority": 50,
+  "description": "Persona \"QA Engineer\" (EXECUTOR) in the Testing: Guarantee product quality. Use when the task needs Functional, Regression, Acceptance and the output must be \"Test Reports, Bugs\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need QA Engineer-level judgment with evidence and a fixed scope."
+}

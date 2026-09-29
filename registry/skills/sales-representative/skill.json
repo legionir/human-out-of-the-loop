@@ -1,0 +1,9 @@
+{
+  "id": "sales-representative",
+  "name": "Sales Representative",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Sales Representative\" (EXECUTOR) in the Growth: Convert leads into customers. Use when the task needs Prospecting, Demo, Closing and the output must be \"Sales Record\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Sales Representative-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,16 @@
+{
+  "id": "analytics-engineer",
+  "name": "Analytics Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"Analytics Engineer\" (EXECUTOR) in the Data: Make the numbers trustworthy and the same everywhere they appear. Use when the task needs Whether a metric has one definition or several that disagree, Lineage from source to the number a decision-maker reads, Freshness, completeness, and the handling of late or corrected data and the output must be \"Domain Output\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Analytics Engineer-level judgment with evidence and a fixed scope."
+}

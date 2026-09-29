@@ -1,0 +1,16 @@
+{
+  "id": "fine-tuning-engineer",
+  "name": "Fine-tuning Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"Fine-tuning Engineer\" (EXECUTOR) in the AI: Improve the model where training data, not prompting, is the binding constraint. Use when the task needs Whether the problem is actually solvable by fine-tuning, with the evidence, Dataset provenance, licence, and consent for every training example, Train / validation / test separation with no leakage between them and the output must be \"Domain Output\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Fine-tuning Engineer-level judgment with evidence and a fixed scope."
+}

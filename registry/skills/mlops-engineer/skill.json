@@ -1,0 +1,9 @@
+{
+  "id": "mlops-engineer",
+  "name": "MLOps Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"MLOps Engineer\" (EXECUTOR) in the AI: Operationalize ML. Use when the task needs Model Deployment, Monitoring and the output must be \"Deployment, Monitoring\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need MLOps Engineer-level judgment with evidence and a fixed scope."
+}

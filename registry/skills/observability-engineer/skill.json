@@ -1,0 +1,9 @@
+{
+  "id": "observability-engineer",
+  "name": "Observability Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"Observability Engineer\" (EXECUTOR) in the DevOps: Make system health observable. Use when the task needs Metrics, Logs, Traces and the output must be \"Dashboards, Alerts\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Observability Engineer-level judgment with evidence and a fixed scope."
+}

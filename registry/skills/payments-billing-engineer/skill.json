@@ -1,0 +1,16 @@
+{
+  "id": "payments-billing-engineer",
+  "name": "Payments / Billing Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status"
+  ],
+  "priority": 50,
+  "description": "Persona \"Payments / Billing Engineer\" (EXECUTOR) in the Software: Move money correctly, exactly once, and reconcilably. Use when the task needs Idempotency and exactly-once semantics on every money-moving path, Rounding, currency, tax, and proration handling at every boundary, Reconciliation between the internal ledger and every external provider and the output must be \"Domain Output\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Payments / Billing Engineer-level judgment with evidence and a fixed scope."
+}
