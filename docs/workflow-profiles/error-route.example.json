@@ -4,7 +4,7 @@
   "profile": {
     "id": "example.error-route",
     "name": "Explicit error route",
-    "description": "Structural fixture for explicit, typed, sanitized onError routing.",
+    "description": "Structural fixture for explicit, typed, sanitized onError routing. Dependency digests are structural placeholders; resolve real component content and replace them before activation.",
     "version": "1.0.0",
     "runtime": {
       "minVersion": "1.0.0"
@@ -19,12 +19,14 @@
     {
       "kind": "persona",
       "id": "hootl.executor",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     },
     {
       "kind": "toolset",
       "id": "hootl.default-tools",
-      "version": "1.0.0"
+      "version": "1.0.0",
+      "digest": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
     }
   ],
   "workflow": {

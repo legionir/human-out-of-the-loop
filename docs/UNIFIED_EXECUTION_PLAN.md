@@ -471,4 +471,58 @@ K-01 ⛔ / K-02 🟡 / K-05 🟡 / K-10 🟡 ── موازی، ورودی ما
 | R | 🟢 | 2026-09-27 | `78b0545` … `51fc52e` (هش هر ردیف در جدول فاز R) |
 
 ---
+
+## §۸ — Addendum: Workflow Profiles v1 (2026-09-29, append-only)
+
+این الحاقیه وضعیت و traceability کار Workflow Profiles را ثبت می‌کند؛ هیچ وضعیت تاریخی A–K/R، baseline یا source audit این سند را جایگزین نمی‌کند. پلن اجرایی تفصیلی: `docs/workflow-profiles/EXECUTION_PLAN.md`؛ گزارش شواهد Phase 1: `docs/workflow-profiles/PHASE1_BASELINE.md`.
+
+**Baseline فعلی این کار:** `main` = `ff7c030afaa20b8a343cdb090b3b2db16384279e`. PRهای #5/#6/#7 merged هستند؛ هیچ‌کدام پیش‌نیاز باز نیست. CI run `36577591299` روی همین SHA در Windows Node 22/24 شکست داشته و در بقیهٔ matrix/E2Eهای گزارش‌شده سبز بوده است؛ failureها attribution نشده‌اند و regression یا flake فرض نمی‌شوند.
+
+**Gate:** Phase 1 🟡؛ Steps 1–2 شواهد baseline/معماری دارند؛ Steps 3–5 تا تصمیم‌های مالک، حل seam، تکمیل evidence محدودیت‌ها، review و merge زرد می‌مانند. Phase 2 هنوز شروع نشده و اجرای Profile در دسترس کاربر نیست. v1 فقط JSON داده‌ای است، default-off در rollout، بدون inheritance/template/sub-workflow/recursion/parallelism/fan-out/join؛ Runtime و PlanRuntime موجود تنها مراجع اجرای مدل، ابزار و Plan DAG می‌مانند.
+
+### شناسه‌های ردیابی افزوده‌شده
+
+| ID | الزام | محل اجرا | راستی‌آزمایی هدف |
+|---|---|---|---|
+| WP-R-001 | JSON Schema versioned، سقف اندازهٔ مستند، بدون کد/DSL | Workflow Profiles Phase 2.1–2.2 | schema/loader tests |
+| WP-R-002 | Semantic graph validation برای endpointها، portها، mapping، result و cycle/loop bounds | Phase 2.4 | semantic positive/negative fixtures |
+| WP-R-003 | resolution وابستگی‌ها با نسخه/digest بدون کپی Persona/Skill | Phase 3.1 | resolver tests |
+| WP-R-004 | Toolset/Persona/Runtime authorization فقط دسترسی را محدود می‌کند؛ enforcement در call-site | Phase 3.2 و 6.3 | denied-tool integration tests |
+| WP-R-005 | first-match قطعی، loops محدود و error/retry/route typed | Phase 4.1–4.4 | graph-kernel tests |
+| WP-R-006 | Feature flag پیش‌فرض خاموش و legacy behavior محفوظ | Phase 4.5 و 7.2–7.3 | default-off/opt-in + golden parity |
+| WP-R-007 | handlerها lifecycle موجود را delegate و متن Profile را untrusted نگه می‌دارند | Phase 5.1–5.4 | handler/adversarial tests |
+| WP-R-008 | lifecycle durable، resume/cancel، digest-bound approval و budget مشترک | Phase 6.1–6.4 | restart/recovery/policy tests |
+| WP-R-009 | default profile با رفتار observable جاری برابر است | Phase 7.1–7.3 | characterization/golden suite |
+| WP-R-010 | authoring/discovery/selection و diagnostics در interfaceهای پشتیبانی‌شده | Phase 8.1–8.3 | CLI/API contract tests |
+| WP-R-011 | adversarial trust/tool boundaries و resource ceilings | Phase 5.2 و 9.1–9.2 | security/performance tests |
+| WP-R-012 | migration، rollback، docs، CI و review gates | Phase 10.1–10.3 | migration/CI/review evidence |
+| WP-R-013 | exclusionهای v1 صریح و enforce‌شده | Phase 1.3؛ Phase 2–4 | schema/semantic rejection tests |
+
+شناسه‌های `WP-R-*` متعلق به این قابلیت‌اند و با IDهای تاریخی R-01…R-30 این سند تداخل ندارند. همهٔ verification targetهای بالا planned و اجرا‌نشده‌اند.
+
+### تصمیم‌ها و موانع مالک
+
+| ID | موضوع | وضعیت/موعد |
+|---|---|---|
+| D-WP-001 | JSON Schema authority و validator (پیشنهاد: Draft 2020-12 validator جدا از semantic TS checks) | 🟡 تصمیم Pouya، پیش از Phase 2.1–2.2 |
+| D-WP-002 | pinning نسخه/digest؛ Persona/Tool registry فعلاً نسخهٔ یکنواخت ندارند | 🟡 تصمیم Pouya، پیش از Phase 2.3/3.1 |
+| D-WP-003 | project-profile selection، default override و trust/opt-in | 🟡 تصمیم Pouya، پیش از Phase 2.3 |
+| D-WP-004 | approval node در برابر Law 17 و waiting/resume پایدار | 🟡 تصمیم Pouya، پیش از Phase 2.1/5.3 |
+| D-WP-005 | ترکیب capهای Profile/Plan/Agent/provider و شمارنده‌های monotonic | 🟡 تصمیم Pouya، پیش از Phase 6.2 |
+| D-WP-006 | سازگاری MCP `toolPrefix + raw tool name` با ID محدودشدهٔ registry | 🟡 شواهد/compatibility tests پیش از Phase 2.1/3.2 |
+| D-WP-007 | byte cap مبتنی بر اندازه‌گیری، نه مقدار حدسی | 🟡 اندازه‌گیری و تست پیش از Phase 2.1 |
+| D-WP-008 | facade مرحله‌ای روی Orchestrator با حفظ PlanRuntime به‌عنوان تنها Plan DAG scheduler | 🟡 تصمیم معماری Pouya پیش از Phase 4/5 |
+
+**PR/rollout:** یک PR مستقل برای Phase 1 و سپس یک PR برای هر فاز وابسته؛ Phase 2 فقط بعد از merge/review/CI و حل blockers Phase 1 بر مبنای همان merge SHA شروع می‌شود. `main` مستقیم تغییر نمی‌کند و این الحاقیه مجوز merge/rollout محسوب نمی‌شود.
+
+---
 *پایان سند. هر تغییر وضعیت فقط با ویرایش همین فایل و کامیت مرتبط.*
+
+
+### 8.1 — Workflow Profiles owner-decision update (2026-09-29 19:38 GMT+3:30; append-only)
+
+This update supersedes the initial D-WP open-decision statuses in §8 while preserving that historical record. Pouya Rahimi confirmed: Ajv + Draft 2020-12 structural validation separate from semantic validation; required content-digest pins (version optional and recorded only when available); one active profile per run with explicit selection > opted-in project > built-in default; digest-bound approval that grants no tool/effect permission; strictest per-dimension Runtime/user-session/profile budget; exact MCP IDs with a 256 UTF-8-byte cap and source-aware validation; a 1 MiB UTF-8-byte profile-file cap before parse; and an outer profile graph that delegates every inner Plan DAG to the existing `PlanRuntime` through an owner-approved narrow internal adapter (no second scheduler or public/generic Orchestrator facade). The Profile Schema and three structural fixtures were updated to reflect the digest and tool-ID contract; fixture digests are placeholders, not activation-ready pins.
+
+**Evidence:** `Orchestrator.run()` delegates through private `runInSession()` and is composite; `PlanRuntime` exposes `execute/resume/cancel` and owns DAG scheduling. `mcp-connector.ts` concatenates prefix and raw name without normalization, but `ToolDefinitionSchema` currently applies the restricted local-ID regex to MCP IDs; source-aware validation is therefore a required Phase 2/3 change. Current profile schema/examples occupy 35,763 / 10,107 / 7,461 / 4,002 bytes, all below the approved 1 MiB cap. Boundary tests and live/fixture MCP compatibility tests remain future implementation work.
+
+**Current gate:** Phase 1 stays 🟡 pending PR #8 review/merge (Step 5). Step 3 is 🟢 and Step 4 is 🟢 for the approved read-only design spike; adapter integration is not implemented or claimed. Phase 2 and Runtime code remain 🔴; do not start them until Phase 1's review/merge gate is complete. PR #8 contains documentation and declarative contract/fixture updates only; no file or branch deletion is authorized or performed.
