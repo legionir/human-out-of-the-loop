@@ -1,0 +1,19 @@
+{
+  "id": "soc-analyst",
+  "name": "SOC Analyst",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Persona \"SOC Analyst\" (EXECUTOR) in the Security: Monitor and give correct first response to security incidents. Use when the task needs Evidence-based alert analysis, classification/prioritisation, first response and containment, escalation and reporting and the output must be \"Incident report, classification, evidence\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need SOC Analyst-level judgment with evidence and a fixed scope."
+}

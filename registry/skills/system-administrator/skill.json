@@ -1,0 +1,11 @@
+{
+  "id": "system-administrator",
+  "name": "System Administrator",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "run_command"
+  ],
+  "priority": 50,
+  "description": "Persona \"System Administrator\" (EXECUTOR) in the DevOps: Health of base systems. Use when the task needs OS, Services, Users and the output must be \"System Config\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need System Administrator-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,9 @@
+{
+  "id": "system-architect",
+  "name": "System Architect",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [],
+  "priority": 50,
+  "description": "Persona \"System Architect\" (EXECUTOR) in the Architecture: Design system-level architecture. Use when the task needs Hardware/Software/Network Integration and the output must be \"System Architecture\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need System Architect-level judgment with evidence and a fixed scope."
+}

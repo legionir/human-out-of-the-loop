@@ -1,0 +1,25 @@
+{
+  "id": "testing-quality-assurance-audit",
+  "name": "Testing & Quality Assurance Audit — Master Prompt (v1)",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Evidence-based audit of test and verification quality: what is actually tested, which critical behaviours have no test, assertion-free and mocked-away tests, flakiness and ordering dependence, coverage that measures the wrong thing, and regression risk. Use before trusting a green suite, when defects escape to production, when a refactor feels unsafe, or when a release gate depends on tests. Read-only; never weaken a test to make it pass."
+}

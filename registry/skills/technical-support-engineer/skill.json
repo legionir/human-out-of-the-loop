@@ -1,0 +1,11 @@
+{
+  "id": "technical-support-engineer",
+  "name": "Technical Support Engineer",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "run_command"
+  ],
+  "priority": 50,
+  "description": "Persona \"Technical Support Engineer\" (EXECUTOR) in the Support: Fix technical issues. Use when the task needs Troubleshooting, Diagnostics and the output must be \"Resolution Report\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Technical Support Engineer-level judgment with evidence and a fixed scope."
+}

@@ -1,0 +1,25 @@
+{
+  "id": "third-party-integration-specialist",
+  "name": "Third-party Integration Specialist",
+  "version": "1.0.0",
+  "instructions": "SKILL.md",
+  "tools": [
+    "directory_tree",
+    "get_file_info",
+    "git_branch_list",
+    "git_diff",
+    "git_log",
+    "git_remote_list",
+    "git_show",
+    "git_status",
+    "list_allowed_directories",
+    "list_directory",
+    "list_directory_with_sizes",
+    "read_file",
+    "read_multiple_files",
+    "search_code",
+    "search_files"
+  ],
+  "priority": 50,
+  "description": "Persona \"Third-party Integration Specialist\" (EXECUTOR) in the Software: Reliable service connectivity. Use when the task needs API Integration, Webhooks and the output must be \"Integration Code, Tests\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 4 execution steps, and the final Quality Gate. Use when you need Third-party Integration Specialist-level judgment with evidence and a fixed scope."
+}
