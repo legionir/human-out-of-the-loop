@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Incident Forensic Review & Postmortem.md"
+  source: "../../personas/incident-forensic-review-postmortem.json"
   language: "en"
   spec: "composites/incident-forensic-review.json"
   generated: true

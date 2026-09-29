@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Mid"
-  source: "prompts/implementation/full-stack-developer.md"
+  source: "../../personas/full-stack-developer.json"
   language: "en"
 ---
 

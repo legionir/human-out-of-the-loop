@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 4
-  source: "prompts/composite/License Compliance Analysis.md"
+  source: "../../personas/license-compliance-analysis.json"
   language: "en"
   spec: "composites/license-compliance-analysis.json"
   generated: true

@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Localisation & i18n Audit.md"
+  source: "../../personas/localisation-i18n-audit.json"
   language: "en"
   spec: "composites/localisation-i18n-audit.json"
   generated: true

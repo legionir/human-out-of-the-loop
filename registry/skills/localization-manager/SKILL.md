@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Documentation"
   seniority: "Manager"
-  source: "prompts/audit/localization-manager.md"
+  source: "../../personas/localization-manager.json"
   language: "en"
 ---
 

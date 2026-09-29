@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Testing"
   seniority: "Mid"
-  source: "prompts/implementation/load-stress-tester.md"
+  source: "../../personas/load-stress-tester.json"
   language: "en"
 ---
 

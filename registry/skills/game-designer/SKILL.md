@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Design"
   seniority: "Specialist"
-  source: "prompts/implementation/game-designer.md"
+  source: "../../personas/game-designer.json"
   language: "en"
 ---
 

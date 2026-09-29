@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Mid"
-  source: "prompts/implementation/frontend-developer.md"
+  source: "../../personas/frontend-developer.json"
   language: "en"
 ---
 

@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Identity & Access Management Audit.md"
+  source: "../../personas/identity-access-management-audit.json"
   language: "en"
   spec: "composites/identity-access-management-audit.json"
   generated: true

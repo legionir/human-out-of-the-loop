@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Security"
   seniority: "Senior"
-  source: "prompts/implementation/iam-identity-engineer.md"
+  source: "../../personas/iam-identity-engineer.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Compliance"
   seniority: "Specialist"
-  source: "prompts/implementation/kyc-aml-specialist.md"
+  source: "../../personas/kyc-aml-specialist.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Compliance"
   seniority: "Specialist"
-  source: "prompts/audit/ip-copyright-specialist.md"
+  source: "../../personas/ip-copyright-specialist.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "DevOps"
   seniority: "Manager"
-  source: "prompts/audit/infrastructure-manager.md"
+  source: "../../personas/infrastructure-manager.json"
   language: "en"
 ---
 
