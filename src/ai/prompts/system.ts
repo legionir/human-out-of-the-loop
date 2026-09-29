@@ -29,7 +29,10 @@ export function filterSkillInstructions(
 ): string {
   const disallowed = skillToolIds.filter((id) => !allowedTools.has(id));
   if (disallowed.length === 0) return markdown;
-  const patterns = disallowed.map((id) => new RegExp(`\\b${id.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`));
+  const patterns = disallowed.map((id) => {
+    const escapedId = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escapedId}\\b`);
+  });
   const sections = markdown.split(/(?=^## )/m);
   const kept = sections.filter((section) => !patterns.some((pattern) => pattern.test(section)));
   const text = kept.join('').trim();
