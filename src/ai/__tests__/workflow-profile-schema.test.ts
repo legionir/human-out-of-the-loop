@@ -52,18 +52,60 @@ describe('Workflow Profile v1 structural contract', () => {
     expect(validateWorkflowProfileStructure(profile).length).toBeGreaterThan(0);
   });
 
-  it('applies the same bounded scalar extension policy at the document root', () => {
-    const profile = readFixture(fixtureNames[0]!);
-    profile['x-note'] = 'safe scalar';
-    expect(validateWorkflowProfileStructure(profile)).toEqual([]);
-    profile['x-nested'] = { executable: 'no' };
-    expect(validateWorkflowProfileStructure(profile).some((diagnostic) => diagnostic.path === '/x-nested')).toBe(true);
-    delete profile['x-nested'];
-    delete profile['x-note'];
-    for (let index = 0; index < 16; index++) profile[`x-extra-${index}`] = index;
-    expect(validateWorkflowProfileStructure(profile)).toEqual([]);
-    profile['x-extra-16'] = 16;
-    expect(validateWorkflowProfileStructure(profile).length).toBeGreaterThan(0);
+  it('enforces the 16-field x-* cap on every extension-enabled object and limits strings to 1024 characters', () => {
+    const extensionTargets: Array<{ name: string; select: (profile: Record<string, any>) => Record<string, any> }> = [
+      {
+        name: 'document root',
+        select: (profile) => { delete profile.$schema; return profile; },
+      },
+      {
+        name: 'profile metadata',
+        select: (profile) => { delete profile.profile.description; return profile.profile; },
+      },
+      {
+        name: 'node',
+        select: (profile) => profile.workflow.nodes[0],
+      },
+      {
+        name: 'edge',
+        select: (profile) => {
+          delete profile.workflow.edges[0].label;
+          delete profile.workflow.edges[0].when;
+          return profile.workflow.edges[0];
+        },
+      },
+    ];
+
+    for (const target of extensionTargets) {
+      const withinLimit = readFixture(fixtureNames[0]!);
+      const withinTarget = target.select(withinLimit);
+      for (let index = 0; index < 16; index++) withinTarget[`x-extra-${index}`] = index;
+      expect(validateWorkflowProfileStructure(withinLimit), target.name).toEqual([]);
+
+      const overLimit = readFixture(fixtureNames[0]!);
+      const overTarget = target.select(overLimit);
+      for (let index = 0; index < 17; index++) overTarget[`x-extra-${index}`] = index;
+      expect(validateWorkflowProfileStructure(overLimit).length, target.name).toBeGreaterThan(0);
+    }
+
+    const scalarValues = readFixture(fixtureNames[0]!);
+    scalarValues.profile['x-string'] = 'bounded';
+    scalarValues.profile['x-number'] = 42;
+    scalarValues.profile['x-boolean'] = true;
+    scalarValues.profile['x-null'] = null;
+    expect(validateWorkflowProfileStructure(scalarValues)).toEqual([]);
+
+    const exactLength = readFixture(fixtureNames[0]!);
+    exactLength.profile['x-long'] = 'a'.repeat(1024);
+    expect(validateWorkflowProfileStructure(exactLength)).toEqual([]);
+
+    const longString = readFixture(fixtureNames[0]!);
+    longString.profile['x-long'] = 'a'.repeat(1025);
+    expect(validateWorkflowProfileStructure(longString).some((diagnostic) => diagnostic.path === '/profile/x-long')).toBe(true);
+
+    const nonScalar = readFixture(fixtureNames[0]!);
+    nonScalar.profile['x-array'] = ['not', 'a', 'scalar'];
+    expect(validateWorkflowProfileStructure(nonScalar).some((diagnostic) => diagnostic.path === '/profile/x-array')).toBe(true);
   });
 
   it('validates retry and route policy shapes without executing retry behavior', () => {

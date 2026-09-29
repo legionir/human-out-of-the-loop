@@ -105,3 +105,7 @@ The Phase 1 owner-decision blockers are resolved. **Step 3 is 🟢**: owner deci
 
 PR #8 merged to `main` at `ee3fa3f67d695a251974d5bb94ce53ab6e605b5a`. Post-merge CI run `36601818036` is completed with conclusion `success`. Phase 1 Step 5 and the Phase 1 Gate are now 🟢. The source branch `feat/workflow-profile-phase1-baseline-20260929` is preserved. Phase 2 may proceed on a new branch from this merge commit; it does not authorize Runtime activation or any later phase.
 
+## 9. D-WP-009 — owner-confirmed extension metadata policy (2026-09-29 21:33 GMT+3:30; append-only)
+
+Pouya confirmed that `x-*` extension metadata is limited to JSON scalar values only; each extension-enabled object may contain at most 16 such fields; extension strings are limited to 1,024 characters; the overall Profile file remains capped at 1 MiB (1,048,576 UTF-8 bytes). Arrays, objects, executable content, and extension keys outside the existing bounded key pattern are rejected. This resolves the remaining owner-policy question for Phase 2. Contract tests cover the 16/17-field boundary at each extension-enabled object, non-scalar values, string length, and the file-size boundary. This approval does not authorize workflow execution or later phases.
+
