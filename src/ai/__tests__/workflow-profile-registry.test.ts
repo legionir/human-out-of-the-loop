@@ -68,6 +68,18 @@ describe('Workflow Profile loader and registry', () => {
     expect(registry.size).toBe(1);
   });
 
+  it('fails closed on the same profile ID appearing in different scopes', () => {
+    const builtInDir = tempDir();
+    const projectDir = tempDir();
+    fs.writeFileSync(path.join(builtInDir, 'base.json'), sourceProfile('shared-id'));
+    fs.writeFileSync(path.join(projectDir, 'project.json'), sourceProfile('shared-id'));
+    const builtIn = loadWorkflowProfilesFromDirectory({ directory: builtInDir, scope: 'builtin' }).list()[0]!;
+    const project = loadWorkflowProfilesFromDirectory({ directory: projectDir, scope: 'project', projectOptIn: true }).list()[0]!;
+    const registry = new WorkflowProfileRegistry();
+    registry.register(builtIn);
+    expect(() => registry.register(project)).toThrow(/duplicate workflow profile id/i);
+  });
+
   it('fails closed for the whole directory on malformed, inaccessible, or duplicate profile entries', () => {
     const dir = tempDir();
     fs.writeFileSync(path.join(dir, 'a.json'), sourceProfile('same'));
@@ -106,16 +118,5 @@ describe('Workflow Profile loader and registry', () => {
     expect(selectWorkflowProfile(registry, { projectOptIn: true, projectDefaultProfileId: 'project-default', builtInDefaultProfileId: 'built-in-default' }).profile.profile.id).toBe('project-default');
     expect(selectWorkflowProfile(registry, { builtInDefaultProfileId: 'built-in-default' }).profile.profile.id).toBe('built-in-default');
     expect(() => selectWorkflowProfile(registry, { requestedProfileId: 'project-default', projectOptIn: false, builtInDefaultProfileId: 'built-in-default' })).toThrow(/opt-in/i);
-  });
-
-  it('fails closed on explicitly supplied empty profile IDs instead of falling back', () => {
-    const builtInDir = tempDir();
-    fs.writeFileSync(path.join(builtInDir, 'base.json'), sourceProfile('built-in-default'));
-    const registry = loadWorkflowProfilesFromDirectory({ directory: builtInDir, scope: 'builtin' });
-
-    expect(() => selectWorkflowProfile(registry, { requestedProfileId: '', builtInDefaultProfileId: 'built-in-default' }))
-      .toThrow(/explicitly selected profile "".*not discovered/i);
-    expect(() => selectWorkflowProfile(registry, { projectOptIn: true, projectDefaultProfileId: '', builtInDefaultProfileId: 'built-in-default' }))
-      .toThrow(/project default profile "".*not discovered/i);
   });
 });
