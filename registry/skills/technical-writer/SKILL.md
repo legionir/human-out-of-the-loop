@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Documentation"
   seniority: "Mid"
-  source: "prompts/implementation/technical-writer.md"
+  source: "../../personas/technical-writer.json"
   language: "en"
 ---
 

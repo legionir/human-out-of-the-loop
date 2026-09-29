@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Project"
   seniority: "Manager"
-  source: "prompts/audit/vendor-manager.md"
+  source: "../../personas/vendor-manager.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Support"
   seniority: "Senior"
-  source: "prompts/implementation/technical-support-engineer.md"
+  source: "../../personas/technical-support-engineer.json"
   language: "en"
 ---
 

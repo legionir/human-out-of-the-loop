@@ -202,7 +202,7 @@ for (const sourceSkill of skillIndex) {
   };
   generated.set(`registry/personas/${persona.id}.json`, `${JSON.stringify(personaJson, null, 2)}\n`);
 
-  let markdown = skillMarkdown.replace(/^source:\s*.*$/m, `source: "../../personas/${persona.id}.json"`);
+  let markdown = skillMarkdown.replace(/^(\s*source:\s*).*$/m, (_match, prefix) => `${prefix}"../../personas/${persona.id}.json"`);
   markdown = markdown.replace(/\[([^\]]*)\]\(([^)]*(?:prompts|references)\/[^)]*)\)/g, '[Full Persona](../../personas/' + persona.id + '.json)');
   markdown = `${markdown.trim()}\n\n## HOOTL tool binding\n\n` +
     'Adaptation notice: this upstream Skill was adapted for HOOTL by rewriting Persona/reference links and adding this local tool-binding boundary. ' +

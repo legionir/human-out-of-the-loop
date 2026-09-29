@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Support"
   seniority: "Junior"
-  source: "prompts/implementation/ui-ux-research-participants.md"
+  source: "../../personas/ui-ux-research-participants.json"
   language: "en"
 ---
 

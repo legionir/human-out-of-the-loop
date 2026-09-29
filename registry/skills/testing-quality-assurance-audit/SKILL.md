@@ -6,7 +6,7 @@ metadata:
   type: "COMPOSITE"
   typeLabel: "Composite"
   lenses: 6
-  source: "prompts/composite/Testing & Quality Assurance Audit.md"
+  source: "../../personas/testing-quality-assurance-audit.json"
   language: "en"
   spec: "composites/testing-quality-audit.json"
   generated: true

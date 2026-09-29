@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "AI"
   seniority: "Mid"
-  source: "prompts/implementation/tool-developer.md"
+  source: "../../personas/tool-developer.json"
   language: "en"
 ---
 

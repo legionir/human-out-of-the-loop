@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Specialist"
-  source: "prompts/implementation/technical-evangelist.md"
+  source: "../../personas/technical-evangelist.json"
   language: "en"
 ---
 

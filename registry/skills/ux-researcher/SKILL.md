@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Analytics"
   seniority: "Senior"
-  source: "prompts/implementation/ux-researcher.md"
+  source: "../../personas/ux-researcher.json"
   language: "en"
 ---
 

@@ -7,7 +7,7 @@ metadata:
   typeLabel: "SUPERVISOR"
   domain: "Software"
   seniority: "Lead"
-  source: "prompts/audit/technical-lead-tech-lead.md"
+  source: "../../personas/technical-lead-tech-lead.json"
   language: "en"
 ---
 

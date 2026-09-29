@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Documentation"
   seniority: "Mid"
-  source: "prompts/implementation/ux-writer-content-designer.md"
+  source: "../../personas/ux-writer-content-designer.json"
   language: "en"
 ---
 

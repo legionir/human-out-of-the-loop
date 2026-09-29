@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Software"
   seniority: "Specialist"
-  source: "prompts/implementation/third-party-integration-specialist.md"
+  source: "../../personas/third-party-integration-specialist.json"
   language: "en"
 ---
 

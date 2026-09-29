@@ -7,7 +7,7 @@ metadata:
   typeLabel: "EXECUTOR"
   domain: "Documentation"
   seniority: "Mid"
-  source: "prompts/implementation/translator.md"
+  source: "../../personas/translator.json"
   language: "en"
 ---
 
