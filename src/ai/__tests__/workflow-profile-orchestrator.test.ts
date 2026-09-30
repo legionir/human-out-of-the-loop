@@ -1,4 +1,20 @@
 import { describe, expect, it, vi } from 'vitest';
+
+// The answer branch delegates to the existing chat agent (`answerRun`), so its model call is
+// stubbed here — the parity of that delegation is asserted in the Phase 7 parity suite.
+vi.mock('ai', async () => {
+  const actual = (await vi.importActual('ai')) as Record<string, unknown>;
+  return {
+    ...actual,
+    generateText: vi.fn(async () => ({
+      text: 'It is 42.',
+      usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
+      steps: [],
+    })),
+    generateObject: vi.fn(),
+  };
+});
+
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';

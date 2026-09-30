@@ -5,6 +5,34 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [Unreleased] — Workflow Profiles (opt-in, off by default)
+
+Workflow Profiles let a JSON document describe the run's control flow (intake, planner, bounded
+clarification, digest-bound plan approval, delegated execution, review, ends) while `PlanRuntime`
+stays the only inner-DAG scheduler. **`HOOTL_WORKFLOW_PROFILE` is off by default: without an explicit
+opt-in nothing profile-related is resolved and the existing path runs unchanged.**
+
+**Added**
+- Draft 2020-12 schema, semantic validation, dependency resolution with content-digest pins, the
+  execution kernel, node handlers/adapters, durable run state with resume guards, budgets,
+  authorization guard and events (Phases 2–6).
+- The built-in default profile (`src/ai/workflow-profiles/default-profile.ts`), built in code with
+  pins computed from resolved component content, and the activation seam plus run bridge that wire it
+  to the Orchestrator behind the flag (Phase 7).
+
+**Behaviour differences to review before the default profile is activated** (recorded in
+`docs/workflow-profiles/PHASE7_PARITY.md`; the built-in default stays gated until the approval is
+recorded):
+- A plan-confirmation denial with feedback cannot re-plan in v1 (the digest-bound decision port is an
+  object and v1 predicates address one top-level scalar port): the run ends fail-closed, like a
+  cancellation.
+- The answer branch ends with the run status `success`; the interaction status `answered` stays the
+  entry point's job, and an answer outcome without text ends with no response value.
+- The user-facing report wording on the profile path differs from the legacy formatter (the review's
+  final summary still reaches the user on both paths).
+- A failed plan execution is routed to the review (the current flow reviews failures instead of
+  aborting), so the run is reported rather than terminated at the execution node.
+
 ## [27.17.17] — 2026-09-27 — Real provider runs and a green CI matrix
 
 Found by running the CLI against a real OpenAI-compatible gateway (`real-provider.yml`) and by the first real Actions runs of the CI matrix. Suite: **vitest 1693/1693** (also with `TMPDIR` behind a symlink), **e2e 209/209**; CI green on ubuntu/macos/windows × node 22/24/26.

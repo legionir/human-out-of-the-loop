@@ -173,7 +173,7 @@ workflow پس از restart از state و hash/version درست resume می‌ش�
 
 ---
 
-## [🟡] Phase 7: پروفایل پیش‌فرض و حفظ رفتار فعلی
+## [🟢] Phase 7: پروفایل پیش‌فرض و حفظ رفتار فعلی
 
 جریان فعلی HOOTL را فقط پس از استخراج از کد/تست به Profile پیش‌فرض تبدیل کن. Feature flag در v1 پیش‌فرض خاموش می‌ماند؛ خاموش بودن یعنی مسیر legacy بدون تغییر. Profile فقط با opt-in صریح و پس از parity gate اجرا می‌شود؛ انتخاب implicit/فعال‌سازی عمومی بدون gate ممنوع است.
 
@@ -189,7 +189,7 @@ workflow پس از restart از state و hash/version درست resume می‌ش�
 
 هنگام flag خاموش، هیچ Profileای resolve/dispatch نشود و مسیر legacy فعلی اجرا شود. با flag روشن و default profile صریح/مصوب، Profile resolve شود؛ profile نامعتبر fail-closed و diagnostic بدهد و هرگز silent fallback، اجرای نیمه‌راهی یا گسترش ابزار رخ ندهد. فعال‌سازی پیش‌فرض در محیط/کاربر فقط پس از parity و opt-in/approval ثبت‌شده انجام شود.
 
-### [🔴] Step 3: اثبات parity و سازگاری دادهٔ موجود
+### [🟢] Step 3: اثبات parity و سازگاری دادهٔ موجود
 
 تست‌های characterization/golden برای همان ورودی‌ها و خروجی‌های observable موجود بساز: clarification، plan confirmation، execution order، retry/replan، acceptance failure، cancellation، final report و tool authorization. Planها و Sessionهای قدیمی باید قابل‌خواندن/resume بمانند یا migration مستند و آزموده داشته باشند. هر تفاوت رفتاری عمدی باید در این طرح، release notes و approval مالک ثبت شود.
 
@@ -553,3 +553,33 @@ path, the G-5 confirmation-denial mapping and the cancellation-category normaliz
 so no default activation happens; Step 3 (parity tests, plan/session compatibility and the rollback
 path) is next. No merge is authorized until all phases are complete.
 
+## Phase 7 closure (2026-09-30; append-only)
+
+Phase 7 is 🟢. Steps 1–3 are complete: the default profile is built in code from resolved component
+content, the Orchestrator hook is behind `HOOTL_WORKFLOW_PROFILE` (off by default — nothing
+profile-related resolves while it is off) with fail-closed activation, and the characterization/parity
+suite drives both paths with the same scripted model and compares the observable surface.
+
+**Acceptance criteria (all verified with evidence in `docs/workflow-profiles/PHASE7_PARITY.md` §9):**
+a request without a profile keeps the legacy path and its observable result; clarification, plan
+confirmation, execution order, retry/re-plan, acceptance failure, cancellation, the final report and
+tool authorization are covered by parity tests that pass; authorization and the single human
+interaction are not weakened (persona/tool-surface parity, digest-bound approval, terminal denial and
+cancellation); existing plans/sessions are read with no format change and no migration; default
+activation is rollbackable (flag off, or the recorded `BUILT_IN_DEFAULT_APPROVAL` gate which is still
+unapproved); and a load error executes nothing (no session, no plan, no model call).
+
+**Behaviour differences recorded for the owner's approval before any default activation** (also in
+`CHANGELOG.md` and `PHASE7_PARITY.md` §9): G-5 (confirmation feedback cannot re-plan in v1 and ends
+fail-closed), G-2 (the answer branch ends `success`; `answered` stays the entry point's job),
+report wording, and the absence of the legacy `plan:clarified` observability entry. Two parity gaps
+found by the suite were fixed in code rather than documented: the missing acceptance/status callbacks
+on the profile path's `PlanRuntime`, and a failed plan execution skipping the review (now routed to the
+review node through the existing error-routing vocabulary).
+
+**Evidence:** `workflow-profile-parity.test.ts` 9 tests, `workflow-profile-orchestrator.test.ts` 4,
+all Workflow Profile suites **21 files / 235 tests**; adjacent suites 76 tests; full repository suite
+141 files / 1,925 tests with only the pre-existing `phase-j-checkpoint` J-05 failure; `npm run
+typecheck` and `npm run build` clean. No default activation happened: `BUILT_IN_DEFAULT_APPROVAL`
+remains `approved: false`, and no merge is authorized until all phases are complete (owner
+instruction). Phase 8 (user authoring/selection) is the next dependency-ordered phase.

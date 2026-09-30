@@ -259,3 +259,70 @@ sessions created; and an approved-default answer-branch run end to end with the 
 All Workflow Profile suites: **19 files / 217 tests**; `chat-mode`, `c4-clarification` and
 `phase-b-orchestration` (50 tests) stay green; typecheck and build clean.
 
+## 9. Step 3 characterization/parity (append-only, 2026-09-30)
+
+`src/ai/__tests__/workflow-profile-parity.test.ts` drives **both** paths with the same scripted model
+(`schemaName`-dispatched `generateObject` plus a text `generateText`), the same plan and the same
+registry, and compares the observable surface. All nine cases pass:
+
+| Scenario | Parity asserted |
+| --- | --- |
+| Plan branch | `kind`, `review.outcome`, `executionResult.status`/`completedSteps`, step-agent system prompt, **step-agent tool surface**, acceptance-call and final-review counts, persisted plan step statuses, session linkage, interaction outcome |
+| Answer branch | no plan, no confirmation, no step, `planId: 'none'`, review `success`, interaction `success`; the answer text comes from the same chat agent (`answerRun`, read-only tools, planner draft as fallback) |
+| Clarification | the answered question reaches the second planner call as the legacy block (`CLARIFICATIONS FROM USER: Q/A`), then the run continues to confirmation and execution |
+| Acceptance failure + re-planning | same `review.outcome` (`failure`), same `failedSteps`, same number of planner calls (the bounded automatic re-plan happens inside the delegation on both paths), same review calls |
+| Tool authorization | a plan step naming a tool its persona does not allow is refused **before execution** on both paths (no step agent runs), the run reports the infeasibility and the rejected plan stays visible in the plan store |
+| Cancellation | `cancelled` on both paths, no step agent, interaction `cancelled` |
+| Final report | the review's `finalSummary` reaches the user on both paths |
+| Existing data + rollback | a legacy plan and session created on disk are read back by the profile path (same step statuses, same session, appended interaction); the same configuration with the flag off runs the legacy path again |
+| Load error safety | flag on + invalid selected document: `WorkflowProfileLoadError`, **no session, no plan, no step agent, no model call** |
+
+Two parity gaps found while building this were fixed rather than documented away:
+
+- **Acceptance/streaming callbacks.** The profile path's `PlanRuntime` was built without
+  `acceptanceChecker`, `onPersistError` or the status callback, so no acceptance judgment ran and no
+  step/re-plan events reached the observability log, the Journal or the streaming manager. The legacy
+  callback is now a shared `planStatusChangeHandler()` used by both construction sites, and the
+  acceptance hook and persist-error reporting are wired identically.
+- **A failed plan execution.** The kernel's execute handler terminates the run on a failed outcome,
+  which would have skipped the review the current flow always performs. The default profile now routes
+  an execution failure to its review node through the existing error-routing vocabulary
+  (`onError.routeTo: review`, mapping the sanitized `/failure/code` and `/failure/category`), so a
+  partial/failed plan is reviewed and reported exactly like today. Authorization denial, approval
+  denial and cancellation remain terminal and cannot be routed.
+- The plan is now persisted **before** the feasibility gate on the profile path (as the legacy path
+  does), so an infeasible plan stays visible as a draft, and an infeasible plan reports the legacy
+  `❌ Plan infeasible` result instead of a generic planner failure. An auto-mode answer that asks to be
+  planned is re-run in `plan` mode with the answer kept as the fallback for an infeasible plan.
+
+Deliberate differences (asserted as differences in the suite; recorded here, in `CHANGELOG.md` and in
+the plan, and requiring the owner's approval before any default activation):
+
+1. **G-5 — confirmation feedback cannot re-plan.** The digest-bound gate ends fail-closed on a denial
+   with feedback instead of starting the bounded re-plan the legacy path performs.
+2. **G-2 — the answer branch ends `success`** and the `answered` interaction status stays the entry
+   point's job; an `answer` outcome without text ends with no response value.
+3. **Report wording** differs (the legacy formatter vs the profile summary line); the review's final
+   summary reaches the user on both paths.
+4. **The legacy `plan:clarified` observability entry** is not written by the profile path; the same
+   round appears in the workflow events instead.
+
+**Rollback.** Activation is per process and per instance: `HOOTL_WORKFLOW_PROFILE` unset/`0` (or no
+`OrchestratorConfig.workflowProfile`) runs the legacy path, and the built-in default additionally
+requires the recorded `BUILT_IN_DEFAULT_APPROVAL` before it can be selected at all.
+
+**Data compatibility.** No new store format: plans and sessions are the same `PlanStore`/`SessionStore`
+JSON, written by the same code, and the suite reads a legacy-created plan and session back through the
+profile path (and vice versa).
+
+**Evidence.** `workflow-profile-parity.test.ts` 9 tests; all Workflow Profile suites **21 files / 235
+tests**; the orchestrator-adjacent suites (`chat-mode`, `c4-clarification`, `clarification-fidelity`,
+`phase-b-orchestration`, `phase15`) 76 tests; full repository suite 141 files / 1,925 tests with the
+single pre-existing `phase-j-checkpoint` J-05 failure; `npm run typecheck` and `npm run build` clean.
+
+**Acceptance criteria status (Phase 7):** a request without a profile keeps the legacy path and its
+observable result (flag-off test); every key default behaviour has a parity test and passes; tool
+authorization and the single human interaction are not weakened (authorization parity + digest-bound
+approval + terminal denial/cancellation); existing plan/session data is read without migration; default
+activation is rollbackable and the load-error path executes nothing.
+

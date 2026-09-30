@@ -29,6 +29,7 @@ import {
   type PlanRuntimeLike,
 } from './orchestrator-adapters.js';
 import { createWorkflowProfileHandlers, type WorkflowReviewerPort } from './node-handlers.js';
+import { confineUntrustedContent } from './untrusted-content.js';
 import { WorkflowNodeError } from './profile-kernel.js';
 import type {
   WorkflowFailure,
@@ -40,6 +41,23 @@ import type { Plan } from '../schemas/plan.js';
 import type { PlanExecutionResult } from '../runtime/plan-runtime.js';
 import type { Review } from '../schemas/review.js';
 import type { RunMode } from '../modes.js';
+
+/**
+ * Thrown by the caller's `onPlan` hook when the plan cannot be executed (the
+ * feasibility/cycle gate rejected it) — a `WorkflowNodeError` so the kernel reports it with
+ * this exact code rather than wrapping it into a generic planner failure; the Orchestrator
+ * maps it onto the same observable outcome the legacy path produces.
+ */
+export const PLAN_INFEASIBLE_CODE = 'plan.infeasible';
+
+export class WorkflowProfilePlanInfeasibleError extends WorkflowNodeError {
+  constructor(public readonly detail: string) {
+    super(`The plan is not executable:\n${detail}`, {
+      category: 'validation', code: PLAN_INFEASIBLE_CODE, retryable: false,
+    });
+    this.name = 'WorkflowProfilePlanInfeasibleError';
+  }
+}
 
 export interface WorkflowProfileBridgeServices {
   /** The existing planner entry (planning + the feasibility/cycle gate behind it). */
@@ -96,6 +114,15 @@ export async function runWorkflowProfileBridge(
   let review: Review | undefined;
   let answer: string | undefined;
 
+  /**
+   * The clarification round must reach the planner exactly as the legacy re-plan does:
+   * `"<request>\n\nCLARIFICATIONS FROM USER:\nQ: …\nA: …"`. The questions come from the
+   * planner's own clarify outcome and the answer from the text approval, so the bridge
+   * rebuilds that block rather than forwarding the raw answer text.
+   */
+  let lastQuestions: string[] = [];
+  const clarificationAnswer = { text: '' };
+
   const plannerPort = createPlannerPort({
     planner: services.planner,
     ...(services.renderPlan ? { renderPlan: services.renderPlan } : {}),
@@ -139,7 +166,17 @@ export async function runWorkflowProfileBridge(
   const handlers = createWorkflowProfileHandlers({
     planner: {
       async plan(request) {
-        const outcome = await plannerPort.plan(request);
+        const enriched = request.context && lastQuestions.length > 0
+          ? {
+            ...request,
+            context: confineUntrustedContent(
+              `CLARIFICATIONS FROM USER:\n${lastQuestions.map((question) => `Q: ${question}\nA: ${clarificationAnswer.text}`).join('\n')}`,
+              { kind: 'context', source: 'request' },
+            ),
+          }
+          : request;
+        const outcome = await plannerPort.plan(enriched);
+        if (outcome.kind === 'clarify') lastQuestions = [...outcome.needsClarification];
         if (outcome.kind === 'plan') {
           plan = outcome.plan as Plan;
           planText = outcome.planText;
@@ -153,7 +190,22 @@ export async function runWorkflowProfileBridge(
     },
     executor: createExecutorPort({ planRuntime: planRuntimeView }),
     ...(reviewerPort ? { reviewer: reviewerPort } : {}),
-    ...(services.confirm ? { approvals: createApprovalPort({ confirm: services.confirm }) } : {}),
+    ...(services.confirm
+      ? {
+        approvals: (() => {
+          const port = createApprovalPort({ confirm: services.confirm });
+          return {
+            async request(approvalRequest: Parameters<typeof port.request>[0]) {
+              const outcome = await port.request(approvalRequest);
+              if (approvalRequest.responseKind === 'text' && outcome.status === 'approved') {
+                clarificationAnswer.text = outcome.answer ?? '';
+              }
+              return outcome;
+            },
+          };
+        })(),
+      }
+      : {}),
   });
 
   const result = await prepared.run({

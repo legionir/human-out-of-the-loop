@@ -120,7 +120,9 @@ export function createDefaultWorkflowProfileDocument(
           id: 'plan',
           kind: 'planner',
           goal: 'Decide whether the request needs a plan, can be answered directly, or needs clarification.',
-          inputs: { request: objectPort(false), clarification: stringPort(false) },
+          // `context` is the port the planner handler folds into the planning prompt; the
+          // clarification round feeds it exactly like the legacy re-plan does.
+          inputs: { request: objectPort(false), context: stringPort(false) },
           outputs: {
             // The discriminator is the only always-present port; each outcome produces its own.
             kind: { type: 'string', required: true, enum: ['plan', 'answer', 'clarify'] },
@@ -179,7 +181,16 @@ export function createDefaultWorkflowProfileDocument(
           // executor persona to pin in the current flow.
           bindings: { personaSource: 'plan-step' },
           config: { mode: 'assisted', requireApprovalForSideEffects: true },
-          onError: { strategy: 'fail' },
+          // The current flow reviews a failed/partial plan instead of aborting the run, so a
+          // delegated execution failure is routed to the review (the failure code and
+          // category travel through the sanitized envelope) and the review decides the
+          // outcome. Authorization denial, approval denial and cancellation stay terminal
+          // and cannot be routed (kernel contract).
+          onError: {
+            strategy: 'route',
+            routeTo: 'review',
+            routeMap: { summary: '/failure/code', status: '/failure/category' },
+          },
         },
         {
           id: 'review',
@@ -243,7 +254,7 @@ export function createDefaultWorkflowProfileDocument(
             onExhausted: { strategy: 'fail' },
           },
         },
-        { from: 'clarify', to: 'plan', map: { clarification: '/answer' } },
+        { from: 'clarify', to: 'plan', map: { context: '/answer' } },
         // The approval node only ever produces a decision when the user approved; a denial
         // or cancellation fails the node, so the approved path is the default route.
         { from: 'confirm', to: 'execute', default: true, map: { plan: '/plan', planDigest: '/planDigest' } },
