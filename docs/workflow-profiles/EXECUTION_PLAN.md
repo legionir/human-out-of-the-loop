@@ -78,15 +78,15 @@ JSON Schema مطابق Draft 2020-12 و همهٔ fixtures معتبرند؛ schem
 
 ---
 
-## [🔴] Phase 3: resolution قطعات مشترک و مجوزهای مؤثر v1
+## [🟢] Phase 3: resolution قطعات مشترک و مجوزهای مؤثر v1
 
 این فاز فقط قطعاتی را resolve می‌کند که در schema v1 هستند: Persona، Skill، Toolset، Rubric و Model Profile. هیچ منبع حقیقت موازی نساز. **تصمیم دامنهٔ v1:** inheritance، Node Template و Sub-workflow، recursion و composition تو‌در‌تو خارج از این نسخه‌اند؛ این موارد فقط با RFC، قرارداد/نسخهٔ جدا و approval مالک در scope آینده وارد می‌شوند، نه به‌عنوان step اجرایی این plan.
 
-### [🔴] Step 1: ساخت resolver برای وابستگی‌های Profile
+### [🟢] Step 1: ساخت resolver برای وابستگی‌های Profile
 
 در registry/factory موجود، ارجاع‌های هر Profile را resolve کن؛ digest محتوای دقیق برای هر dependency الزامی است و نسخهٔ دقیق registry فقط در صورت موجود بودن ثبت می‌شود، اما جای digest را نمی‌گیرد. missing digest، mismatch، duplicate، ambiguous، ناسازگار یا غیرفعال را پیش از activation رد کن. با AgentDefinition فعلی (Persona + Skills + Model) هماهنگ شو و متن‌ها را در Profile کپی نکن. برای Rubric و Model Profile، اگر منبع حقیقت موجود نیست، طبق تصمیم ثبت‌شده به قرارداد موجود وصل شو یا design decision لازم را متوقف/ثبت کن؛ ساخت registry موازی بدون تصمیم ممنوع است. برای هر Review node دارای خروجی `decision`، پس از resolve کردن Rubric دقیقاً با digest پین‌شده، دامنهٔ `allowedDecisions` و enum خروجی را با دامنهٔ واقعی Rubric تطبیق بده؛ مقدار مفقود/نامنطبق پیش از activation رد شود و تست‌های digest/domain mismatch اضافه شوند. Artifactها در run به digest resolve‌شده pin شوند؛ version metadata را هرجا موجود است ثبت کن.
 
-### [🔴] Step 2: تعریف و اعمال Toolsetهای نام‌دار
+### [🟢] Step 2: تعریف و اعمال Toolsetهای نام‌دار
 
 ابتدا بررسی کن Toolset مستقل در مخزن وجود دارد یا نه؛ اگر ندارد، فقط پس از تصمیم Phase 1 حداقل registry نام‌دار و نسخه‌دار از tool IDs واقعی بساز. ابزار مؤثر برابر intersectionِ Runtime-permitted، Persona.allowedTools و Toolset است، سپس deny list آن را کمتر می‌کند. Toolset هرگز ابزار غایب/غیرفعال یا خارج از مجوز را اضافه نمی‌کند؛ approval و resource limits نیز فقط می‌توانند سخت‌تر شوند. ثبت کن که schema validation مجوز اجرایی محسوب نمی‌شود و authorization در call site واقعی تکرار خواهد شد.
 
@@ -432,3 +432,17 @@ This entry closes the Phase 2 gate recorded in the previous addenda. It adds evi
 **Phase 2 acceptance criteria:** all six plan criteria are met with the evidence above — Draft 2020-12 Schema plus valid fixtures; diagnostic schema/semantic separation with parity coverage; the full Step 4 positive/negative matrix; invalid profiles rejected before load/registry exposure; the approved 1 MiB loader cap enforced before parse; and green build/typecheck (local plus CI). The phase and its four steps are therefore 🟢.
 
 **Not authorized / still gated:** PR #9 remains Draft and unmerged; merge, approval, release, and undrafting require explicit owner authorization. Per rule 10 the next phase must be based on the merged Phase 2 commit or an owner-approved base, so Phase 3 implementation does not start here. The pre-Runtime-integration gates recorded earlier remain mandatory and unverified: trusted host code must guarantee stable, trusted, non-attacker-writable profile roots, and the authoritative Workflow Runtime compatibility/enforcement contract must be defined before Runtime integration (Phases 5–7). Rubric domain equality after digest-pinned resolution, dependency resolution itself, and execution semantics remain Phase 3/Phase 4 work.
+
+## Phase 3 implementation closure (2026-09-30; append-only)
+
+Phase 3 Steps 1–2 are implemented and locally verified; the phase is 🟢. Evidence and contracts live in `docs/workflow-profiles/PHASE3_RESOLUTION.md`. This is static, pre-activation resolution only — no Runtime execution, feature flag, handler, or Orchestrator integration is claimed, and the pre-Runtime-integration gates recorded earlier remain open.
+
+**Deliverables:** `src/ai/workflow-profiles/profile-digest.ts` (canonical JSON + typed dependency digest), `src/ai/workflow-profiles/profile-resolver.ts` (dependency resolution and review-decision domain matching), `src/ai/workflow-profiles/toolsets.ts` (named, versioned toolsets and the strictest-intersection effective tool computation), and `src/ai/__tests__/workflow-profile-resolver.test.ts`.
+
+**Owner-delegated decisions recorded in this phase (both conservative, per the standing delegation):** **D-WP-010** — v1 resolves `rubric` references against a built-in, code-owned rubric catalogue that mirrors the existing acceptance/final-review decision contract (`pass | revise | reject`); no parallel registry is created and user-authored rubrics are deferred to a later phase that needs an explicit owner decision. **D-WP-011** — a dependency pin is `sha256` over the envelope `hootl.workflow-profile.dependency.v1`, `<kind>`, `<id>`, and the canonical JSON of the resolved content projection; for skills the projection carries the resolved SKILL.md text instead of the on-disk reference; unknown extra fields are retained so any content change breaks the pin. `version` stays optional metadata and never substitutes for the digest.
+
+**Phase 3 acceptance criteria:** every v1 dependency kind resolves against an existing or owner-approved source of truth (persona, skill, model-profile, toolset, built-in rubric); exact digests are pinned for all kinds and registry versions are recorded where a source exposes one; every mismatch (digest, version, missing, ambiguous, disabled, malformed) is rejected before activation; toolsets can only narrow access — `effectiveToolIds` returns a subset of the runtime-permitted set and registration rejects tools the live catalog lacks; no inheritance, template, sub-workflow, or recursion is implemented in the schema or resolver; the valid/missing/duplicate/version/digest/ambiguous/denied cases and the Phase 2 scope-trust tests pass; and a review node's declared decision domain (and its `decision` port enum) must equal the digest-pinned rubric's real domain, with mismatch rejected before activation. Template/sub-workflow requests remain recorded as deferred future scope (schema exclusions plus Phase 1/2 notes), not as forgotten requirements.
+
+**Evidence:** `npm run typecheck` and `npm run build` pass; `npx vitest run src/ai/__tests__/workflow-profile-*.test.ts` passes **5 files / 79 tests** (resolver 16, semantic 27, registry 21, schema 11, MCP-ID 4) on Node v22.22.3. The resolver tests resolve real repository components (a `registry/personas` persona, a `registry/models` config, real tool ids from `registry/tools`, and the built-in rubric) and prove the shipped example pins are rejected because their digests are explicit placeholders. This is local evidence; the resulting commit still requires exact-head CI before it can be treated as verified on the remote.
+
+**Not authorized / still gated:** PR #9 remains Draft and unmerged, and no merge is authorized until all phases are complete (owner instruction, 2026-09-30). The trusted-host stable-root guarantee and the authoritative Runtime compatibility/enforcement contract remain mandatory before Runtime integration; `profile.runtime` stays syntax-only metadata. Phase 4 (graph engine) is the next dependency-ordered phase.
