@@ -177,7 +177,7 @@ workflow پس از restart از state و hash/version درست resume می‌ش�
 
 جریان فعلی HOOTL را فقط پس از استخراج از کد/تست به Profile پیش‌فرض تبدیل کن. Feature flag در v1 پیش‌فرض خاموش می‌ماند؛ خاموش بودن یعنی مسیر legacy بدون تغییر. Profile فقط با opt-in صریح و پس از parity gate اجرا می‌شود؛ انتخاب implicit/فعال‌سازی عمومی بدون gate ممنوع است.
 
-### [🟡] Step 1: مدل‌کردن جریان فعلی در Profile پیش‌فرض
+### [🟢] Step 1: مدل‌کردن جریان فعلی در Profile پیش‌فرض
 
 ترتیب واقعی intake/clarification، planner، feasibility/cycle checks، نمایش و تأیید plan، execution، acceptance/re-plan، review/report و cancellation را از کد و تست‌ها استخراج و به node/edge و policy نگاشت کن. تفاوت‌های اصل Human-Out-Of-Loop، تنها تعامل مجاز، retry/re-plan خودکار، rate limit و خطای جزئی باید صریح باقی بمانند؛ behavior را از مستندات حدس نزن.
 
@@ -514,3 +514,11 @@ Step 2 is **blocked on owner decision D-WP-014**: v1 requires `bindings.personaR
 ## Test-infrastructure timeout adjustment (2026-09-30; append-only)
 
 Owner instruction (2026-09-30): the rotating Windows/macOS failures across the Phase 5/6 heads are 5000 ms test/hook timeouts and wall-clock budget misses in pre-existing tests this branch never touched, so raise the ceilings instead of chasing the flake. Applied: `vitest.config.ts` sets `testTimeout`/`hookTimeout` to 30 s and `maxWorkers` to 2 **on CI only** (local runs keep Vitest's defaults, so a real hang still fails fast), and `phase21.test.ts` PERF-04's Windows budget moves from 500 ms to 2000 ms while still catching an open/close-per-event regression. Evidence and the full failing-test list are in `docs/workflow-profiles/PHASE5_HANDLERS.md` §7. This is test infrastructure only: no workflow-profile assertion was relaxed and no phase evidence depends on it.
+
+## Phase 7 Step 1 closure (2026-09-30; append-only)
+
+Step 1 is 🟢. The default profile artifact is `createDefaultWorkflowProfileDocument(sources)` in `src/ai/workflow-profiles/default-profile.ts`: nine nodes / nine edges modelling the extracted flow (intake → planner with the `plan`/`answer`/`clarify` discriminator → bounded clarification loop → digest-bound confirmation → delegated execution with `personaSource: "plan-step"` → review → `finish`/`rejected`), with dependency pins computed from resolved component content and a fail-closed error when a pinned component is missing. The artifact, the recorded choices (confirmation binds `planText`; `review` accepts the rubric's full `pass`/`revise`/`reject` domain; budget values sized so the profile never cuts a legitimate run short; `allowedToolsets: []` adds no narrowing) and the two intentional differences (**G-5**: a confirmation denial with feedback cannot re-plan in v1 — `bindsTo` is decision-only, the decision port is an object and v1 predicates address one top-level scalar port, so feedback terminates fail-closed like a cancellation; **G-2**: the answer branch ends `success` and the `answered` interaction status stays the entry point's job, and a planner `answer` outcome without text ends with no response value, mirroring the current flow's empty answer) are recorded in `docs/workflow-profiles/PHASE7_PARITY.md` §3 and §5. Per Step 3, both differences must also appear in the release notes and be approved by the owner before any default activation; no activation happens in this phase.
+
+**Evidence:** `src/ai/__tests__/workflow-profile-default-profile.test.ts` (11 tests) passes, all Workflow Profile suites pass **15 files / 194 tests**, and `npm run typecheck` / `npm run build` are clean on the Step 1 head. Step 1's `Blocked (D-WP-014)` record above is preserved; D-WP-014 was resolved by the owner on 2026-09-30 and implemented in the preceding commit.
+
+**Still open in Phase 7:** Step 2 (Orchestrator wiring behind the flag; flag off ⇒ nothing profile-related resolves) and Step 3 (characterization/golden parity tests, including the tests that pin G-2/G-5, plan/session compatibility, and the rollback path). Phase 7 stays 🟡 until both are complete. No merge is authorized until all phases are complete (owner instruction).

@@ -109,3 +109,62 @@ termination, the final report fields, and the tool authorization decision for a 
 session data compatibility is structural rather than a migration: the profile path reuses
 `PlanStore`/`SessionStore` unchanged, and a legacy-created plan/session must load, list, resume and
 cancel identically (tests planned in Step 3; no new store format is introduced by this phase).
+
+## 5. Step 1 artifact (append-only, 2026-09-30)
+
+`createDefaultWorkflowProfileDocument(sources)` in `src/ai/workflow-profiles/default-profile.ts` is the
+artifact. It is built in code, not shipped as JSON, so every dependency pin is the digest of the
+component content the caller actually resolved — a missing persona or rubric throws
+`WorkflowProfileLoadError` (`default-profile.component-missing`) instead of yielding a profile with a
+placeholder pin. `planner` and `reviewer` are pinned by reference; `execute` uses
+`bindings.personaSource: "plan-step"` (D-WP-014).
+
+Graph (nine nodes, nine edges): `request` → `plan`, then three exhaustive routes on the planner's
+required `kind` discriminator — `plan` → `confirm`, `answer` → `answered`, `clarify` → `clarify`;
+`clarify` → `plan` (loop `clarification-rounds`, `maxIterations: 3`, `onExhausted: fail`, i.e. three
+questions, matching `maxClarificationRounds`); `confirm` → `execute` (single explicit `default` edge:
+an approval node only produces a decision after the user approved, while a denial, cancellation or
+digest mismatch fails the node); `execute` → `review`; `review` routes its decision domain
+(`pass` → `finish`, `revise`/`reject` → `rejected`).
+
+Recorded choices and their reasons:
+
+- **The confirmation binds `planText`, not the plan object.** `bindsTo` must name a declared input
+  port of the approval node; the port whose digest is bound is the text the interaction displays
+  (`show: ["planText"]`), which is what D-WP-004/D-WP-013 make the user's acknowledgement mean.
+  The same `planDigest` (computed by the planner handler from that text) is threaded to `execute`, so
+  the execution delegation is handed exactly the digest that was approved.
+- **`review` must accept the digest-pinned rubric's whole domain.** The Phase 3 resolver gate
+  compares `config.allowedDecisions` with the rubric's `decisions` and the built-in
+  `hootl.default-review` mirrors the existing review contract (`pass`, `revise`, `reject`), so the
+  node declares all three. `revise` and `reject` both end at `rejected`: the current flow does not
+  re-execute after the final review, and the kernel has no `failed-partial` status, so a partial
+  success is reported rather than re-run. The decision itself stays visible in the review output.
+- **Budgets.** `maxNodeVisits: 40` covers the conservative static bound (|nodes| × (1 + 3) = 36) with
+  headroom; `maxDurationSeconds: 3600`, `maxModelCalls: 500`, `maxToolCalls: 2000` are deliberately
+  generous so the profile never cuts a legitimate current-flow run short. Runtime and session layers
+  can only tighten the effective values, and a resume never resets a counter.
+- **Tool surface.** `policies.tools.allowedToolsets: []` adds no narrowing (drives the G-4 fix);
+  effective tools stay runtime ∩ persona ∩ step.
+
+Intentional differences from the current flow, to be recorded in the plan, the release notes and the
+owner's approval before any default activation (Step 3):
+
+- **G-5 — confirmation feedback cannot re-plan in v1.** `bindsTo` is only legal with
+  `responseKind: "decision"`, whose required output port is an object, while v1 predicates address
+  exactly one top-level port of scalar type; the approval node therefore has no routable scalar, and
+  the kernel's error routes are terminal-by-contract for approval denials (they cannot be retried,
+  routed, or made into a bounded loop). A denial with feedback ends the run fail-closed exactly like
+  a cancellation. The bounded clarification loop still models the re-plan that follows an answered
+  question, and the runtime's per-step re-planning inside `execute` is untouched.
+- **G-2 — the answer branch ends `success`.** The interaction status `answered` is the entry point's
+  job (stage 0 stays outside the profile). A planner that reports `answer` without text ends the run
+  with no response value — the same degenerate outcome the current flow has for an empty answer —
+  instead of executing work.
+
+Evidence for this step: the new suite `src/ai/__tests__/workflow-profile-default-profile.test.ts`
+(11 tests: structure/semantics/resolution, closed-profile failure, plan branch order, answer branch,
+clarification round-trip and exhaustion, reject and revise terminals, out-of-domain decision,
+cancellation, digest mismatch, denial) passes; all Workflow Profile suites pass 15 files / 194 tests;
+`npm run typecheck` and `npm run build` are clean. Step 2 (Orchestrator wiring) and Step 3 (parity
+tests, including the tests that pin the two differences above) are next.
