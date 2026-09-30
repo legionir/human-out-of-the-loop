@@ -1,0 +1,372 @@
+/**
+ * Phase 6 (WP-R-007): the versioned, crash-safe run state and its resume rules.
+ *
+ * State carries everything a resume needs and nothing that grants authority:
+ * the profile id/version plus a hash of the canonical profile bytes, the schema
+ * and runtime versions, the resolved dependency pins, the current node, the
+ * outputs/loop counters/budget counters, the approvals (with the digest each
+ * one approved) and the linked plan/session. Before any work resumes the state
+ * is re-verified against the live profile, dependencies, and runtime version —
+ * any mismatch stops the run BEFORE a side effect — and a state that was left
+ * with a pending effect is never retried automatically.
+ *
+ * **Unknown / Requires Verification (recorded, not resolved):** the existing
+ * stores (`PlanStore`, the checkpoint store) persist *results*, not an
+ * intent/effect/commit journal, so they cannot prove whether an interrupted
+ * step's side effect reached the outside world. This module therefore treats
+ * every persisted "effect started" marker as ambiguous and refuses automatic
+ * continuation. A real journal belongs to the Runtime contract that is still an
+ * open pre-integration gate.
+ */
+import fs from 'node:fs';
+import path from 'node:path';
+import { atomicWriteFileSync } from '../runtime/atomic-write.js';
+import { canonicalJson } from './profile-digest.js';
+import { contentDigest } from './untrusted-content.js';
+import { detectAuthorityIncrease, type AuthoritySnapshot } from './profile-access-guard.js';
+import type { WorkflowBudgetUsage } from './profile-budget.js';
+import type { ProfileDependency, WorkflowProfileDocument } from './profile-types.js';
+
+/** Dependency kinds a v1 profile can pin. */
+export type ProfileDependencyKind = ProfileDependency['kind'];
+import type { WorkflowRunResult, WorkflowRunStatus } from './profile-kernel.js';
+
+export const PROFILE_RUN_STATE_VERSION = 1;
+
+/**
+ * The pin actually recorded for a resolved dependency: kind, id, the version the
+ * source exposed (if any), and the content digest that was verified. A resume
+ * compares these, never the profile's declaration alone.
+ */
+export interface StoredDependencyPin {
+  kind: ProfileDependencyKind;
+  id: string;
+  version?: string;
+  digest: string;
+}
+
+/** Map resolved dependencies onto their stored pins. */
+export function storedDependencyPins(
+  dependencies: ReadonlyArray<{ kind: ProfileDependencyKind; id: string; declaredVersion?: string; resolvedVersion?: string; contentDigest?: string; declaredDigest?: string }>,
+): StoredDependencyPin[] {
+  return dependencies.map((dependency) => ({
+    kind: dependency.kind,
+    id: dependency.id,
+    ...(dependency.resolvedVersion ?? dependency.declaredVersion ? { version: dependency.resolvedVersion ?? dependency.declaredVersion } : {}),
+    digest: dependency.contentDigest ?? dependency.declaredDigest ?? '',
+  }));
+}
+
+export interface WorkflowProfileApprovalRecord {
+  nodeId: string;
+  status: 'approved' | 'denied' | 'expired' | 'cancelled';
+  /** The digest the decision approved, when the node bound one. */
+  digest?: string;
+  boundPort?: string;
+  atMs: number;
+}
+
+/** Marker written BEFORE a side effect and cleared after it is committed. */
+export interface WorkflowProfilePendingEffect {
+  nodeId: string;
+  attemptId: string;
+  intent: string;
+  startedAtMs: number;
+}
+
+export interface WorkflowProfileRunState {
+  stateVersion: number;
+  runId: string;
+  profileId: string;
+  profileVersion?: string;
+  /** `sha256:<hex>` over the canonical profile bytes. */
+  profileHash: string;
+  schemaVersion: string;
+  /** Host-declared runtime version; a resume must match it. */
+  runtimeVersion: string;
+  /** Resolved dependency pins; a resume must match all of them. */
+  dependencies: StoredDependencyPin[];
+  status: WorkflowRunStatus | 'interrupted';
+  /**
+   * Set when a run paused on the `ask-user` limit: the run is waiting for the
+   * user, keeps every counter, and may be resumed — it is not terminal.
+   */
+  awaitingUser?: boolean;
+  currentNodeId: string;
+  nodeSequence: string[];
+  visits: number;
+  loopCounters: Record<string, number>;
+  budget: WorkflowBudgetUsage;
+  /** Declared authority the run started with; a resume may never widen it. */
+  authority: AuthoritySnapshot;
+  approvals: WorkflowProfileApprovalRecord[];
+  planId?: string;
+  sessionId?: string;
+  pendingEffect?: WorkflowProfilePendingEffect;
+  updatedAtMs: number;
+}
+
+export interface CreateRunStateOptions {
+  runId: string;
+  profile: WorkflowProfileDocument;
+  dependencies: ReadonlyArray<StoredDependencyPin>;
+  runtimeVersion: string;
+  startNodeId: string;
+  /** Declared authority of this attempt; recorded so a resume can prove it never widened. */
+  authority?: AuthoritySnapshot;
+  planId?: string;
+  sessionId?: string;
+  now?: number;
+}
+
+/** Hash of the exact profile bytes a run was started from. */
+export function workflowProfileHash(profile: WorkflowProfileDocument): string {
+  return contentDigest(canonicalJson(profile));
+}
+
+export function createWorkflowProfileRunState(options: CreateRunStateOptions): WorkflowProfileRunState {
+  const now = options.now ?? Date.now();
+  return {
+    stateVersion: PROFILE_RUN_STATE_VERSION,
+    runId: options.runId,
+    profileId: options.profile.profile.id,
+    ...(options.profile.profile.version ? { profileVersion: options.profile.profile.version } : {}),
+    profileHash: workflowProfileHash(options.profile),
+    schemaVersion: options.profile.schemaVersion,
+    runtimeVersion: options.runtimeVersion,
+    dependencies: options.dependencies.map((dependency) => ({ ...dependency })),
+    status: 'interrupted',
+    currentNodeId: options.startNodeId,
+    nodeSequence: [],
+    visits: 0,
+    loopCounters: {},
+    budget: { visits: 0, durationMs: 0, modelCalls: 0, toolCalls: 0 },
+    authority: options.authority
+      ? { toolIds: [...options.authority.toolIds], budget: { ...options.authority.budget }, approvalStrictness: options.authority.approvalStrictness }
+      : { toolIds: [], budget: {}, approvalStrictness: 0 },
+    approvals: [],
+    ...(options.planId ? { planId: options.planId } : {}),
+    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    updatedAtMs: now,
+  };
+}
+
+export interface RecordRunResultOptions {
+  result: WorkflowRunResult;
+  /** `ask-user` maps to a resumable pause instead of a terminal status. */
+  awaitingUser?: boolean;
+  nodeSequence?: ReadonlyArray<string>;
+  approvals?: ReadonlyArray<WorkflowProfileApprovalRecord>;
+  planId?: string;
+  sessionId?: string;
+  now?: number;
+}
+
+/** Fold a finished run into its state record for the next load/resume. */
+export function applyRunResultToState(
+  state: WorkflowProfileRunState,
+  options: RecordRunResultOptions,
+): WorkflowProfileRunState {
+  const now = options.now ?? Date.now();
+  const { awaitingUser: _previous, ...carried } = state;
+  const paused = options.awaitingUser === true;
+  return {
+    ...carried,
+    status: paused ? 'interrupted' : options.result.status,
+    ...(paused ? { awaitingUser: true } : {}),
+    currentNodeId: options.nodeSequence?.at(-1) ?? state.currentNodeId,
+    nodeSequence: [...(options.nodeSequence ?? state.nodeSequence)],
+    visits: options.result.visits,
+    loopCounters: { ...options.result.loopCounters },
+    budget: { ...options.result.budget },
+    approvals: [...state.approvals, ...(options.approvals ?? [])],
+    ...(options.planId ? { planId: options.planId } : {}),
+    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+    updatedAtMs: now,
+  };
+}
+
+/**
+ * Mark that an effect is about to run. Written and flushed before the effect, so
+ * a crash between the marker and its clearance is detectable as ambiguity.
+ */
+export function markPendingEffect(
+  state: WorkflowProfileRunState,
+  effect: Omit<WorkflowProfilePendingEffect, 'startedAtMs'> & { startedAtMs?: number },
+): WorkflowProfileRunState {
+  return {
+    ...state,
+    pendingEffect: { ...effect, startedAtMs: effect.startedAtMs ?? Date.now() },
+    updatedAtMs: Date.now(),
+  };
+}
+
+export function clearPendingEffect(state: WorkflowProfileRunState): WorkflowProfileRunState {
+  const { pendingEffect: _pending, ...rest } = state;
+  return { ...rest, updatedAtMs: Date.now() };
+}
+
+// ─── Store ────────────────────────────────────────────────────────
+
+export interface WorkflowProfileRunStateStore {
+  save(state: WorkflowProfileRunState): void;
+  load(runId: string): WorkflowProfileRunState | undefined;
+  list(): string[];
+  delete(runId: string): void;
+}
+
+function hashedFileName(id: string): string {
+  return contentDigest(id).slice('sha256:'.length, 'sha256:'.length + 32) + '.json';
+}
+
+/** Crash-safe store: every write goes through the existing atomic temp+rename helper. */
+export class FileWorkflowProfileRunStateStore implements WorkflowProfileRunStateStore {
+  constructor(private readonly dir: string) {
+    fs.mkdirSync(this.dir, { recursive: true });
+  }
+
+  private pathFor(runId: string): string {
+    return path.join(this.dir, hashedFileName(runId));
+  }
+
+  save(state: WorkflowProfileRunState): void {
+    atomicWriteFileSync(this.pathFor(state.runId), JSON.stringify(state, null, 2));
+  }
+
+  load(runId: string): WorkflowProfileRunState | undefined {
+    const file = this.pathFor(runId);
+    if (!fs.existsSync(file)) return undefined;
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as WorkflowProfileRunState;
+    if (parsed.stateVersion !== PROFILE_RUN_STATE_VERSION) return undefined;
+    return parsed;
+  }
+
+  list(): string[] {
+    if (!fs.existsSync(this.dir)) return [];
+    return fs.readdirSync(this.dir).filter((name) => name.endsWith('.json')).sort();
+  }
+
+  delete(runId: string): void {
+    const file = this.pathFor(runId);
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  }
+}
+
+export class MemoryWorkflowProfileRunStateStore implements WorkflowProfileRunStateStore {
+  private readonly states = new Map<string, WorkflowProfileRunState>();
+
+  save(state: WorkflowProfileRunState): void {
+    this.states.set(state.runId, JSON.parse(JSON.stringify(state)) as WorkflowProfileRunState);
+  }
+
+  load(runId: string): WorkflowProfileRunState | undefined {
+    const state = this.states.get(runId);
+    return state ? (JSON.parse(JSON.stringify(state)) as WorkflowProfileRunState) : undefined;
+  }
+
+  list(): string[] {
+    return [...this.states.keys()].sort();
+  }
+
+  delete(runId: string): void {
+    this.states.delete(runId);
+  }
+}
+
+// ─── Verification and resume ──────────────────────────────────────
+
+export interface ResumeExpectation {
+  profile: WorkflowProfileDocument;
+  dependencies: ReadonlyArray<StoredDependencyPin>;
+  runtimeVersion: string;
+  /** Authority the caller is about to grant; must not exceed the stored snapshot. */
+  authority?: AuthoritySnapshot;
+}
+
+export interface WorkflowProfileResumeDiagnostic {
+  code:
+    | 'resume.profile-missing'
+    | 'resume.profile-changed'
+    | 'resume.schema-version-changed'
+    | 'resume.runtime-version-changed'
+    | 'resume.dependency-missing'
+    | 'resume.dependency-changed'
+    | 'resume.authority-increase'
+    | 'resume.ambiguous-effect'
+    | 'resume.already-terminal';
+  message: string;
+}
+
+export type WorkflowProfileResumeAction =
+  | 'resume'
+  | 'refuse-integrity'
+  | 'refuse-ambiguous-effect'
+  | 'already-terminal';
+
+export interface WorkflowProfileResumeDecision {
+  action: WorkflowProfileResumeAction;
+  diagnostics: WorkflowProfileResumeDiagnostic[];
+}
+
+const TERMINAL_RUN_STATUSES: ReadonlySet<string> = new Set(['success', 'rejected', 'handoff', 'cancelled', 'failure']);
+
+function pinOf(dependency: StoredDependencyPin): string {
+  return `${dependency.kind}:${dependency.id}:${dependency.digest}`;
+}
+
+/**
+ * Decide whether a stored run may continue. Integrity is checked before anything
+ * else; a pending effect refuses automatic continuation regardless of integrity.
+ */
+export function evaluateWorkflowProfileResume(
+  state: WorkflowProfileRunState | undefined,
+  expectation: ResumeExpectation,
+): WorkflowProfileResumeDecision {
+  if (!state) {
+    return { action: 'refuse-integrity', diagnostics: [{ code: 'resume.profile-missing', message: 'No stored run state for this run id' }] };
+  }
+  const diagnostics: WorkflowProfileResumeDiagnostic[] = [];
+  if (state.profileId !== expectation.profile.profile.id) {
+    diagnostics.push({ code: 'resume.profile-missing', message: `Stored run belongs to profile "${state.profileId}", not "${expectation.profile.profile.id}"` });
+  }
+  if (state.profileHash !== workflowProfileHash(expectation.profile)) {
+    diagnostics.push({ code: 'resume.profile-changed', message: 'Profile content changed since the run started' });
+  }
+  if (state.schemaVersion !== expectation.profile.schemaVersion) {
+    diagnostics.push({ code: 'resume.schema-version-changed', message: `Schema version changed from ${state.schemaVersion} to ${expectation.profile.schemaVersion}` });
+  }
+  if (state.runtimeVersion !== expectation.runtimeVersion) {
+    diagnostics.push({ code: 'resume.runtime-version-changed', message: `Runtime version changed from ${state.runtimeVersion} to ${expectation.runtimeVersion}` });
+  }
+  const expected = new Map(expectation.dependencies.map((dependency) => [pinOf(dependency), dependency]));
+  for (const stored of state.dependencies) {
+    const current = expected.get(pinOf(stored));
+    if (!current) {
+      const sameId = expectation.dependencies.find((dependency) => dependency.kind === stored.kind && dependency.id === stored.id);
+      diagnostics.push(sameId
+        ? { code: 'resume.dependency-changed', message: `Dependency ${stored.kind}:${stored.id} no longer matches its pinned digest` }
+        : { code: 'resume.dependency-missing', message: `Dependency ${stored.kind}:${stored.id} is no longer available` });
+    }
+  }
+  if (diagnostics.length > 0) return { action: 'refuse-integrity', diagnostics };
+  if (expectation.authority && detectAuthorityIncrease(state.authority, expectation.authority).length > 0) {
+    diagnostics.push({
+      code: 'resume.authority-increase',
+      message: `The policy for this run is wider than the one it started with: ${detectAuthorityIncrease(state.authority, expectation.authority).join('; ')}`,
+    });
+  }
+  if (diagnostics.length > 0) return { action: 'refuse-integrity', diagnostics };
+  if (state.pendingEffect) {
+    return {
+      action: 'refuse-ambiguous-effect',
+      diagnostics: [{
+        code: 'resume.ambiguous-effect',
+        message: `Node "${state.pendingEffect.nodeId}" started effect ${state.pendingEffect.attemptId} and its outcome was never committed; it is not retried automatically`,
+      }],
+    };
+  }
+  if (TERMINAL_RUN_STATUSES.has(state.status)) {
+    return { action: 'already-terminal', diagnostics: [{ code: 'resume.already-terminal', message: `Run already finished with status ${state.status}` }] };
+  }
+  return { action: 'resume', diagnostics: [] };
+}

@@ -73,6 +73,8 @@ export interface WorkflowExecutorOutcome {
   artifacts?: unknown[];
   /** Optional classification of a failure, so retry/route can use real categories. */
   failure?: { category: WorkflowFailureCategory; code: string; retryable?: boolean };
+  /** Calls the delegation actually spent, charged to the run budget by the handler. */
+  usage?: { modelCalls?: number; toolCalls?: number };
 }
 
 export interface WorkflowExecutorPort {
@@ -233,6 +235,9 @@ export function createWorkflowProfileHandlers(
     const context = Object.hasOwn(inputs, 'context') ? confine(inputs.context, 'context', 'request') : undefined;
     let outcome: WorkflowPlannerOutcome;
     try {
+      // Planning is a model call: it is charged before the delegation happens, so a
+      // run whose model budget is exhausted cannot make the call at all.
+      invocation.budget.consumeModelCall();
       outcome = await services.planner.plan({
         nodeId: node.id,
         goal,
@@ -284,6 +289,8 @@ export function createWorkflowProfileHandlers(
     } catch (error) {
       throw failure(error, 'execute.failed', 'tool');
     }
+    if (outcome.usage?.modelCalls) invocation.budget.consumeModelCall(outcome.usage.modelCalls);
+    if (outcome.usage?.toolCalls) invocation.budget.consumeToolCall(outcome.usage.toolCalls);
     if (outcome.status === 'failed' && outcome.failure) {
       throw new WorkflowNodeError(outcome.summary, {
         category: outcome.failure.category,
@@ -305,6 +312,8 @@ export function createWorkflowProfileHandlers(
     const allowedDecisions = Array.isArray(node.config.allowedDecisions) ? [...node.config.allowedDecisions] : ['pass', 'revise', 'reject'];
     let outcome: WorkflowReviewerOutcome;
     try {
+      // Reviewing is a model call too.
+      invocation.budget.consumeModelCall();
       outcome = await services.reviewer.review({
         nodeId: node.id,
         rubricRef: String(node.config.rubricRef),

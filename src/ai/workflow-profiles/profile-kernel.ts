@@ -22,6 +22,12 @@
  * carries raw exception text.
  */
 import { evaluatePredicate, readPort, scalarMatchesType, ABSENT } from './profile-predicate.js';
+import {
+  WorkflowBudget,
+  effectiveWorkflowBudget,
+  limitRunStatus,
+} from './profile-budget.js';
+import type { WorkflowBudgetLimits, WorkflowBudgetUsage, WorkflowBudgetViolation } from './profile-budget.js';
 import type {
   ProfileDependency,
   WorkflowEdge,
@@ -61,12 +67,27 @@ export class WorkflowNodeError extends Error {
   }
 }
 
+/**
+ * Run-scoped budget handed to every handler. Consumption is the only way a
+ * handler can spend a model or tool call, so accounting cannot be bypassed;
+ * exceeding a cap throws a terminal `budget` error that no profile policy may
+ * retry or route.
+ */
+export interface WorkflowBudgetHandle {
+  consumeModelCall(count?: number): void;
+  consumeToolCall(count?: number): void;
+  elapsedMs(): number;
+  remaining(): Required<WorkflowBudgetLimits>;
+  usage(): WorkflowBudgetUsage;
+}
+
 export interface WorkflowNodeInvocation {
   node: WorkflowNode;
   inputs: Readonly<Record<string, unknown>>;
   attempt: number;
   visit: number;
   signal?: AbortSignal;
+  budget: WorkflowBudgetHandle;
 }
 
 export type WorkflowNodeHandler = (
@@ -96,6 +117,18 @@ export interface WorkflowKernelOptions {
   sleep?: (milliseconds: number) => Promise<void>;
   /** Runtime hard cap; the effective cap is the strictest of profile, runtime, and the schema maximum. */
   maxNodeVisits?: number;
+  /** Runtime layer of the per-dimension budget; can only lower the profile's caps. */
+  budget?: WorkflowBudgetLimits;
+  /** User/session layer of the per-dimension budget; can only lower the caps. */
+  sessionBudget?: WorkflowBudgetLimits;
+  /** Counters carried over from a persisted run state so a resume never resets a budget. */
+  usage?: Partial<WorkflowBudgetUsage>;
+  /** Loop counters carried over from a persisted run state; they only continue. */
+  loopCounters?: Readonly<Record<string, number>>;
+  /** Node visits already performed before this call (resume). */
+  visitCount?: number;
+  /** Injected clock for deterministic budget/timeout tests. */
+  now?: () => number;
 }
 
 export type WorkflowRunStatus = 'success' | 'rejected' | 'handoff' | 'cancelled' | 'failure';
@@ -107,15 +140,32 @@ export interface WorkflowRunResult {
   visits: number;
   loopCounters: Readonly<Record<string, number>>;
   nodeSequence: ReadonlyArray<string>;
+  /** Counters after this run; persisted so a later resume continues, never restarts. */
+  budget: WorkflowBudgetUsage;
+  /**
+   * Present when a limit stopped the run: the profile's `onLimit` value. `ask-user`
+   * is a resumable pause, so the durable layer must not treat it as terminal.
+   */
+  limit?: 'fail' | 'handoff' | 'ask-user';
 }
 
 const SCHEMA_MAX_NODE_VISITS = 1000;
 
-/** Strictest applicable visit cap; Runtime and profile can only lower the schema maximum. */
-export function effectiveMaxNodeVisits(profile: WorkflowProfileDocument, runtimeCap?: number): number {
-  const profileCap = profile?.policies?.execution?.maxNodeVisits ?? SCHEMA_MAX_NODE_VISITS;
-  const caps = [SCHEMA_MAX_NODE_VISITS, profileCap, runtimeCap].filter((cap): cap is number => typeof cap === 'number' && Number.isFinite(cap) && cap > 0);
-  return Math.min(...caps);
+/**
+ * Strictest applicable visit cap; Runtime and profile can only lower the schema
+ * maximum. Kept as a named export for callers that only care about visits;
+ * `effectiveWorkflowBudget` is the single source of the full budget.
+ */
+export function effectiveMaxNodeVisits(
+  profile: WorkflowProfileDocument,
+  runtimeCap?: number,
+  sessionCap?: number,
+): number {
+  return effectiveWorkflowBudget(
+    profile?.policies?.execution,
+    runtimeCap === undefined ? undefined : { maxNodeVisits: runtimeCap },
+    sessionCap === undefined ? undefined : { maxNodeVisits: sessionCap },
+  ).maxNodeVisits;
 }
 
 function failureFrom(error: unknown, nodeId: string, attempt: number): WorkflowFailure {
@@ -170,18 +220,59 @@ export async function runWorkflowProfileKernel(options: WorkflowKernelOptions): 
   const nodeById = new Map<string, WorkflowNode>();
   for (const node of profile.workflow?.nodes ?? []) nodeById.set(node.id, node);
   const edges = (profile.workflow?.edges ?? []).map((edge, index) => ({ edge, index }));
-  const maxVisits = effectiveMaxNodeVisits(profile, options.maxNodeVisits);
+  const caps = effectiveWorkflowBudget(
+    profile?.policies?.execution,
+    options.maxNodeVisits === undefined ? undefined : { maxNodeVisits: options.maxNodeVisits },
+    options.budget,
+    options.sessionBudget,
+  );
+  const maxVisits = caps.maxNodeVisits;
+  const now = (): number => options.now?.() ?? Date.now();
+  const budget = new WorkflowBudget({
+    caps,
+    ...(options.usage ? { usage: options.usage } : {}),
+    now: now(),
+  });
+  const onLimit = (profile?.policies?.execution as Record<string, unknown> | undefined)?.onLimit as 'fail' | 'handoff' | 'ask-user' | undefined;
+  const budgetFailure = (violation: WorkflowBudgetViolation, nodeId: string, attempt: number): WorkflowFailure => ({
+    category: 'budget', code: violation.code, retryable: false, nodeId, attempt,
+  });
+  const handle: WorkflowBudgetHandle = {
+    consumeModelCall: (count?: number) => {
+      const violation = budget.recordModelCall(count, now());
+      if (violation) throw new WorkflowNodeError(violation.message, { category: 'budget', code: violation.code, retryable: false });
+    },
+    consumeToolCall: (count?: number) => {
+      const violation = budget.recordToolCall(count, now());
+      if (violation) throw new WorkflowNodeError(violation.message, { category: 'budget', code: violation.code, retryable: false });
+    },
+    elapsedMs: () => budget.elapsedMs(now()),
+    remaining: () => budget.remaining(now()),
+    usage: () => budget.usage(now()),
+  };
 
-  const state: KernelState = { visits: 0, counters: new Map(), sequence: [], results: [], events: [] };
+  const state: KernelState = {
+    visits: Math.max(0, Math.trunc(options.visitCount ?? 0)),
+    counters: new Map(Object.entries(options.loopCounters ?? {})),
+    sequence: [],
+    results: [],
+    events: [],
+  };
 
-  const finish = (status: WorkflowRunStatus, terminalFailure?: WorkflowFailure): WorkflowRunResult => {
+  const finish = (
+    status: WorkflowRunStatus,
+    terminalFailure?: WorkflowFailure,
+    limit?: 'fail' | 'handoff' | 'ask-user',
+  ): WorkflowRunResult => {
     const result: WorkflowRunResult = {
       status,
       results: Object.freeze([...state.results]),
       ...(terminalFailure ? { terminalFailure } : {}),
+      ...(limit ? { limit } : {}),
       visits: state.visits,
       loopCounters: Object.freeze(Object.fromEntries([...state.counters.entries()].sort())),
       nodeSequence: Object.freeze([...state.sequence]),
+      budget: budget.usage(now()),
     };
     emit({ type: 'run.end', nodeId: terminalFailure?.nodeId, failure: terminalFailure });
     return result;
@@ -307,12 +398,21 @@ export async function runWorkflowProfileKernel(options: WorkflowKernelOptions): 
     const abortResult = cancelled(current.id);
     if (abortResult) return abortResult;
 
+    const spent = budget.checkDuration(now());
+    if (spent) return finish(limitRunStatus(onLimit), budgetFailure(spent, current.id, 1), onLimit ?? 'fail');
     if (state.visits >= maxVisits) {
-      return finish('failure', {
+      // Node visits are a budget dimension: the cap is the strictest of
+      // profile/runtime/session (see `effectiveMaxNodeVisits`) and `onLimit`
+      // decides the terminal status. The Phase 4 code identity is kept so
+      // existing evidence stays reproducible.
+      return finish(limitRunStatus(onLimit), {
         category: 'visit-cap', code: 'max-node-visits', retryable: false, nodeId: current.id, attempt: 1,
-      });
+      }, onLimit ?? 'fail');
     }
     state.visits += 1;
+    // Bookkeeping only: the check above is the single enforcement point, so this
+    // can only return a violation for a counter seeded past the cap.
+    budget.recordVisit(now());
     state.sequence.push(current.id);
 
     const node = current;
@@ -335,7 +435,7 @@ export async function runWorkflowProfileKernel(options: WorkflowKernelOptions): 
                     category: 'handler', code: 'handler.missing', retryable: false,
                   });
                 }
-                return handler({ node, inputs, attempt, visit: state.visits, ...(signal ? { signal } : {}) });
+                return handler({ node, inputs, attempt, visit: state.visits, budget: handle, ...(signal ? { signal } : {}) });
               })();
         outputs = await Promise.resolve(produced as Record<string, unknown> | Promise<Record<string, unknown>>);
         if (node.kind !== 'condition' && node.kind !== 'end') validateOutputs(node, outputs, attempt);
@@ -394,7 +494,10 @@ export async function runWorkflowProfileKernel(options: WorkflowKernelOptions): 
     }
 
     if (routed) continue;
-    if (failure) return finish('failure', failure);
+    if (failure) {
+      const limited = TERMINAL_FAILURE_CATEGORIES.has(failure.category) && failure.category === 'budget';
+      return finish(limited ? limitRunStatus(onLimit) : 'failure', failure, limited ? (onLimit ?? 'fail') : undefined);
+    }
     const produced = outputs ?? {};
 
     if (node.kind === 'end') {

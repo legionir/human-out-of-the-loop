@@ -148,23 +148,23 @@ approval node به mechanism interaction/callback موجود متصل شود؛ �
 
 ---
 
-## [🔴] Phase 6: lifecycle پایدار، بودجه و enforcement امنیتی
+## [🟢] Phase 6: lifecycle پایدار، بودجه و enforcement امنیتی
 
 اجرای Profile باید در کنار حلقهٔ فعلی دارای وضعیت قابل‌بازیابی، توقف امن، بودجهٔ نهایی، رخدادهای قابل‌مشاهده و مجوزهای واقعی باشد. وضعیت اجرای Profile با plan/session موجود هم‌زیست می‌شود و فرمت ذخیره‌شدهٔ قدیمی را نمی‌شکند.
 
-### [🔴] Step 1: پایداری state و resume نسخه‌دار
+### [🟢] Step 1: پایداری state و resume نسخه‌دار
 
 در store/lifecycle موجود، state لازم برای workflow run را ذخیره کن: profile ID/version و hash از canonical profile bytes، schema/runtime version، resolved dependency versions/digests، node/status فعلی، outputs/handoffs لازم، loop counters، budget counters، approvals (شامل digest مورد تأیید) و plan/session ارتباط‌یافته. نوشتن باید crash-safe مطابق قرارداد store موجود باشد. پیش از resume hash و dependency integrity را تطبیق بده؛ mismatch یا profile/dependency حذف‌شده یعنی توقف پیش از هر side effect. **Unknown / Requires Verification:** تضمین‌های store فعلی برای تشخیص side effect انجام‌شده اما commit‌نشده؛ attempt ID و intent/effect/commit journaling را با قرارداد موجود هماهنگ کن، و اگر نتیجهٔ side effect مبهم است آن را خودکار تکرار نکن.
 
-### [🔴] Step 2: cancellation، timeout و resource budget
+### [🟢] Step 2: cancellation، timeout و resource budget
 
 `maxDurationSeconds`، `maxNodeVisits`، `maxModelCalls` و `maxToolCalls` را در مسیر واقعی و نه صرفاً config اعمال کن؛ سقف مؤثر هر بُعد برابر محدودکننده‌ترین مقدار بین Runtime، user/session و Profile است؛ بودجه‌ها جمع نمی‌شوند و هیچ لایه‌ای نمی‌تواند cap یا شمارنده را افزایش/reset کند. v1 sub-workflow ندارد، پس شمارندهٔ run در Profile و PlanRuntime موجود یکپارچه تعریف می‌شود. cancellation باید به handler/task فعال برسد، state terminal معتبر ثبت کند و از شروع کار بعدی جلوگیری کند. رفتار limit طبق policy مصوب به fail/handoff/ask-user برود و counters در resume reset نشوند.
 
-### [🔴] Step 3: enforce کردن tools و approval در runtime
+### [🟢] Step 3: enforce کردن tools و approval در runtime
 
 در نقطهٔ فراخوانی واقعی ابزار، دسترسی مؤثر را دوباره اعمال کن؛ به validation پروفایل اکتفا نکن. ابزار، approval و budget از Runtime، user, Persona, Toolset و Profile فقط به‌صورت strictest/intersection محدود شوند. Profile/workspace override برای default بدون trust/opt-in مصوب رد شود. deny list، سیاست filesystem/network/Git و کنترل approval پابرجا بمانند؛ denial/cancel fail-closed و خارج از profile error routing باشد. Side effect بدون مجوز و approval مستقل لازمِ Runtime پیش از اجرا مسدود شود؛ digest-bound plan approval به‌تنهایی این gate را برآورده نمی‌کند. تغییر policy بین آغاز و resume نباید موجب افزایش اختیار شود.
 
-### [🔴] Step 4: رخدادها، audit و خطاهای lifecycle
+### [🟢] Step 4: رخدادها، audit و خطاهای lifecycle
 
 چرخهٔ profile را از طریق EventBus/observability فعلی گزارش کن: آغاز، node transition، loop، approval، tool/model budget، retry، failure، resume و پایان. اطلاعات حساس، secret، prompt خام و دادهٔ خصوصی را با قواعد redaction موجود ثبت نکن. شکست persistence یا event sink نباید باعث state مبهم یا اجرای دوبارهٔ side effect شود؛ semantics سازگار با تضمین‌های فعلی را ثبت و تست کن.
 
@@ -480,3 +480,18 @@ Phase 5 Steps 1–4 are implemented and locally verified; the phase is 🟢. Con
 **Evidence:** `npm run typecheck` and `npm run build` pass; `npx vitest run src/ai/__tests__/workflow-profile-*.test.ts` passes **11 files / 144 tests** (kernel 16, handlers 17, injection 8, adapters 10, predicate 8, untrusted-content 6, semantic 27, resolver 16, registry 21, schema 11, MCP-ID 4) on Node v22.22.3; the full repository suite runs 1,843 tests with **1,842 passing**, the sole failure being the pre-existing, out-of-scope `phase-j-checkpoint.test.ts > J-05` mtime-tie finding already recorded in the Phase 2 closure. This is local evidence; the resulting commit still requires exact-head CI before it can be treated as verified on the remote.
 
 **Not authorized / still gated:** no merge is authorized until all phases are complete (owner instruction, 2026-09-30); PR #9 remains Draft. Phase 5 is committed as its own reviewable commit on the working branch so per-phase review remains reconstructable at handoff. The trusted-host stable-root guarantee and the authoritative Runtime compatibility/enforcement contract remain mandatory before Runtime integration. Phase 6 (durable lifecycle, budgets, and enforcement at the real call site) is the next dependency-ordered phase.
+
+
+## Phase 6 implementation closure (2026-09-30; append-only)
+
+Phase 6 Steps 1–4 are implemented and locally verified; the phase is 🟢. The durable-state, budget, enforcement, and event contracts — including the recorded `ask-user` pause semantics — live in `docs/workflow-profiles/PHASE6_LIFECYCLE.md`. The feature flag stays off by default, no Orchestrator entry point exists, and the pre-Runtime-integration gates recorded earlier remain open.
+
+**Deliverables:** `src/ai/workflow-profiles/profile-budget.ts` (single per-dimension budget contract: schema maxima, strictest-of folding, limit→status mapping, run-scoped counters), `src/ai/workflow-profiles/profile-run-state.ts` (versioned crash-safe state via the existing atomic write helper, file/memory stores, saved dependency pins, authority snapshot, pending-effect marker, `evaluateWorkflowProfileResume`), `src/ai/workflow-profiles/profile-access-guard.ts` (`narrowAccessPolicy`, `assertToolAccess`, `assertSideEffectAuthorized`, `detectAuthorityIncrease`/`assertNoAuthorityIncrease`), `src/ai/workflow-profiles/profile-events.ts` (lifecycle events over the existing EventBus-shaped sink, scrubbed and best-effort), plus the kernel/runner/handler wiring and three new test suites (`budget` 11, `lifecycle` 15, `enforcement` 10).
+
+**Recorded contract decisions (consequences of the approved plan; no new owner decision):** (1) an `ask-user` limit is a resumable pause — the kernel reports `limit: 'ask-user'`, the durable record keeps every counter and stores `awaitingUser: true` with status `interrupted`, and because budget layers can only narrow, resuming an exhausted budget pauses again instead of granting more calls, while a caller offering wider authority is refused; `fail` and `handoff` stay terminal. (2) A failing state-store write is fail-closed (the error is rethrown after `workflow.persistence.degraded`), whereas a failing event sink only degrades — durability differs from observability on purpose. (3) The visit cap keeps its Phase 4 code/category (`max-node-visits`/`visit-cap`) while its terminal status now follows `onLimit`, so Phase 4 evidence stays reproducible.
+
+**Phase 6 acceptance criteria:** a workflow resumes after a restart from state with matching hash/version/pins/authority, or fails closed before any side effect; cancellation, timeout, and all four budget dimensions are enforced on the real path with the strictest-of semantics and no reset on resume, including the `ask-user` pause; tool authorization is checked at the call site and no layer can widen it; a digest-bound plan approval is matched before continuing and never substitutes the Runtime's own authorization for a side effect; an ambiguous effect is never auto-retried; lifecycle events are traceable and secret-free; and the crash/resume, stale profile/dependency/digest, changed-policy, mid-run cancellation, and persistence-failure tests pass. All criteria are met with the evidence below.
+
+**Evidence:** `npm run typecheck` and `npm run build` pass; `npx vitest run src/ai/__tests__/workflow-profile` passes **14 files / 180 tests** (the Phase 2–5 suites: 144, plus budget 11, lifecycle 15, enforcement 10) on Node v22.22.3; the full repository suite runs 1,879 tests with **1,878 passing**, the sole failure being the pre-existing, out-of-scope `phase-j-checkpoint.test.ts > J-05` mtime-tie finding already recorded in the Phase 2 closure. This is local evidence; the resulting commit still requires exact-head CI before it can be treated as verified on the remote.
+
+**Not authorized / still gated:** no merge is authorized until all phases are complete (owner instruction, 2026-09-30); PR #9 remains Draft. The Phase 6 guard functions are enforcement primitives at the profile/adapter boundary — the live Orchestrator tool call site is not wired yet and the pending-effect journal remains an open Runtime-contract gate; neither is claimed as complete. Phase 6 is committed as its own reviewable commit on the working branch. Phase 7 (default profile and preservation of current behaviour) is the next dependency-ordered phase.

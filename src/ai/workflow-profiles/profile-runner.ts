@@ -1,12 +1,18 @@
 /**
- * Phase 4 Step 5 (WP-R-006): the profile-execution feature flag and the only
- * supported way to obtain an executable profile run.
+ * Phase 4 Step 5 / Phase 6 (WP-R-006, WP-R-007): the profile-execution feature
+ * flag and the only supported way to obtain an executable profile run.
  *
  * Default is OFF. While the flag is off, no profile is validated, resolved, or
  * dispatched and every entry point keeps its legacy behaviour. Even when the flag
  * is on, a profile must pass structural validation, semantic validation, and
  * digest-pinned dependency resolution before a single handler can run — invalid or
  * unknown profiles are rejected before dispatch, never silently skipped.
+ *
+ * Phase 6 adds the durable layer: when a state store and run id are supplied the
+ * run is written before it starts and after it ends (through the existing atomic
+ * write helper), a stored run is re-verified against the live profile,
+ * dependencies, and runtime before continuing, and a run that was interrupted
+ * with an effect in flight is refused rather than retried automatically.
  */
 import {
   SUPPORTED_SCHEMA_MAJOR,
@@ -17,6 +23,19 @@ import { validateWorkflowProfileSemantics } from './profile-semantic-validator.j
 import { WorkflowProfileLoadError, type RegisteredWorkflowProfile } from './profile-registry.js';
 import { resolveWorkflowProfileDependencies, type ResolvedWorkflowProfile, type WorkflowProfileComponentSources } from './profile-resolver.js';
 import { runWorkflowProfileKernel, type WorkflowKernelOptions, type WorkflowRunResult } from './profile-kernel.js';
+import { effectiveWorkflowBudget, type WorkflowBudgetLimits } from './profile-budget.js';
+import { narrowAccessPolicy, type AuthoritySnapshot } from './profile-access-guard.js';
+import { createWorkflowProfileEventEmitter, type EventSinkLike, type WorkflowProfileEventEmitter } from './profile-events.js';
+import {
+  applyRunResultToState,
+  clearPendingEffect,
+  createWorkflowProfileRunState,
+  evaluateWorkflowProfileResume,
+  markPendingEffect,
+  storedDependencyPins,
+  type WorkflowProfileRunState,
+  type WorkflowProfileRunStateStore,
+} from './profile-run-state.js';
 import type { WorkflowProfileDocument } from './profile-types.js';
 
 /** Environment variable that opts a process into Workflow Profile execution. */
@@ -43,6 +62,18 @@ export interface PreparedWorkflowProfileRun {
   readonly resolved: ResolvedWorkflowProfile;
   /** Run the kernel with the caller-supplied handlers. */
   run(options: Omit<WorkflowKernelOptions, 'profile'>): Promise<WorkflowRunResult>;
+  /** The persisted state record of this run, when a state store is configured. */
+  runState(): WorkflowProfileRunState | undefined;
+  /** Events emitted by this run (mapped kernel events plus lifecycle records). */
+  readonly events: WorkflowProfileEventEmitter;
+  /**
+   * Mark that a side effect is about to run. The marker is persisted BEFORE the
+   * effect, so an interruption between the effect and its commit is detected on
+   * the next load and refuses an automatic retry.
+   */
+  recordEffectStart(nodeId: string, intent: string): string;
+  /** Clear the marker once the effect is known to have committed. */
+  recordEffectCommitted(): void;
 }
 
 export interface PrepareWorkflowProfileRunOptions {
@@ -53,6 +84,22 @@ export interface PrepareWorkflowProfileRunOptions {
   env?: EnvSource;
   /** Runtime hard cap for node visits; the strictest applicable cap wins. */
   maxNodeVisits?: number;
+  /** Identifies the runtime that will execute the run; a resume must match it. */
+  runtimeVersion?: string;
+  runId?: string;
+  planId?: string;
+  sessionId?: string;
+  stateStore?: WorkflowProfileRunStateStore;
+  eventSink?: EventSinkLike;
+  onDegraded?: (error: unknown) => void;
+  secrets?: ReadonlyArray<string>;
+  /** Runtime-permitted tool ids; the profile declaration is intersected with them. */
+  runtimeToolIds?: ReadonlyArray<string>;
+  /** Runtime layer of the per-dimension budget. */
+  budget?: WorkflowBudgetLimits;
+  /** User/session layer of the per-dimension budget. */
+  sessionBudget?: WorkflowBudgetLimits;
+  now?: () => number;
 }
 
 function schemaVersionDiagnostic(value: unknown): boolean {
@@ -90,15 +137,151 @@ export function prepareWorkflowProfileRun(options: PrepareWorkflowProfileRunOpti
 
   const resolved = resolveWorkflowProfileDependencies(profile, options.sources);
   const frozen = Object.freeze(profile) as Readonly<WorkflowProfileDocument>;
+  const now = options.now ?? (() => Date.now());
+  const runId = options.runId ?? `run-${frozen.profile.id}`;
+  const events = createWorkflowProfileEventEmitter({
+    runId,
+    ...(options.eventSink ? { sink: options.eventSink } : {}),
+    ...(options.secrets ? { secrets: options.secrets } : {}),
+    ...(options.onDegraded ? { onDegraded: options.onDegraded } : {}),
+    now,
+  });
+  const declaredAuthority: AuthoritySnapshot = (() => {
+    const tools = (profile.policies as { tools?: { allowedToolsets?: ReadonlyArray<string> } } | undefined)?.tools;
+    const approvalPolicy = (profile.policies as { approvals?: { policy?: string } } | undefined)?.approvals?.policy;
+    const policy = narrowAccessPolicy([
+      { toolIds: tools?.allowedToolsets ?? [], budget: (profile.policies as { execution?: WorkflowBudgetLimits } | undefined)?.execution },
+      options.runtimeToolIds ? { toolIds: options.runtimeToolIds } : undefined,
+      { budget: options.budget },
+      { budget: options.sessionBudget, approvalPolicy },
+    ]);
+    return { toolIds: policy.toolIds, budget: policy.budget, approvalStrictness: policy.approvalStrictness };
+  })();
+  const dependencies = storedDependencyPins(resolved.dependencies);
+  const runtimeVersion = options.runtimeVersion ?? 'unversioned';
+  let state: WorkflowProfileRunState | undefined = options.stateStore ? options.stateStore.load(runId) : undefined;
+  /** A record that already existed means this attempt is a resume, not a first run. */
+  const resumingStoredRun = state !== undefined;
+  let started = false;
+
+  const persist = (next: WorkflowProfileRunState): void => {
+    state = next;
+    if (!options.stateStore) return;
+    try {
+      options.stateStore.save(next);
+    } catch (error) {
+      // Fail closed: the caller must not be able to treat an unwritten state as
+      // committed. Observability records the degradation before the throw.
+      events.emit({ type: 'workflow.persistence.degraded', runId, atMs: now(), code: error instanceof Error ? error.name : 'unknown' });
+      throw error;
+    }
+  };
+
+  if (options.stateStore && !state) {
+    // Written before anything can run or touch an effect, so an interrupted
+    // process is always visible as an interrupted run.
+    persist(createWorkflowProfileRunState({
+      runId,
+      profile: frozen as WorkflowProfileDocument,
+      dependencies,
+      runtimeVersion,
+      startNodeId: profile.workflow.startNode,
+      authority: declaredAuthority,
+      ...(options.planId ? { planId: options.planId } : {}),
+      ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+      now: now(),
+    }));
+  }
 
   return Object.freeze({
     profileId: profile.profile.id,
     profile: frozen,
     resolved,
-    run: (runOptions: Omit<WorkflowKernelOptions, 'profile'>) => runWorkflowProfileKernel({
-      ...runOptions,
-      profile: frozen as WorkflowProfileDocument,
-      ...(options.maxNodeVisits !== undefined ? { maxNodeVisits: options.maxNodeVisits } : {}),
-    }),
+    events,
+    runState: () => (state ? (JSON.parse(JSON.stringify(state)) as WorkflowProfileRunState) : undefined),
+    run: async (runOptions: Omit<WorkflowKernelOptions, 'profile'>) => {
+      if (started) {
+        // One prepared run object executes at most once; a retry is always a new
+        // prepare, so a terminal or in-flight attempt can never be silently reused.
+        throw new WorkflowProfileLoadError(`Workflow Profile run "${runId}" cannot resume (already-terminal: this run object already executed)`, [{
+          stage: 'semantic', code: 'resume.already-terminal', message: 'This prepared run already executed once', profileId: profile.profile.id,
+        }]);
+      }
+      started = true;
+      let resumeFrom: WorkflowProfileRunState | undefined;
+      if (options.stateStore) {
+        if (resumingStoredRun) {
+          const decision = evaluateWorkflowProfileResume(state!, {
+            profile: frozen as WorkflowProfileDocument,
+            dependencies,
+            runtimeVersion,
+            authority: declaredAuthority,
+          });
+          if (decision.action !== 'resume') {
+            for (const diagnostic of decision.diagnostics) {
+              events.emit({ type: 'workflow.run.resume-refused', runId, atMs: now(), code: diagnostic.code, status: decision.action });
+            }
+            const reasons = decision.diagnostics.map((diagnostic) => diagnostic.code).join(', ');
+            throw new WorkflowProfileLoadError(`Workflow Profile run "${runId}" cannot resume (${decision.action}: ${reasons})`, decision.diagnostics.map((diagnostic) => ({
+              stage: 'semantic' as const,
+              code: diagnostic.code,
+              message: diagnostic.message,
+              profileId: profile.profile.id,
+            })));
+          }
+          resumeFrom = state;
+        }
+      }
+
+      const resuming = resumeFrom !== undefined;
+      const runProfile = resuming
+        ? ({ ...frozen, workflow: { ...frozen.workflow, startNode: resumeFrom!.currentNodeId } } as WorkflowProfileDocument)
+        : (frozen as WorkflowProfileDocument);
+
+      const { onEvent: callerOnEvent, ...kernelOptions } = runOptions;
+      let result: WorkflowRunResult;
+      try {
+        result = await runWorkflowProfileKernel({
+          ...kernelOptions,
+          profile: runProfile,
+          onEvent: (event) => {
+            events.emitKernelEvent(event);
+            callerOnEvent?.(event);
+          },
+          ...(resuming ? { usage: resumeFrom!.budget, loopCounters: resumeFrom!.loopCounters, visitCount: resumeFrom!.visits } : {}),
+          ...(options.maxNodeVisits !== undefined ? { maxNodeVisits: options.maxNodeVisits } : {}),
+          ...(options.budget ? { budget: options.budget } : {}),
+          ...(options.sessionBudget ? { sessionBudget: options.sessionBudget } : {}),
+          now,
+        });
+      } catch (error) {
+        // The kernel does not throw for run outcomes; a throw here is a defect.
+        events.emit({ type: 'workflow.run.end', runId, atMs: now(), status: 'kernel-error', code: error instanceof Error ? error.name : 'unknown' });
+        throw error;
+      }
+
+      if (options.stateStore && state) {
+        persist(applyRunResultToState(state, {
+          result,
+          awaitingUser: result.limit === 'ask-user',
+          nodeSequence: result.nodeSequence,
+          ...(options.planId ? { planId: options.planId } : {}),
+          ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+          now: now(),
+        }));
+      }
+      return result;
+    },
+    recordEffectStart: (nodeId: string, intent: string): string => {
+      const attemptId = `effect-${now()}-${Math.trunc(Math.random() * 1e6)}`;
+      if (!state || !options.stateStore) return attemptId;
+      persist(markPendingEffect(state, { nodeId, attemptId, intent, startedAtMs: now() }));
+      return attemptId;
+    },
+    recordEffectCommitted: (): void => {
+      if (!state || !options.stateStore) return;
+      persist(clearPendingEffect(state));
+    },
   });
 }
+
