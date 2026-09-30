@@ -1556,14 +1556,20 @@ export class Orchestrator {
       acceptedFindings: [],
       rejectedFindings: [],
       incompleteSteps: [],
+      // The bridge has already normalized a cancellation category onto `cancelled`, so the
+      // summary must not call a cancelled run "failed" while the report below says CANCELLED.
       finalSummary: outcome.failure
-        ? `Workflow profile run failed: ${outcome.failure.code} (${outcome.failure.category}, node ${outcome.failure.nodeId})`
+        ? `Workflow profile run ${reviewOutcome === 'cancelled' ? 'cancelled' : 'failed'}: ${outcome.failure.code} (${outcome.failure.category}, node ${outcome.failure.nodeId})`
         : (outcome.answer ?? `Workflow profile run ended: ${outcome.status}`),
       usage: emptyReviewUsage,
     };
+    // The trailing line keeps the profile's own identity. It prints the bridge-normalized status, so
+    // a cancelled run can never read "failure" here while the FINAL REPORT above it says CANCELLED
+    // (the review *outcome* may still differ from the profile status by design, e.g. a rejected end
+    // reported with the legacy failure vocabulary after execution).
     const report = isAnswer
       ? `💬 Answer\n\n${outcome.answer ?? ''}`
-      : `${formatFinalReview(review)}\n\nWorkflow profile "${outcome.failure ? 'failure' : outcome.status}" (profile path${outcome.execution ? ', executed' : ', no execution'})`;
+      : `${formatFinalReview(review)}\n\nWorkflow profile "${outcome.status}" (profile path${outcome.execution ? ', executed' : ', no execution'})`;
     return {
       kind: isAnswer ? 'answer' : 'plan',
       review,

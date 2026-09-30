@@ -250,6 +250,12 @@ describe('Phase 7 parity — legacy path vs profile path', () => {
 
     expect(legacyResult.review.outcome).toBe('cancelled');
     expect(profileResult.review.outcome).toBe('cancelled');
+    // The profile's trailing status line prints the bridge-normalized status, so a cancelled run
+    // can never claim "failure" there while the FINAL REPORT above says CANCELLED.
+    expect(profileResult.report).toContain('Workflow profile "cancelled"');
+    expect(profileResult.report).not.toContain('Workflow profile "failure"');
+    // The synthetic summary must not call the cancelled run "failed" either.
+    expect(profileResult.report).toContain('Workflow profile run cancelled');
     expect(stepSystemPrompts()).toHaveLength(0);
     expect(legacyPrompts).toBe(0);
     const session = profileOrch.sessionStore.getSession(profileOrch.sessionStore.listSessions()[0]!);

@@ -376,7 +376,7 @@ describe('Phase 9 hardening — profile policy boundaries end to end', () => {
     expect(refused.review.outcome).toBe('cancelled');
     expect(mockGenerateText).not.toHaveBeenCalled();
     expect(refused.report).toContain('FINAL REPORT');
-    expect(refused.report).toContain('Workflow profile');
+    expect(refused.report).toContain('Workflow profile "rejected"');
     expect(refused.report).toContain('no execution');
 
     // The same graph with an approving user executes, then rejects the result in the review node.
