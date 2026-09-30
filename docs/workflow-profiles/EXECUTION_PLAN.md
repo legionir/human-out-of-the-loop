@@ -198,21 +198,77 @@ workflow پس از restart از state و hash/version درست resume می‌ش�
 
 ---
 
-## [🔴] Phase 8: ساخت، انتخاب و اعتبارسنجی Profile توسط کاربر
+## [🟡] Phase 8: ساخت، انتخاب و اعتبارسنجی Profile توسط کاربر
 
 قابلیت سفارشی‌سازی را روی رابط‌های موجود عرضه کن تا کاربر بتواند Profile JSON بسازد/قرار دهد، فهرست و اعتبارسنجی کند و برای یک اجرای مشخص انتخاب کند. این فاز ویرایشگر گرافیکی یا DSL جدید اضافه نمی‌کند؛ JSON همان قالب نویسندگی/انتقال باقی می‌ماند.
 
-### [🔴] Step 1: فراهم‌کردن مسیر authoring و discovery
+### [🟢] Step 1: فراهم‌کردن مسیر authoring و discovery
 
 طبق scopeهای تصویب‌شدهٔ Phase 1، discovery و authoring Profile سفارشی را فراهم کن. Project/workspace profile untrusted است و نمی‌تواند default را override کند، مگر trust/opt-in صریح طبق قرارداد موجود. Feature flag تا انتخاب کاربر/اپراتور خاموش باقی می‌ماند. precedence، naming، schema/semantic errors و versioning مستند شود؛ registry پکیج دست‌نخورده بماند.
 
-### [🔴] Step 2: افزودن فهرست/اعتبارسنجی/انتخاب در interfaceهای پشتیبانی‌شده
+
+**Progress (2026-09-30; append-only):** Step 1 is 🟢. `profile-discovery.ts` owns the documented
+conventions — `<projectRoot>/.hootl/workflow-profiles/*.json` (project scope, read only with the
+trust opt-in), `HOOTL_WORKFLOW_PROFILES_DIR` (operator directory) and a single explicitly named file
+— and returns the registry plus per-file diagnostics instead of throwing, so a broken project file is
+visible while selection stays fail-closed. The package registry is untouched, and discovery never
+decides precedence: `selectWorkflowProfile` (D-WP-003) still owns explicit > opted-in project
+default > built-in default. Evidence: `workflow-profile-discovery.test.ts` 6/6.
+
+### [🟡] Step 2: افزودن فهرست/اعتبارسنجی/انتخاب در interfaceهای پشتیبانی‌شده
 
 entry pointهای جاری CLI و server/API را دوباره تأیید و با الگوی config آن‌ها سازگار کن. کاربر بتواند Profileها را فهرست/اعتبارسنجی کند، یک profile ID را برای run انتخاب کند و خطای نسخه/وابستگی/مجوز را پیش از اجرا ببیند. سازگاری clientها و مسیر بدون تعیین profile را حفظ کن. **Unknown / Requires Verification:** نام دقیق command/flag، request field یا UI affordance را از قراردادهای موجود استخراج کن؛ API یا route جدید را از روی حدس نساز.
 
-### [🔴] Step 3: نمونه‌ها و راهنمای نویسندگی
+
+**Progress (2026-09-30; append-only):** the CLI half of Step 2 is implemented and verified.
+`hootl profiles list` (id, scope, name, version, graph size, file, diagnostics; never fails on a
+broken project file), `hootl profiles validate <id|file>` (schema, semantics and dependency
+resolution; exit 1 on any diagnostic) and `hootl run --profile <id> | --profile-file <path>` are
+registered in `src/cli.ts`; the run flags are mutually exclusive, and selection *is* the opt-in — it
+sets `HOOTL_WORKFLOW_PROFILE=1` for that run only, through the Phase 7 activation gate. Unknown ids,
+unreadable/broken files, a missing `--profile-file`, untrusted project profiles and every
+validation/resolution error fail before a session or plan exists. A run with no selection keeps the
+legacy path exactly (verified: `run --profile e2e.demo` uses the profile path and succeeds, the same
+request without a flag goes to the legacy planner, and `run --profile nope.missing` exits 1 with
+`selection.profile-missing` and creates nothing). Evidence: `phase8-profiles.test.ts` 8/8 (including
+"the CLI's resolved selection activates the profile"), built-CLI smoke tests against a temp project
+with a project-scope profile, all Workflow Profile + CLI suites 34 files / 454 tests, `npm run
+build` clean.
+
+**Unknown / Requires Verification (Step 2, server/API half; owner decision required):** the plan
+asks the *existing* server/API to support profile selection "consistently", but the server holds a
+single long-lived Orchestrator (`ServerContext.orchestrator`) whose `workflowProfile` option is a
+constructor argument, and `POST /api/run` has no per-run channel for it. Adding a per-request
+`profile` field therefore implies an architectural choice, and the plan forbids inventing routes or
+fields from a guess. The options recorded for the owner: (A) resolve the selection per request
+exactly like the CLI and run that request through a per-run Orchestrator carrying `workflowProfile`
+(new per-run channel; run-control, SSE and session ownership must be shown unchanged); (B) keep a
+single Orchestrator and treat profile selection as operator-level only — a server started with a
+profile uses it, a per-request `profile` field is rejected with a clear 400 and no new field is
+invented; (C) defer server selection to Phase 10 with the CLI as the supported authoring interface.
+No route or request field was added; the CLI is unaffected by the choice. Decision owner: Pouya.
+Until it is answered, Step 2 stays 🟡 and Step 3 proceeds independently.
+
+### [🟢] Step 3: نمونه‌ها و راهنمای نویسندگی
 
 مستندات خودبسنده برای schema، nodeهای پشتیبانی‌شده، پورت و mapping، شرط‌های مجاز، bounded loop، Toolset/Persona/Skill reference، approval، بودجه، error policy، version compatibility، validation، انتخاب و troubleshooting اضافه کن. حداقل یک نمونهٔ کوچک سفارشی و یک نمونهٔ bounded review/fix ارائه کن؛ برای هر دو آزمون خودکار اعتبارسنجی بنویس تا در Phase 9 به CI متصل شوند. مشخص کن افزودن node kind تازه مستلزم handler و تست Runtime است.
+
+**Progress (2026-09-30; append-only):** Step 3 is 🟢 for the authoring artifacts.
+`docs/workflow-profiles/PHASE8_AUTHORING.md` is the self-contained guide (scopes and trust,
+document skeleton and hard limits, the seven node kinds and their bindings, ports/mapping and
+pointer depth, routing/predicates/defaults and fail-closed route selection, bounded loops and the
+static visit bound, approvals and the digest-bound gate, budgets with strictest-wins semantics,
+error policy, dependency pins and how to re-pin, `x-` extensions, validate/select commands, a
+troubleshooting table and version compatibility). It states explicitly that a new node kind requires
+a handler and runtime tests. Two resolvable examples ship with real pins: `examples/answer-only
+.example.json` (the smallest useful custom profile — no `execute`/`review`, so it cannot cause a side
+effect) and `examples/bounded-review-fix.example.json` (digest-bound confirmation, execution with the
+`plan-step` persona source, error routing to review, and exactly one bounded re-plan loop that fails
+when exhausted). Both validate through the real CLI (`profiles validate` → exit 0) and are covered by
+`workflow-profile-examples.test.ts` 7/7, which runs the full authoring path (load → validate →
+resolve → discover → select), proves a stale pin is caught, and proves the examples are selectable by
+file. The pre-existing `*.example.json` files stay schema/semantic fixtures with placeholder digests;
+the guide says so. Phase 9 wires these into CI as required.
 
 **Acceptance criteria:**
 نویسنده می‌تواند فقط با JSON مستندشده Profile سفارشی تعریف کند؛ Profile معتبر در scope مصوب discover و انتخاب می‌شود و Profile نامعتبر قبل از اجرا diagnostic می‌دهد؛ CLI و server/API موجود به‌صورت سازگار انتخاب Profile را پشتیبانی می‌کنند؛ درخواست قدیمی بدون profile حفظ می‌شود؛ نمونه‌ها در CI اعتبارسنجی می‌شوند؛ هیچ DSL، eval یا ویرایشگر خارج از دامنه اضافه نشده است.

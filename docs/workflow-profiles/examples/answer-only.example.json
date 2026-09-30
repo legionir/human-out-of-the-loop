@@ -1,0 +1,118 @@
+{
+  "$schema": "../workflow-profile.schema.json",
+  "schemaVersion": "1.0.0",
+  "profile": {
+    "id": "example.answer-only",
+    "name": "Answer only (smallest custom profile)",
+    "description": "A deliberately tiny custom profile: the request is intake'd, the planner either answers it or asks for clarification, and the run always ends without executing anything. It shows the smallest graph that is useful, and it proves that a profile without an execute node cannot perform side effects (no plan, no tool call beyond the planner's own read-only turn). Dependency digests are real pins of the content this repository ships; re-pin them when that content changes.",
+    "version": "1.0.0",
+    "author": "HOOTL examples",
+    "tags": ["example", "minimal", "conversation"]
+  },
+  "dependencies": [
+    {
+      "kind": "persona",
+      "id": "planner",
+      "version": "1.0.0",
+      "digest": "sha256:432f1b39576a8221598d3f91e1a116dc6ce64998f2d6ac53cff9b391c45da4c4"
+    }
+  ],
+  "workflow": {
+    "startNode": "request",
+    "nodes": [
+      {
+        "id": "request",
+        "kind": "intake",
+        "goal": "Carry the run request into the workflow.",
+        "inputs": { "request": { "type": "object", "required": false } },
+        "outputs": { "request": { "type": "object", "required": true } },
+        "config": {}
+      },
+      {
+        "id": "plan",
+        "kind": "planner",
+        "goal": "Answer the request, or ask the questions needed to answer it.",
+        "inputs": {
+          "request": { "type": "object", "required": false },
+          "context": { "type": "string", "required": false }
+        },
+        "outputs": {
+          "kind": { "type": "string", "required": true, "enum": ["plan", "answer", "clarify"] },
+          "answer": { "type": "string", "required": false },
+          "clarification": { "type": "string", "required": false }
+        },
+        "bindings": { "personaRef": "planner" },
+        "config": { "mode": "decompose", "maxPlanItems": 20 }
+      },
+      {
+        "id": "clarify",
+        "kind": "approval",
+        "goal": "Ask the user the questions the planner could not answer.",
+        "inputs": { "clarification": { "type": "string", "required": false } },
+        "outputs": { "answer": { "type": "string", "required": true } },
+        "config": {
+          "prompt": "The request needs clarification before it can be answered. Please answer the questions.",
+          "approvalType": "custom",
+          "responseKind": "text",
+          "show": ["clarification"],
+          "timeoutSeconds": 3600
+        }
+      },
+      {
+        "id": "answered",
+        "kind": "end",
+        "goal": "Return the answer.",
+        "inputs": { "answer": { "type": "string", "required": false } },
+        "outputs": { "response": { "type": "string", "required": false } },
+        "config": { "outcome": "success", "emit": { "response": "answer" } }
+      },
+      {
+        "id": "unplanned",
+        "kind": "end",
+        "goal": "Refuse silently: this profile never executes work.",
+        "inputs": { "response": { "type": "string", "required": true } },
+        "outputs": { "response": { "type": "string", "required": true } },
+        "config": { "outcome": "rejected", "emit": { "response": "response" } }
+      }
+    ],
+    "edges": [
+      { "from": "request", "to": "plan", "map": { "request": "/request" } },
+      {
+        "from": "plan",
+        "to": "answered",
+        "when": { "path": "/kind", "operator": "equals", "value": "answer" },
+        "map": { "answer": "/answer" }
+      },
+      {
+        "from": "plan",
+        "to": "clarify",
+        "when": { "path": "/kind", "operator": "equals", "value": "clarify" },
+        "map": { "clarification": "/clarification" },
+        "label": "clarification-round",
+        "loop": { "maxIterations": 3, "counterId": "clarification-rounds", "onExhausted": { "strategy": "fail" } }
+      },
+      { "from": "clarify", "to": "plan", "map": { "context": "/answer" } },
+      {
+        "from": "plan",
+        "to": "unplanned",
+        "when": { "path": "/kind", "operator": "equals", "value": "plan" },
+        "map": { "response": "/kind" }
+      }
+    ]
+  },
+  "policies": {
+    "execution": {
+      "maxNodeVisits": 20,
+      "maxDurationSeconds": 600,
+      "maxModelCalls": 10,
+      "maxToolCalls": 20,
+      "onLimit": "fail"
+    },
+    "tools": { "allowedToolsets": [], "deniedTools": [] },
+    "approvals": { "policy": "runtime-default" }
+  },
+  "result": [
+    { "fromNode": "answered", "port": "response", "kind": "response", "outcome": "success" },
+    { "fromNode": "unplanned", "port": "response", "kind": "response", "outcome": "rejected" }
+  ]
+}

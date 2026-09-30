@@ -19,6 +19,16 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
 - The built-in default profile (`src/ai/workflow-profiles/default-profile.ts`), built in code with
   pins computed from resolved component content, and the activation seam plus run bridge that wire it
   to the Orchestrator behind the flag (Phase 7).
+- Authoring and selection (Phase 8): discovery on fixed conventions (`.hootl/workflow-profiles/`
+  project scope behind the trust opt-in, `HOOTL_WORKFLOW_PROFILES_DIR`, and a single explicit file),
+  `hootl profiles list`, `hootl profiles validate <id|file>` (schema, semantics and dependency pins;
+  exit 1 on any diagnostic) and `hootl run --profile <id> | --profile-file <path>`. Selecting a
+  profile for a run is the opt-in: it enables the flag for that run only, and every failure
+  (unknown id, unreadable/broken file, untrusted project profile, stale pin) happens before a session
+  or plan exists. A run without a selection never resolves a profile.
+- `docs/workflow-profiles/PHASE8_AUTHORING.md`, the self-contained authoring guide, plus two
+  resolvable examples under `docs/workflow-profiles/examples/` (answer-only, bounded review/fix) that
+  are validated end to end in the test suite.
 
 **Behaviour differences to review before the default profile is activated** (recorded in
 `docs/workflow-profiles/PHASE7_PARITY.md`; the built-in default stays gated until the approval is

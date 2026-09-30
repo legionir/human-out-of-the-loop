@@ -74,7 +74,7 @@ function resolveDiscovery(opts: ProfilesCommandOptions): { projectRoot: string; 
  * The same registry layers a run reads (package → project), loaded without the Orchestrator so
  * validation stays introspection-only: no MCP connection, no model call, no plan/session writes.
  */
-function loadProfileRegistries(projectRoot: string): {
+export function loadProfileRegistries(projectRoot: string): {
   personaRegistry: PersonaRegistry;
   skillRegistry: SkillRegistry;
   toolRegistry: ToolRegistry;
