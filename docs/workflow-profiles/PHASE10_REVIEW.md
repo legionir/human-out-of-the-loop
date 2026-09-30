@@ -95,3 +95,46 @@ writable by another local user is outside what the loader can prove.
 the default remains off; the open items above are decisions and environment properties, not
 implementation gaps. Recommend: independent review against this document, then the owner's U-item
 decisions, then — only with explicit authorisation — activation and merge.
+
+## 8. Addendum — self-review of the implementation (2026-09-30; owner-requested)
+
+The owner asked for the code written in this session to be reviewed and confirmed, not asserted. Scope
+of the review: the R-3 outcome mapping and report alignment, the resume wiring (CLI/server), the
+run-state store additions (`loadAll`, approval records, `profileFile`), the activation package, and
+the profile gate/selection paths. Method: line-by-line reading of the changed functions plus the
+guards they depend on (bridge status normalization, kernel end/limit handling, resume integrity
+checks), then the focused and full suites, the e2e scenario and the CI gate.
+
+**Findings:**
+
+1. **Defect, fixed (`aa240b3`).** A cancelled profile run printed `Workflow profile "failure"` in the
+   report's trailing status line while the FINAL REPORT above it said CANCELLED, because the line
+   preferred `outcome.failure` over the bridge-normalized status; the synthetic summary similarly
+   called the run "failed". The line now prints the normalized status and the summary reads
+   "Workflow profile run cancelled: …". Pinned by the parity cancellation test (both strings asserted)
+   — the assertion fails against the previous code.
+2. **Open mapping, recorded (U-7, `496b4ce`).** A `handoff` end (a limit with
+   `onLimit`/`onExhausted: handoff`/`ask-user`, or an `end` node with `outcome: "handoff"`) has no
+   legacy counterpart: the Orchestrator reports it as `failure` in the review and the session
+   interaction, while the durable record correctly keeps an ask-user pause resumable. Recommendation
+   recorded in `TRACEABILITY.md` §3: `handoff` → `partial-success`, and an `ask-user` pause's
+   interaction stays `pending`. No shipped flow takes this route (the built-in default uses
+   `onLimit: fail`); the mapping stays fail-closed and visible until the owner decides.
+3. **Checked and found correct:** the execution gate runs `assertExecutable` before any plan executes
+   and the digest it compares is computed from the planner's own `planText` (not profile content), so
+   a profile can only deny, never widen; the resume decision orders profile-hash, schema/runtime
+   version, dependency, authority and pending-effect guards before any node runs; `loadAll` skips
+   unreadable records so one corrupt file cannot break the listing; the server passes its own run id
+   and never exposes resume over HTTP; the activation gate still refuses `approved: false`.
+4. **Observations, not defects.** An unknown `--profile` id exits 1 with the CLI's global
+   `Error: <message>` rendering (no diagnostic codes); `profiles validate` remains the diagnostic
+   path and the documented behaviour ("exit 1, no session") holds. A synthetic `rejected` end *after*
+   execution still maps to `failure` — the documented interpretation of R-3 (refusal before
+   execution is `cancelled`; work that ran and was rejected stays a failure).
+
+**Evidence at the reviewed head `496b4ce`:** `workflow-profile-parity.test.ts` +
+`workflow-profile-hardening.test.ts` 19/19; profile + CLI + server suites 51 files / 576 tests; the
+CI-equivalent full suite 150 files / 1,985 tests with only the pre-existing `J-05`; e2e `profiles`
+12/12; profile gates 9/9; `tsc --noEmit` and `npm run build` clean; CI run `36779326761` on the exact
+head **success 10/10**.
+

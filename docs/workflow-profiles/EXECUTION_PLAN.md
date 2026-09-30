@@ -887,3 +887,13 @@ selected; per-run/per-request selection still wins; there is no process-wide ena
 things the owner is expected to check before authorizing. `BUILT_IN_DEFAULT_APPROVAL.approved` stays
 `false` — the agent does not record the approval.
 
+### Phase 10 owner-requested self-review of the implementation (2026-09-30; append-only)
+
+The owner asked for the session's code to be reviewed and confirmed. The review, its method, the one
+defect it found and fixed (`aa240b3`: a cancelled run's report line said `failure`), the open mapping
+it recorded (U-7: `handoff` doesn't fit the legacy vocabulary) and what it checked and found correct
+are in `PHASE10_REVIEW.md` §8. Evidence at head `496b4ce`: the two focused suites 19/19, profile +
+CLI + server 51 files / 576 tests, the full suite 150 files / 1,985 tests with only the pre-existing
+`J-05`, e2e `profiles` 12/12, gates 9/9, tsc/build clean, and CI run `36779326761` on the exact head
+**success 10/10**. Nothing here closes Step 3: the owner's own review and decisions remain the gate.
+
