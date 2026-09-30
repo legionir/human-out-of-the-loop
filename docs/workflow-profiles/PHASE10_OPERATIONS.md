@@ -255,6 +255,8 @@ with `hootl run --resume`, and checks that the run executed and turned terminal 
       and digest-verified, and the remaining property — "a directory only the operator can write" — is
       written down in §4 for the operator to acknowledge.
 - [ ] Owner approval recorded for `BUILT_IN_DEFAULT_APPROVAL` before any default activation.
+- [ ] **U-7** decided — how a `handoff`/`ask-user` end is reported in the legacy vocabulary
+      (`TRACEABILITY.md` §3; opened by the 2026-09-30 self-review).
 - [x] Behaviour differences decided by the owner (U-4, 2026-09-30): G-5 **accepted**, G-2
       **accepted**, report wording **aligned to the legacy formatter** (implemented), R-3
       **changed** — a `rejected` end before execution reports `cancelled`, after execution `failure`

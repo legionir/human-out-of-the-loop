@@ -354,3 +354,16 @@ differences to approve):
   without the fix.
 
 Both are recorded with reproductions and evidence in `PHASE9_HARDENING.md`.
+
+Recorded by the self-review of 2026-09-30, for the owner's activation decision:
+
+- **A `handoff`/`ask-user` end has no legacy counterpart (opened as U-7).** A profile that stops at a
+  limit with `onLimit: handoff`/`ask-user`, or ends an `end` node with `outcome: "handoff"`, finishes
+  with run status `handoff`; the Orchestrator maps that onto the legacy review and interaction
+  outcome `failure` (the review union has no `handoff`), while the report's trailing line keeps
+  `Workflow profile "handoff"`. For `ask-user` the durable record is still a resumable pause
+  (`awaitingUser: true`), so nothing is lost — only the session label is wrong. Recommendation:
+  `handoff` → `partial-success`, `ask-user` interaction stays `pending`. Tracked as U-7 in
+  `TRACEABILITY.md` §3; behaviour today is fail-closed and visible, and the built-in default never
+  takes this route (`onLimit: fail`).
+
