@@ -37,6 +37,10 @@ import {
   plansResumeCommand,
   plansRollbackCommand,
 } from './cli/commands/plans.js';
+import {
+  profilesListCommand,
+  profilesValidateCommand,
+} from './cli/commands/profiles.js';
 import { mcpListCommand, mcpTestCommand } from './cli/commands/mcp.js';
 import { serveCommand } from './cli/commands/serve.js';
 import { logsCommand } from './cli/commands/logs.js';
@@ -287,6 +291,8 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .option('--max-steps <n>', 'max tool-call iterations per agent run (1-100)', (v: string) => Number(v))
     .option('--max-replans <n>', 'automatic re-planning attempts on failure (0-10)', (v: string) => Number(v))
     .option('--max-delegation-depth <n>', 'max agent-to-subagent delegation depth (0-5)', (v: string) => Number(v))
+    .option('--profile <id>', 'run with a discovered Workflow Profile (see: profiles list)')
+    .option('--profile-file <path>', 'run with a Workflow Profile JSON file (explicit selection)')
     .option('--label <text>', 'label for the NEW session (max 64 chars)')
     // Phase 32: the model's own thinking text, streamed as it is produced.
     .option(
@@ -326,6 +332,8 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
         thinking: opts.thinking as string | undefined,
         toolLog: opts.toolLog as string | undefined,
         trustProject: opts.trustProject === true,
+        profile: opts.profile as string | undefined,
+        profileFile: opts.profileFile as string | undefined,
       });
       process.exitCode = result.exitCode;
     })
@@ -431,6 +439,42 @@ export function createProgram(binName: string = DEFAULT_BIN_NAME): Command {
     .option('--project-root <dir>', 'project root (default: current directory)')
     .action(async (id: string, label: string, opts: Record<string, string | undefined>) => {
       process.exitCode = await sessionsLabelCommand(id, label, { projectRoot: opts.projectRoot });
+    });
+
+  // ── profiles ─────────────────────────────────────────────────
+  const profiles = program
+    .command('profiles')
+    .description('List and validate Workflow Profiles (opt-in execution flow documents)');
+  profiles
+    .command('list')
+    .description('List the profiles this project can select, with their scope and file')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .option('--json', 'machine-readable output')
+    .option('--trust-project', "trust this project (required to read .hootl/workflow-profiles)")
+    .option('--profiles-dir <dir>', 'operator profile directory (default: HOOTL_WORKFLOW_PROFILES_DIR)')
+    .action(async (opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await profilesListCommand({
+        projectRoot: opts.projectRoot as string | undefined,
+        json: opts.json === true,
+        trustProject: opts.trustProject === true,
+        directory: opts.profilesDir as string | undefined,
+      });
+    });
+  profiles
+    .command('validate')
+    .description('Validate one profile (by id or file path): schema, semantics and dependency pins')
+    .argument('<target>', 'profile id, or a path to a profile .json file')
+    .option('--project-root <dir>', 'project root (default: current directory)')
+    .option('--json', 'machine-readable output')
+    .option('--trust-project', "trust this project (required to read .hootl/workflow-profiles)")
+    .option('--profiles-dir <dir>', 'operator profile directory (default: HOOTL_WORKFLOW_PROFILES_DIR)')
+    .action(async (target: string, opts: Record<string, string | boolean | undefined>) => {
+      process.exitCode = await profilesValidateCommand(target, {
+        projectRoot: opts.projectRoot as string | undefined,
+        json: opts.json === true,
+        trustProject: opts.trustProject === true,
+        directory: opts.profilesDir as string | undefined,
+      });
     });
 
   // ── plans ────────────────────────────────────────────────────

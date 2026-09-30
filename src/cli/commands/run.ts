@@ -44,6 +44,60 @@ import {
 } from '../utils/reasoning.js';
 import { createToolLogRenderer, resolveToolLogEnabled } from '../utils/tool-log.js';
 import { parseBudget } from '../../ai/runtime/budget.js';
+import {
+  discoverWorkflowProfiles,
+} from '../../ai/workflow-profiles/profile-discovery.js';
+import { selectWorkflowProfile, WorkflowProfileLoadError } from '../../ai/workflow-profiles/profile-registry.js';
+import { WORKFLOW_PROFILE_FLAG_ENV_VAR } from '../../ai/workflow-profiles/profile-runner.js';
+import type { OrchestratorWorkflowProfileOptions } from '../../ai/orchestrator.js';
+
+/**
+ * Phase 8 Step 2: resolve `--profile <id>` / `--profile-file <path>` into the activation options.
+ * Only the *explicit* selection is turned into an opt-in; `profiles validate` is the introspection
+ * path, so nothing is executed or written here.
+ */
+export function resolveProfileSelection(
+  projectRoot: string,
+  trustedProject: boolean,
+  opts: Pick<RunCommandOptions, 'profile' | 'profileFile'>,
+): OrchestratorWorkflowProfileOptions {
+  if (opts.profile !== undefined && opts.profileFile !== undefined) {
+    throw new WorkflowProfileLoadError('--profile and --profile-file are mutually exclusive', [{
+      stage: 'semantic', code: 'selection.conflicting-flags',
+      message: 'Select one profile either by id (--profile) or by file (--profile-file), not both',
+    }]);
+  }
+  const discovered = discoverWorkflowProfiles({
+    projectRoot,
+    projectOptIn: trustedProject,
+    ...(opts.profileFile ? { file: opts.profileFile } : {}),
+  });
+  // A broken profile file must never be silently ignored: fail before the run starts.
+  if (discovered.diagnostics.length > 0) {
+    throw new WorkflowProfileLoadError('Workflow profile discovery found problems', [...discovered.diagnostics]);
+  }
+  // `--profile-file` names a document, so the id comes from the discovered entry for that file.
+  const fileId = opts.profileFile
+    ? discovered.profiles.find((entry) => path.resolve(entry.file) === path.resolve(opts.profileFile!))?.profile.profile.id
+    : undefined;
+  if (opts.profileFile && fileId === undefined) {
+    throw new WorkflowProfileLoadError('The selected profile file was not registered', [{
+      stage: 'read', code: 'file.not-registered',
+      message: `Profile file ${path.resolve(opts.profileFile)} did not register a profile`, file: path.resolve(opts.profileFile),
+    }]);
+  }
+  // D-WP-003: explicit selection wins; the project default only applies when the user asked for it
+  // by trusting the project and by naming no profile — and even then only through this flag.
+  const selection = selectWorkflowProfile(discovered.registry, {
+    requestedProfileId: (opts.profile ?? fileId)!,
+    projectOptIn: trustedProject,
+    ...(discovered.projectDefaultProfileId ? { projectDefaultProfileId: discovered.projectDefaultProfileId } : {}),
+  });
+  return {
+    env: { ...process.env, [WORKFLOW_PROFILE_FLAG_ENV_VAR]: '1' },
+    selection: { registered: selection },
+  };
+}
 
 export interface RunCommandOptions {
   /** Default: '.' (or the global config's projectRoot) */
@@ -106,6 +160,10 @@ export interface RunCommandOptions {
    * `registry/mcp-servers` layer is allowed to spawn.
    */
   trustProject?: boolean;
+  /** Phase 8: run with this discovered Workflow Profile (explicit user selection). */
+  profile?: string;
+  /** Phase 8: run with this Workflow Profile file (explicit user selection). */
+  profileFile?: string;
   /** J-03: token count or `$1.50`. */
   budget?: string;
   /** J-07: plan only and print an estimate; nothing is executed. */
@@ -398,6 +456,13 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     opts.runHooks.onToolCall = toolLog;
   }
 
+  // Phase 8: an explicitly selected Workflow Profile turns the profile path on for this run —
+  // selection is the opt-in the flag documents. Discovery/validation happens here, before the
+  // session and the plan exist, so a bad profile fails before any side effect.
+  const profileSelection = opts.profile !== undefined || opts.profileFile !== undefined
+    ? resolveProfileSelection(projectRoot, trustedProject, opts)
+    : undefined;
+
   const orchestrator =
     opts.orchestrator ??
     new Orchestrator({
@@ -405,6 +470,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       persistent,
       ...extraOrch,
       ...(model ? { defaultModelId: model } : {}),
+      ...(profileSelection ? { workflowProfile: profileSelection } : {}),
       onProgress: (event: ProgressEvent) => renderer(event),
       ...(showThinking ? { onThought: reasoning } : {}),
       onToolCall: toolLog,
