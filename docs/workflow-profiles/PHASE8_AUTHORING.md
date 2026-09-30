@@ -185,6 +185,25 @@ An `approval` node is the only place a profile can ask a human for something.
 - `policies.approvals.policy` is `runtime-default`, `side-effects` or `every-tool-call`, with an
   optional `requireUserConfirmationFor` list of effect classes. Again: strictest wins.
 
+### Named toolsets
+
+A toolset is a name for a set of tool ids, loaded from the same registry layers as every other
+component: `<registry layer>/toolsets/<id>.json` (package layer first, project layer second, a
+project entry with the same id replaces the packaged one).
+
+```json
+{ "id": "acme.read-only", "name": "Acme read-only", "version": "1.0.0", "tools": ["read_file", "list_files"] }
+```
+
+- Every tool id is checked against the runtime's live catalog when the toolset is registered; a
+  toolset naming a tool that does not exist is refused (`toolset.tool-unavailable`), so a toolset can
+  never introduce a tool.
+- To bind one, list it in `policies.tools.allowedToolsets`, pin it in `dependencies` (kind
+  `toolset`) and reference it on a node with `bindings.toolsetRef`. The effective surface for that
+  node is `runtime ∩ persona.allowedTools ∩ toolset.tools − deniedTools` — narrowing only.
+- `hootl profiles validate` loads exactly the toolsets a run would load, so a profile's toolset pin
+  is verified with the same content digest rules as personas and rubrics.
+
 ## 9. Error policy
 
 Any node may declare an error policy:
@@ -310,6 +329,8 @@ not resolvable and not meant to be selected.
 | `dependency.missing` / `dependency.disabled` | the component is not in the resolved registries | add/rename it in the registry, or drop the reference |
 | `bindings.persona-binding-missing` | `planner`/`review` without `personaRef`, or `execute` with neither of the two allowed forms | add `personaRef`, or `personaSource: "plan-step"` for `execute` |
 | `toolset.not-allowed` | `toolsetRef` not listed in `policies.tools.allowedToolsets` | list it — the profile can only narrow, never add |
+| `toolset.tool-unavailable` | a toolset file names a tool the runtime catalog does not have | use a tool id from `hootl tools list`, or drop it from the toolset |
+| `dependency.source-missing` for kind `toolset` | the toolset file is not in any registry layer | put it in `<project>/registry/toolsets/<id>.json` |
 | `mapping.type-mismatch` / `end.emit-type-mismatch` | a value of a different type is routed into a port | align port types, or route through a `condition` node |
 | `route.implicit-fallback` / `route.domain-not-exhaustive` | a decision can fall through with no matching edge | add the missing predicate edge or one `default: true` edge |
 | `workflow.unbounded-cycle` | a cycle without a loop edge | add `loop` with `maxIterations` and a unique `counterId` |

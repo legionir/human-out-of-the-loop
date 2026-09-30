@@ -20,6 +20,7 @@ import { ModelRegistry } from '../../ai/registries/model-registry.js';
 import { ToolRegistry } from '../../ai/registries/tool-registry.js';
 import { registryLayersFor } from '../../ai/registries/layout.js';
 import { bootstrapTools } from '../../ai/tools/bootstrap.js';
+import { ToolsetRegistry, loadToolsetsFromDirectory } from '../../ai/workflow-profiles/toolsets.js';
 import { resolveAndMaybePersistTrust } from '../utils/trust-project.js';
 import { prepareCliEnvironment } from '../utils/config.js';
 import { color, err, out, renderTable } from '../utils/output.js';
@@ -79,19 +80,25 @@ export function loadProfileRegistries(projectRoot: string): {
   skillRegistry: SkillRegistry;
   toolRegistry: ToolRegistry;
   modelRegistry: ModelRegistry;
+  toolsetRegistry: ToolsetRegistry;
 } {
   const personaRegistry = new PersonaRegistry();
   const toolRegistry = new ToolRegistry();
   const skillRegistry = new SkillRegistry({ toolRegistry });
   const modelRegistry = new ModelRegistry({ env: process.env });
+  const toolsetRegistry = new ToolsetRegistry({
+    tools: { hasDefinition: (id: string) => toolRegistry.getDefinition(id) !== undefined },
+  });
   for (const [index, layer] of registryLayersFor(projectRoot).entries()) {
     const override = index > 0;
     personaRegistry.loadFromDirectory(path.join(layer.dir, 'personas'), false, override);
     bootstrapTools(path.join(layer.dir, 'tools'), toolRegistry, projectRoot, { required: false, override });
     loadSkillsFromDirectory(path.join(layer.dir, 'skills'), skillRegistry, false, override);
     modelRegistry.loadConfigsFromDirectory(path.join(layer.dir, 'models'), false, override);
+    // Phase 9 (H-3): the same toolsets the run path loads, so validation and a run agree.
+    loadToolsetsFromDirectory(path.join(layer.dir, 'toolsets'), toolsetRegistry, { required: false, override });
   }
-  return { personaRegistry, skillRegistry, toolRegistry, modelRegistry };
+  return { personaRegistry, skillRegistry, toolRegistry, modelRegistry, toolsetRegistry };
 }
 
 export async function profilesListCommand(opts: ProfilesCommandOptions = {}): Promise<number> {
@@ -189,10 +196,15 @@ export async function profilesValidateCommand(target: string, opts: ProfilesComm
   if (profileId !== undefined) {
     const entry = registry.get(profileId);
     if (entry) {
-      const { personaRegistry, skillRegistry, toolRegistry, modelRegistry } = loadProfileRegistries(projectRoot);
+      const { personaRegistry, skillRegistry, toolRegistry, modelRegistry, toolsetRegistry } = loadProfileRegistries(projectRoot);
       try {
         resolveWorkflowProfileDependencies(entry.profile, createWorkflowProfileComponentSources({
-          registries: { personas: personaRegistry, skills: skillRegistry, models: modelRegistry },
+          registries: {
+            personas: personaRegistry,
+            skills: skillRegistry,
+            models: modelRegistry,
+            toolsets: toolsetRegistry,
+          },
           toolCatalog: { hasDefinition: (id: string) => toolRegistry.getDefinition(id) !== undefined },
         }));
       } catch (error) {

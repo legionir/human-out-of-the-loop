@@ -26,6 +26,10 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
   profile for a run is the opt-in: it enables the flag for that run only, and every failure
   (unknown id, unreadable/broken file, untrusted project profile, stale pin) happens before a session
   or plan exists. A run without a selection never resolves a profile.
+- Named toolsets are loadable from the registry layers (`<layer>/toolsets/<id>.json`, project
+  overrides package) and are wired into both the run and `profiles validate`, so a profile can pin a
+  `toolset` dependency. A toolset still cannot add access: every tool id is re-checked against the
+  live catalog and the effective set stays an intersection (Phase 9 finding H-3).
 - `docs/workflow-profiles/PHASE8_AUTHORING.md`, the self-contained authoring guide, plus two
   resolvable examples under `docs/workflow-profiles/examples/` (answer-only, bounded review/fix) that
   are validated end to end in the test suite.
@@ -39,6 +43,11 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
 - The profile path sent the planner its node goal text instead of the user's request (the request
   arrives as the entry payload object). Both paths now hand the planner the request; a regression
   test fails without the fix (finding H-2 in the same document).
+- Phase 9 hardening: end-to-end adversarial coverage for component-content injection, toolset
+  narrowing, a toolset naming an unavailable tool, an unknown approval policy, error-payload leakage
+  into the report/session/log, graph caps and an exhausted bounded loop; findings and the
+  reproducible measurements (byte cap before parse, counters before calls, flag-off cost) are
+  recorded in `docs/workflow-profiles/PHASE9_HARDENING.md`.
 
 **API**
 - `POST /api/run` accepts `profile: "<id>"` and runs that request with the selected Workflow

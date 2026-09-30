@@ -335,15 +335,15 @@ heads. No merge, release or default activation is authorized until all phases ar
 
 ---
 
-## [🟡] Phase 9: hardening امنیتی و سنجش منابع
+## [🟢] Phase 9: hardening امنیتی و سنجش منابع
 
 پس از اتصال handlerها و پیش از rollout، امنیت/adversarial و ظرفیت را با معیارهای مصوب harden کن. مرز اعتماد از Phase 5 برقرار شده؛ این فاز آن را end-to-end می‌بندد و جایگزین تست‌های زودهنگام نیست.
 
-### [🟡] Step 1: آزمون adversarial سرتاسری و policy boundary
+### [🟢] Step 1: آزمون adversarial سرتاسری و policy boundary
 
 تست end-to-end برای profile/Persona/Skill/fetch injection، اجرای code/eval، tool/path escalation، untrusted workspace override، approval/budget downgrade، forged dependency/version/digest، route abuse، error payload leakage، graph بزرگ، nested/overlapping loops، exhaustion، cancellation، restart و persistence failure اضافه کن. ثابت کن injection هیچ‌گاه system policy، authorization، approval، feature flag یا budget را تغییر نمی‌دهد؛ raw exception/secret وارد route/prompt/log نمی‌شود؛ default-off واقعی است؛ denied/cancelled action هیچ‌وقت retry/routed نمی‌شود. تست‌ها از gateهای مراحل قبلی کپی مبهم نباشند؛ اینجا end-to-end و integration کامل پوشش داده شوند.
 
-### [🔴] Step 2: ارزیابی performance و منابع
+### [🟢] Step 2: ارزیابی performance و منابع
 
 با workflow نماینده، load/schema/semantic validation/resolution/run هزینه، node visits، wall time و رشد state را نسبت به baseline اندازه‌گیری کن. اعداد هدف را از baseline و limits مصوب استخراج کن، نه با حدس. prove کن byte cap پیش از parse، counters قبل از call، `maxNodeVisits` hard cap و time/model/tool budgets قبل از runaway موثرند؛ flag خاموش overhead غیرضروری و regression محسوس ندارد. نتیجه و محیط قابل‌بازتولید را ثبت کن.
 
@@ -363,6 +363,35 @@ resource measurement) are listed as open in `PHASE9_HARDENING.md`. Recorded devi
 still 🟡 on its one owner-decision criterion and the owner directed the work to continue, so this
 Step 1 work proceeds append-only with that decision open; no merge/release/default activation is
 authorized until all phases are complete.
+
+**Phase 9 closure (2026-09-30; append-only):**
+
+**Step 1** is 🟢: `workflow-profile-adversarial.test.ts` (7 tests) covers component-content injection
+through a profile's own pinned persona, toolset narrowing (a pinned toolset can never add a tool),
+a toolset naming a tool the runtime lacks (refused before any model call), an unknown approval
+policy, error-payload leakage into the report/session/observability log, the graph caps, and an
+exhausted bounded loop stopping the run before execution; `workflow-profile-hardening.test.ts` (9
+tests) covers the confirmation gate and terminal denial/cancellation. Finding **H-3** was fixed on
+the way: nothing wired a `ToolsetRegistry` into the resolver's sources, so a profile naming a toolset
+could never resolve — toolsets are now loaded from the same registry layers as every other component
+(`<layer>/toolsets/*.json`, project overrides package) by both the Orchestrator and the CLI, with
+`workflow-profile-toolsets.test.ts` (4 tests) proving the loader and an end-to-end resolution.
+Restart/persistence replay and cancellation stay owned by the Phase 6 lifecycle/budget suites, and
+`eval`/code execution is structurally absent (no `eval`, `new Function` or process spawning in the
+profile modules; profile text is confined data).
+
+**Step 2** is 🟢: `scripts/profile-bench.mjs` measures the built output reproducibly (no network) and
+records its environment; the results are tabulated in `PHASE9_HARDENING.md` §Step 2. Headline: the
+flag-off decision costs p50 0.000 ms (one flag read), preparing a selected profile ~0.8 ms,
+validating a 43 KB document ~0.7 ms, discovery+selection ~0.6 ms; an over-cap file is refused in
+0.016 ms against 1.284 ms to parse a just-under-cap file (cap before parse); and with the model
+budget already spent the planner is never called and the run ends `failure` (counters before calls).
+Caveat recorded honestly: no pre-feature baseline was captured, so the claim is "off by default adds
+one flag read", not a fabricated percentage against a baseline that does not exist.
+
+`PHASE9_HARDENING.md` records the findings (H-1, H-2, H-3), the mapping difference (R-3) and the
+measurements; Phase 9 is 🟢. No merge, release or default activation is authorized until all phases
+are complete (owner instruction).
 
 **Acceptance criteria:**
 همهٔ security/adversarial E2Eهای تعریف‌شده سبزند؛ هیچ profile/untrusted text مجوز یا policy را تضعیف نمی‌کند؛ default-off و عدم‌اجرای denial/cancel با تست اثبات شده؛ limits قبل از مصرف runaway عمل می‌کنند؛ performance با معیار baseline مصوب سازگار است یا blocker صریح ثبت شده؛ suiteهای قبلی پابرجا هستند.

@@ -81,6 +81,7 @@ import { createAgent, type ResolvedAgent } from './agents/agent-factory.js';
 import { DEFAULT_RUN_MODE, type RunMode } from './modes.js';
 import { readOnlyToolIds } from './tools/read-only.js';
 import { activateWorkflowProfile, type WorkflowProfileActivation, type WorkflowProfileActivationOptions } from './workflow-profiles/profile-activation.js';
+import { ToolsetRegistry, loadToolsetsFromDirectory } from './workflow-profiles/toolsets.js';
 import {
   PLAN_INFEASIBLE_CODE,
   runWorkflowProfileBridge,
@@ -1138,16 +1139,40 @@ export class Orchestrator {
 
   // ─── Phase 7: Workflow Profile path ─────────────────────────────
 
-  /** Component sources for the resolver and the built-in default profile (same content). */
+  /**
+   * Component sources for the resolver and the built-in default profile (same content).
+   *
+   * Phase 9 (finding H-3): named toolsets are loaded from the same registry layers as every other
+   * component (`<layer>/toolsets/*.json`), so a profile that pins a `toolset` dependency resolves in
+   * a real run. A toolset never adds access: `ToolsetRegistry.register` rejects any tool the live
+   * catalog does not have, and the effective set stays an intersection.
+   */
   private workflowProfileSources(): WorkflowProfileComponentSources {
-    this.profileComponentSources ??= createWorkflowProfileComponentSources({
-      registries: {
-        personas: this.personaRegistry,
-        skills: this.skillRegistry,
-        models: this.modelRegistry,
-      },
-      toolCatalog: { hasDefinition: (id: string) => this.toolRegistry.getDefinition(id) !== undefined },
-    });
+    if (!this.profileComponentSources) {
+      const toolCatalog = { hasDefinition: (id: string) => this.toolRegistry.getDefinition(id) !== undefined };
+      const toolsetRegistry = new ToolsetRegistry({ tools: toolCatalog });
+      for (const [index, layer] of registryLayersFor(this.config.projectRoot, { env: this.env }).entries()) {
+        const loaded = loadToolsetsFromDirectory(path.join(layer.dir, 'toolsets'), toolsetRegistry, {
+          required: false,
+          override: index > 0,
+        });
+        for (const failure of loaded.errors) {
+          this.observabilityLogger.logSystemError(
+            'workflow-profile-toolsets',
+            `Toolset file "${failure.file}" could not be registered: ${failure.error}`,
+          );
+        }
+      }
+      this.profileComponentSources = createWorkflowProfileComponentSources({
+        registries: {
+          personas: this.personaRegistry,
+          skills: this.skillRegistry,
+          models: this.modelRegistry,
+          toolsets: toolsetRegistry,
+        },
+        toolCatalog,
+      });
+    }
     return this.profileComponentSources;
   }
 

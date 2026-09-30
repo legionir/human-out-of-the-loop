@@ -13,6 +13,8 @@
  * Recording boundary: schema/registry validation is *not* an execution
  * authorization. Phase 6 re-checks the effective set at the real tool call site.
  */
+import fs from 'node:fs';
+import path from 'node:path';
 import { z } from 'zod';
 import { WorkflowProfileLoadError } from './profile-registry.js';
 
@@ -112,9 +114,72 @@ export class ToolsetRegistry {
     return Object.freeze(Array.from(this.tools.values()));
   }
 
+  /** Removes a toolset so a higher registry layer can replace it (loader use only). */
+  remove(id: string): boolean {
+    return this.tools.delete(id);
+  }
+
   get size(): number {
     return this.tools.size;
   }
+}
+
+/** One file a loader could not register. `file` is the path or the entry name that failed. */
+export interface ToolsetFileError {
+  file: string;
+  error: string;
+}
+
+export interface LoadToolsetsOptions {
+  /** Replace a same-id toolset from an earlier layer (project layer overrides package). */
+  override?: boolean;
+  /**
+   * Treat a missing directory as an error. Defaults to false: a registry layer may legitimately
+   * ship only some subdirectories, exactly like personas/skills/models.
+   */
+  required?: boolean;
+}
+
+/**
+ * Load `<dir>/<id>.json` toolsets into a registry (Phase 9 finding H-3).
+ *
+ * A profile may pin a `toolset` dependency, but until now nothing in a real run wired the
+ * `ToolsetRegistry` into the resolver's sources, so any profile naming a toolset failed with
+ * `dependency.source-missing`. The loader follows the same registry-layer convention as the other
+ * component kinds: one JSON file per toolset, project layer overrides package, and every tool id is
+ * re-checked against the live catalog by `ToolsetRegistry.register` — a toolset can never introduce
+ * a tool the runtime does not have. Errors are collected, never thrown, so a validation report can
+ * show every broken file.
+ */
+export function loadToolsetsFromDirectory(
+  dir: string,
+  registry: ToolsetRegistry,
+  options: LoadToolsetsOptions = {},
+): { loaded: number; errors: ToolsetFileError[] } {
+  const result = { loaded: 0, errors: [] as ToolsetFileError[] };
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    if (options.required === true) result.errors.push({ file: dir, error: 'Directory does not exist' });
+    return result;
+  }
+  for (const entry of [...entries].sort((left, right) => left.name.localeCompare(right.name))) {
+    if (!entry.isFile() || !entry.name.endsWith('.json')) continue;
+    const file = path.join(dir, entry.name);
+    try {
+      const raw = JSON.parse(fs.readFileSync(file, 'utf-8')) as unknown;
+      if (options.override === true && typeof raw === 'object' && raw !== null && !Array.isArray(raw)) {
+        const id = (raw as { id?: unknown }).id;
+        if (typeof id === 'string' && registry.has(id)) registry.remove(id);
+      }
+      registry.register(raw);
+      result.loaded += 1;
+    } catch (error) {
+      result.errors.push({ file: entry.name, error: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  return result;
 }
 
 export interface EffectiveToolInput {
