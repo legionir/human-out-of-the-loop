@@ -472,7 +472,8 @@ agent cannot self-issue. PR #10's description now carries the phase-by-phase tab
 evidence) and the handoff checklist. The agent's own five-dimension review is recorded in
 `PHASE10_REVIEW.md` together with what it cannot certify (independent review, owner decisions, real
 provider behaviour, cross-platform manual runs, soak). **CI evidence:** run `36757851673` on exact head
-`307b218` (the code head of Phase 10 Steps 1–2) is **success 10/10 jobs** (ubuntu/macos/windows ×
+`307b218` (the code head of Phase 10 Steps 1–2), run `36770114778` on the resume head `73e578b`, and
+run `36773662406` on the U-4/R-3 head `86dbe88` are each **success 10/10 jobs** (ubuntu/macos/windows ×
 Node 22/24/26 for unit+integration, plus the three e2e legs), including the new `profile-gates` step.
 Earlier phase heads: `1921260` (run `36755763589`, success 10/10) and `655d77c` (run `36749650967`,
 success 10/10). The docs-only follow-up heads are recorded with their red legs rather than
@@ -859,3 +860,12 @@ existing review outcome a given end reports, and which formatter renders it. The
 remains unapproved (`BUILT_IN_DEFAULT_APPROVAL.approved: false`) and the flag stays off; Step 3 stays
 🟡 pending the owner's personal review of `PHASE10_REVIEW.md`; merges remain frozen by the owner's
 instruction.
+
+### Phase 10 U-4/R-3 exact-head CI confirmation (2026-09-30; append-only)
+
+**CI:** run `36773662406` on head `86dbe88` is **success 10/10** — ubuntu/macos/windows × Node
+22/24/26 unit+integration, the three e2e legs, `type check`, `build the CLI`, the Workflow Profile
+gate step and the CLI smoke. The resume head `73e578b` is likewise **success 10/10** (run
+`36770114778`), so both of this stretch's code heads are green on the exact SHA. Local evidence at
+`86dbe88`: profile + CLI + server suites 51 files / 576 tests; full suite 150 files / 1,985 tests with
+only the pre-existing `J-05`; e2e `profiles` 12/12; gates 9/9; `tsc`/`build` clean.

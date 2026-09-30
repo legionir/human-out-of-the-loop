@@ -693,6 +693,9 @@ execution-result status. Evidence: the new R-3 regression in `workflow-profile-h
 (both directions; 10/10 in that file), the shared-report assertions in
 `workflow-profile-parity.test.ts` (9), and the updated API-visible expectation in
 `phase8-profile-selection.test.ts`. Decision record: `PHASE10_OPERATIONS.md` §9; superseded text in
-`PHASE7_PARITY.md` §9–§10 is struck through with the decision applied. `BUILT_IN_DEFAULT_APPROVAL`
+`PHASE7_PARITY.md` §9–§10 is struck through with the decision applied. **Exact-head CI:** run
+`36773662406` on head `86dbe88` is **success 10/10** (all three OSes × Node 22/24/26, the three e2e
+legs, the Workflow Profile gate step), and the resume head `73e578b` is **success 10/10** in run
+`36770114778`. `BUILT_IN_DEFAULT_APPROVAL`
 stays `approved: false`, the flag stays off, Step 3 stays 🟡 pending the owner's review of
 `PHASE10_REVIEW.md`, and merges remain frozen by the owner's instruction.
