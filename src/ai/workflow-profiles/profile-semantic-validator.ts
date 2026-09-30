@@ -60,7 +60,13 @@ function assignable(source: WorkflowPort, target: WorkflowPort): boolean {
   if (target.required === true && source.required !== true) return false;
   const sourceType = source.type;
   const targetType = target.type;
-  const typeCompatible = sourceType === 'any' || targetType === 'any' || sourceType === targetType || (sourceType === 'integer' && targetType === 'number');
+  // `any` is safe as a target, but an unconstrained `any` source cannot flow
+  // into a narrower contract. A finite source enum provides enough evidence
+  // for the domain checks below to prove that the mapping is safe.
+  const typeCompatible = targetType === 'any'
+    || sourceType === targetType
+    || (sourceType === 'integer' && targetType === 'number')
+    || (sourceType === 'any' && source.enum !== undefined);
   if (!typeCompatible) return false;
 
   const targetDomain = domainFor(target);
@@ -315,14 +321,22 @@ function validateWorkflowProfileSemanticsUnchecked(profile: WorkflowProfileDocum
       }
     }
 
-    if (node.kind === 'review' && Array.isArray(node.config.allowedDecisions)) {
-      const allowed = node.config.allowedDecisions as unknown[];
+    if (node.kind === 'review') {
+      const configuredDomain = node.config.allowedDecisions;
       const decision = node.outputs.decision;
-      if (!decision) addDiagnostic('review.decision-output-missing', `Review node "${node.id}" with allowedDecisions must declare a decision output`, `/workflow/nodes/${index}/outputs/decision`, node.id);
-      else {
-        if (decision.required !== true) addDiagnostic('review.decision-output-optional', `Review decision output must be required when config.allowedDecisions is set`, `/workflow/nodes/${index}/outputs/decision/required`, node.id);
-        if (decision.type !== 'string') addDiagnostic('review.decision-output-type', `Review decision output must have type "string"`, `/workflow/nodes/${index}/outputs/decision/type`, node.id);
-        if (!Array.isArray(decision.enum) || !sameSet(decision.enum, allowed)) addDiagnostic('review.decision-enum-mismatch', `Review decision output enum must exactly match config.allowedDecisions`, `/workflow/nodes/${index}/outputs/decision/enum`, node.id);
+      // Phase 2 checks the profile's declared decision contract. Comparing it
+      // with the actual rubric domain requires resolving the digest-pinned
+      // rubric and is a Phase 3 resolver gate, not an inference from its ID.
+      if (decision || configuredDomain !== undefined) {
+        if (!Array.isArray(configuredDomain) || configuredDomain.length === 0) {
+          addDiagnostic('review.decision-domain-missing', `Review node "${node.id}" with a decision output must declare a non-empty allowedDecisions domain`, `/workflow/nodes/${index}/config/allowedDecisions`, node.id);
+        }
+        if (!decision) addDiagnostic('review.decision-output-missing', `Review node "${node.id}" with allowedDecisions must declare a decision output`, `/workflow/nodes/${index}/outputs/decision`, node.id);
+        else {
+          if (decision.required !== true) addDiagnostic('review.decision-output-optional', `Review decision output must be required when config.allowedDecisions is set`, `/workflow/nodes/${index}/outputs/decision/required`, node.id);
+          if (decision.type !== 'string') addDiagnostic('review.decision-output-type', `Review decision output must have type "string"`, `/workflow/nodes/${index}/outputs/decision/type`, node.id);
+          if (!Array.isArray(configuredDomain) || !Array.isArray(decision.enum) || !sameSet(decision.enum, configuredDomain)) addDiagnostic('review.decision-enum-mismatch', `Review decision output enum must exactly match config.allowedDecisions`, `/workflow/nodes/${index}/outputs/decision/enum`, node.id);
+        }
       }
     }
   }

@@ -60,6 +60,39 @@ describe('Workflow Profile semantic validation', () => {
     const mismatch = fixture();
     mismatch.workflow.edges[0]!.map.request = '/needsClarification';
     expect(codes(mismatch)).toContain('mapping.type-mismatch');
+
+    const makeAnySource = (withFiniteEnum: boolean): WorkflowProfileDocument => {
+      const profile = fixture();
+      // Keep only the intake→plan mapping under test. Removing the edge into
+      // `clarify` alone would leave clarify→plan and create a second, unrelated
+      // object→string mismatch.
+      profile.workflow.edges = profile.workflow.edges.filter((edge) => edge.from !== 'clarify' && edge.to !== 'clarify');
+      profile.workflow.nodes = profile.workflow.nodes.filter((node) => node.id !== 'clarify');
+      profile.workflow.nodes.find((node) => node.id === 'plan')!.inputs.request!.type = 'string';
+      const intake = profile.workflow.nodes.find((node) => node.id === 'request')!;
+      intake.outputs.request!.type = 'any';
+      if (withFiniteEnum) intake.outputs.request!.enum = ['a concrete request'];
+      else delete intake.outputs.request!.enum;
+      return profile;
+    };
+    const isAnyToStringMismatch = (profile: WorkflowProfileDocument): boolean =>
+      validateWorkflowProfileSemantics(profile).some((diagnostic) =>
+        diagnostic.code === 'mapping.type-mismatch'
+        && diagnostic.message.includes('Output request.request (any) is not assignable to input plan.request (string)'));
+    expect(isAnyToStringMismatch(makeAnySource(false))).toBe(true);
+    expect(isAnyToStringMismatch(makeAnySource(true))).toBe(false);
+
+    const incompatibleFiniteEnum = makeAnySource(true);
+    incompatibleFiniteEnum.workflow.nodes.find((node) => node.id === 'request')!.outputs.request!.enum = [42];
+    expect(isAnyToStringMismatch(incompatibleFiniteEnum)).toBe(true);
+
+    const mixedFiniteEnum = makeAnySource(true);
+    mixedFiniteEnum.workflow.nodes.find((node) => node.id === 'request')!.outputs.request!.enum = ['a concrete request', 42];
+    expect(isAnyToStringMismatch(mixedFiniteEnum)).toBe(true);
+
+    const anyToAny = makeAnySource(false);
+    anyToAny.workflow.nodes.find((node) => node.id === 'plan')!.inputs.request!.type = 'any';
+    expect(isAnyToStringMismatch(anyToAny)).toBe(false);
   });
 
   it('rejects unreachable nodes and end nodes', () => {
@@ -92,6 +125,10 @@ describe('Workflow Profile semantic validation', () => {
     const review = badReviewEnum.workflow.nodes.find((node) => node.kind === 'review')!;
     review.outputs.decision!.enum = ['pass', 'revise'];
     expect(codes(badReviewEnum)).toContain('review.decision-enum-mismatch');
+
+    const missingDeclaredReviewDomain = fixture();
+    delete missingDeclaredReviewDomain.workflow.nodes.find((node) => node.kind === 'review')!.config.allowedDecisions;
+    expect(codes(missingDeclaredReviewDomain)).toContain('review.decision-domain-missing');
 
     const missingReviewRoute = fixture();
     missingReviewRoute.workflow.edges = missingReviewRoute.workflow.edges.filter((edge) => !(edge.from === 'review' && edge.label === 'reject'));
