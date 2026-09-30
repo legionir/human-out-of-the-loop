@@ -68,3 +68,9 @@ Coverage highlights: all seven kinds in one semantically validated profile (`sta
 - Existing services are consumed through narrow structural interfaces, so a future change to `Planner`/`PlanRuntime`/`FinalReviewer` signatures surfaces as a type error at wiring time instead of silent drift.
 - The trusted-host stable-root guarantee and the authoritative Runtime compatibility/enforcement contract remain open pre-integration gates.
 - Per the owner instruction of 2026-09-30 no merge happens until every phase is complete; this phase is its own commit so per-phase review remains reconstructable at handoff.
+
+## 7. CI record (append-only)
+
+**Run `36713201379` on `c9ba62d` — attempt 1, 9/10 jobs, failure on `windows-latest / node 22` only.** The other nine jobs passed (ubuntu 22/24/26, macos 22/24, windows 24, and the three e2e jobs). The failing job's logs are not retrievable from this environment (the job-log API returns 0 bytes and the log archive request ends in `EOF`, the same limitation recorded for earlier runs), and both rerun routes are rejected (`run cannot be rerun`; `rerun-failed-jobs` → HTTP 403 `Resource not accessible by integration`), so **no cause is asserted** for this failure.
+
+Context that bears on interpretation, not a conclusion: the same `windows-latest / node 22` or `node 24` job failed on two of the four most recent pushes to this branch and passed on rerun or on the next push without any change to that job's inputs (PR #9 attempt 1 → attempt 2 all green; PR #10 `2ccaaa0` failed `windows / node 24`; Phase 4 run `36710870531` passed all ten). A fresh exact-head run on the next commit is the discriminating evidence; until it is green, Phase 5's local evidence above stands on its own and the Windows result is recorded as unexplained rather than resolved.
