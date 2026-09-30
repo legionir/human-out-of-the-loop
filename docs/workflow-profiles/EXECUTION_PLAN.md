@@ -466,9 +466,17 @@ agent cannot self-issue. PR #10's description now carries the phase-by-phase tab
 evidence) and the handoff checklist. The agent's own five-dimension review is recorded in
 `PHASE10_REVIEW.md` together with what it cannot certify (independent review, owner decisions, real
 provider behaviour, cross-platform manual runs, soak). **CI evidence:** run `36757851673` on exact head
-`307b218` is **success 10/10 jobs** (ubuntu/macos/windows × Node 22/24/26 for unit+integration, plus
-the three e2e legs), including the new `profile-gates` step. Earlier phase heads: `1921260`
-(run `36755763589`, success 10/10) and `655d77c` (run `36749650967`, success 10/10).
+`307b218` (the code head of Phase 10 Steps 1–2) is **success 10/10 jobs** (ubuntu/macos/windows ×
+Node 22/24/26 for unit+integration, plus the three e2e legs), including the new `profile-gates` step.
+Earlier phase heads: `1921260` (run `36755763589`, success 10/10) and `655d77c` (run `36749650967`,
+success 10/10). The **docs-only** follow-up head `f3bd11a` (run `36758702602`) is recorded as
+**failure 1/10**: `windows-latest / node 22` reddened in the unit/integration suite on two unrelated
+tests that timed out as hooks — `u3-run-options.test.ts` ("maxSteps is applied as the SDK loop bound",
+`Hook timed out in 30000ms`) and `phase-h.test.ts` ("serves ui-logic.js for the module frontend",
+`Hook timed out in 30000ms`). Nothing Workflow Profile-related failed, the diff is documentation only,
+the same tests pass on every other leg and passed on `307b218`; the standard remedy (rerunning only
+the failed job) is not permitted for this run ("run … cannot be rerun"), so the flake is recorded here
+rather than hidden, exactly as the earlier Windows job flakes are.
 
 **Acceptance criteria:**
 migration/rollback آزموده یا عدم نیاز مستند است؛ CI و semantic/schema/security gates روی head هر PR نتیجهٔ ثبت‌شده دارند؛ traceability برای همهٔ R IDs کامل است؛ هیچ unknown مسدودکننده‌ای بی‌صاحب/بی‌موعد نیست؛ PRها فازبندی و قابل‌بازبینی‌اند؛ regressions از baseline تفکیک شده؛ همهٔ docs/examples با implementation همخوانند؛ rollout default-off است؛ merge/release بدون مجوز انجام نشده است.

@@ -657,6 +657,9 @@ PRs.
 compatibility findings with their evidence, plus what it cannot certify (independent human review,
 the U-1…U-5 owner decisions, real-provider behaviour, manual cross-platform runs, soak testing). PR
 #10's description is the phase-by-phase handoff (commit → WP-R IDs → evidence → CI head). CI run
-`36757851673` on head `307b218` is **success 10/10**, including the new Workflow Profile gate step.
+`36757851673` on head `307b218` is **success 10/10**, including the new Workflow Profile gate step;
+the docs-only follow-up head `f3bd11a` (run `36758702602`) is recorded as failure 1/10 on
+`windows-latest / node 22` from two unrelated hook timeouts (`u3-run-options`, `phase-h`) — no profile
+test failed and the rerun-only-failed-job remedy is not permitted for that run.
 Step 3 stays 🟡 until a reviewer other than the implementer signs off and the owner answers the open
 items; no merge, release or activation is performed or requested.
