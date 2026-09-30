@@ -6,11 +6,42 @@ import type {
   WorkflowProfileDiagnostic,
   WorkflowProfileDocument,
   WorkflowProfileScope,
+  ValidatedWorkflowProfileDocument,
 } from './profile-types.js';
 
 export const MAX_WORKFLOW_PROFILE_BYTES = 1_048_576;
 
 const WORKFLOW_PROFILE_SCOPES: ReadonlySet<string> = new Set(['builtin', 'project', 'user-selected']);
+
+function isRecord(value: unknown): value is Record<string, any> {
+  try {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    for (const key of Reflect.ownKeys(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !('value' in descriptor)) return false;
+    }
+    return true;
+  } catch { return false; }
+}
+
+const UNSAFE_BOUNDARY_VALUE = Symbol('unsafe-boundary-value');
+
+function ownDataValue(record: object, key: string): unknown {
+  try {
+    const descriptor = Object.getOwnPropertyDescriptor(record, key);
+    return descriptor && 'value' in descriptor ? descriptor.value : undefined;
+  } catch {
+    // Let the public boundary's normal type/shape validation turn this sentinel
+    // into a structured diagnostic rather than leaking a Proxy trap exception.
+    return UNSAFE_BOUNDARY_VALUE;
+  }
+}
+
+function invalidInput(stage: 'read' | 'semantic', code: string, message: string, file?: string): WorkflowProfileLoadError {
+  return new WorkflowProfileLoadError(message, [{ stage, code, message, file }]);
+}
 
 function assertWorkflowProfileScope(scope: unknown, file?: string): asserts scope is WorkflowProfileScope {
   if (typeof scope === 'string' && WORKFLOW_PROFILE_SCOPES.has(scope)) return;
@@ -26,8 +57,15 @@ function projectOptInRequired(file?: string): WorkflowProfileLoadError {
   }]);
 }
 
+export interface WorkflowProfileRegistration {
+  /** Untrusted input; register() revalidates before it is exposed. */
+  readonly profile: WorkflowProfileDocument;
+  readonly scope: WorkflowProfileScope;
+  readonly file: string;
+}
+
 export interface RegisteredWorkflowProfile {
-  readonly profile: Readonly<WorkflowProfileDocument>;
+  readonly profile: ValidatedWorkflowProfileDocument;
   readonly scope: WorkflowProfileScope;
   readonly file: string;
 }
@@ -44,51 +82,68 @@ export class WorkflowProfileRegistry {
   private readonly projectOptIn: boolean;
 
   constructor(options: { projectOptIn?: boolean } = {}) {
-    this.projectOptIn = options.projectOptIn === true;
+    if (!isRecord(options)) throw invalidInput('read', 'registry.options-invalid', 'Registry options must be an object with an optional boolean projectOptIn value');
+    const projectOptIn = ownDataValue(options, 'projectOptIn');
+    if (projectOptIn !== undefined && typeof projectOptIn !== 'boolean') {
+      throw invalidInput('read', 'registry.options-invalid', 'Registry options must be an object with an optional boolean projectOptIn value');
+    }
+    this.projectOptIn = projectOptIn === true;
   }
 
-  register(entry: RegisteredWorkflowProfile): void {
-    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+  register(entry: WorkflowProfileRegistration): void {
+    try { this.registerUnchecked(entry); }
+    catch (error) {
+      if (error instanceof WorkflowProfileLoadError) throw error;
+      throw invalidInput('read', 'registry.entry-invalid', `Registry entry could not be safely inspected: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private registerUnchecked(entry: WorkflowProfileRegistration): void {
+    if (!isRecord(entry)) {
       throw new WorkflowProfileLoadError('Invalid workflow profile registry entry', [{
         stage: 'read', code: 'registry.entry-invalid', message: 'Registry entry must be an object containing scope, file, and profile',
       }]);
     }
-    const file = typeof entry.file === 'string' && entry.file.length > 0 ? entry.file : undefined;
+    const rawFile = ownDataValue(entry, 'file');
+    const scope = ownDataValue(entry, 'scope');
+    const profile = ownDataValue(entry, 'profile');
+    const file = typeof rawFile === 'string' && rawFile.length > 0 ? rawFile : undefined;
     if (file === undefined) {
       throw new WorkflowProfileLoadError('Invalid workflow profile registry entry', [{
         stage: 'read', code: 'registry.entry-invalid', message: 'Registry entry must include a non-empty file identifier',
       }]);
     }
-    assertWorkflowProfileScope((entry as { scope?: unknown }).scope, file);
-    if (entry.scope === 'project' && this.projectOptIn !== true) throw projectOptInRequired(file);
-    const structuralDiagnostics = validateWorkflowProfileStructure(entry.profile).map((diagnostic) => ({ ...diagnostic, file }));
+    assertWorkflowProfileScope(scope, file);
+    if (scope === 'project' && this.projectOptIn !== true) throw projectOptInRequired(file);
+    const structuralDiagnostics = validateWorkflowProfileStructure(profile).map((diagnostic) => ({ ...diagnostic, file }));
     if (structuralDiagnostics.length) {
       throw new WorkflowProfileLoadError(`Structurally invalid workflow profile "${file}"`, structuralDiagnostics);
     }
+    const validProfile = profile as WorkflowProfileDocument;
     // Read profile-controlled values only after structural validation, so a malformed
     // in-memory caller cannot escape as a raw TypeError before diagnostics are formed.
-    const id = entry.profile.profile.id;
-    const version = entry.profile.schemaVersion;
+    const id = validProfile.profile.id;
+    const version = validProfile.schemaVersion;
     const match = typeof version === 'string' ? /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/.exec(version) : null;
     if (!match || Number(match[1]) !== SUPPORTED_SCHEMA_MAJOR || Number(match[2]) !== SUPPORTED_SCHEMA_MINOR) {
       throw new WorkflowProfileLoadError(`Unsupported workflow profile schema version ${typeof version === 'string' ? version : '<missing or invalid>'}`, [{
         stage: 'schema-version', code: 'schema-version.unsupported',
         message: `Supported contract is ${SUPPORTED_SCHEMA_MAJOR}.${SUPPORTED_SCHEMA_MINOR}.x`,
-        profileId: id, file: entry.file, path: '/schemaVersion',
+        profileId: id, file, path: '/schemaVersion',
       }]);
     }
-    const semanticDiagnostics = validateWorkflowProfileSemantics(entry.profile).map((diagnostic) => ({ ...diagnostic, file: entry.file }));
+    const semanticDiagnostics = validateWorkflowProfileSemantics(validProfile).map((diagnostic) => ({ ...diagnostic, file }));
     if (semanticDiagnostics.length) {
-      throw new WorkflowProfileLoadError(`Semantically invalid workflow profile "${entry.file}"`, semanticDiagnostics);
+      throw new WorkflowProfileLoadError(`Semantically invalid workflow profile "${file}"`, semanticDiagnostics);
     }
     if (this.byId.has(id)) {
       throw new WorkflowProfileLoadError(`Duplicate workflow profile id "${id}"`, [{
         stage: 'semantic', code: 'registry.duplicate-id', message: `Duplicate workflow profile id "${id}"`,
-        profileId: id, file: entry.file, path: '/profile/id',
+        profileId: id, file, path: '/profile/id',
       }]);
     }
-    const immutableProfile = deepFreeze(structuredClone(entry.profile));
-    this.byId.set(id, Object.freeze({ ...entry, profile: immutableProfile }));
+    const immutableProfile = deepFreeze(structuredClone(validProfile)) as ValidatedWorkflowProfileDocument;
+    this.byId.set(id, Object.freeze({ profile: immutableProfile, scope, file }));
   }
 
   get(id: string): RegisteredWorkflowProfile | undefined { return this.byId.get(id); }
@@ -150,6 +205,8 @@ export function readWorkflowProfileUtf8(file: string): string {
       stage: 'read', code: 'file.unreadable', message: `Cannot open profile file: ${error instanceof Error ? error.message : String(error)}`, file,
     }]);
   }
+  let decoded: string | undefined;
+  let primaryError: unknown;
   try {
     const stat = fs.fstatSync(fd);
     if (!stat.isFile()) throw new WorkflowProfileLoadError(`Workflow profile is not a regular file: ${file}`, [{
@@ -173,15 +230,25 @@ export function readWorkflowProfileUtf8(file: string): string {
     }
     if (length > MAX_WORKFLOW_PROFILE_BYTES) throw tooLarge(file, length);
     try {
-      return new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length));
+      decoded = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, length));
     } catch (error) {
       throw new WorkflowProfileLoadError(`Profile is not valid UTF-8: ${file}`, [{
         stage: 'utf8', code: 'utf8.invalid', message: error instanceof Error ? error.message : 'Invalid UTF-8 byte sequence', file,
       }]);
     }
-  } finally {
-    fs.closeSync(fd);
+  } catch (error) {
+    primaryError = error;
   }
+  try { fs.closeSync(fd); }
+  catch (error) { if (primaryError === undefined) primaryError = error; }
+  if (primaryError instanceof WorkflowProfileLoadError) throw primaryError;
+  if (primaryError !== undefined) {
+    const message = primaryError instanceof Error ? primaryError.message : String(primaryError);
+    throw new WorkflowProfileLoadError(`Cannot read workflow profile "${file}": ${message}`, [{
+      stage: 'read', code: 'file.read-failed', message, file,
+    }]);
+  }
+  return decoded!;
 }
 
 function tooLarge(file: string, actualBytes: number): WorkflowProfileLoadError {
@@ -195,14 +262,20 @@ export function loadWorkflowProfileFile(
   scope: WorkflowProfileScope,
   options: { projectOptIn?: boolean } = {},
 ): RegisteredWorkflowProfile {
+  if (typeof file !== 'string' || file.length === 0) throw invalidInput('read', 'file.path-invalid', 'Profile file path must be a non-empty string');
+  if (!isRecord(options)) throw invalidInput('read', 'file.options-invalid', 'Profile load options must be an object with an optional boolean projectOptIn value', file);
+  const projectOptIn = ownDataValue(options, 'projectOptIn');
+  if (projectOptIn !== undefined && typeof projectOptIn !== 'boolean') {
+    throw invalidInput('read', 'file.options-invalid', 'Profile load options must be an object with an optional boolean projectOptIn value', file);
+  }
   assertWorkflowProfileScope(scope, file);
-  if (scope === 'project' && options.projectOptIn !== true) throw projectOptInRequired(file);
+  if (scope === 'project' && projectOptIn !== true) throw projectOptInRequired(file);
   const text = readWorkflowProfileUtf8(file);
   const structural = validateWorkflowProfileJson(text, file);
   if (!structural.ok || !structural.profile) throw new WorkflowProfileLoadError(`Invalid workflow profile "${file}"`, structural.diagnostics);
   const semanticDiagnostics = validateWorkflowProfileSemantics(structural.profile).map((diagnostic) => ({ ...diagnostic, file }));
   if (semanticDiagnostics.length) throw new WorkflowProfileLoadError(`Semantically invalid workflow profile "${file}"`, semanticDiagnostics);
-  return Object.freeze({ profile: deepFreeze(structural.profile), scope, file });
+  return Object.freeze({ profile: deepFreeze(structural.profile) as ValidatedWorkflowProfileDocument, scope, file });
 }
 
 /**
@@ -212,7 +285,15 @@ export function loadWorkflowProfileFile(
  * or ambiguous profile set.
  */
 export function loadWorkflowProfilesFromDirectory(options: WorkflowProfileDirectoryOptions): WorkflowProfileRegistry {
-  const { directory, scope, projectOptIn = false } = options;
+  if (!isRecord(options)) throw invalidInput('read', 'directory.options-invalid', 'Directory loader options must be an object');
+  const directoryValue = ownDataValue(options, 'directory');
+  const scopeValue = ownDataValue(options, 'scope');
+  const projectOptInValue = ownDataValue(options, 'projectOptIn');
+  const directory = directoryValue;
+  const scope = scopeValue;
+  const projectOptIn = projectOptInValue === undefined ? false : projectOptInValue;
+  if (typeof directory !== 'string' || directory.length === 0) throw invalidInput('read', 'directory.path-invalid', 'Profile discovery directory must be a non-empty string');
+  if (projectOptIn !== undefined && typeof projectOptIn !== 'boolean') throw invalidInput('read', 'directory.opt-in-invalid', 'projectOptIn must be a boolean', directory);
   assertWorkflowProfileScope(scope, directory);
   if (scope === 'project' && projectOptIn !== true) throw projectOptInRequired(directory);
   let directoryStat: fs.Stats;
@@ -267,29 +348,53 @@ export function selectWorkflowProfile(
   registry: WorkflowProfileRegistry,
   options: WorkflowProfileSelectionOptions,
 ): RegisteredWorkflowProfile {
+  if (!(registry instanceof WorkflowProfileRegistry)) {
+    throw invalidInput('semantic', 'selection.registry-invalid', 'Profile selection requires a WorkflowProfileRegistry instance');
+  }
+  if (!isRecord(options)) throw invalidInput('semantic', 'selection.options-invalid', 'Profile selection options must be an object');
+  const selection = options as unknown as Record<string, unknown>;
+  const requestedProfileId = ownDataValue(selection, 'requestedProfileId');
+  const projectOptIn = ownDataValue(selection, 'projectOptIn');
+  const projectDefaultProfileId = ownDataValue(selection, 'projectDefaultProfileId');
+  const builtInDefaultProfileId = ownDataValue(selection, 'builtInDefaultProfileId');
+  if (projectOptIn !== undefined && typeof projectOptIn !== 'boolean') {
+    throw invalidInput('semantic', 'selection.opt-in-invalid', 'projectOptIn must be a boolean');
+  }
+  for (const [key, id] of Object.entries({
+    requestedProfileId,
+    projectDefaultProfileId,
+    builtInDefaultProfileId,
+  })) {
+    if (id !== undefined && (typeof id !== 'string' || id.length === 0)) {
+      throw invalidInput('semantic', 'selection.profile-id-invalid', `${key} must be a non-empty string when provided`);
+    }
+  }
+  const requestedId = requestedProfileId as string | undefined;
+  const projectDefaultId = projectDefaultProfileId as string | undefined;
+  const builtInDefaultId = builtInDefaultProfileId as string | undefined;
   const requireEligible = (id: string, reason: string): RegisteredWorkflowProfile => {
     const selected = registry.get(id);
     if (!selected) throw new WorkflowProfileLoadError(`Cannot select ${reason} profile "${id}": it was not discovered`, [{
       stage: 'semantic', code: 'selection.profile-missing', message: `Profile "${id}" is not registered`, profileId: id, path: '/profile/id',
     }]);
-    if (selected.scope === 'project' && options.projectOptIn !== true) throw new WorkflowProfileLoadError('Project workflow profiles require explicit opt-in', [{
+    if (selected.scope === 'project' && projectOptIn !== true) throw new WorkflowProfileLoadError('Project workflow profiles require explicit opt-in', [{
       stage: 'read', code: 'project-profile.opt-in-required', message: 'The selected project profile is not eligible without explicit opt-in', profileId: id, file: selected.file,
     }]);
     return selected;
   };
 
-  if (options.requestedProfileId !== undefined) return requireEligible(options.requestedProfileId, 'explicitly selected');
-  if (options.projectOptIn === true && options.projectDefaultProfileId !== undefined) {
-    const projectDefault = requireEligible(options.projectDefaultProfileId, 'project default');
-    if (projectDefault.scope !== 'project') throw new WorkflowProfileLoadError(`Project default profile "${options.projectDefaultProfileId}" is not project-scoped`, [{
+  if (requestedId !== undefined) return requireEligible(requestedId, 'explicitly selected');
+  if (projectOptIn === true && projectDefaultId !== undefined) {
+    const projectDefault = requireEligible(projectDefaultId, 'project default');
+    if (projectDefault.scope !== 'project') throw new WorkflowProfileLoadError(`Project default profile "${projectDefaultId}" is not project-scoped`, [{
       stage: 'semantic', code: 'selection.default-not-project',
-      message: 'A project default must be registered from the project scope', profileId: options.projectDefaultProfileId,
+      message: 'A project default must be registered from the project scope', profileId: projectDefaultId,
       file: projectDefault.file, path: '/profile/id',
     }]);
     return projectDefault;
   }
-  if (options.builtInDefaultProfileId) {
-    const fallback = requireEligible(options.builtInDefaultProfileId, 'built-in default');
+  if (builtInDefaultId) {
+    const fallback = requireEligible(builtInDefaultId, 'built-in default');
     if (fallback.scope !== 'builtin') throw new WorkflowProfileLoadError(`Fallback profile "${fallback.profile.profile.id}" is not built-in`, [{
       stage: 'semantic', code: 'selection.default-not-builtin', message: 'Built-in fallback must come from the built-in scope', profileId: fallback.profile.profile.id, file: fallback.file,
     }]);

@@ -1,15 +1,35 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Ajv2020, { type ErrorObject, type ValidateFunction } from 'ajv/dist/2020.js';
-import { packageRoot } from '../registries/layout.js';
+import { fileURLToPath } from 'node:url';
 import type { WorkflowProfileDocument, WorkflowProfileDiagnostic, WorkflowProfileValidationResult } from './profile-types.js';
 
 export const SUPPORTED_SCHEMA_MAJOR = 1;
 export const SUPPORTED_SCHEMA_MINOR = 0;
 
+function canonicalPackageRoot(): string | undefined {
+  let directory = path.dirname(fileURLToPath(import.meta.url));
+  for (;;) {
+    const manifestPath = path.join(directory, 'package.json');
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as { name?: unknown };
+        // Stop at the nearest package boundary. Never walk past an unrelated or
+        // malformed package manifest and accidentally load an ancestor's Schema.
+        return manifest?.name === 'human-out-of-the-loop' ? directory : undefined;
+      } catch {
+        return undefined;
+      }
+    }
+    const parent = path.dirname(directory);
+    if (parent === directory) return undefined;
+    directory = parent;
+  }
+}
+
 function readCanonicalSchema(): Record<string, unknown> {
-  const root = packageRoot();
-  if (!root) throw new Error('[workflow-profile] Cannot locate package root to load canonical JSON Schema');
+  const root = canonicalPackageRoot();
+  if (!root) throw new Error('[workflow-profile] Cannot locate the human-out-of-the-loop package root to load canonical JSON Schema');
   const schemaPath = path.join(root, 'docs', 'workflow-profiles', 'workflow-profile.schema.json');
   try {
     return JSON.parse(fs.readFileSync(schemaPath, 'utf8')) as Record<string, unknown>;
@@ -30,6 +50,7 @@ const ajv = new Ajv2020({
   strictRequired: false,
   validateSchema: true,
   messages: true,
+  ownProperties: true,
   coerceTypes: false,
   useDefaults: false,
   removeAdditional: false,
@@ -97,6 +118,12 @@ class DuplicateJsonMemberError extends Error {
   }
 }
 
+class JsonScanLimitError extends Error {
+  constructor() { super('JSON nesting exceeds the duplicate-key scanner depth limit'); this.name = 'JsonScanLimitError'; }
+}
+
+const MAX_JSON_SCAN_DEPTH = 128;
+
 /** JSON.parse silently keeps the last duplicate object key; reject duplicates before it loses port/config information. */
 function assertNoDuplicateJsonMembers(text: string): void {
   let index = 0;
@@ -113,7 +140,8 @@ function assertNoDuplicateJsonMembers(text: string): void {
     }
     throw new Error('Unterminated JSON string');
   };
-  const parseValue = (memberPath: string): void => {
+  const parseValue = (memberPath: string, depth = 0): void => {
+    if (depth > MAX_JSON_SCAN_DEPTH) throw new JsonScanLimitError();
     whitespace();
     if (text[index] === '"') { stringToken(); return; }
     if (text[index] === '[') {
@@ -122,7 +150,7 @@ function assertNoDuplicateJsonMembers(text: string): void {
       if (text[index] === ']') { index++; return; }
       let item = 0;
       for (;;) {
-        parseValue(`${memberPath}/${item++}`);
+        parseValue(`${memberPath}/${item++}`, depth + 1);
         whitespace();
         if (text[index] === ']') { index++; return; }
         if (text[index] !== ',') throw new Error('Malformed JSON array');
@@ -145,7 +173,7 @@ function assertNoDuplicateJsonMembers(text: string): void {
         whitespace();
         if (text[index] !== ':') throw new Error('Malformed JSON object');
         index++;
-        parseValue(childPath);
+        parseValue(childPath, depth + 1);
         whitespace();
         if (text[index] === '}') { index++; return; }
         if (text[index] !== ',') throw new Error('Malformed JSON object');
@@ -159,7 +187,7 @@ function assertNoDuplicateJsonMembers(text: string): void {
     }
   };
   try { parseValue(''); } catch (error) {
-    if (error instanceof DuplicateJsonMemberError) throw error;
+    if (error instanceof DuplicateJsonMemberError || error instanceof JsonScanLimitError) throw error;
     // JSON.parse below remains the authority for malformed syntax.
   }
 }
@@ -167,11 +195,16 @@ function assertNoDuplicateJsonMembers(text: string): void {
 export function validateWorkflowProfileJson(text: string, file?: string): WorkflowProfileValidationResult {
   let value: unknown;
   try {
-    assertNoDuplicateJsonMembers(text);
+    // JSON.parse establishes syntax validity first. The duplicate-member scan
+    // then rejects otherwise-valid JSON without taking precedence over syntax errors.
     value = JSON.parse(text) as unknown;
+    assertNoDuplicateJsonMembers(text);
   } catch (error) {
     if (error instanceof DuplicateJsonMemberError) {
       return { ok: false, diagnostics: [{ stage: 'parse', code: 'json.duplicate-key', message: error.message, file, path: error.memberPath }] };
+    }
+    if (error instanceof JsonScanLimitError) {
+      return { ok: false, diagnostics: [{ stage: 'parse', code: 'json.depth-limit', message: error.message, file, path: '/' }] };
     }
     return {
       ok: false,
@@ -216,8 +249,71 @@ export function validateWorkflowProfileJson(text: string, file?: string): Workfl
   };
 }
 
+export function isJsonCompatibleValue(value: unknown): boolean {
+  const pending: Array<{ value: unknown; depth: number }> = [{ value, depth: 0 }];
+  const seen = new WeakSet<object>();
+  let nodes = 0;
+  let encodedBytes = 0;
+  const addBytes = (amount: number): boolean => {
+    encodedBytes += amount;
+    return encodedBytes <= 1_048_576;
+  };
+  try {
+    while (pending.length) {
+      const item = pending.pop()!;
+      const current = item.value;
+      nodes++;
+      if (nodes > 100_000 || item.depth > 128) return false;
+      if (current === null) { if (!addBytes(4)) return false; continue; }
+      if (typeof current === 'string') {
+        if (current.length > 1_048_576 || !addBytes(Buffer.byteLength(JSON.stringify(current)!))) return false;
+        continue;
+      }
+      if (typeof current === 'boolean') { if (!addBytes(current ? 4 : 5)) return false; continue; }
+      if (typeof current === 'number') {
+        if (!Number.isFinite(current) || !addBytes(JSON.stringify(current)!.length)) return false;
+        continue;
+      }
+      if (typeof current !== 'object') return false;
+      const object = current as object;
+      if (seen.has(object)) return false; // JSON documents are trees, not aliased/cyclic object graphs.
+      seen.add(object);
+      const array = Array.isArray(object);
+      const prototype = Object.getPrototypeOf(object);
+      if (array ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return false;
+      const keys = Reflect.ownKeys(object);
+      if (keys.some((key) => typeof key !== 'string')) return false;
+      if (array) {
+        const length = (object as unknown[]).length;
+        if (keys.length !== length + 1 || !keys.includes('length') || !addBytes(2 + Math.max(0, length - 1))) return false;
+        for (let index = 0; index < length; index++) {
+          const descriptor = Object.getOwnPropertyDescriptor(object, String(index));
+          if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) return false;
+          pending.push({ value: descriptor.value, depth: item.depth + 1 });
+        }
+      } else {
+        if (!addBytes(2 + Math.max(0, keys.length - 1))) return false;
+        for (const key of keys as string[]) {
+          if (key.length > 1_048_576 || !addBytes(Buffer.byteLength(JSON.stringify(key)!) + 1)) return false;
+          const descriptor = Object.getOwnPropertyDescriptor(object, key);
+          if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) return false;
+          pending.push({ value: descriptor.value, depth: item.depth + 1 });
+        }
+      }
+    }
+    return true;
+  } catch {
+    // Proxies and objects with hostile reflection traps are not JSON values.
+    return false;
+  }
+}
+
 /** Reusable structural-only validator for internal parity tests. */
 export function validateWorkflowProfileStructure(value: unknown): WorkflowProfileDiagnostic[] {
+  if (!isJsonCompatibleValue(value)) return [{
+    stage: 'structural', code: 'json.value-invalid',
+    message: 'Profile input must be a plain, acyclic JSON value containing only own data properties', path: '/',
+  }];
   if (!validate(value)) return structuralDiagnostics(validate.errors, getProfileId(value), undefined, value);
   return [];
 }

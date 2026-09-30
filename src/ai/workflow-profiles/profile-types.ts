@@ -17,6 +17,10 @@ export interface WorkflowResult {
   outcome: WorkflowResultOutcome;
 }
 
+/**
+ * Untrusted wire/input shape. Its broad index signatures intentionally permit
+ * parsing before Schema validation; callers must not activate or execute it.
+ */
 export interface WorkflowProfileDocument {
   $schema?: string;
   schemaVersion: string;
@@ -92,6 +96,15 @@ export interface WorkflowErrorPolicy {
   routeTo?: string;
   routeMap?: Record<string, string>;
 }
+
+/**
+ * Output type for the only Phase 2 trust boundary: a profile that has passed
+ * structural and semantic validation before registry exposure.
+ */
+declare const validatedWorkflowProfileBrand: unique symbol;
+export type ValidatedWorkflowProfileDocument = Readonly<WorkflowProfileDocument> & {
+  readonly [validatedWorkflowProfileBrand]: true;
+};
 
 export interface WorkflowProfileDiagnostic {
   stage: 'read' | 'utf8' | 'parse' | 'schema-version' | 'structural' | 'semantic';

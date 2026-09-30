@@ -17,6 +17,11 @@ function codes(profile: WorkflowProfileDocument): string[] {
 }
 
 describe('Workflow Profile semantic validation', () => {
+  it('returns diagnostics rather than throwing for malformed direct inputs', () => {
+    expect(codes(null as any)).toContain('semantic.input-invalid');
+    expect(codes({} as any)).toContain('semantic.input-invalid');
+  });
+
   it('rejects duplicate dependency (kind,id), even when version/digest metadata differs', () => {
     const profile = fixture();
     profile.dependencies.push({ ...profile.dependencies[0]!, version: '99.0.0', digest: `sha256:${'a'.repeat(64)}` });
@@ -174,6 +179,75 @@ describe('Workflow Profile semantic validation', () => {
     expect(codes(invalidEnum)).toContain('port.enum-type-mismatch');
   });
 
+  it('enforces required Approval, Condition, and Review output contracts', () => {
+    const missingText = fixture();
+    const textApproval = missingText.workflow.nodes.find((node) => node.kind === 'approval')!;
+    delete textApproval.outputs.answer;
+    expect(codes(missingText)).toContain('approval.response-output-missing');
+
+    const optionalText = fixture();
+    optionalText.workflow.nodes.find((node) => node.kind === 'approval')!.outputs.answer!.required = false;
+    expect(codes(optionalText)).toContain('approval.response-output-optional');
+
+    const wrongText = fixture();
+    wrongText.workflow.nodes.find((node) => node.kind === 'approval')!.outputs.answer!.type = 'object';
+    expect(codes(wrongText)).toContain('approval.response-output-type');
+
+    const decisionApproval = fixture();
+    const decision = decisionApproval.workflow.nodes.find((node) => node.kind === 'approval')!;
+    decision.config.responseKind = 'decision';
+    delete decision.outputs.answer;
+    decision.outputs.decision = { type: 'object', required: true };
+    expect(codes(decisionApproval)).not.toContain('approval.response-output-missing');
+    expect(codes(decisionApproval)).not.toContain('approval.response-output-type');
+    decision.outputs.decision.required = false;
+    expect(codes(decisionApproval)).toContain('approval.response-output-optional');
+    decision.outputs.decision = { type: 'string', required: true };
+    expect(codes(decisionApproval)).toContain('approval.response-output-type');
+
+    const optionalMatched = fixture('bounded-review-fix.example.json');
+    const condition = optionalMatched.workflow.nodes.find((node) => node.kind === 'condition')!;
+    condition.outputs.matched!.required = false;
+    expect(codes(optionalMatched)).toContain('condition.matched-output');
+
+    const opaquePassThrough = fixture('bounded-review-fix.example.json');
+    const opaqueCondition = opaquePassThrough.workflow.nodes.find((node) => node.kind === 'condition')!;
+    opaqueCondition.inputs.request!.type = 'any';
+    opaqueCondition.outputs.request!.type = 'string';
+    expect(codes(opaquePassThrough)).toContain('condition.pass-through');
+
+    const requiredMismatch = fixture('bounded-review-fix.example.json');
+    const requiredCondition = requiredMismatch.workflow.nodes.find((node) => node.kind === 'condition')!;
+    requiredCondition.outputs.request!.required = false;
+    expect(codes(requiredMismatch)).toContain('condition.pass-through');
+
+    const enumMismatch = fixture('bounded-review-fix.example.json');
+    const enumCondition = enumMismatch.workflow.nodes.find((node) => node.kind === 'condition')!;
+    enumCondition.inputs.request!.enum = ['a', 'b'];
+    enumCondition.outputs.request!.enum = ['a'];
+    expect(codes(enumMismatch)).toContain('condition.pass-through');
+
+    const optionalReview = fixture();
+    optionalReview.workflow.nodes.find((node) => node.kind === 'review')!.outputs.decision!.required = false;
+    expect(codes(optionalReview)).toContain('review.decision-output-optional');
+
+    const missingReview = fixture();
+    delete missingReview.workflow.nodes.find((node) => node.kind === 'review')!.outputs.decision;
+    expect(codes(missingReview)).toContain('review.decision-output-missing');
+  });
+
+  it('requires condition routes to use the computed matched output', () => {
+    const bypassed = fixture('bounded-review-fix.example.json');
+    const gateEdges = bypassed.workflow.edges.filter((edge) => edge.from === 'gate');
+    expect(gateEdges).toHaveLength(2);
+    gateEdges[0]!.when!.path = '/severity';
+    expect(codes(bypassed)).toContain('condition.route-output');
+
+    const unconditional = fixture('bounded-review-fix.example.json');
+    for (const edge of unconditional.workflow.edges.filter((candidate) => candidate.from === 'gate')) delete edge.when;
+    expect(codes(unconditional)).toContain('condition.route-output');
+  });
+
   it('validates approval references, condition outputs, and allowed toolset bindings', () => {
     const badApproval = fixture();
     const approval = badApproval.workflow.nodes.find((node) => node.kind === 'approval')!;
@@ -252,6 +326,17 @@ describe('Workflow Profile semantic validation', () => {
     const profile = fixture();
     const route = profile.workflow.edges.find((edge) => edge.from === 'request')!;
     route.when = { path: '/needsClarification', operator: 'contains', value: 'yes' };
+    expect(codes(profile)).toContain('predicate.type-mismatch');
+  });
+
+  it('rejects not-exists predicates on required ports even when a fallback route exists', () => {
+    const profile = fixture();
+    const conditionalRoute = profile.workflow.edges.find((edge) => edge.from === 'request')!;
+    conditionalRoute.when = { path: '/needsClarification', operator: 'not-exists' };
+    const fallback = structuredClone(profile.workflow.edges.find((edge) => edge.from === 'request')!);
+    fallback.default = true;
+    delete fallback.when;
+    profile.workflow.edges.push(fallback);
     expect(codes(profile)).toContain('predicate.type-mismatch');
   });
 

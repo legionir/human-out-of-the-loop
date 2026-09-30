@@ -1,3 +1,4 @@
+import { isJsonCompatibleValue } from './profile-schema-validator.js';
 import type {
   WorkflowEdge,
   WorkflowNode,
@@ -70,6 +71,14 @@ function assignable(source: WorkflowPort, target: WorkflowPort): boolean {
   const sourceDomain = domainFor(source);
   if (sourceDomain && !sourceDomain.every((value) => scalarMatchesType(value, targetType))) return false;
   return true;
+}
+
+function samePortContract(left: WorkflowPort, right: WorkflowPort): boolean {
+  if (left.type !== right.type || (left.required === true) !== (right.required === true)) return false;
+  const leftDomain = left.enum;
+  const rightDomain = right.enum;
+  if (leftDomain === undefined || rightDomain === undefined) return leftDomain === rightDomain;
+  return sameSet(leftDomain, rightDomain);
 }
 
 const ABSENT = Symbol('absent-output');
@@ -175,6 +184,7 @@ function checkPredicate(
     const values = operator === 'in' || operator === 'not-in' ? value as unknown[] : [value];
     if (operator === 'equals' || operator === 'in') compatible = values.every((item) => port.enum!.some((allowed) => equalScalar(item, allowed)));
   }
+  if (operator === 'not-exists' && port.required === true) compatible = false;
   if (!compatible) {
     diagnostics.push({ stage: 'semantic', code: 'predicate.type-mismatch', message: `Predicate operator "${operator}" or its value is incompatible with port "${name}" of type "${port.type}"`, profileId, path, nodeId, edgeIndex });
   }
@@ -210,7 +220,7 @@ function reachableFrom(start: string, adjacency: Map<string, string[]>): Set<str
 }
 
 /** Validate graph, port, route, pin-shape, and bounded-loop semantics without resolving external registries or executing anything. */
-export function validateWorkflowProfileSemantics(profile: WorkflowProfileDocument): WorkflowProfileDiagnostic[] {
+function validateWorkflowProfileSemanticsUnchecked(profile: WorkflowProfileDocument): WorkflowProfileDiagnostic[] {
   const profileId = profile.profile.id;
   const diagnostics: WorkflowProfileDiagnostic[] = [];
   const nodes = profile.workflow.nodes;
@@ -271,10 +281,10 @@ export function validateWorkflowProfileSemantics(profile: WorkflowProfileDocumen
       const predicate = node.config.predicate as WorkflowPredicate;
       checkPredicate(profileId, predicate, node.inputs, `/workflow/nodes/${index}/config/predicate`, diagnostics, node.id);
       const matched = node.outputs.matched;
-      if (!matched || matched.type !== 'boolean') addDiagnostic('condition.matched-output', `Condition node "${node.id}" must declare a boolean "matched" output`, `/workflow/nodes/${index}/outputs/matched`, node.id);
+      if (!matched || matched.type !== 'boolean' || matched.required !== true) addDiagnostic('condition.matched-output', `Condition node "${node.id}" must declare a required boolean "matched" output`, `/workflow/nodes/${index}/outputs/matched`, node.id);
       for (const [name, input] of Object.entries(node.inputs)) {
         const output = node.outputs[name];
-        if (!output || !assignable(input, output) || !assignable(output, input)) addDiagnostic('condition.pass-through', `Condition node must pass input port "${name}" through unchanged in outputs`, `/workflow/nodes/${index}/outputs/${name}`, node.id);
+        if (!output || !samePortContract(input, output)) addDiagnostic('condition.pass-through', `Condition node must pass input port "${name}" through unchanged in outputs`, `/workflow/nodes/${index}/outputs/${name}`, node.id);
       }
       if (Object.hasOwn(node.inputs, 'matched')) addDiagnostic('condition.matched-input-collision', 'Condition input port "matched" conflicts with its required boolean output', `/workflow/nodes/${index}/inputs/matched`, node.id);
       for (const outputName of Object.keys(node.outputs)) {
@@ -289,13 +299,31 @@ export function validateWorkflowProfileSemantics(profile: WorkflowProfileDocumen
       for (const [showIndex, portName] of (config.show ?? []).entries()) {
         if (!Object.hasOwn(node.inputs, portName)) addDiagnostic('approval.show-port-missing', `Approval show references undeclared input port "${portName}"`, `/workflow/nodes/${index}/config/show/${showIndex}`, node.id);
       }
+      const responseContract = config.responseKind === 'text'
+        ? { name: 'answer', type: 'string' }
+        : config.responseKind === 'decision'
+          ? { name: 'decision', type: 'object' }
+          : undefined;
+      if (responseContract) {
+        const responsePort = node.outputs[responseContract.name];
+        const responsePath = `/workflow/nodes/${index}/outputs/${responseContract.name}`;
+        if (!responsePort) addDiagnostic('approval.response-output-missing', `Approval responseKind "${config.responseKind}" must declare output "${responseContract.name}"`, responsePath, node.id);
+        else {
+          if (responsePort.required !== true) addDiagnostic('approval.response-output-optional', `Approval response output "${responseContract.name}" must be required`, `${responsePath}/required`, node.id);
+          if (responsePort.type !== responseContract.type) addDiagnostic('approval.response-output-type', `Approval response output "${responseContract.name}" must have type "${responseContract.type}"`, `${responsePath}/type`, node.id);
+        }
+      }
     }
 
     if (node.kind === 'review' && Array.isArray(node.config.allowedDecisions)) {
       const allowed = node.config.allowedDecisions as unknown[];
       const decision = node.outputs.decision;
       if (!decision) addDiagnostic('review.decision-output-missing', `Review node "${node.id}" with allowedDecisions must declare a decision output`, `/workflow/nodes/${index}/outputs/decision`, node.id);
-      else if (!Array.isArray(decision.enum) || !sameSet(decision.enum, allowed)) addDiagnostic('review.decision-enum-mismatch', `Review decision output enum must exactly match config.allowedDecisions`, `/workflow/nodes/${index}/outputs/decision/enum`, node.id);
+      else {
+        if (decision.required !== true) addDiagnostic('review.decision-output-optional', `Review decision output must be required when config.allowedDecisions is set`, `/workflow/nodes/${index}/outputs/decision/required`, node.id);
+        if (decision.type !== 'string') addDiagnostic('review.decision-output-type', `Review decision output must have type "string"`, `/workflow/nodes/${index}/outputs/decision/type`, node.id);
+        if (!Array.isArray(decision.enum) || !sameSet(decision.enum, allowed)) addDiagnostic('review.decision-enum-mismatch', `Review decision output enum must exactly match config.allowedDecisions`, `/workflow/nodes/${index}/outputs/decision/enum`, node.id);
+      }
     }
   }
 
@@ -352,6 +380,12 @@ export function validateWorkflowProfileSemantics(profile: WorkflowProfileDocumen
       if (!edge.when) continue;
       const port = checkPredicate(profileId, edge.when, source.outputs, `/workflow/edges/${index}/when`, diagnostics, sourceId, index);
       conditions.push({ edge, index, port });
+    }
+    if (source.kind === 'condition') {
+      if (conditions.length === 0) addDiagnostic('condition.route-output', `Condition node "${sourceId}" must route its result using the required /matched output`, '/workflow/edges', sourceId);
+      for (const { edge, index } of conditions) {
+        if (edge.when?.path !== '/matched') addDiagnostic('condition.route-output', `Condition node "${sourceId}" routes must inspect /matched rather than a pass-through output`, `/workflow/edges/${index}/when/path`, sourceId, index);
+      }
     }
     if (conditions.length === 0) continue;
     const predicatePort = conditions[0]?.port;
@@ -466,6 +500,22 @@ export function validateWorkflowProfileSemantics(profile: WorkflowProfileDocumen
   // Dependency resolution and digest canonicalization require real registries and belong to Phase 3.
   void dependencyReferences;
   return diagnostics;
+}
+
+export function validateWorkflowProfileSemantics(profile: WorkflowProfileDocument): WorkflowProfileDiagnostic[] {
+  if (!isJsonCompatibleValue(profile)) return [{
+    stage: 'semantic', code: 'semantic.input-invalid',
+    message: 'Semantic validation requires a plain JSON-compatible profile value', path: '/',
+  }];
+  try {
+    return validateWorkflowProfileSemanticsUnchecked(profile);
+  } catch (error) {
+    return [{
+      stage: 'semantic', code: 'semantic.input-invalid',
+      message: `Semantic validation could not inspect the supplied profile: ${error instanceof Error ? error.message : String(error)}`,
+      path: '/',
+    }];
+  }
 }
 
 function sameSet(a: unknown[], b: unknown[]): boolean {

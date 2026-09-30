@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import type { ValidatedWorkflowProfileDocument, WorkflowProfileDocument } from '../workflow-profiles/profile-types.js';
 import {
   MAX_WORKFLOW_PROFILE_BYTES,
   WorkflowProfileLoadError,
@@ -12,6 +13,10 @@ import {
   readWorkflowProfileUtf8,
   selectWorkflowProfile,
 } from '../workflow-profiles/profile-registry.js';
+
+type IsAssignable<From, To> = From extends To ? true : false;
+type AssertFalse<Value extends false> = Value;
+type RawProfileCannotBeExposedAsValidated = AssertFalse<IsAssignable<WorkflowProfileDocument, ValidatedWorkflowProfileDocument>>;
 
 const fixturePath = path.resolve(process.cwd(), 'docs/workflow-profiles/default-workflow-profile.example.json');
 const tempRoots: string[] = [];
@@ -139,6 +144,76 @@ describe('Workflow Profile loader and registry', () => {
     try { registry.register(undefined as any); } catch (caught) { error = caught; }
     expect(error).toBeInstanceOf(WorkflowProfileLoadError);
     expect((error as WorkflowProfileLoadError).diagnostics.map((item) => item.code)).toContain('registry.entry-invalid');
+  });
+
+  it('returns structured diagnostics for malformed public API options and registry values', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'valid.json');
+    fs.writeFileSync(file, sourceProfile('public-boundary'));
+    const expectDiagnostic = (operation: () => unknown, code: string): void => {
+      let caught: unknown;
+      try { operation(); } catch (error) { caught = error; }
+      expect(caught).toBeInstanceOf(WorkflowProfileLoadError);
+      expect((caught as WorkflowProfileLoadError).diagnostics.map((item) => item.code)).toContain(code);
+      expect(caught).not.toBeInstanceOf(TypeError);
+    };
+
+    expectDiagnostic(() => new WorkflowProfileRegistry(null as any), 'registry.options-invalid');
+    expectDiagnostic(() => new WorkflowProfileRegistry({ projectOptIn: 'yes' } as any), 'registry.options-invalid');
+    expectDiagnostic(() => loadWorkflowProfileFile(file, 'builtin', null as any), 'file.options-invalid');
+    expectDiagnostic(() => loadWorkflowProfileFile(file, 'builtin', { projectOptIn: 'yes' } as any), 'file.options-invalid');
+    expectDiagnostic(() => loadWorkflowProfilesFromDirectory(null as any), 'directory.options-invalid');
+    expectDiagnostic(() => loadWorkflowProfilesFromDirectory(undefined as any), 'directory.options-invalid');
+    expectDiagnostic(() => loadWorkflowProfilesFromDirectory({ directory: dir, scope: 'builtin', projectOptIn: 'yes' } as any), 'directory.opt-in-invalid');
+    expectDiagnostic(() => selectWorkflowProfile(new WorkflowProfileRegistry(), null as any), 'selection.options-invalid');
+    expectDiagnostic(() => selectWorkflowProfile({ get: () => undefined } as any, {}), 'selection.registry-invalid');
+    expectDiagnostic(() => selectWorkflowProfile(new WorkflowProfileRegistry(), { requestedProfileId: 42 } as any), 'selection.profile-id-invalid');
+    expectDiagnostic(() => selectWorkflowProfile(new WorkflowProfileRegistry(), { projectOptIn: 'yes' } as any), 'selection.opt-in-invalid');
+    const throwingGetter = Object.defineProperty({}, 'projectOptIn', { get() { throw new Error('getter failure'); } });
+    expectDiagnostic(() => new WorkflowProfileRegistry(throwingGetter as any), 'registry.options-invalid');
+    let descriptorReads = 0;
+    const statefulProxy = new Proxy({ projectOptIn: true }, {
+      getOwnPropertyDescriptor(target, key) {
+        descriptorReads++;
+        if (descriptorReads > 1) throw new Error('stateful descriptor trap');
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    });
+    expectDiagnostic(() => new WorkflowProfileRegistry(statefulProxy as any), 'registry.options-invalid');
+    expectDiagnostic(() => loadWorkflowProfileFile(file, 'builtin', throwingGetter as any), 'file.options-invalid');
+    expectDiagnostic(() => loadWorkflowProfilesFromDirectory(new Proxy({}, { ownKeys() { throw new Error('proxy ownKeys'); } }) as any), 'directory.options-invalid');
+    expectDiagnostic(() => selectWorkflowProfile(new WorkflowProfileRegistry(), new Proxy({}, { ownKeys() { throw new Error('proxy ownKeys'); } }) as any), 'selection.options-invalid');
+    const throwingEntry = Object.defineProperty({}, 'file', { get() { throw new Error('entry getter'); } });
+    expectDiagnostic(() => new WorkflowProfileRegistry().register(throwingEntry as any), 'registry.entry-invalid');
+
+    const loaded = loadWorkflowProfileFile(file, 'builtin');
+    const nonJsonProfile = structuredClone(loaded.profile) as any;
+    nonJsonProfile.profile['x-date'] = new Date();
+    expectDiagnostic(() => new WorkflowProfileRegistry().register({ ...loaded, profile: nonJsonProfile }), 'json.value-invalid');
+
+    const inheritedProfile = structuredClone(loaded.profile) as any;
+    delete inheritedProfile.schemaVersion;
+    Object.setPrototypeOf(inheritedProfile, { schemaVersion: '1.0.0' });
+    expectDiagnostic(() => new WorkflowProfileRegistry().register({ ...loaded, profile: inheritedProfile }), 'json.value-invalid');
+  });
+
+  it('rejects inherited opt-in, scope, file, profile, and selection properties', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'inherited.json');
+    fs.writeFileSync(file, sourceProfile('inherited-boundary'));
+    const inheritedOptIn = Object.create({ projectOptIn: true });
+    expect(() => new WorkflowProfileRegistry(inheritedOptIn)).toThrow(WorkflowProfileLoadError);
+    expect(() => loadWorkflowProfileFile(file, 'project', inheritedOptIn)).toThrow(WorkflowProfileLoadError);
+    expect(() => loadWorkflowProfilesFromDirectory(Object.create({ directory: dir, scope: 'project', projectOptIn: true }))).toThrow(WorkflowProfileLoadError);
+    expect(() => selectWorkflowProfile(new WorkflowProfileRegistry(), Object.create({ requestedProfileId: 'inherited-boundary', projectOptIn: true }))).toThrow(WorkflowProfileLoadError);
+
+    const loaded = loadWorkflowProfileFile(file, 'builtin');
+    for (const inheritedField of ['scope', 'file', 'profile'] as const) {
+      const ownFields = { ...loaded } as any;
+      delete ownFields[inheritedField];
+      const entry = Object.assign(Object.create({ [inheritedField]: loaded[inheritedField] }), ownFields);
+      expect(() => new WorkflowProfileRegistry().register(entry)).toThrow(WorkflowProfileLoadError);
+    }
   });
 
   it('fails closed for the whole directory on malformed, inaccessible, or duplicate profile entries', () => {
@@ -294,6 +369,21 @@ describe('Workflow Profile loader and registry', () => {
     } finally {
       openSpy.mockRestore();
       if (fs.existsSync(file)) fs.unlinkSync(file);
+    }
+  });
+
+  it('converts descriptor and read failures to structured loader diagnostics', () => {
+    const dir = tempDir();
+    const file = path.join(dir, 'read-failure.json');
+    fs.writeFileSync(file, sourceProfile('read-failure'));
+    const readSpy = vi.spyOn(fs, 'readSync').mockImplementation((() => { throw new Error('simulated read failure'); }) as typeof fs.readSync);
+    try {
+      let caught: unknown;
+      try { readWorkflowProfileUtf8(file); } catch (error) { caught = error; }
+      expect(caught).toBeInstanceOf(WorkflowProfileLoadError);
+      expect((caught as WorkflowProfileLoadError).diagnostics[0]).toMatchObject({ stage: 'read', code: 'file.read-failed' });
+    } finally {
+      readSpy.mockRestore();
     }
   });
 
