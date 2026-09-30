@@ -432,12 +432,18 @@ digest and port it was about: the bridge writes each decision through the new `r
 prepared run (`appendApprovalRecord` in `profile-run-state.ts`), closing the gap where the field
 existed but no wiring filled it.
 
-One owner decision is recorded as **open** in §7 of the operations guide (U-2 in `TRACEABILITY.md`):
-the durable store and resume decision are implemented and tested, but no CLI or server entry point
-creates a state store or re-drives a stored run. Recommended: keep resume embedder-only for v1 (crash
-safety does not depend on it — nothing is auto-retried and a pending effect refuses continuation);
-alternative: wire `.ai-runtime/workflow-profile-runs/` plus a resume command as a follow-up feature.
-Required before activation.
+**Owner decisions of 2026-09-30 (append-only, superseding the recommendation recorded here):**
+(a) **U-2 = option A** — resume is wired, not embedder-only: a profile run records itself under
+`<runtimeDir>/workflow-profile-runs/` by default (run ids do not collide; `stateStore: null` still
+opts out), `hootl profiles runs [--json]` lists the records with status/node/counters/resumability,
+and `hootl run --resume <runId> "…"` continues an interrupted run — re-selecting the profile by id or
+from the recorded file, continuing the recorded session, refusing a missing/finished run with the
+runner's own diagnostics, and re-asking the approval (a stored approval is never authority). The
+server records under its own run id and deliberately does not expose resume over HTTP. Evidence:
+`workflow-profile-resume-wiring.test.ts` (4), `workflow-profile-upgrade.test.ts` (3), and the
+committed end-to-end scenario `node e2e/scenarios/run.mjs profiles` (12/12), which kills a real CLI
+profile run mid-flight and resumes it. (b) **U-1 resolved** by choosing activation: a run records the
+package version unless the host declares one.
 
 **Step 2** is 🟢. `TRACEABILITY.md` is the finalized matrix: `WP-R-001`…`WP-R-013` each mapped to the
 phase/step that implemented it, the exact test files, and the documents that describe it, plus the

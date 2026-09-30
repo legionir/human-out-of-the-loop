@@ -226,7 +226,9 @@ export function runRouter(ctx: ServerContext): Router {
           // U3: per-run overrides (validated above)
           ...(Object.keys(runOverrides).length > 0 ? { runOverrides } : {}),
           // Phase 8: per-run profile selection (resolved above; the flag inside is per run).
-          ...(profileOptions ? { workflowProfile: profileOptions } : {}),
+          // Phase 10 (U-2): the profile run records itself under this run's id, so the durable
+          // record and GET /api/runs/:runId name the same attempt.
+          ...(profileOptions ? { workflowProfile: { ...profileOptions, runId } } : {}),
           // U5: interactive clarification.  The planner asks questions during
           // PLANNING (before any plan id exists), so the SSE channel for this
           // event is keyed by the runId — the run state also carries the

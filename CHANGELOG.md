@@ -35,6 +35,14 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
   are validated end to end in the test suite.
 
 **Added**
+- Durable, resumable Workflow Profile runs: a selected profile records itself under
+  `<projectRoot>/.ai-runtime/workflow-profile-runs/` by default (with the package version as the
+  runtime version unless the host declares one), `hootl profiles runs [--json]` lists the recorded
+  runs with status, node, counters and whether they can be resumed, and
+  `hootl run --resume <runId> "…"` continues an interrupted one — re-selecting the same profile
+  content (by id, or from the file it was selected from) and continuing its session. A stored
+  approval is never authority: the resumed attempt runs the approval node and asks again. Nothing is
+  auto-retried (a pending effect refuses continuation) and a finished run is refused as history.
 - `docs/workflow-profiles/PHASE10_OPERATIONS.md` (upgrade, rollout and rollback operations, including
   the evidence that no persistent-state migration is required), `docs/workflow-profiles/TRACEABILITY.md`
   (the `WP-R-001`…`WP-R-013` matrix, the decision register and the open owner items) and

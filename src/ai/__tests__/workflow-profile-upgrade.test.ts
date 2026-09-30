@@ -34,6 +34,7 @@ import { componentProjection, dependencyDigest } from '../workflow-profiles/prof
 import { createBuiltInRubricCatalogue } from '../workflow-profiles/profile-resolver.js';
 import { createWorkflowProfileComponentSources } from '../workflow-profiles/profile-sources.js';
 import { loadProfileRegistries } from '../../cli/commands/profiles.js';
+import { packageVersion } from '../registries/layout.js';
 import type { WorkflowProfileDocument } from '../workflow-profiles/profile-types.js';
 
 const mockGenerateObject = vi.mocked(generateObject);
@@ -182,6 +183,9 @@ describe('Phase 10 — an interrupted profile run, resumed', () => {
       sources: profileSources(),
       env: PROFILE_ENV,
       runId,
+      // What a real run records now (U-1): the Orchestrator defaults the runtime version to the
+      // package version, and a resume must match it.
+      runtimeVersion: packageVersion() ?? 'unversioned',
       stateStore,
     });
     const stored = stateStore.load(runId);

@@ -34,6 +34,10 @@ import { loadWorkflowProfileFile, WorkflowProfileRegistry } from '../../ai/workf
 import { resolveWorkflowProfileDependencies } from '../../ai/workflow-profiles/profile-resolver.js';
 import type { WorkflowProfileDiagnostic } from '../../ai/workflow-profiles/profile-types.js';
 import { createWorkflowProfileComponentSources } from '../../ai/workflow-profiles/profile-sources.js';
+import {
+  listWorkflowProfileRuns,
+  openWorkflowProfileRunStore,
+} from '../../ai/workflow-profiles/profile-resume.js';
 
 export interface ProfilesCommandOptions {
   projectRoot?: string;
@@ -150,6 +154,46 @@ export async function profilesListCommand(opts: ProfilesCommandOptions = {}): Pr
     '\nWorkflow Profile execution stays off until a run selects a profile explicitly (--profile).',
   ));
   // Listing is introspection: a broken project file is reported but does not make `list` fail.
+  return 0;
+}
+
+/**
+ * Phase 10 (U-2): `hootl profiles runs` — the profile runs this project recorded, newest first.
+ *
+ * This is the human side of the durable run state: after a crash, the interrupted run is visible
+ * here (with its node, counters and whether it can be resumed), and `hootl run --resume <runId>`
+ * continues it. A record that cannot be parsed is skipped, never thrown.
+ */
+export async function profilesRunsCommand(opts: ProfilesCommandOptions = {}): Promise<number> {
+  const projectRoot = path.resolve(opts.projectRoot ?? process.cwd());
+  prepareCliEnvironment(projectRoot);
+  const runtimeDir = path.join(projectRoot, '.ai-runtime');
+  const summaries = listWorkflowProfileRuns(openWorkflowProfileRunStore(runtimeDir));
+
+  if (opts.json) {
+    out(JSON.stringify({ projectRoot, runtimeDir, runs: summaries }, null, 2));
+    return 0;
+  }
+  if (summaries.length === 0) {
+    out(color.dim(`No Workflow Profile runs recorded under ${runtimeDir}.`));
+    return 0;
+  }
+  out(renderTable(
+    ['RUN ID', 'PROFILE', 'STATUS', 'NODE', 'VISITS', 'UPDATED', 'RESUME'],
+    summaries.map((summary) => [
+      summary.runId,
+      summary.profileId,
+      summary.status === 'interrupted' && summary.awaitingUser ? 'awaiting-user' : summary.status,
+      summary.currentNodeId,
+      String(summary.visits),
+      new Date(summary.updatedAtMs).toISOString(),
+      summary.resumable ? 'yes' : summary.status === 'interrupted' ? 'no (pending effect)' : 'no (finished)',
+    ]),
+  ));
+  const resumable = summaries.filter((summary) => summary.resumable);
+  if (resumable.length > 0) {
+    out(color.dim(`\nResume one with: hootl run --resume ${resumable[0]!.runId} "<the same request>"`));
+  }
   return 0;
 }
 

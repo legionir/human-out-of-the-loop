@@ -6,7 +6,8 @@ still has to decide on. Everything here is written to be checkable against the c
 named in each section.
 
 **Status: 🟡** — the guide, the compatibility evidence and the rollout/rollback procedure are
-complete; the *resume surface* limitation in §7 is an open owner decision.
+complete, and the resume surface is wired (§7). The remaining owner items are the activation
+checklist in §8.
 
 ## 1. What the feature is, and what is off by default
 
@@ -165,31 +166,65 @@ Downgrade safety, explicitly:
   project is trusted; every component a profile pins is re-verified by content digest before the run
   starts, and the tool surface is re-checked at the real call site.
 
-## 7. Open limitation (owner decision): the resume surface is not wired into the CLI/server
+## 7. Resume: wired into the CLI and the server (Phase 10, U-2)
 
-The durable run-state store, its integrity guards and the resume decision are implemented and tested
-(Phase 6; `workflow-profile-lifecycle.test.ts`). What is **not** wired yet: the Orchestrator does not
-create a `FileWorkflowProfileRunStateStore` on its own, so a CLI or server run does not write a
-run-state file by default, and there is no `hootl` command that re-drives a stored run. An embedder
-can pass `stateStore` (and a stable `runId`) through `OrchestratorConfig.workflowProfile`, exactly as
-the lifecycle suite does.
+The durable run-state store is no longer embedder-only. A profile run records itself by default, and
+the operator surface reads it back.
 
-Consequences today, stated plainly:
+**Where a record lives.** `<projectRoot>/.ai-runtime/workflow-profile-runs/` — one JSON file per run,
+named by a hash of the run id (`runtimeDir` follows the Orchestrator config, as every other store
+does). A run whose host passes `stateStore: null` keeps its state in memory only; nothing else creates
+the directory.
 
-- A crash or restart does not resume an interrupted profile run; the run's plan/session records are
-  still there, but the profile-specific counters/state are not.
-- Restart safety is unaffected: nothing is retried automatically, and a pending side effect can never
-  be repeated (the marker logic is what refuses it — it is simply not written unless a state store is
-  configured).
+**Runtime version (U-1).** A run records the **package version** (`package.json`, through the same
+helper the CLI banner uses) unless the host declares `runtimeVersion`. A resume whose recorded version
+differs is refused (`resume.runtime-version-changed`), so a run started on one build is never
+continued on another.
 
-**Owner decision required** (recorded in `EXECUTION_PLAN.md` as well): (A) wire the file store into
-CLI/server runs (`.ai-runtime/workflow-profile-runs/`, `runId` derived from the interaction) **and**
-add a resume command, so an interrupted run can be continued; or (B) keep resume an embedder-only
-capability for v1 and document it as such in the release notes. Recommendation: **B for v1** —
-resume needs its own interaction surface (choosing a stored run, showing counters, re-confirming the
-plan digest) and the crash story is already safe without it; (A) is a follow-up feature, not a
-rollout prerequisite. Until the owner decides, the feature ships without CLI-level resume and this
-document says so explicitly.
+**What the record contains.** Profile id/version and the hash of the exact profile bytes, schema and
+runtime versions, the resolved dependency pins, the authority snapshot, the node sequence and
+counters, the approvals (with the digest each decision bound), the plan/session ids, and — when the
+profile was selected from a file — that file path. An interrupted run also carries the
+`pendingEffect` marker, which is what refuses an automatic retry.
+
+**Operator workflow.**
+
+```bash
+hootl profiles runs                 # what this project recorded (status, node, counters, resumable)
+hootl profiles runs --json          # the same, machine-readable
+hootl run --resume <runId> "…"      # continue an interrupted run (same request text)
+```
+
+- The listing is newest-first, skips a record it cannot parse (one bad file never breaks it) and
+  marks each row `yes` / `no (pending effect)` / `no (finished)`.
+- `--resume` reads the record first, so a missing or finished run fails with exit 1 and the runner's
+  own diagnostics (`resume.profile-missing`, `resume.already-terminal`) before anything is created.
+- The request text is supplied again: the kernel keeps no cross-run input state, and an interrupted
+  run resumes from the node its record names (for a run interrupted before its first node, that is the
+  start node — the request is re-entered normally).
+- The profile is re-selected exactly as it was: by id, or from the recorded file when the original
+  selection was `--profile-file`. The record cannot substitute different content — the resume guard
+  compares the profile hash, every dependency pin and the authority snapshot first, and a mismatch
+  refuses the resume.
+- The run continues in the session its record names when that session still exists, so the
+  conversation and the persisted plan stay in one place; the profile run id stays the same, and the
+  record ends `success`/`failure`/`rejected`/`cancelled` like any other run.
+- `--resume` cannot be combined with `--profile`/`--profile-file` (exit 2): the record names its
+  profile. The one deliberate limit kept: a resumed run is re-confirmed by the profile's own approval
+  node (a stored approval is never authority), so continuing a run can never execute work the user has
+  not seen.
+
+**Server.** `POST /api/run { profile }` records its run state under the server's own run id, so
+`GET /api/runs/:runId` and the durable record name the same attempt. Resume over HTTP is deliberately
+*not* exposed: continuing a run is an operator action on a project directory (the CLI), not something
+a client asks the server to do with a run id it guessed. The file itself stays inside `.ai-runtime`.
+
+**Evidence.** `workflow-profile-resume-wiring.test.ts` (4 tests: the record is written unasked, run
+ids do not collide, `stateStore: null` opts out, and the listing/refusal helpers behave);
+`workflow-profile-upgrade.test.ts` (3 tests: a stored approval is re-asked, a decline stops the run, a
+changed profile is refused); and the committed end-to-end scenario `node e2e/scenarios/run.mjs
+profiles`, which kills a real CLI profile run mid-flight, lists the interrupted record, resumes it
+with `hootl run --resume`, and checks that the run executed and turned terminal (12/12 checks).
 
 ## 8. Release checklist (before activation is requested)
 

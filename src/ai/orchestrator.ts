@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { z } from 'zod';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { packageVersion } from './registries/layout.js';
 import { registryLayersFor, type RegistryScope } from './registries/layout.js';
 import { EventBus } from './runtime/event-bus.js';
 import type { EnvSource } from './env.js';
@@ -82,6 +83,7 @@ import { DEFAULT_RUN_MODE, type RunMode } from './modes.js';
 import { readOnlyToolIds } from './tools/read-only.js';
 import { activateWorkflowProfile, type WorkflowProfileActivation, type WorkflowProfileActivationOptions } from './workflow-profiles/profile-activation.js';
 import { ToolsetRegistry, loadToolsetsFromDirectory } from './workflow-profiles/toolsets.js';
+import { workflowProfileRunsDir } from './workflow-profiles/profile-resume.js';
 import {
   PLAN_INFEASIBLE_CODE,
   runWorkflowProfileBridge,
@@ -91,7 +93,7 @@ import {
 } from './workflow-profiles/orchestrator-bridge.js';
 import { createWorkflowProfileComponentSources } from './workflow-profiles/profile-sources.js';
 import type { WorkflowProfileComponentSources } from './workflow-profiles/profile-resolver.js';
-import type { WorkflowProfileRunStateStore } from './workflow-profiles/profile-run-state.js';
+import { FileWorkflowProfileRunStateStore, type WorkflowProfileRunStateStore } from './workflow-profiles/profile-run-state.js';
 import { detectLanguage, languageSection, type DetectedLanguage } from './language.js';
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -159,6 +161,13 @@ export const OrchestratorConfigSchema = z.object({
 export interface OrchestratorWorkflowProfileOptions extends Omit<WorkflowProfileActivationOptions, 'sources'> {
   /** Pre-built ports; omitted ⇒ built from this Orchestrator's own services. */
   ports?: Partial<WorkflowProfileBridgeServices>;
+  /**
+   * Phase 10 (U-2): durable run-state store (inherited from the activation options). Omitted ⇒ this
+   * Orchestrator writes `<runtimeDir>/workflow-profile-runs`, so an interrupted run is visible to
+   * `hootl profiles runs` and resumable with `hootl run --resume`. Pass `null` to keep the run's
+   * state in memory only (a host that manages its own store), or a store to use that one.
+   */
+  stateStore?: WorkflowProfileRunStateStore | null;
 }
 
 export type OrchestratorConfig = z.input<typeof OrchestratorConfigSchema> & {
@@ -397,6 +406,7 @@ export class Orchestrator {
 
   /** Phase 7: component sources shared by the resolver and the built-in default profile. */
   private profileComponentSources?: WorkflowProfileComponentSources;
+  private profileRunStateStore?: WorkflowProfileRunStateStore;
 
   readonly personaRegistry: PersonaRegistry;
   readonly skillRegistry: SkillRegistry;
@@ -1176,12 +1186,36 @@ export class Orchestrator {
     return this.profileComponentSources;
   }
 
+  /**
+   * The durable store a profile run records itself in when the caller did not choose one.
+   *
+   * Phase 10 (U-2): this is what makes an interrupted run visible (`hootl profiles runs`) and
+   * resumable (`hootl run --resume <runId>`). It is the same `runtimeDir` the plan/session stores
+   * use, and it is created lazily, so an installation that never selects a profile never has it.
+   */
+  private defaultProfileRunStateStore(): WorkflowProfileRunStateStore {
+    if (!this.profileRunStateStore) {
+      this.profileRunStateStore = new FileWorkflowProfileRunStateStore(
+        workflowProfileRunsDir(this.config.runtimeDir),
+      );
+    }
+    return this.profileRunStateStore;
+  }
+
   /** Flag + selection + approval gate; throws (fail closed) instead of falling back. */
   private resolveWorkflowProfileActivation(
     options: OrchestratorWorkflowProfileOptions,
   ): WorkflowProfileActivation {
-    const { ports: _ports, ...profileOptions } = options;
-    return activateWorkflowProfile({ ...profileOptions, sources: this.workflowProfileSources() });
+    const { ports: _ports, stateStore, ...profileOptions } = options;
+    return activateWorkflowProfile({
+      ...profileOptions,
+      // Phase 10 (U-1): the runtime version is the package version unless the host declares one, so
+      // a resume across two builds is refused instead of continuing on changed behaviour.
+      runtimeVersion: profileOptions.runtimeVersion ?? packageVersion() ?? 'unversioned',
+      // Phase 10 (U-2): durable by default; `null` opts out explicitly.
+      ...(stateStore === null ? {} : { stateStore: stateStore ?? this.defaultProfileRunStateStore() }),
+      sources: this.workflowProfileSources(),
+    });
   }
 
   /**

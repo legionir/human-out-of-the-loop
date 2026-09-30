@@ -100,6 +100,12 @@ export interface WorkflowProfileRunState {
   /** Declared authority the run started with; a resume may never widen it. */
   authority: AuthoritySnapshot;
   approvals: WorkflowProfileApprovalRecord[];
+  /**
+   * The file the profile was explicitly selected from, when it came from one (`--profile-file`).
+   * Recorded so a resume can re-read the same content; the profile *hash* guard is what makes that
+   * safe — tampering with this field cannot substitute different content.
+   */
+  profileFile?: string;
   planId?: string;
   sessionId?: string;
   pendingEffect?: WorkflowProfilePendingEffect;
@@ -114,6 +120,8 @@ export interface CreateRunStateOptions {
   startNodeId: string;
   /** Declared authority of this attempt; recorded so a resume can prove it never widened. */
   authority?: AuthoritySnapshot;
+  /** The file this profile was explicitly selected from, when it came from one. */
+  profileFile?: string;
   planId?: string;
   sessionId?: string;
   now?: number;
@@ -145,6 +153,7 @@ export function createWorkflowProfileRunState(options: CreateRunStateOptions): W
       ? { toolIds: [...options.authority.toolIds], budget: { ...options.authority.budget }, approvalStrictness: options.authority.approvalStrictness }
       : { toolIds: [], budget: {}, approvalStrictness: 0 },
     approvals: [],
+    ...(options.profileFile ? { profileFile: options.profileFile } : {}),
     ...(options.planId ? { planId: options.planId } : {}),
     ...(options.sessionId ? { sessionId: options.sessionId } : {}),
     updatedAtMs: now,
@@ -257,6 +266,26 @@ export class FileWorkflowProfileRunStateStore implements WorkflowProfileRunState
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as WorkflowProfileRunState;
     if (parsed.stateVersion !== PROFILE_RUN_STATE_VERSION) return undefined;
     return parsed;
+  }
+
+  /**
+   * Every readable record, in file-name order.
+   *
+   * `list()` deliberately returns *file names* (the store is storage-only), so a caller that wants
+   * records cannot load them back by name — the file name is a hash of the run id, not the run id.
+   * A record that cannot be parsed is skipped: one corrupt file must not make a listing unusable.
+   */
+  loadAll(): WorkflowProfileRunState[] {
+    const states: WorkflowProfileRunState[] = [];
+    for (const name of this.list()) {
+      try {
+        const parsed = JSON.parse(fs.readFileSync(path.join(this.dir, name), 'utf8')) as WorkflowProfileRunState;
+        if (parsed.stateVersion === PROFILE_RUN_STATE_VERSION) states.push(parsed);
+      } catch {
+        // Unreadable record: skipped, and the rest of the listing still works.
+      }
+    }
+    return states;
   }
 
   list(): string[] {

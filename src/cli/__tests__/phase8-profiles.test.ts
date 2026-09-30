@@ -210,11 +210,16 @@ describe('Phase 8 — profiles CLI', () => {
     const program = createProgram();
     const profiles = program.commands.find((command) => command.name() === 'profiles');
     expect(profiles).toBeDefined();
-    expect(profiles!.commands.map((command) => command.name()).sort()).toEqual(['list', 'validate']);
+    expect(profiles!.commands.map((command) => command.name()).sort()).toEqual(['list', 'runs', 'validate']);
     const run = program.commands.find((command) => command.name() === 'run');
     const runFlags = run!.options.map((option) => option.long);
     expect(runFlags).toContain('--profile');
     expect(runFlags).toContain('--profile-file');
+    // Phase 10 (U-2): the durable run state is reachable from the CLI surface end to end.
+    expect(runFlags).toContain('--resume');
+    const runs = profiles!.commands.find((command) => command.name() === 'runs');
+    expect(runs).toBeDefined();
+    expect(runs!.options.map((option) => option.long)).toContain('--json');
     const validate = profiles!.commands.find((command) => command.name() === 'validate');
     expect(validate!.registeredArguments.map((argument) => argument.name())).toEqual(['target']);
   });

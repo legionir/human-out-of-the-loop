@@ -26,8 +26,14 @@ unless the user asks for one.
   retries or resumes.
 - **Untrusted content stays data.** Profile text, project-layer personas and clarification answers
   are confined when they enter a prompt; they cannot change system policy or the tool surface.
-- **Authoring and operations surfaces.** `hootl profiles list|validate`, `hootl run --profile
-  <id>|--profile-file <path>`, `POST /api/run { profile }`, operator
+- **Durable, resumable runs.** Every profile run records itself under
+  `<projectRoot>/.ai-runtime/workflow-profile-runs/`; `hootl profiles runs` lists them (status, node,
+  counters, whether it can be resumed) and `hootl run --resume <runId> "…"` continues an interrupted
+  one — re-selecting the same profile content (by id, or from the recorded file) and continuing its
+  session. Nothing is auto-retried: a pending effect refuses continuation, and a run that already
+  finished is refused as history.
+- **Authoring and operations surfaces.** `hootl profiles list|validate|runs`, `hootl run --profile
+  <id>|--profile-file <path>|--resume <runId>`, `POST /api/run { profile }`, operator
   (`HOOTL_WORKFLOW_PROFILES_DIR`) and project (`.hootl/workflow-profiles`, trust-gated) discovery,
   plus three shipped examples (`answer-only`, `bounded-review-fix`, `error-route`) that pass the
   schema, the semantic validator and dependency resolution in CI.
@@ -92,8 +98,8 @@ exceptions).
 
 | ID | Limitation | Where it is recorded |
 | --- | --- | --- |
-| U-1 | No authoritative Runtime-version source: a host that does not pass `runtimeVersion` records `'unversioned'` | `TRACEABILITY.md` §3 |
-| U-2 | Resume is embedder-level: the CLI/server do not create a state store or re-drive a stored run | `PHASE10_OPERATIONS.md` §7 (recommendation: keep it out of v1) |
+| ~~U-1~~ | ~~No authoritative runtime-version source~~ — resolved: a run records the package version | `PHASE10_OPERATIONS.md` §7 |
+| ~~U-2~~ | ~~Resume is embedder-level~~ — resolved: runs record themselves, `hootl profiles runs` lists them, `hootl run --resume` continues one | `PHASE10_OPERATIONS.md` §7 |
 | U-3 | The built-in default cannot activate until the owner records the approval | `EXECUTION_PLAN.md`, `default-profile.ts` |
 | U-5 | Host-root stability is an operator property (the server never takes a root from a request) | `TRACEABILITY.md` §3 |
 | U-6 | A pre-existing checkpoint test (`J-05`) is mtime-resolution sensitive on this sandbox; unchanged by this work, green on CI | `TRACEABILITY.md` §3 |

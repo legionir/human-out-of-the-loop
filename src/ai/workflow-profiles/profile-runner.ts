@@ -14,6 +14,7 @@
  * dependencies, and runtime before continuing, and a run that was interrupted
  * with an effect in flight is refused rather than retried automatically.
  */
+import { randomUUID } from 'node:crypto';
 import {
   SUPPORTED_SCHEMA_MAJOR,
   SUPPORTED_SCHEMA_MINOR,
@@ -97,7 +98,12 @@ export interface PrepareWorkflowProfileRunOptions {
   runId?: string;
   planId?: string;
   sessionId?: string;
-  stateStore?: WorkflowProfileRunStateStore;
+  /**
+   * Durable run state. Omitted ⇒ the run keeps its state in memory only (the Orchestrator supplies
+   * a file-backed store for real runs); `null` explicitly means the same thing, which lets a caller
+   * with a defaulted store opt out (`OrchestratorWorkflowProfileOptions.stateStore: null`).
+   */
+  stateStore?: WorkflowProfileRunStateStore | null;
   eventSink?: EventSinkLike;
   onDegraded?: (error: unknown) => void;
   secrets?: ReadonlyArray<string>;
@@ -146,7 +152,12 @@ export function prepareWorkflowProfileRun(options: PrepareWorkflowProfileRunOpti
   const resolved = resolveWorkflowProfileDependencies(profile, options.sources);
   const frozen = Object.freeze(profile) as Readonly<WorkflowProfileDocument>;
   const now = options.now ?? (() => Date.now());
-  const runId = options.runId ?? `run-${frozen.profile.id}`;
+  // Phase 10 (U-2): a durable run needs an id that does not collide with the previous run of the
+  // same profile, because a stored record means "resume this attempt". Without a store the id stays
+  // the stable, human-readable one callers (and tests) already expect.
+  const runId = options.runId ?? (options.stateStore
+    ? `run-${frozen.profile.id}-${randomUUID()}`
+    : `run-${frozen.profile.id}`);
   const events = createWorkflowProfileEventEmitter({
     runId,
     ...(options.eventSink ? { sink: options.eventSink } : {}),
@@ -209,6 +220,7 @@ export function prepareWorkflowProfileRun(options: PrepareWorkflowProfileRunOpti
       runtimeVersion,
       startNodeId: profile.workflow.startNode,
       authority: declaredAuthority,
+      ...(options.registered?.file ? { profileFile: options.registered.file } : {}),
       ...(options.planId ? { planId: options.planId } : {}),
       ...(options.sessionId ? { sessionId: options.sessionId } : {}),
       now: now(),
