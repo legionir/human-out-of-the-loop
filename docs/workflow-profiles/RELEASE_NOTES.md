@@ -81,6 +81,13 @@ Nothing else about the legacy path changes, and the parity suite fails if the pl
 agents, execution result or review summary diverge (the differences above are the documented
 exceptions).
 
+**Host requirements (U-5, documented 2026-09-30):** the server never accepts `projectRoot` from a
+request, every profile/component file is identity-checked and digest-verified, but nothing in code can
+prove the operator's directory is unwritable by another local user — run HOOTL in a directory only the
+operator can write, and treat the run-state records under `.ai-runtime/workflow-profile-runs/` as
+private as the plans and sessions beside them. Details and the exact guarantee/limit split:
+`PHASE10_OPERATIONS.md` §4.
+
 ## 4. Upgrade, rollback, migration
 
 - **No persistent-state migration is required**: profile runs reuse `PlanStore`/`SessionStore`

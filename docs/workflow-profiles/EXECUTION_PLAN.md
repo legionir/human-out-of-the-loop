@@ -869,3 +869,21 @@ gate step and the CLI smoke. The resume head `73e578b` is likewise **success 10/
 `36770114778`), so both of this stretch's code heads are green on the exact SHA. Local evidence at
 `86dbe88`: profile + CLI + server suites 51 files / 576 tests; full suite 150 files / 1,985 tests with
 only the pre-existing `J-05`; e2e `profiles` 12/12; gates 9/9; `tsc`/`build` clean.
+
+### Phase 10 U-5 documentation and the activation package (2026-09-30; append-only)
+
+**U-5 (host-root stability) documented, not coded:** `PHASE10_OPERATIONS.md` §4 now has a *Host
+requirements* subsection that separates what the code guarantees (the server takes `projectRoot` only
+from configuration; every profile/component open is identity-checked — no symlink following, opened
+handle compared with `lstat`/`fstat`; pinned content is digest-verified before a run) from what it
+cannot (nothing proves the operator's directory is unwritable by another local user), and states the
+operator rule and where the run-state records live. `TRACEABILITY.md` U-5 records the disposition with
+owner acknowledgement still part of the activation checklist; `RELEASE_NOTES.md` §3 points to it.
+
+**Activation package prepared (not applied):** `PHASE10_OPERATIONS.md` §10 lists the exact single
+change that activates the built-in default (`BUILT_IN_DEFAULT_APPROVAL` in `profile-activation.ts`),
+why nothing else changes (the gate only governs the default when the flag is on and nothing was
+selected; per-run/per-request selection still wins; there is no process-wide enablement), and the five
+things the owner is expected to check before authorizing. `BUILT_IN_DEFAULT_APPROVAL.approved` stays
+`false` — the agent does not record the approval.
+

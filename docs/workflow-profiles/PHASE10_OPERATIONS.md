@@ -125,6 +125,28 @@ Recommended order for a project or an organisation; each step is reversible on i
    report/interaction records; secrets and raw prompt text are not written (asserted end to end by
    `workflow-profile-adversarial.test.ts`).
 
+### Host requirements (U-5, documented 2026-09-30)
+
+Workflow Profiles add files that a run reads and writes, so the host directory is part of the trust
+boundary. What the code guarantees, and what it deliberately does not:
+
+- **Guaranteed.** The server takes `projectRoot` only from configuration — never from a request — so a
+  client cannot point a run at a directory of its choosing. Every profile and component file is
+  opened with identity checks (no symlink following; the opened handle is compared with the path's
+  `lstat`/`fstat`), component content is re-verified by digest before the run starts, and a broken
+  file fails before a session or plan exists.
+- **Not guaranteed by the code.** Nothing proves the operator's project/runtime directory is
+  unwritable by *another local user* of the same host. That is an operator property, exactly like the
+  existing trust opt-in for project registry content.
+- **Therefore:** run HOOTL in a directory only the operator (and the service account) can write, and
+  keep the run-state records (`<projectRoot>/.ai-runtime/workflow-profile-runs/`) as private as the
+  plans and sessions they sit beside. A project profile is read only when the project is explicitly
+  trusted; an operator-directory profile needs no trust because choosing that directory is the
+  operator's own act.
+- **When it matters most:** shared hosts, CI runners with shared caches, and any deployment where a
+  second unprivileged user can write into the project root. `TRACEABILITY.md` keeps this as U-5 for the
+  owner to acknowledge at activation; the recommendation above is the documented disposition.
+
 ## 5. Rollback
 
 | Action | Effect | What it does *not* undo |
@@ -229,6 +251,9 @@ with `hootl run --resume`, and checks that the run executed and turned terminal 
 ## 8. Release checklist (before activation is requested)
 
 - [ ] All phase statuses in `EXECUTION_PLAN.md` are 🟢 with evidence (Phases 1–9 are).
+- [x] Host requirements documented (U-5): no requests supply `projectRoot`, files are identity-checked
+      and digest-verified, and the remaining property — "a directory only the operator can write" — is
+      written down in §4 for the operator to acknowledge.
 - [ ] Owner approval recorded for `BUILT_IN_DEFAULT_APPROVAL` before any default activation.
 - [x] Behaviour differences decided by the owner (U-4, 2026-09-30): G-5 **accepted**, G-2
       **accepted**, report wording **aligned to the legacy formatter** (implemented), R-3
@@ -256,3 +281,37 @@ directions), `workflow-profile-parity.test.ts` (shared report shape),
 `src/server/__tests__/phase8-profile-selection.test.ts` (the API-visible outcome), plus the full
 profile/CLI/server sweep. No profile document gained behaviour it did not have: the mapping only
 changed which existing review outcome a given end reports.
+
+## 10. Activation package (prepared, not applied)
+
+The owner decided to **start activation** (2026-09-30) and explicitly required that the approval
+record is never written by the agent without their authorization. Everything that can be prepared
+without recording it is prepared here, so activation is a single reviewable change when the owner
+authorizes it.
+
+**The one change that activates the built-in default** — `src/ai/workflow-profiles/profile-activation.ts`:
+
+```ts
+export const BUILT_IN_DEFAULT_APPROVAL: BuiltInDefaultApproval = Object.freeze({
+  approved: false,                                                       // → true
+  reference: 'Phase 7 Step 3 parity gate: owner approval not recorded yet', // → the owner's record
+});
+```
+
+`reference` must name where the approval is recorded (plan section, PR comment, release note) — the
+gate prints it in the refusal, so the value is user-visible and must be an accurate citation.
+
+**Why nothing else changes:** the switch only decides whether the *built-in default* may be used when
+the flag is on and nothing was selected. A run without a selection still resolves nothing
+(`profile-activation.not-selected`), a per-run/per-request selection still wins over the default
+(D-WP-003), and `HOOTL_WORKFLOW_PROFILE` still has to be set for the profile path to be reachable at
+all. There is no process-wide enablement in this repository, so "activation" is the documented
+rollout of an opt-in flag, not a default flip for existing users.
+
+**What the owner is expected to check before authorizing** (from `PHASE10_REVIEW.md` §6 and §8 here):
+
+1. Their own read of `PHASE10_REVIEW.md` — Step 3 stays 🟡 until that sign-off.
+2. The behaviour decisions U-4 — **done** (G-5/G-2 accepted, report aligned, R-3 changed).
+3. U-5 host requirements — **documented** in §4 above; acknowledgement is the owner's.
+4. Exact-head CI green on the SHA being handed over (`gh run list --json headSha,conclusion`).
+5. Merge authorization — a separate, still-frozen decision.
