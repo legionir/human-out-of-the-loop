@@ -168,3 +168,26 @@ clarification round-trip and exhaustion, reject and revise terminals, out-of-dom
 cancellation, digest mismatch, denial) passes; all Workflow Profile suites pass 15 files / 194 tests;
 `npm run typecheck` and `npm run build` are clean. Step 2 (Orchestrator wiring) and Step 3 (parity
 tests, including the tests that pin the two differences above) are next.
+
+## 6. Step 2 activation seam (append-only, 2026-09-30)
+
+`activateWorkflowProfile(options)` in `src/ai/workflow-profiles/profile-activation.ts` is the single
+decision point the Orchestrator will call:
+
+- **Flag off** (or `HOOTL_WORKFLOW_PROFILE` set to anything but `1`/`true`) ⇒
+  `{ kind: 'legacy' }`, decided *before* any component lookup, schema check or dependency resolution.
+  No profile-related module work happens, so the legacy path is byte-for-byte the one that runs today.
+- **Flag on** ⇒ never legacy. An explicit selection (`document` or a registered profile, D-WP-003's
+  highest precedence) is validated, resolved and prepared, or the caller gets a `WorkflowProfileLoadError`
+  carrying the diagnostics. Nothing selected and no opt-in ⇒ `profile-activation.not-selected`.
+- **Built-in default** is gated by a recorded approval (`BUILT_IN_DEFAULT_APPROVAL`, currently
+  `approved: false` with its reference). While it is unapproved, asking for the default fails closed with
+  `profile-activation.not-approved` — and does so *before* touching the registries, so an unreadable
+  registry can never be confused with a missing approval. Flipping the constant is a recorded change
+  that must land with the Step 3 parity evidence, the release notes and the owner's approval.
+
+Evidence: `src/ai/__tests__/workflow-profile-activation.test.ts` (8 tests) covers the flag values, the
+"flag off resolves nothing" proof (a counting registry is never touched), the not-selected and
+not-approved refusals (also proven registry-free), explicit selection, approved-default preparation,
+the schema-version refusal (no fallback) and a dependency-resolution refusal. The Orchestrator hook
+(Step 2's second half) follows in the same step.
