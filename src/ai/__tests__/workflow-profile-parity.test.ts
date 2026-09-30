@@ -10,8 +10,11 @@
  *
  * Deliberate differences are asserted as differences here and recorded in
  * `docs/workflow-profiles/PHASE7_PARITY.md` (§8/§9) for the release notes and the owner's
- * approval before any default activation: the report wording, the absence of the legacy
- * `plan:clarified` observability entry, and the G-2/G-5 mappings.
+ * decision before any default activation. The owner decided each one on 2026-09-30 (U-4):
+ * G-2/G-5 accepted, the report wording **aligned** to the legacy formatter (asserted below,
+ * with the profile path appending one status line), and the `rejected`-end mapping changed
+ * (R-3, pinned in `workflow-profile-hardening.test.ts`). The absence of the legacy
+ * `plan:clarified` observability entry stays as designed.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -170,9 +173,14 @@ describe('Phase 7 parity — legacy path vs profile path', () => {
     expect(profilePlan?.steps.map((step) => `${step.id}:${step.status}`)).toEqual(legacyPlan?.steps.map((step) => `${step.id}:${step.status}`));
     expect(profilePlan?.sessionId).toBe(profileResult.sessionId);
 
-    // Recorded differences (must appear in the release notes): the report wording differs.
-    expect(legacyResult.report).not.toBe(profileResult.report);
+    // Owner decision (U-4, 2026-09-30): the report wording is now *aligned* — both paths render the
+    // same legacy FINAL REPORT block; the profile path only appends one line naming its own status
+    // and whether it executed. Asserted, so an accidental divergence fails here.
+    expect(legacyResult.report).toContain('FINAL REPORT');
+    expect(profileResult.report).toContain('FINAL REPORT');
+    expect(profileResult.report.startsWith(legacyResult.report.slice(0, legacyResult.report.indexOf('FINAL REPORT')))).toBe(true);
     expect(profileResult.report.toLowerCase()).toContain('success');
+    expect(profileResult.report).toContain('Workflow profile "success"');
 
     // Same interaction outcome on both paths.
     const interactions = (orch: Orchestrator) => orch.sessionStore.getSession(orch.sessionStore.listSessions()[0]!);

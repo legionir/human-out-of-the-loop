@@ -69,15 +69,19 @@ writable by another local user is outside what the loader can prove.
   (parity suite, read and write). The run-state record is new, additive and opt-in.
 - **Defaults:** `HOOTL_WORKFLOW_PROFILE` off; the built-in default refuses to activate
   (`BUILT_IN_DEFAULT_APPROVAL.approved === false`).
-- **Behaviour differences** that a user of a *selected* profile will see are recorded and need the
-  owner's acceptance (U-4): G-5, G-2, report wording, absent `plan:clarified`, and the
-  `rejected`-end → `failure` review mapping.
+- **Behaviour differences** that a user of a *selected* profile will see: **decided by the owner on
+  2026-09-30 (U-4)** — G-5 and G-2 accepted, report wording aligned to the legacy `FINAL REPORT`
+  block, R-3 changed (a `rejected` end before execution ⇒ `cancelled`, after execution ⇒ `failure`),
+  and the absent `plan:clarified` entry stays as designed. Decision record:
+  `PHASE10_OPERATIONS.md` §9; the review text above describes the state at handoff and this paragraph
+  is the later owner decision applied to it.
 
 ## 6. What this review cannot certify
 
 1. **Independent review.** A reviewer other than the implementer must confirm the above; the plan
    requires it and this file does not substitute for it.
-2. **U-1/U-2/U-3/U-4/U-5** decisions in `TRACEABILITY.md` §3 — each needs the owner before activation.
+2. **U-3/U-5** remain open in `TRACEABILITY.md` §3 (U-1, U-2 and U-4 were decided by the owner on
+   2026-09-30); U-3 is the activation approval itself, U-5 a host-directory property to document.
 3. **Real-provider behaviour.** Every end-to-end run here uses the scripted/stub model; no provider
    call was made (no key, and the plan forbids claiming provider-verified results without one).
 4. **Cross-platform.** Behaviour is verified on Linux (sandbox) and by CI on ubuntu/macos/windows

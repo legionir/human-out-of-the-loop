@@ -811,7 +811,12 @@ unapproved); and a load error executes nothing (no session, no plan, no model ca
 **Behaviour differences recorded for the owner's approval before any default activation** (also in
 `CHANGELOG.md` and `PHASE7_PARITY.md` §9): G-5 (confirmation feedback cannot re-plan in v1 and ends
 fail-closed), G-2 (the answer branch ends `success`; `answered` stays the entry point's job),
-report wording, and the absence of the legacy `plan:clarified` observability entry. Two parity gaps
+report wording, and the absence of the legacy `plan:clarified` observability entry.
+
+> **Superseded in part (2026-09-30, owner decision U-4):** the differences were decided case by case
+> — G-5 and G-2 accepted, the report wording aligned to the legacy formatter, and R-3 (`rejected` end
+> → review outcome) changed. The decision record and the implemented behaviour are in
+> `PHASE10_OPERATIONS.md` §9 and the Phase 10 U-4 entry below. This paragraph is kept for the record. Two parity gaps
 found by the suite were fixed in code rather than documented: the missing acceptance/status callbacks
 on the profile path's `PlanRuntime`, and a failed plan execution skipping the review (now routed to the
 review node through the existing error-routing vocabulary).
@@ -822,3 +827,35 @@ all Workflow Profile suites **21 files / 235 tests**; adjacent suites 76 tests; 
 typecheck` and `npm run build` clean. No default activation happened: `BUILT_IN_DEFAULT_APPROVAL`
 remains `approved: false`, and no merge is authorized until all phases are complete (owner
 instruction). Phase 8 (user authoring/selection) is the next dependency-ordered phase.
+
+## Phase 10 U-4 behaviour-difference decision and implementation (2026-09-30; append-only)
+
+The owner answered the U-4 behaviour-difference items case by case (record: `PHASE10_OPERATIONS.md` §9,
+`TRACEABILITY.md` U-4):
+
+- **G-5 accepted** — a confirmation denial with feedback stays terminal (fail-closed); no re-plan is
+  introduced in v1.
+- **G-2 accepted** — the answer branch ends `success`.
+- **Report wording: align** — implemented: the profile path reports through the legacy
+  `formatReviewForUser` block and appends one line naming the profile status and whether it executed
+  (`Workflow profile "<status>" (profile path[, executed])`).
+- **R-3: change** — implemented: a profile `rejected` end reached **before** execution is reported as
+  `cancelled` (a refusal, exactly like a declined confirmation on the legacy path); a `rejected` end
+  **after** execution stays `failure`. The profile's own status always remains in the report line.
+
+**Implementation:** `src/ai/orchestrator.ts` — `rejectedWithoutExecution()` governs the interaction
+status, the review outcome and the synthetic execution-result status; `orchestratorResultFromProfile`
+builds the report from `formatReviewForUser(review)` plus the trailing profile line.
+
+**Evidence (local, this head; exact-head CI recorded after the push):**
+`workflow-profile-hardening.test.ts` 10/10 including the new R-3 regression (a `clarify`-with-no-loop
+refusal ⇒ `cancelled` with no model call; an executed-then-`rejected` run ⇒ `failure`);
+`workflow-profile-parity.test.ts` (shared `FINAL REPORT` shape),
+`phase8-profile-selection.test.ts` (the API-visible outcome updated from `failure` to `cancelled`, as
+the owner's change requires), and the full profile/CLI/server sweep.
+
+**Not changed:** no profile document gained new authority or behaviour; the change only selects which
+existing review outcome a given end reports, and which formatter renders it. The default profile
+remains unapproved (`BUILT_IN_DEFAULT_APPROVAL.approved: false`) and the flag stays off; Step 3 stays
+🟡 pending the owner's personal review of `PHASE10_REVIEW.md`; merges remain frozen by the owner's
+instruction.

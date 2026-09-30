@@ -82,16 +82,20 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
   is per request — the flag is never enabled process-wide. `profileFile` is not accepted over the
   API; selecting by file stays a CLI action.
 
-**Behaviour differences to review before the default profile is activated** (recorded in
-`docs/workflow-profiles/PHASE7_PARITY.md`; the built-in default stays gated until the approval is
-recorded):
-- A plan-confirmation denial with feedback cannot re-plan in v1 (the digest-bound decision port is an
-  object and v1 predicates address one top-level scalar port): the run ends fail-closed, like a
-  cancellation.
-- The answer branch ends with the run status `success`; the interaction status `answered` stays the
-  entry point's job, and an answer outcome without text ends with no response value.
-- The user-facing report wording on the profile path differs from the legacy formatter (the review's
-  final summary still reaches the user on both paths).
+**Behaviour differences — decided by the owner on 2026-09-30 (U-4)** (recorded in
+`docs/workflow-profiles/PHASE7_PARITY.md`, the decision record in `PHASE10_OPERATIONS.md` §9; the
+built-in default stays gated until the approval is recorded):
+- **Accepted:** a plan-confirmation denial with feedback cannot re-plan in v1 (the digest-bound
+  decision port is an object and v1 predicates address one top-level scalar port): the run ends
+  fail-closed, like a cancellation.
+- **Accepted:** the answer branch ends with the run status `success`; the interaction status
+  `answered` stays the entry point's job, and an answer outcome without text ends with no response
+  value.
+- **Changed — report aligned:** the profile path now renders the legacy `FINAL REPORT` block and
+  appends one line naming the profile status and whether the run executed.
+- **Changed — `rejected` ends (R-3):** a `rejected` end reached before anything executed is reported
+  as `cancelled` (a refusal, like a declined confirmation on the legacy path); a `rejected` end
+  **after** execution stays `failure`. Both directions are pinned by a regression test.
 - A failed plan execution is routed to the review (the current flow reviews failures instead of
   aborting), so the run is reported rather than terminated at the execution node.
 

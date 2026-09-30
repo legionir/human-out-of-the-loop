@@ -124,13 +124,17 @@ boundary (`profile-run-state`, resume guards, pending-effect journal); this file
 component-content, toolset, leakage and limit boundaries, and `PHASE9_HARDENING.md` records which
 suite owns what rather than duplicating it.
 
-### Recorded mapping: a `rejected` end is reported as a `failure` review outcome
+### Recorded mapping: a `rejected` end — **superseded by the owner decision of 2026-09-30 (R-3)**
 
-Not a defect, but user-visible: `Review.outcome` keeps the existing vocabulary
-(`success` / `partial-success` / `failure` / `cancelled`), so a profile run that ends an `end` node
-with `outcome: "rejected"` (or routes an unroutable review decision there) is reported as a failed
-run. The profile's own status stays in the report text (`Workflow profile "rejected" — …`). Recorded
-in `PHASE7_PARITY.md` §10 for the release notes and the owner's activation review.
+As first measured, `Review.outcome` keeps the existing vocabulary (`success` / `partial-success` /
+`failure` / `cancelled`), so a profile run ending an `end` node with `outcome: "rejected"` was
+reported as a failed run (profile status kept in the report text). The owner's U-4 answer changed
+this: a `rejected` end **before anything executed** is a refusal and is reported as `cancelled` —
+the same thing the legacy path reports for a declined confirmation — while a `rejected` end **after
+execution** stays `failure`. The report itself now comes from the legacy formatter plus one trailing
+profile line. Implementation and both directions are pinned by the R-3 regression in
+`src/ai/__tests__/workflow-profile-hardening.test.ts`; the decision record is in
+`PHASE10_OPERATIONS.md` §8.
 
 ## Step 2 — performance and resource measurement
 

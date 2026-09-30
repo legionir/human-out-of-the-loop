@@ -230,9 +230,29 @@ with `hootl run --resume`, and checks that the run executed and turned terminal 
 
 - [ ] All phase statuses in `EXECUTION_PLAN.md` are 🟢 with evidence (Phases 1–9 are).
 - [ ] Owner approval recorded for `BUILT_IN_DEFAULT_APPROVAL` before any default activation.
-- [ ] Behaviour differences accepted: G-5 (confirmation feedback cannot re-plan), G-2 (answer branch
-      ends `success`), `rejected` → `failure` review-outcome mapping, report wording, missing
-      `plan:clarified` entry (`PHASE7_PARITY.md` §9–§10, `CHANGELOG.md`).
+- [x] Behaviour differences decided by the owner (U-4, 2026-09-30): G-5 **accepted**, G-2
+      **accepted**, report wording **aligned to the legacy formatter** (implemented), R-3
+      **changed** — a `rejected` end before execution reports `cancelled`, after execution `failure`
+      (implemented). The missing `plan:clarified` entry was covered by the same decision and stays as
+      designed (`PHASE7_PARITY.md` §9–§10, `CHANGELOG.md`).
 - [ ] The §7 decision recorded.
 - [ ] CI green on the exact head SHA being handed over (`gh run list --json headSha,conclusion`).
 - [ ] Release notes read the `[Unreleased] — Workflow Profiles` section.
+
+## 9. Owner decision record (U-4, 2026-09-30): behaviour differences
+
+Asked case by case because each becomes user-visible the moment the default profile is activated.
+The owner's answers, and what was implemented for each:
+
+| Item | Answer | Implementation |
+| --- | --- | --- |
+| G-5 — a confirmation denial *with feedback* cannot re-plan; the run ends | **Accepted** | Unchanged: the denial stays terminal (fail-closed). Covered by the existing hardening suite |
+| G-2 — the answer branch ends `success` | **Accepted** | Unchanged: an `answer` outcome reports `success` and keeps the answer in the report |
+| Report wording — the profile path printed its own one-line summary | **Align** | Implemented: `formatReviewForUser` (the legacy FINAL REPORT block) plus one trailing line `Workflow profile "<status>" (profile path[, executed])`; the parity suite asserts the shared shape |
+| R-3 — a `rejected` end mapped onto the review `failure` outcome | **Change** | Implemented: `rejected` **before** execution ⇒ `cancelled` (a refusal, like a declined confirmation); `rejected` **after** execution ⇒ `failure`. Both directions pinned by the R-3 regression test; the profile's own status always stays in the report line |
+
+Evidence (this head): `src/ai/__tests__/workflow-profile-hardening.test.ts` (R-3 regression, both
+directions), `workflow-profile-parity.test.ts` (shared report shape),
+`src/server/__tests__/phase8-profile-selection.test.ts` (the API-visible outcome), plus the full
+profile/CLI/server sweep. No profile document gained behaviour it did not have: the mapping only
+changed which existing review outcome a given end reports.

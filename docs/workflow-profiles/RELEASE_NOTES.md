@@ -65,16 +65,17 @@ scope.
 ## 3. Behaviour differences to accept before activation
 
 These are deliberate, measured differences between a profile run and the legacy path; all are
-recorded with evidence in `PHASE7_PARITY.md` §9–§10. **Owner acceptance is required (U-4)** because
-they become user-visible the moment the default profile is activated.
+recorded with evidence in `PHASE7_PARITY.md` §9–§10. **Owner acceptance (U-4) was decided on
+2026-09-30** — the acceptance and the two changes it asked for are recorded here and implemented;
+the decision record itself is in `PHASE10_OPERATIONS.md` §8.
 
-| # | Difference | Why it is there |
-| --- | --- | --- |
-| G-5 | A confirmation denial with feedback cannot re-plan; the run ends | The v1 kernel routes denials to a terminal outcome instead of re-entering the planner with the feedback; introducing a re-plan would be a new approval model |
-| G-2 | The answer branch ends `success` (the legacy path reports the answer through its own outcome) | A profile's `end` declares the outcome; the answer-only shape has no failure to report |
-| — | The run report wording differs for the profile path (profile id and node-path phrasing) | The profile's node sequence is the source of the summary |
-| — | No `plan:clarified` observability entry on the profile path | The clarification round is an `approval` node with a bounded loop, not the legacy in-planner clarification |
-| R-3 | A `rejected` end maps to a `failure` review outcome | The review union has no `rejected` member; the mapping is explicit and tested |
+| # | Difference | Owner decision (2026-09-30) | Why it is there |
+| --- | --- | --- | --- |
+| G-5 | A confirmation denial with feedback cannot re-plan; the run ends | **Accepted as designed** — the denial with feedback stays terminal and fail-closed | The v1 kernel routes denials to a terminal outcome instead of re-entering the planner with the feedback; introducing a re-plan would be a new approval model |
+| G-2 | The answer branch ends `success` (the legacy path reports the answer through its own outcome) | **Accepted as designed** | A profile's `end` declares the outcome; the answer-only shape has no failure to report |
+| — | ~~The run report wording differs for the profile path (profile id and node-path phrasing)~~ | **Changed (implemented):** the profile path now reports through the legacy `formatReviewForUser` block, with one trailing line naming the profile status and whether it executed | The owner asked for one report shape; the profile's own status stays visible in that trailing line |
+| — | No `plan:clarified` observability entry on the profile path | Accepted with the suite (not raised as a separate item) | The clarification round is an `approval` node with a bounded loop, not the legacy in-planner clarification |
+| R-3 | ~~A `rejected` end maps to a `failure` review outcome~~ | **Changed (implemented):** a `rejected` end reached before execution is reported as `cancelled` (a refusal, exactly like a declined confirmation on the legacy path); a `rejected` end **after** execution stays `failure`. The profile's own status is always in the report line | The review union has no `rejected` member; refusing to map it straight onto `failure` was the owner's call |
 
 Nothing else about the legacy path changes, and the parity suite fails if the plan, session, step
 agents, execution result or review summary diverge (the differences above are the documented

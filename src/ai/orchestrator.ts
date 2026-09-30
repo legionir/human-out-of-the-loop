@@ -170,6 +170,16 @@ export interface OrchestratorWorkflowProfileOptions extends Omit<WorkflowProfile
   stateStore?: WorkflowProfileRunStateStore | null;
 }
 
+/**
+ * R-3 (owner decision 2026-09-30): a profile end reached with `rejected` **before anything
+ * executed** is a refusal (most often the user declining the plan), which the legacy path reports as
+ * `cancelled`; the same end *after* an execution is a rejection of work that ran and stays a
+ * `failure`. The distinction is the execution itself, not the profile text.
+ */
+function rejectedWithoutExecution(outcome: WorkflowProfileBridgeOutcome): boolean {
+  return outcome.status === 'rejected' && outcome.execution === undefined;
+}
+
 export type OrchestratorConfig = z.input<typeof OrchestratorConfigSchema> & {
   /**
    * Phase 7: opt-in Workflow Profile execution. Absent ⇒ the instance has no profile path.
@@ -1514,9 +1524,12 @@ export class Orchestrator {
     userRequest: string,
   ): void {
     if (!interaction) return;
+    // R-3 (owner decision): a `rejected` end that never executed is the user's refusal — the legacy
+    // path records a declined confirmation as `cancelled`. A rejection *after* execution stays a
+    // failure, because work ran and its result was rejected.
     const status: 'success' | 'failure' | 'cancelled' = outcome.status === 'success'
       ? 'success'
-      : outcome.status === 'cancelled' ? 'cancelled' : 'failure';
+      : outcome.status === 'cancelled' || rejectedWithoutExecution(outcome) ? 'cancelled' : 'failure';
     this.sessionStore.updateInteraction(sessionId, interaction.id, {
       outcome: status,
       reviewSummary: outcome.review?.finalSummary ?? outcome.failure?.code ?? `Workflow profile run ${outcome.status}`,
@@ -1535,7 +1548,7 @@ export class Orchestrator {
     const planId = outcome.plan?.id ?? 'none';
     const reviewOutcome: Review['outcome'] = outcome.status === 'success'
       ? 'success'
-      : outcome.status === 'cancelled' ? 'cancelled' : 'failure';
+      : outcome.status === 'cancelled' || rejectedWithoutExecution(outcome) ? 'cancelled' : 'failure';
     const review: Review = outcome.review ?? {
       planId,
       goal: userRequest,
@@ -1550,7 +1563,7 @@ export class Orchestrator {
     };
     const report = isAnswer
       ? `💬 Answer\n\n${outcome.answer ?? ''}`
-      : `${outcome.status === 'success' ? '✅' : outcome.status === 'rejected' ? '⚠️' : outcome.status === 'cancelled' ? '🛑' : '❌'} Workflow profile "${outcome.status}" — ${review.finalSummary}`;
+      : `${formatFinalReview(review)}\n\nWorkflow profile "${outcome.failure ? 'failure' : outcome.status}" (profile path${outcome.execution ? ', executed' : ', no execution'})`;
     return {
       kind: isAnswer ? 'answer' : 'plan',
       review,
@@ -1559,7 +1572,8 @@ export class Orchestrator {
       sessionId,
       executionResult: outcome.execution ?? {
         planId,
-        status: outcome.status === 'success' ? 'completed' : outcome.status === 'cancelled' ? 'cancelled' : 'failed-partial',
+        status: outcome.status === 'success' ? 'completed'
+          : outcome.status === 'cancelled' || rejectedWithoutExecution(outcome) ? 'cancelled' : 'failed-partial',
         completedSteps: 0,
         failedSteps: 0,
         totalSteps: 0,

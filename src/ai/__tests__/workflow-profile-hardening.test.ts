@@ -54,10 +54,14 @@ const planOf = (goal = GOAL) => ({
   }],
 });
 
-function installScript(): void {
+function installScript(options: { clarify?: boolean } = {}): void {
   mockGenerateObject.mockImplementation(async (opts: unknown) => {
     const name = (opts as { schemaName?: string }).schemaName;
-    if (name === 'PlannerAssessment') return { object: { isClear: true, needsClarification: [], plan: planOf() } } as never;
+    if (name === 'PlannerAssessment') {
+      return options.clarify
+        ? { object: { isClear: false, needsClarification: ['Which page?'], plan: undefined } } as never
+        : { object: { isClear: true, needsClarification: [], plan: planOf() } } as never;
+    }
     if (name === 'ExecutionPlan') return { object: planOf() } as never;
     if (name === 'AcceptanceJudgment') return { object: { accepted: true, reason: 'fine' } } as never;
     if (name === 'FinalReview') {
@@ -194,6 +198,25 @@ function profileWithApproval(withDigest: boolean): WorkflowProfileDocument {
       ],
     },
   } as unknown as WorkflowProfileDocument;
+}
+
+/**
+ * A profile that executes and then ends `rejected` instead of `finish`: the "rejected *after*
+ * execution" case of the R-3 mapping (the work ran, so the outcome is a failure, not a refusal).
+ */
+function rejectingProfile(): WorkflowProfileDocument {
+  const document = profileWithApproval(true) as unknown as {
+    workflow: { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> };
+    result: Array<Record<string, unknown>>;
+  };
+  document.workflow.edges = document.workflow.edges.map((edge) =>
+    edge.from === 'execute' ? { ...edge, to: 'rejected' } : edge,
+  );
+  // The rejected end replaces the success end, and the graph keeps exactly the reachability it had
+  // (no review node: this is the synthetic-outcome path the R-3 mapping governs).
+  document.workflow.nodes = document.workflow.nodes.filter((node) => node.id !== 'finish');
+  document.result = document.result.filter((entry) => entry.fromNode !== 'finish');
+  return document as unknown as WorkflowProfileDocument;
 }
 
 function rubricPin(): string {
@@ -340,6 +363,29 @@ describe('Phase 9 hardening — profile policy boundaries end to end', () => {
     );
     const plannerNode = document.workflow.nodes.find((node) => node.id === 'plan')!;
     expect(plannerPrompt).not.toContain(plannerNode.goal);
+  });
+
+  it('maps a rejected end onto `cancelled` before execution, and `failure` after it (R-3)', async () => {
+    // Owner decision (2026-09-30): the profile cannot invent a new review vocabulary, so the exit
+    // status is mapped by *what actually happened*. Nothing executed ⇒ the refusal reads like the
+    // legacy declined-confirmation outcome (`cancelled`); work executed and was rejected ⇒ `failure`.
+    installScript({ clarify: true });
+    const refused = await withProfile(profileWithoutApproval()).run(GOAL, { confirmCallback: confirmAccepting });
+    // A `clarify` outcome with no loop in this fixture falls to the rejected end before anything
+    // runs: a refusal, reported the way the legacy path reports a refusal.
+    expect(refused.review.outcome).toBe('cancelled');
+    expect(mockGenerateText).not.toHaveBeenCalled();
+    expect(refused.report).toContain('FINAL REPORT');
+    expect(refused.report).toContain('Workflow profile');
+    expect(refused.report).toContain('no execution');
+
+    // The same graph with an approving user executes, then rejects the result in the review node.
+    installScript();
+    const rejecting = withProfile(rejectingProfile());
+    const afterExecution = await rejecting.run(GOAL, { confirmCallback: confirmAccepting });
+    expect(afterExecution.review.outcome).toBe('failure');
+    expect(mockGenerateText).toHaveBeenCalled();
+    expect(afterExecution.report).toContain('executed');
   });
 
   it('a cancelled run is terminal and never routed into the review', async () => {

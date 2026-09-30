@@ -663,3 +663,36 @@ the docs-only follow-up head `f3bd11a` (run `36758702602`) is recorded as failur
 test failed and the rerun-only-failed-job remedy is not permitted for that run.
 Step 3 stays 🟡 until a reviewer other than the implementer signs off and the owner answers the open
 items; no merge, release or activation is performed or requested.
+
+### 8.15 — Workflow Profiles Phase 10: owner decisions U-1/U-2 (resume) and U-4 (behaviour differences) implemented (2026-09-30; append-only)
+
+**U-1 (runtime version), owner chose activation:** a profile run records the package version
+(`packageVersion()` in `registries/layout.ts`) unless the host declares `runtimeVersion`; a resume
+whose recorded version differs is refused (`resume.runtime-version-changed`). **U-2 (resume surface),
+owner chose option A — wired:** a selected profile records itself under
+`<projectRoot>/.ai-runtime/workflow-profile-runs/`, `hootl profiles runs [--json]` lists the records
+(newest first; unreadable files are skipped), and `hootl run --resume <runId> "…"` continues one —
+re-selecting the profile content it was selected from and continuing its session; a missing or
+finished run exits 1 (`resume.profile-missing` / `resume.already-terminal`) and `--resume` together
+with `--profile*` is a usage error (exit 2). The guarantees hold: a stored approval is never authority
+(the resumed attempt re-runs the approval node and asks again), a pending effect refuses continuation
+(`resume.ambiguous-effect`), and resume is not exposed over HTTP (the server records under its own run
+id only). Evidence: `workflow-profile-resume-wiring.test.ts` (4), `workflow-profile-upgrade.test.ts`
+(3), `phase8-profiles.test.ts` (CLI), e2e `profiles` scenario 12/12 (kill → list → resume).
+
+**U-4 (behaviour differences), decided case by case:** G-5 **accepted** (a confirmation denial with
+feedback stays terminal, fail-closed) and G-2 **accepted** (the answer branch ends `success`).
+**Report wording aligned:** `orchestratorResultFromProfile` now renders the legacy
+`formatReviewForUser` block and appends one line, `Workflow profile "<status>" (profile path[,
+executed])`, so both paths show the same FINAL REPORT. **R-3 changed:** a `rejected` end reached
+**before** execution is reported as `cancelled` (a refusal — the same outcome a declined confirmation
+reports on the legacy path), while a `rejected` end **after** execution stays `failure`; the profile's
+own status always stays in the report line. Implemented through `rejectedWithoutExecution()` in
+`src/ai/orchestrator.ts`, which governs the interaction status, the review outcome and the synthetic
+execution-result status. Evidence: the new R-3 regression in `workflow-profile-hardening.test.ts`
+(both directions; 10/10 in that file), the shared-report assertions in
+`workflow-profile-parity.test.ts` (9), and the updated API-visible expectation in
+`phase8-profile-selection.test.ts`. Decision record: `PHASE10_OPERATIONS.md` §9; superseded text in
+`PHASE7_PARITY.md` §9–§10 is struck through with the decision applied. `BUILT_IN_DEFAULT_APPROVAL`
+stays `approved: false`, the flag stays off, Step 3 stays 🟡 pending the owner's review of
+`PHASE10_REVIEW.md`, and merges remain frozen by the owner's instruction.

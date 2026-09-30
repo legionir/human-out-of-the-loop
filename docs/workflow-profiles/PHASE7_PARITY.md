@@ -296,16 +296,18 @@ Two parity gaps found while building this were fixed rather than documented away
   planned is re-run in `plan` mode with the answer kept as the fallback for an infeasible plan.
 
 Deliberate differences (asserted as differences in the suite; recorded here, in `CHANGELOG.md` and in
-the plan, and requiring the owner's approval before any default activation):
+the plan). The owner decided each one on 2026-09-30 (U-4; record in `PHASE10_OPERATIONS.md` §8):
 
-1. **G-5 — confirmation feedback cannot re-plan.** The digest-bound gate ends fail-closed on a denial
-   with feedback instead of starting the bounded re-plan the legacy path performs.
-2. **G-2 — the answer branch ends `success`** and the `answered` interaction status stays the entry
-   point's job; an `answer` outcome without text ends with no response value.
-3. **Report wording** differs (the legacy formatter vs the profile summary line); the review's final
-   summary reaches the user on both paths.
+1. **G-5 — confirmation feedback cannot re-plan** (owner: **accepted**). The digest-bound gate ends
+   fail-closed on a denial with feedback instead of starting the bounded re-plan the legacy path
+   performs.
+2. **G-2 — the answer branch ends `success`** (owner: **accepted**) and the `answered` interaction
+   status stays the entry point's job; an `answer` outcome without text ends with no response value.
+3. ~~Report wording differs~~ (owner: **align**) — **implemented:** the profile path now reports via
+   the legacy `formatReviewForUser` block, plus one trailing line with the profile status and whether
+   the run executed. The parity suite asserts the shared `FINAL REPORT` shape.
 4. **The legacy `plan:clarified` observability entry** is not written by the profile path; the same
-   round appears in the workflow events instead.
+   round appears in the workflow events instead (not raised as a separate decision item).
 
 **Rollback.** Activation is per process and per instance: `HOOTL_WORKFLOW_PROFILE` unset/`0` (or no
 `OrchestratorConfig.workflowProfile`) runs the legacy path, and the built-in default additionally
@@ -330,12 +332,14 @@ activation is rollbackable and the load-error path executes nothing.
 
 Recorded for the release notes and the owner's approval before any default activation:
 
-- **The profile's `rejected` end maps onto the legacy `failure` review outcome.** `Review.outcome`
-  speaks the existing vocabulary (`success` / `partial-success` / `failure` / `cancelled`), so a
-  profile that ends an end node with `outcome: "rejected"` (an unroutable review decision, a
-  refusal) is reported as a **failed** run; the profile's own status stays visible in the report
-  text ("Workflow profile \"rejected\" — …"). Nothing re-executes and no result is lost — it is a
-  vocabulary mapping, recorded here because the owner's approval covers activation behaviour.
+- ~~**The profile's `rejected` end maps onto the legacy `failure` review outcome.**~~ **Superseded
+  by the owner's U-4 decision of 2026-09-30 (R-3) and implemented:** a `rejected` end reached
+  **before** anything executed is a refusal and is reported as `cancelled` (exactly what the legacy
+  path reports when the user declines the confirmation); a `rejected` end **after** execution stays
+  `failure`, because work ran and its result was rejected. The profile's own status is always
+  visible in the report's trailing line. Both directions are pinned by the R-3 regression in
+  `workflow-profile-hardening.test.ts`. The original text and reasoning are kept struck through
+  above for the record. Nothing re-executes and no result is lost — it is a vocabulary mapping.
 
 Two defects were found later, by the Phase 9 hardening pass, and are **fixed** (they are not
 differences to approve):

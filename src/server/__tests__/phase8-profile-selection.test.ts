@@ -183,10 +183,11 @@ describe('Phase 8 — per-request profile selection over the API', () => {
         .expect(202);
       expect(selected.body.profileId).toBe('tests.rejecting');
       const selectedState = await pollRun(created.app, selected.body.runId as string);
-      // The profile's end node reports `rejected`, which the legacy Review vocabulary records as
-      // `failure` (the recorded mapping difference; the report keeps the profile's own status), and
-      // no step agent ran for this request.
-      expect(selectedState.outcome).toBe('failure');
+      // The profile's end node reports `rejected` and nothing executed, which the owner's R-3
+      // decision maps onto the legacy `cancelled` outcome (the same thing a declined confirmation
+      // reports); a rejection *after* execution stays `failure`. The report keeps the profile's own
+      // status and now uses the legacy FINAL REPORT formatter.
+      expect(selectedState.outcome).toBe('cancelled');
       expect(selectedState.profileId).toBe('tests.rejecting');
       expect(selectedState.report).toContain('Workflow profile "rejected"');
       expect(mockGenerateText).toHaveBeenCalledTimes(1); // only the legacy request executed a step
