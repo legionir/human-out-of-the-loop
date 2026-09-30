@@ -147,10 +147,24 @@ export function prepareWorkflowProfileRun(options: PrepareWorkflowProfileRunOpti
     now,
   });
   const declaredAuthority: AuthoritySnapshot = (() => {
-    const tools = (profile.policies as { tools?: { allowedToolsets?: ReadonlyArray<string> } } | undefined)?.tools;
+    // The profile's tool surface is the *content* of its pinned personas and
+    // toolsets, never the raw ids: an empty declaration means the profile adds no
+    // narrowing (it cannot mean "permit nothing", which would deny every tool).
+    const declaredToolIds = new Set<string>();
+    for (const dependency of resolved.dependencies) {
+      const declared = dependency.kind === 'toolset'
+        ? (dependency.content as { tools?: unknown }).tools
+        : dependency.kind === 'persona'
+          ? (dependency.content as { allowedTools?: unknown }).allowedTools
+          : undefined;
+      if (Array.isArray(declared)) for (const tool of declared) if (typeof tool === 'string') declaredToolIds.add(tool);
+    }
     const approvalPolicy = (profile.policies as { approvals?: { policy?: string } } | undefined)?.approvals?.policy;
     const policy = narrowAccessPolicy([
-      { toolIds: tools?.allowedToolsets ?? [], budget: (profile.policies as { execution?: WorkflowBudgetLimits } | undefined)?.execution },
+      {
+        ...(declaredToolIds.size > 0 ? { toolIds: [...declaredToolIds] } : {}),
+        budget: (profile.policies as { execution?: WorkflowBudgetLimits } | undefined)?.execution,
+      },
       options.runtimeToolIds ? { toolIds: options.runtimeToolIds } : undefined,
       { budget: options.budget },
       { budget: options.sessionBudget, approvalPolicy },

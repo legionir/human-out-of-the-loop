@@ -173,13 +173,15 @@ workflow پس از restart از state و hash/version درست resume می‌ش�
 
 ---
 
-## [🔴] Phase 7: پروفایل پیش‌فرض و حفظ رفتار فعلی
+## [🟡] Phase 7: پروفایل پیش‌فرض و حفظ رفتار فعلی
 
 جریان فعلی HOOTL را فقط پس از استخراج از کد/تست به Profile پیش‌فرض تبدیل کن. Feature flag در v1 پیش‌فرض خاموش می‌ماند؛ خاموش بودن یعنی مسیر legacy بدون تغییر. Profile فقط با opt-in صریح و پس از parity gate اجرا می‌شود؛ انتخاب implicit/فعال‌سازی عمومی بدون gate ممنوع است.
 
-### [🔴] Step 1: مدل‌کردن جریان فعلی در Profile پیش‌فرض
+### [🟡] Step 1: مدل‌کردن جریان فعلی در Profile پیش‌فرض
 
 ترتیب واقعی intake/clarification، planner، feasibility/cycle checks، نمایش و تأیید plan، execution، acceptance/re-plan، review/report و cancellation را از کد و تست‌ها استخراج و به node/edge و policy نگاشت کن. تفاوت‌های اصل Human-Out-Of-Loop، تنها تعامل مجاز، retry/re-plan خودکار، rate limit و خطای جزئی باید صریح باقی بمانند؛ behavior را از مستندات حدس نزن.
+
+**Blocked (D-WP-014, owner decision required before Step 2):** the extraction from code and tests is complete (`docs/workflow-profiles/PHASE7_PARITY.md` §1–§2), but the default profile cannot be finalized because v1 requires `bindings.personaRef` on `execute` while the current flow assigns a persona **per plan step** (`plan-runtime.ts` `buildAgentForStep` ← `step.assignedPersona`) and has no executor persona to pin. Three options are recorded in `PHASE7_PARITY.md` §3 (G-1): (1) author a HOOTL-owned `hootl.executor` persona whose system prompt mirrors the runtime's step prompt, (2) make `personaRef` optional for `execute` as a versioned v1 contract change, (3) defer default-profile activation and ship the modeling/parity harness only. Decision owner: Pouya. Deadline: before Step 2 (Orchestrator wiring). Also recorded: G-2 (the answer/conversation branch stays an explicit intentional difference until the artifact is built) and G-4 (resolved: the authority snapshot now derives the declared tool surface from pinned content and `allowedToolsets: []` means no narrowing).
 
 ### [🔴] Step 2: اتصال default profile به Orchestrator
 
@@ -499,3 +501,10 @@ Phase 6 Steps 1–4 are implemented and locally verified; the phase is 🟢. The
 ## Phase 6 CI record (2026-09-30; append-only)
 
 CI run `36717190085` on the Phase 6 code head `2cdbd6a` (`arena/01a0f205-human-out-of-the-loop`, pushed to PR #10) reported **7/10 jobs green**, including `windows-latest / node 24` — the job that failed for the Phase 5 heads — while `macos-latest / node 22` (`src/cli/__tests__/cli.test.ts`, "logs --follow streams new entries as they are appended (followLog)": `followLog never emitted`) and `windows-latest / node 22` (`src/cli/__tests__/phase-g.test.ts` G-09/G-04/G-02: `Test timed out in 5000ms`) failed. `git diff 0bc9288..2cdbd6a -- src/cli` is empty: Phase 6 changed no CLI file, and the failing jobs differ from the ones recorded for the Phase 5 heads, so no Phase 6-caused failure is established. The full table, the counter-evidence (`macos-latest / node 24` and `windows-latest / node 24` pass on the same commit), and the still-open flake question are recorded in `docs/workflow-profiles/PHASE6_LIFECYCLE.md` §7. The Phase 4 exact head (`506a6ec`, run `36710870531`) remains the last fully green run. No merge is authorized until all phases are complete; Phase 7 (default profile and current-behaviour parity) is the next dependency-ordered phase.
+
+
+## Phase 7 progress and blocking decision (2026-09-30; append-only)
+
+Phase 7 is 🟡. Step 1's extraction is complete and recorded in `docs/workflow-profiles/PHASE7_PARITY.md`: the real stage order (entry/session → planning assessment → answer branch → clarification loop → feasibility/cycle gate → plan persistence and link → confirmation → execution with per-step acceptance and re-planning → cancellation → final review and report) is derived from `orchestrator.ts` and the characterization suites, each stage is mapped to a profile construct, and the deliberate delegation boundary (PlanRuntime stays the sole inner-DAG scheduler/validator) is recorded. The tool-surface gap found while extracting was fixed in the same step: the authority snapshot now derives the profile's declared tool surface from the content of its pinned personas/toolsets, and "no toolsets declared" no longer means "permit nothing" (`allowedToolsets: []` is a valid non-widening default), with a lifecycle test.
+
+Step 2 is **blocked on owner decision D-WP-014**: v1 requires `bindings.personaRef` on `execute`, but the current flow has no single executor persona — `plan-runtime.ts` builds each step's agent from `step.assignedPersona` and `agent-factory.ts` throws for an unknown persona, while the registry ships `planner` and `reviewer` (both genuinely used by the runtime) but no executor. The three options (author `hootl.executor`; make `personaRef` optional for `execute` as a versioned contract change; defer activation and ship modeling + parity harness only) are recorded in `PHASE7_PARITY.md` §3 (G-1). No profile is activated, the flag stays off by default, and Steps 2–3 stay 🔴 until the decision is made.

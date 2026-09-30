@@ -143,3 +143,17 @@ this record does not claim a Windows/macOS-green run for the Phase 6 head: the P
   still fails closed at the node's contract check.
 - Merge remains frozen until all phases are complete (owner instruction, 2026-09-30); PR #9 stays
   Draft. Phases 7–10 are still 🔴.
+
+### 2026-09-30 — run 36717860718 @ `2482b6e` (documentation commit for the record above)
+
+Result: **failure**, `windows-latest` only — `/ node 22` failed on `v2717-chat-mode.test.ts`
+("answers a greeting", `Hook timed out`), `u2-registry.test.ts` (U2, `Test timed out in 5000ms`) and
+`phase-g.test.ts` (G-04, `Test timed out in 5000ms`); `/ node 24` failed on `phase21.test.ts`
+(PERF-04, "writes 1000 events in < 100 ms") and `phase19.test.ts` (Law 16, timeout). All of these
+files are untouched by every phase of this work (`git diff ee3fa3f..2482b6e -- src/ai/__tests__/
+src/server/__tests__ src/cli/__tests__` only shows the new `workflow-profile-*` suites), and the
+combined evidence across the runs recorded here — a different job, operating system, and test each
+time, always a 5000 ms test/hook timeout or a wall-clock performance assertion, never the profile
+suites — is consistent with runner-performance flakiness rather than a branch defect. No
+Windows-green run exists for the Phase 5/6 heads; the Phase 4 exact head (`506a6ec`) remains the last
+fully green run.

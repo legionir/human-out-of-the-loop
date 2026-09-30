@@ -322,6 +322,22 @@ describe('Workflow Profile durable runs', () => {
     await expect(moreTools.run({ input: {}, handlers: handlers() })).rejects.toThrow(/authority-increase/);
   });
 
+  it('derives the declared tool surface from pinned content and never denies every tool by default', async () => {
+    const store = new MemoryWorkflowProfileRunStateStore();
+    // This fixture pins one persona and declares no toolsets: the profile adds no
+    // tool narrowing, so its declared surface is whatever the persona permits.
+    const prepared = runWith(store);
+    const state = prepared.runState()!;
+    expect(state.authority.toolIds).toEqual([...STUB_PERSONA.allowedTools].sort());
+    await prepared.run({ input: {}, handlers: handlers() });
+    // A resume with the same declaration stays allowed (no false "authority increase").
+    const again = prepareWorkflowProfileRun({
+      document: executableProfile(), sources, env, runtimeVersion: RUNTIME_VERSION,
+      runId: 'run-durable', stateStore: new MemoryWorkflowProfileRunStateStore(),
+    });
+    expect(again.runState()!.authority.toolIds).toEqual([...STUB_PERSONA.allowedTools].sort());
+  });
+
   it('refuses to continue a run that stopped with an effect in flight', async () => {
     const store = new MemoryWorkflowProfileRunStateStore();
     const prepared = runWith(store);
