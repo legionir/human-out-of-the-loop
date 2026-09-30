@@ -158,6 +158,24 @@ export interface ReviewerPortOptions {
  *   - otherwise, when a step/task pair is present, `AcceptanceChecker` judges it.
  * A cancelled run is a terminal cancellation, never a `reject` verdict.
  */
+/**
+ * Map a delegated final review onto the review node's decision contract.
+ * `success` → `pass`, `partial-success` → `revise`, `failure` → `reject`; a cancelled run is a
+ * terminal cancellation and is never converted into a routeable verdict.
+ */
+export function reviewerOutcomeFromReview(review: Review): WorkflowReviewerOutcome {
+  if (review.outcome === 'cancelled') {
+    throw new WorkflowNodeError(review.finalSummary || 'run cancelled', {
+      category: 'cancelled', code: 'review.cancelled', retryable: false,
+    });
+  }
+  return {
+    decision: OUTCOME_DECISION[review.outcome],
+    reason: review.finalSummary,
+    findings: [...review.acceptedFindings, ...review.rejectedFindings],
+  };
+}
+
 export function createReviewerPort(options: ReviewerPortOptions): WorkflowReviewerPort {
   return {
     async review(request): Promise<WorkflowReviewerOutcome> {
@@ -171,17 +189,7 @@ export function createReviewerPort(options: ReviewerPortOptions): WorkflowReview
           execution as PlanExecutionResult,
           options.modelId,
         );
-        if (review.outcome === 'cancelled') {
-          // A cancelled run is terminal: it is never converted into a routeable verdict.
-          throw new WorkflowNodeError(review.finalSummary || 'run cancelled', {
-            category: 'cancelled', code: 'review.cancelled', retryable: false,
-          });
-        }
-        return {
-          decision: OUTCOME_DECISION[review.outcome],
-          reason: review.finalSummary,
-          findings: [...review.acceptedFindings, ...review.rejectedFindings],
-        };
+        return reviewerOutcomeFromReview(review);
       }
       if (options.acceptanceChecker && options.stepSelector) {
         const selected = options.stepSelector(request.raw as Record<string, unknown>);

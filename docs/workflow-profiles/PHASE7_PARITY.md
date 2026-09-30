@@ -191,3 +191,40 @@ Evidence: `src/ai/__tests__/workflow-profile-activation.test.ts` (8 tests) cover
 not-approved refusals (also proven registry-free), explicit selection, approved-default preparation,
 the schema-version refusal (no fallback) and a dependency-resolution refusal. The Orchestrator hook
 (Step 2's second half) follows in the same step.
+
+## 7. Step 2 run bridge and component sources (append-only, 2026-09-30)
+
+Two more Step 2 pieces landed, both fail-closed and mutation-free:
+
+- **`runWorkflowProfileBridge(prepared, options)`** (`src/ai/workflow-profiles/orchestrator-bridge.ts`)
+  runs a prepared profile against the existing services — `Planner` through the Phase 5 planner port,
+  `PlanRuntime` as the sole inner-DAG scheduler, the `FinalReviewer` (or `AcceptanceChecker`) for the
+  review node, and the existing confirm callback for approvals. Boundaries it enforces: the `onPlan`
+  hook fires the moment a plan exists and *before* anything executes, so the caller keeps its existing
+  `PlanStore`/session-link writes; usage accounting stays inside the services the Orchestrator built;
+  the caller's service objects are never mutated (capture views are new objects); a missing service
+  fails closed (`approval.service-missing`, `reviewer.service-missing`) instead of substituting a stub.
+  The final review is built from the bridge's captured plan/execution context — the profile hands the
+  review node only the execution summary — and `reviewerOutcomeFromReview` maps
+  `success`/`partial-success`/`failure` onto `pass`/`revise`/`reject` while keeping a cancelled run a
+  terminal cancellation. Because the kernel reports a cancellation *category* on a failed node while
+  reserving run status `cancelled` for the abort signal, the bridge normalizes
+  `failure` + category `cancelled` to status `cancelled`, so the caller maps exactly one cancellation
+  outcome.
+- **`createWorkflowProfileComponentSources(registries)`** (`src/ai/workflow-profiles/profile-sources.ts`)
+  wires the live persona/skill/model-config/toolset/rubric registries into the resolver's component
+  sources, returning defensive copies (a caller cannot change registry state through the profile
+  layer, and a pin cannot be invalidated by later mutation) and `undefined` for unknown ids so the
+  resolver reports `dependency.missing` instead of substituting content. The rubric source defaults to
+  the code-owned built-in catalogue; no toolset registry ships, so toolsets resolve to nothing (G-4).
+
+Evidence: `workflow-profile-bridge.test.ts` (6 tests: plan branch with the persistence-before-execution
+order, answer branch, denied confirmation, missing approval service, missing reviewer, cancelled
+execution) and `workflow-profile-sources.test.ts` (5 tests: resolution, enumeration, unknown ids,
+defensive copies, stable pins, built-in rubrics). All Workflow Profile suites: **18 files / 213 tests**;
+typecheck and build clean.
+
+**Still to do in Step 2:** the Orchestrator hook itself (`OrchestratorConfig.workflowProfile`,
+activation before any session/interaction side effect, the interaction/`OrchestratorResult` mapping),
+which is the next change; the plan keeps Step 2 🔴 until it lands.
+

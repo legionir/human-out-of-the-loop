@@ -522,3 +522,18 @@ Step 1 is 🟢. The default profile artifact is `createDefaultWorkflowProfileDoc
 **Evidence:** `src/ai/__tests__/workflow-profile-default-profile.test.ts` (11 tests) passes, all Workflow Profile suites pass **15 files / 194 tests**, and `npm run typecheck` / `npm run build` are clean on the Step 1 head. Step 1's `Blocked (D-WP-014)` record above is preserved; D-WP-014 was resolved by the owner on 2026-09-30 and implemented in the preceding commit.
 
 **Still open in Phase 7:** Step 2 (Orchestrator wiring behind the flag; flag off ⇒ nothing profile-related resolves) and Step 3 (characterization/golden parity tests, including the tests that pin G-2/G-5, plan/session compatibility, and the rollback path). Phase 7 stays 🟡 until both are complete. No merge is authorized until all phases are complete (owner instruction).
+
+## Phase 7 Step 2 progress (2026-09-30; append-only)
+
+Step 2 remains 🔴 and is being implemented in reviewable pieces: the fail-closed activation seam
+(`activateWorkflowProfile`, `profile-activation.ts`), the run bridge against the existing services
+(`runWorkflowProfileBridge`, `orchestrator-bridge.ts`) and the registry→sources adapter
+(`createWorkflowProfileComponentSources`, `profile-sources.ts`) have landed with their suites
+(Workflow Profile suites now **18 files / 213 tests**, typecheck and build clean). The remaining piece
+is the Orchestrator hook itself: `OrchestratorConfig.workflowProfile`, activation before any session or
+interaction side effect (flag off ⇒ nothing profile-related resolves and the legacy path is unchanged),
+and the interaction/`OrchestratorResult` mapping — including the cancellation-category normalization
+recorded in `PHASE7_PARITY.md` §7 and the G-5 confirmation-denial mapping. Step 3 (characterization
+parity tests, plan/session compatibility, rollback) follows. No merge is authorized until all phases
+are complete.
+
