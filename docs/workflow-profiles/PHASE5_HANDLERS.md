@@ -83,3 +83,20 @@ Context that bears on interpretation, not a conclusion: the same `windows-latest
 | `windows-latest / node 24` | `src/server/__tests__/server.test.ts` — "U1 — server config parity (.env + global config) model precedence" | `Error: Test timed out in 5000ms.` |
 
 Both files are byte-identical to `main` on this branch (`git diff main --stat` for them is empty), both are pre-existing suites unrelated to Workflow Profiles, and the failure mode is the 5-second Vitest timeout on Windows runners — a different test per job and a different job set than the previous run on identical code. The nine/eight other jobs, including all three e2e jobs and every workflow-profile suite on Linux and macOS, pass. The Windows unit jobs on this repository therefore fail for an environment/timeout reason outside this phase's scope; the earlier unexplained `windows-latest / node 24` failure at `2ccaaa0` (run 36707929806) and the failed-then-passed Windows jobs at PR #9 are the same symptom. This is recorded as an environment finding for the owner, not resolved here and not attributed to Phase 5.
+
+### 2026-09-30 — owner-authorized CI timeout adjustment (append-only)
+
+Across the Phase 5/6 heads the Windows legs failed with a rotating set of **5000 ms test/hook
+timeouts in pre-existing tests this branch never touched** (`chat-mode.test.ts` greeting,
+`server.test.ts` U1 parity, `u2-registry.test.ts` U2, `u2717-chat-mode.test.ts` greeting,
+`phase19.test.ts` Law 16, `phase-g.test.ts` G-02/G-04/G-09, `phase21.test.ts` PERF-04,
+`cli.test.ts` followLog), never with a Workflow Profile assertion. The check-run annotations are the
+evidence: each failure is a Vitest timeout or a wall-clock budget, the failing test differs per run
+and per job, and the same commit can be green on one runner and red on another.
+
+Owner instruction (2026-09-30): stop chasing the flake and raise the ceilings. Applied in
+`vitest.config.ts` — on CI only, `testTimeout`/`hookTimeout` 30 s and `maxWorkers` 2, so the 2-core
+runners are not starved; local runs keep Vitest's defaults. `phase21.test.ts` PERF-04's Windows
+budget was raised from 500 ms to 2000 ms (the assertion still catches a regression to one
+open/close per event, which costs seconds on that platform). No assertion was removed and no test
+semantics changed; the flake itself is recorded, not hidden.
