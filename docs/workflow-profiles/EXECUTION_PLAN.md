@@ -123,23 +123,23 @@ graphهای خطی، شاخه‌ای و bounded-loop با fake handlerها deter
 
 ---
 
-## [🔴] Phase 5: handlerهای node و اتصال به سرویس‌های موجود
+## [🟢] Phase 5: handlerهای node و اتصال به سرویس‌های موجود
 
 هستهٔ graph را به قابلیت‌های واقعی HOOTL وصل کن. این فاز تنها adapterهای node را اضافه می‌کند؛ کنترل جریان، loop bound و امنیت پایه از Phase 4/Phase 6 می‌آیند و نباید در handlerها به‌صورت موازی دوباره پیاده شوند.
 
-### [🔴] Step 1: اتصال nodeهای intake و condition و end
+### [🟢] Step 1: اتصال nodeهای intake و condition و end
 
 پیاده‌سازی intake باید ورودی درخواست و context را به قرارداد port تبدیل کند؛ condition از evaluator Phase 4 استفاده کند؛ end فقط result declaration معتبر را بسازد. Clarification و user-facing result باید با lifecycle و payloadهای entry point موجود سازگار باشند.
 
-### [🔴] Step 2: اتصال planner، execute و review با مرز اعتماد از روز اول
+### [🟢] Step 2: اتصال planner، execute و review با مرز اعتماد از روز اول
 
 `planner` به Planner/feasibility/cycle flow موجود، `execute` به PlanRuntime/AgentRuntime/TaskRuntime و `review` به Acceptance/Final Review و Rubric مصوب delegate شود. ورودی/خروجی با contract بررسی شود و lifecycle فعلی دور زده نشود. از اولین ارسال `goal`، description، Persona/Skill یا fetch content به مدل، متن را به‌صورت untrusted data محصور کن؛ دستورهای تعبیه‌شده در آن هرگز system policy، tool allowlist، approval، feature flag یا route را تغییر نمی‌دهند. همین‌جا unit/integration adversarial test برای prompt injection در goal/persona/skill/fetched text و تلاش برای tool escalation اضافه کن، نه اینکه به hardening نهایی موکول شود. مدل/tool فقط از registry/factory resolve شوند.
 
-### [🔴] Step 3: اتصال approval و رفتارهای خطا
+### [🟢] Step 3: اتصال approval و رفتارهای خطا
 
 approval node به mechanism interaction/callback موجود متصل شود؛ تصمیم approved/denied/expired و timeout/cancel را مستقل ثبت کند. تأیید plan به digest همان planی متصل باشد که کاربر دیده است و فقط acknowledgement همان plan محسوب شود؛ این تأیید به‌تنهایی مجوز ابزار یا side effect نیست. پیش از هر effect، authorization مستقل Runtime و هر approval جداگانهٔ لازم دوباره بررسی شود؛ mismatch در digest=abort. Clarification از approval gate جدا بماند. `fail/retry/route` دقیقاً طبق Phase 4 اجرا شوند؛ route مقصد و mapping فقط همان sanitized failure envelope را می‌گیرند و هیچ مسیر خطا مجوز را گسترش نمی‌دهد. Limit `ask-user` فقط pause/resume معتبر است، نه approval خودکار.
 
-### [🔴] Step 4: تست یکپارچهٔ handlerها و مرز امنیتی
+### [🟢] Step 4: تست یکپارچهٔ handlerها و مرز امنیتی
 
 تست integration برای هر هفت kind بنویس؛ node/config ناشناخته پیش از side effect رد شود. adversarial tests از Step 2 باید در همان PR/fase سبز باشند و ثابت کنند prompt injection از goal/Persona/Skill/fetch نمی‌تواند system instruction، toolset، approval، route یا budget را تغییر دهد. delegation به runtime مشترک، policy enforcement و lifecycle جاری را اثبات کن.
 
@@ -466,3 +466,17 @@ Phase 4 Steps 1–5 are implemented and locally verified; the phase is 🟢. Evi
 CI run `36710870531` on the Phase 4 commit `506a6ec801822a19ed24d4b7f0afe520f3a02e39` (`arena/01a0f205-human-out-of-the-loop`, pushed to PR #10) completed **success on attempt 1** with **10/10 jobs passing**: unit+integration on ubuntu 22/24/26, macos 22/24, windows 22/24, plus e2e on ubuntu, macos, and windows. Unlike the earlier PR-head runs, no job needed a rerun. The Phase 4 closure above is therefore verified on the remote for that exact SHA, in addition to the local 103-test profile evidence and the 1,801/1,802 full-suite result whose only failure is the pre-existing phase-j J-05 mtime-tie finding.
 
 No merge is authorized until all phases are complete (owner instruction, 2026-09-30); PR #9 remains Draft. Phase 5 (node handlers and delegation to existing services) is the next dependency-ordered phase.
+
+## Phase 5 implementation closure (2026-09-30; append-only)
+
+Phase 5 Steps 1–4 are implemented and locally verified; the phase is 🟢. Contracts, the trust boundary, and the recorded decisions live in `docs/workflow-profiles/PHASE5_HANDLERS.md`. This phase adds adapters only: no Orchestrator entry point, feature-flag activation, persistence, resume, budget enforcement at the real call site, or observability wiring is claimed, and the pre-Runtime-integration gates recorded earlier remain open.
+
+**Deliverables:** `src/ai/workflow-profiles/untrusted-content.ts` (single confinement implementation: labelled `<untrusted-data>` blocks, delimiter neutralization, byte cap, raw-content digest), `src/ai/workflow-profiles/node-handlers.ts` (intake plus planner/execute/review/approval adapters over injected ports; `condition` and `end` stay in the kernel so no second implementation can drift), `src/ai/workflow-profiles/orchestrator-adapters.ts` (planner → `Planner.plan`, execute → `PlanRuntime.execute`, review → `FinalReviewer`/`AcceptanceChecker`, approval → the existing confirm callback), and the handler, adapter, confinement, and injection test suites.
+
+**Recorded owner-delegated decisions:** **D-WP-012** — an `approval` node emits its response port and passes through any input port it also declares as an output (the rule a `condition` node already follows), so a plan can be gated and then executed without threading state around the gate; the rule cannot widen a contract because only already-declared ports can be produced. **D-WP-013** — for `approvalType: side-effect` with `bindsTo`, the handler computes the digest of the bound port, shows it inside the same interaction, and requires the port to return the digest it approved; a mismatch aborts with `approval.digest-mismatch` (terminal). The text-confirm adapter echoes the digest it displayed; a host with out-of-band approval must supply its own port returning the approved digest, and the check itself is unconditional.
+
+**Phase 5 acceptance criteria:** all seven kinds are operational through the handler contract (a semantically validated profile runs intake → planner → approval → execute → review → condition → end); planner/execute/review delegate to the existing services rather than re-implementing them; approval and error outcomes are explicit (approved / denied / expired / cancelled, with denial, expiry, and cancellation terminal and never routed or retried, and an approval decision explicitly not a tool authorization); every node's output is checked against its port contract by the kernel; an unknown or unwired handler fails closed instead of degrading; and the integration/adversarial tests show that neither injected prompt content nor an approval decision can widen toolsets, approvals, budgets, or routing, and that a cancelled run is terminal rather than a routeable verdict. All criteria are met with the evidence below.
+
+**Evidence:** `npm run typecheck` and `npm run build` pass; `npx vitest run src/ai/__tests__/workflow-profile-*.test.ts` passes **11 files / 144 tests** (kernel 16, handlers 17, injection 8, adapters 10, predicate 8, untrusted-content 6, semantic 27, resolver 16, registry 21, schema 11, MCP-ID 4) on Node v22.22.3; the full repository suite runs 1,843 tests with **1,842 passing**, the sole failure being the pre-existing, out-of-scope `phase-j-checkpoint.test.ts > J-05` mtime-tie finding already recorded in the Phase 2 closure. This is local evidence; the resulting commit still requires exact-head CI before it can be treated as verified on the remote.
+
+**Not authorized / still gated:** no merge is authorized until all phases are complete (owner instruction, 2026-09-30); PR #9 remains Draft. Phase 5 is committed as its own reviewable commit on the working branch so per-phase review remains reconstructable at handoff. The trusted-host stable-root guarantee and the authoritative Runtime compatibility/enforcement contract remain mandatory before Runtime integration. Phase 6 (durable lifecycle, budgets, and enforcement at the real call site) is the next dependency-ordered phase.

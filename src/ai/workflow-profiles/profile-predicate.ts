@@ -38,7 +38,7 @@ export function scalarMatchesType(value: unknown, type: string): boolean {
 /** Pure predicate evaluation; identical for static domain checks and runtime routing. */
 export function predicateMatches(predicate: WorkflowPredicate, candidate: unknown): boolean {
   if (candidate === ABSENT) return predicate.operator === 'not-exists';
-  const value = predicate.value as any;
+  const value = predicate.value as unknown;
   switch (predicate.operator) {
     case 'exists': return true;
     case 'not-exists': return false;
@@ -46,12 +46,14 @@ export function predicateMatches(predicate: WorkflowPredicate, candidate: unknow
     case 'not-equals': return !equalScalar(candidate, value);
     case 'in': return Array.isArray(value) && value.some((item) => equalScalar(candidate, item));
     case 'not-in': return Array.isArray(value) && !value.some((item) => equalScalar(candidate, item));
-    case 'greater-than': return typeof candidate === 'number' && candidate > value;
-    case 'greater-or-equal': return typeof candidate === 'number' && candidate >= value;
-    case 'less-than': return typeof candidate === 'number' && candidate < value;
-    case 'less-or-equal': return typeof candidate === 'number' && candidate <= value;
+    case 'greater-than': return typeof candidate === 'number' && candidate > (value as number);
+    case 'greater-or-equal': return typeof candidate === 'number' && candidate >= (value as number);
+    case 'less-than': return typeof candidate === 'number' && candidate < (value as number);
+    case 'less-or-equal': return typeof candidate === 'number' && candidate <= (value as number);
     case 'contains':
-      return typeof candidate === 'string' ? candidate.includes(value) : Array.isArray(candidate) && candidate.includes(value);
+      return typeof candidate === 'string'
+        ? candidate.includes(value as string)
+        : Array.isArray(candidate) && candidate.includes(value);
     default: return false;
   }
 }

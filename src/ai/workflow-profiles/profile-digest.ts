@@ -93,7 +93,7 @@ export function dependencyDigest(kind: string, id: string, content: unknown): st
  * Content projection for a resolved component: every own enumerable field of the
  * validated source record, with the skill's `instructions` replaced by the text
  * that was actually resolved from disk. Unknown/extra fields are deliberately
- * kept: any content change must break the pin.
+ * kept, so that a content change always breaks the pin.
  */
 export function componentProjection(record: Record<string, unknown>): Record<string, unknown> {
   const projection: Record<string, unknown> = {};
