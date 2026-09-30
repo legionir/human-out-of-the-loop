@@ -22,6 +22,20 @@ describe('Workflow Profile v1 structural contract', () => {
     expect(validateWorkflowProfileStructure(readFixture(fixtureNames[0]!))).toEqual([]);
   });
 
+  it('returns a structural diagnostic when a Proxy throws during Ajv property access', () => {
+    const profile = readFixture(fixtureNames[0]!);
+    const hostile = new Proxy(profile, {
+      get() { throw new Error('hostile get trap'); },
+    });
+
+    expect(() => validateWorkflowProfileStructure(hostile)).not.toThrow();
+    expect(validateWorkflowProfileStructure(hostile)).toEqual([expect.objectContaining({
+      stage: 'structural',
+      code: 'json.value-invalid',
+      path: '/',
+    })]);
+  });
+
   it('keeps Workflow Runtime compatibility metadata optional and non-operative in Phase 2', () => {
     const profileWithoutRuntime = readFixture(fixtureNames[0]!);
     delete profileWithoutRuntime.profile.runtime;

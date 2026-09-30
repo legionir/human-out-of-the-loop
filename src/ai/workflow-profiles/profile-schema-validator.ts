@@ -310,10 +310,18 @@ export function isJsonCompatibleValue(value: unknown): boolean {
 
 /** Reusable structural-only validator for internal parity tests. */
 export function validateWorkflowProfileStructure(value: unknown): WorkflowProfileDiagnostic[] {
-  if (!isJsonCompatibleValue(value)) return [{
+  const invalidValueDiagnostic: WorkflowProfileDiagnostic = {
     stage: 'structural', code: 'json.value-invalid',
     message: 'Profile input must be a plain, acyclic JSON value containing only own data properties', path: '/',
-  }];
-  if (!validate(value)) return structuralDiagnostics(validate.errors, getProfileId(value), undefined, value);
-  return [];
+  };
+  try {
+    if (!isJsonCompatibleValue(value)) return [invalidValueDiagnostic];
+    if (!validate(value)) return structuralDiagnostics(validate.errors, getProfileId(value), undefined, value);
+    return [];
+  } catch {
+    // A Proxy may pass descriptor-based shape checks but throw when Ajv reads
+    // its properties. Treat any hostile reflective/get trap as invalid input;
+    // the public structural boundary must return diagnostics, never raw errors.
+    return [invalidValueDiagnostic];
+  }
 }
