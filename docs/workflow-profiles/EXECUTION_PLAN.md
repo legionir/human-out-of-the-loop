@@ -94,27 +94,27 @@ JSON Schema مطابق Draft 2020-12 و همهٔ fixtures معتبرند؛ schem
 تمام dependency kindهای v1 به منبع حقیقت موجود/مصوب resolve می‌شوند؛ digest دقیق برای همه پین و version هرجا موجود است ثبت می‌شود؛ هر mismatch پیش از اجرا رد می‌شود؛ Toolset فقط دسترسی را محدود می‌کند؛ هیچ inheritance/template/sub-workflow در schema یا resolver اجرا نمی‌شود؛ تست‌های valid/missing/duplicate/version/digest/ambiguous/denied و scope trust موفق‌اند؛ Rubric resolved و digest-pinned نیز با enum/دامنهٔ `allowedDecisions` در Review profile تطبیق داده می‌شود و mismatch پیش از activation رد می‌شود. هر درخواست Template/Sub-workflow به عنوان deferred future scope با تصمیم و traceability ثبت شده، نه الزام فراموش‌شده.
 ---
 
-## [🔴] Phase 4: Workflow graph engine و bounded control-flow
+## [🟢] Phase 4: Workflow graph engine و bounded control-flow
 
 پیاده‌سازی هستهٔ interpreter برای node/edge، ورودی/خروجی، شرط و حلقهٔ محدود به‌عنوان یک واحد داخلی و قابل‌آزمون. در پایان این فاز هنوز Profile برای کاربر فعال نمی‌شود؛ فقط kernel کامل و پایدار است و اجرای مدل/ابزار به handlerهای فاز بعد وابسته می‌ماند.
 
-### [🔴] Step 1: state machine و انتخاب first-match
+### [🟢] Step 1: state machine و انتخاب first-match
 
 کنترل‌جریان بیرونی را با state machine صریح پیاده کن: start، resolve input، dispatch handler، اعتبارسنجی/ثبت output و انتخاب edge. انتخاب شرطی فقط مطابق قرارداد مشترک است: conditional edges به‌ترتیب priority صعودی و سپس declaration order؛ اولین predicate درست برنده است، حتی اگر شرط بعدی نیز درست باشد؛ اگر هیچ‌کدام درست نیست، تنها default مجاز اجرا می‌شود؛ بدون match/default fail-closed. ambiguity error تولید نکن. routeMap mapping سطح‌اول را با port type/required کنترل کن. تست کن دو شرط هم‌زمان درست‌اند، priority tie به declaration order می‌رود، default فقط fallback است، default تکراری رد می‌شود، و نبود route fail-closed است.
 
-### [🔴] Step 2: ارزیابی predicateهای داده‌ای
+### [🟢] Step 2: ارزیابی predicateهای داده‌ای
 
 عملگرهای محدود مصوب را بر خروجی resolveشده پیاده کن؛ JSON Pointer نامعتبر، property مفقود، نوع نامتوافق و value مقایسه‌ناپذیر را طبق semantics ثبت‌شده مدیریت کن. هیچ string expression، eval یا کد دلخواه اجرا نشود. آزمون مرزی برای null، مقدار مفقود، آرایه و object مطابق قرارداد اضافه کن.
 
-### [🔴] Step 3: اجرای loopهای محدود و کران node visit
+### [🟢] Step 3: اجرای loopهای محدود و کران node visit
 
 هر loop counter یکتا، monotonic و run-scoped باشد؛ یک iteration دقیقاً traversal موفق همان edge است. در تلاش بعد از سقف، onExhausted به‌صورت transition مشخص اجرا می‌شود. تمام normal، exhaustion و error-route transitions در cycle analysis بیایند؛ چرخه‌ای که در یک counter-state بدون افزایش counter دور بزند رد شود. semantic validator کران محافظه‌کارانهٔ `|nodes| × Π(1 + maxIterations_i)` را با saturating arithmetic محاسبه و با `maxNodeVisits` مقایسه کند؛ Runtime هم در هر transition hard visit cap را enforce کند تا nested loops یا خطای تحلیل نتواند runaway بسازد. تست nested/overlapping loops، exhaustion route، counter collision و overflow را اضافه کن.
 
-### [🔴] Step 4: اجرای قرارداد error/retry/route
+### [🟢] Step 4: اجرای قرارداد error/retry/route
 
 قرارداد typed خطا را پیاده کن: `fail` خاتمهٔ failure؛ `retry` فقط دسته‌های صریح retryOn را با maxAttempts شامل invocation اول و backoff ثابت تکرار می‌کند و پس از exhaust یا nonretryable fail می‌شود؛ `route` انتقال مستقیم به routeTo با نگاشت target inputها از failure envelope محدود (`failure.category/code/retryable`، `node.id/attempt` و snapshot `inputs.<port>`). raw exception text به node/مدل داده نشود. authorization/approval denial و cancellation همواره fail-closed و خارج از retry/route پروفایل هستند. route transition از normal edges مستقل اما در reachability/budget/cycle graph منظور شود.
 
-### [🔴] Step 5: feature flag و دسترس‌پذیری امن kernel
+### [🟢] Step 5: feature flag و دسترس‌پذیری امن kernel
 
 Feature flag پشتیبانی Profile را بر اساس الگوی موجود اضافه/تطبیق بده؛ پیش‌فرض خاموش باشد. تا زمانی که خاموش است هیچ entry point کاربر نباید Profile را اجرا کند و درخواست‌های legacy تغییر نکنند. تست مثبت opt-in کنترل‌شده و منفی default-off / unknown profile / invalid profile پیش از handler dispatch اضافه کن.
 
@@ -446,3 +446,17 @@ Phase 3 Steps 1–2 are implemented and locally verified; the phase is 🟢. Evi
 **Evidence:** `npm run typecheck` and `npm run build` pass; `npx vitest run src/ai/__tests__/workflow-profile-*.test.ts` passes **5 files / 79 tests** (resolver 16, semantic 27, registry 21, schema 11, MCP-ID 4) on Node v22.22.3. The resolver tests resolve real repository components (a `registry/personas` persona, a `registry/models` config, real tool ids from `registry/tools`, and the built-in rubric) and prove the shipped example pins are rejected because their digests are explicit placeholders. This is local evidence; the resulting commit still requires exact-head CI before it can be treated as verified on the remote.
 
 **Not authorized / still gated:** PR #9 remains Draft and unmerged, and no merge is authorized until all phases are complete (owner instruction, 2026-09-30). The trusted-host stable-root guarantee and the authoritative Runtime compatibility/enforcement contract remain mandatory before Runtime integration; `profile.runtime` stays syntax-only metadata. Phase 4 (graph engine) is the next dependency-ordered phase.
+
+## Phase 4 implementation closure (2026-09-30; append-only)
+
+Phase 4 Steps 1–5 are implemented and locally verified; the phase is 🟢. Evidence and the recorded execution semantics live in `docs/workflow-profiles/PHASE4_KERNEL.md`. This is a deterministic outer-control kernel plus an opt-in access path only — no node handler, model/tool call, approval interaction, persistence, resume, budget enforcement, or Orchestrator integration is claimed, and the pre-Runtime-integration gates recorded earlier remain open.
+
+**Deliverables:** `src/ai/workflow-profiles/profile-predicate.ts` (single data-only predicate/port-domain contract shared by the semantic validator and the kernel), `src/ai/workflow-profiles/profile-kernel.ts` (state machine, first-match selection, typed mapping, bounded loops, hard visit cap, typed error/retry/route with sanitized envelope), `src/ai/workflow-profiles/profile-runner.ts` (default-off `HOOTL_WORKFLOW_PROFILE` flag and the validated `prepareWorkflowProfileRun` pipeline), `src/ai/__tests__/workflow-profile-predicate.test.ts`, and `src/ai/__tests__/workflow-profile-kernel.test.ts`.
+
+**Recorded execution semantics (consequences of the approved contract; no new owner decision):** a successful retry attempt clears the previous failure; the visit cap blocks the next visit and reports only performed visits; loop exhaustion is observed on the loop edge, so another already-matching edge may reach the loop target once more before the exhausted edge routes or fails; and `security-denied`, `approval-denied`, `cancelled`, `visit-cap`, and `budget` are never retried or routed even when a profile policy names them.
+
+**Phase 4 acceptance criteria:** linear, branching, and bounded-loop graphs run deterministically against fake handlers; first-match semantics are tested under overlap and priority/declaration-order ties, the default edge is used only as a fallback, duplicate defaults are rejected, and no-match fails closed; mapping, predicate, and error-route behaviour is typed and validated at runtime; retry has explicit counting and a definite ending; unbounded cycles and insufficient visit bounds are rejected statically while the runtime hard cap stops a runaway even if that analysis is wrong; security denial and cancellation cannot be routed or retried; the feature flag is off by default with no public path that executes a profile without explicit opt-in; the kernel is still not a model/tool engine; and unit tests plus typecheck/build pass. All seven criteria are met with the evidence below.
+
+**Evidence:** `npm run typecheck` and `npm run build` pass; `npx vitest run src/ai/__tests__/workflow-profile-*.test.ts` passes **7 files / 103 tests** (kernel 16, predicate 8, semantic 27, resolver 16, registry 21, schema 11, MCP-ID 4) on Node v22.22.3; the full repository suite runs 1,802 tests with **1,801 passing**, the sole failure being the pre-existing, out-of-scope `phase-j-checkpoint.test.ts > J-05` mtime-tie finding already recorded in the Phase 2 closure (its source and test are untouched by this phase). This is local evidence; the resulting commit still requires exact-head CI before it can be treated as verified on the remote.
+
+**Not authorized / still gated:** no merge is authorized until all phases are complete (owner instruction, 2026-09-30); PR #9 remains Draft and unmerged. Phase 4 is committed as its own reviewable commit on the working branch so per-phase review remains reconstructable at handoff. The trusted-host stable-root guarantee and the authoritative Runtime compatibility/enforcement contract remain mandatory before Runtime integration. Phase 5 (node handlers and delegation to existing services) is the next dependency-ordered phase.

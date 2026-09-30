@@ -1,3 +1,4 @@
+import { ABSENT, PORT_POINTER, domainFor, equalScalar, isRecord, predicateMatches, routingDomainFor, scalarMatchesType } from './profile-predicate.js';
 import { isJsonCompatibleValue } from './profile-schema-validator.js';
 import type {
   WorkflowEdge,
@@ -8,7 +9,6 @@ import type {
   WorkflowProfileDocument,
 } from './profile-types.js';
 
-const PORT_POINTER = /^\/([a-zA-Z][a-zA-Z0-9_-]{0,63})$/;
 const ERROR_POINTER = /^\/(?:failure\/(?:category|code|retryable)|node\/(?:id|attempt)|inputs\/[a-zA-Z][a-zA-Z0-9_-]{0,63})$/;
 const MAX_MCP_TOOL_ID_BYTES = 256;
 
@@ -21,39 +21,12 @@ const RESULT_KIND_PORT_TYPES: Record<string, readonly string[]> = {
   handoff: ['object'],
 };
 
-function isRecord(value: unknown): value is Record<string, any> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
+function finiteDomainCovered(domain: unknown[], predicates: WorkflowPredicate[]): boolean {
+  return domain.every((value) => predicates.some((predicate) => predicateMatches(predicate, value)));
 }
 
-function equalScalar(a: unknown, b: unknown): boolean {
-  return Object.is(a, b);
-}
-
-function scalarMatchesType(value: unknown, type: string): boolean {
-  switch (type) {
-    case 'string': return typeof value === 'string';
-    case 'number': return typeof value === 'number' && Number.isFinite(value);
-    case 'integer': return typeof value === 'number' && Number.isInteger(value);
-    case 'boolean': return typeof value === 'boolean';
-    case 'object': return isRecord(value);
-    case 'array': return Array.isArray(value);
-    case 'file':
-    case 'artifact':
-    case 'any': return true;
-    default: return false;
-  }
-}
-
-function domainFor(port: WorkflowPort): unknown[] | undefined {
-  if (Array.isArray(port.enum)) return port.enum;
-  if (port.type === 'boolean') return [false, true];
-  return undefined;
-}
-
-function routingDomainFor(port: WorkflowPort): unknown[] | undefined {
-  const domain = domainFor(port);
-  if (!domain) return undefined;
-  return port.required === true ? domain : [...domain, ABSENT];
+function pathPort(pointer: string): string | undefined {
+  return PORT_POINTER.exec(pointer)?.[1];
 }
 
 function assignable(source: WorkflowPort, target: WorkflowPort): boolean {
@@ -85,36 +58,6 @@ function samePortContract(left: WorkflowPort, right: WorkflowPort): boolean {
   const rightDomain = right.enum;
   if (leftDomain === undefined || rightDomain === undefined) return leftDomain === rightDomain;
   return sameSet(leftDomain, rightDomain);
-}
-
-const ABSENT = Symbol('absent-output');
-
-function predicateMatches(predicate: WorkflowPredicate, candidate: unknown): boolean {
-  if (candidate === ABSENT) return predicate.operator === 'not-exists';
-  const value = predicate.value as any;
-  switch (predicate.operator) {
-    case 'exists': return true;
-    case 'not-exists': return false;
-    case 'equals': return equalScalar(candidate, value);
-    case 'not-equals': return !equalScalar(candidate, value);
-    case 'in': return Array.isArray(value) && value.some((item) => equalScalar(candidate, item));
-    case 'not-in': return Array.isArray(value) && !value.some((item) => equalScalar(candidate, item));
-    case 'greater-than': return typeof candidate === 'number' && candidate > value;
-    case 'greater-or-equal': return typeof candidate === 'number' && candidate >= value;
-    case 'less-than': return typeof candidate === 'number' && candidate < value;
-    case 'less-or-equal': return typeof candidate === 'number' && candidate <= value;
-    case 'contains':
-      return typeof candidate === 'string' ? candidate.includes(value) : Array.isArray(candidate) && candidate.includes(value);
-    default: return false;
-  }
-}
-
-function finiteDomainCovered(domain: unknown[], predicates: WorkflowPredicate[]): boolean {
-  return domain.every((value) => predicates.some((predicate) => predicateMatches(predicate, value)));
-}
-
-function pathPort(pointer: string): string | undefined {
-  return PORT_POINTER.exec(pointer)?.[1];
 }
 
 function checkMapping(
