@@ -469,14 +469,21 @@ provider behaviour, cross-platform manual runs, soak). **CI evidence:** run `367
 `307b218` (the code head of Phase 10 Steps 1–2) is **success 10/10 jobs** (ubuntu/macos/windows ×
 Node 22/24/26 for unit+integration, plus the three e2e legs), including the new `profile-gates` step.
 Earlier phase heads: `1921260` (run `36755763589`, success 10/10) and `655d77c` (run `36749650967`,
-success 10/10). The **docs-only** follow-up head `f3bd11a` (run `36758702602`) is recorded as
-**failure 1/10**: `windows-latest / node 22` reddened in the unit/integration suite on two unrelated
+success 10/10). The docs-only follow-up heads are recorded with their red legs rather than
+hidden: `f3bd11a` (run `36758702602`) and `45f4fe3` (run `36760123086`) are **failure 1/10**, each on
+a different non-Linux runner, each in an unrelated timing-sensitive test that baseline CI has flaked
+on before — `f3bd11a`: `windows-latest / node 22` reddened in the unit/integration suite on two unrelated
 tests that timed out as hooks — `u3-run-options.test.ts` ("maxSteps is applied as the SDK loop bound",
 `Hook timed out in 30000ms`) and `phase-h.test.ts` ("serves ui-logic.js for the module frontend",
 `Hook timed out in 30000ms`). Nothing Workflow Profile-related failed, the diff is documentation only,
 the same tests pass on every other leg and passed on `307b218`; the standard remedy (rerunning only
 the failed job) is not permitted for this run ("run … cannot be rerun"), so the flake is recorded here
-rather than hidden, exactly as the earlier Windows job flakes are.
+rather than hidden, exactly as the earlier Windows job flakes are. `45f4fe3`: `macos-latest / node 24`,
+`phase40-fetch.test.ts` ("the fetch tool against a local server times out on a server that never
+answers", `Test timed out in 10000ms`). Re-running only the failed jobs is not permitted for this
+integration (`gh run rerun` → "cannot be rerun"; the REST `rerun-failed-jobs` endpoint → HTTP 403), so
+the green exact head for the *code* is `307b218` and the docs-only heads are recorded as flaky, not as
+profile failures.
 
 **Acceptance criteria:**
 migration/rollback آزموده یا عدم نیاز مستند است؛ CI و semantic/schema/security gates روی head هر PR نتیجهٔ ثبت‌شده دارند؛ traceability برای همهٔ R IDs کامل است؛ هیچ unknown مسدودکننده‌ای بی‌صاحب/بی‌موعد نیست؛ PRها فازبندی و قابل‌بازبینی‌اند؛ regressions از baseline تفکیک شده؛ همهٔ docs/examples با implementation همخوانند؛ rollout default-off است؛ merge/release بدون مجوز انجام نشده است.
