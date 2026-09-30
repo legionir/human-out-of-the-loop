@@ -66,6 +66,17 @@ step prompt into registry content; making `personaRef` optional for `execute` is
 This document does not guess: D-WP-014 asks the owner which of the three is approved before Step 2
 wires the default profile.
 
+**Resolved (D-WP-014, owner decision 2026-09-30; append-only):** the owner approved the
+standards-conformant contract change: `execute` nodes may declare
+`bindings.personaSource: "plan-step"` instead of a pinned `personaRef`, meaning "the runtime assigns
+each plan step's persona". The JSON Schema, the type and the semantic validator were extended
+(planner/review still require `personaRef`; exactly one of the two is required on `execute`; the
+source value is a closed single-value domain, and declaring `personaSource` on any other node kind
+is rejected). No registry content was added, so nothing duplicates the runtime's step prompt, and the
+binding grants nothing: it only tells the executor where its persona comes from. The default profile
+artifact built in Step 1 uses it for the `execute` node.
+
+
 ### G-2 (non-blocking, recorded): the answer/conversation branch
 
 The current flow answers conversational requests without any plan (`answerRun`). A v1 profile can

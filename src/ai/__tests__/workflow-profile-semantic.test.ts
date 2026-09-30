@@ -28,6 +28,33 @@ describe('Workflow Profile semantic validation', () => {
     expect(codes(profile)).toContain('dependency.duplicate');
   });
 
+  it('lets an execute node declare the runtime-assigned persona source instead of a personaRef (D-WP-014)', () => {
+    const withSource = fixture();
+    const execute = withSource.workflow.nodes.find((node) => node.kind === 'execute')!;
+    execute.bindings = { skillRefs: [], toolsetRef: 'hootl.default-tools', personaSource: 'plan-step' };
+    expect(codes(withSource).filter((code) => code.startsWith('bindings.'))).toEqual([]);
+
+    const both = fixture();
+    const bothExecute = both.workflow.nodes.find((node) => node.kind === 'execute')!;
+    bothExecute.bindings = { ...bothExecute.bindings, personaSource: 'plan-step', personaRef: 'hootl.executor' } as never;
+    expect(codes(both)).toContain('bindings.persona-binding-ambiguous');
+
+    const neither = fixture();
+    const neitherExecute = neither.workflow.nodes.find((node) => node.kind === 'execute')!;
+    neitherExecute.bindings = { skillRefs: [] };
+    expect(codes(neither)).toContain('bindings.persona-binding-missing');
+
+    const wrongKind = fixture();
+    const planner = wrongKind.workflow.nodes.find((node) => node.kind === 'planner')!;
+    planner.bindings = { ...planner.bindings, personaSource: 'plan-step' } as never;
+    expect(codes(wrongKind)).toContain('bindings.persona-source-unsupported');
+
+    const badValue = fixture();
+    const badExecute = badValue.workflow.nodes.find((node) => node.kind === 'execute')!;
+    badExecute.bindings = { skillRefs: [], personaSource: 'runtime' } as never;
+    expect(codes(badValue)).toContain('bindings.persona-source-invalid');
+  });
+
   it('rejects duplicate loop counter IDs and an unbounded cycle', () => {
     const duplicate = fixture();
     const bounded = duplicate.workflow.edges.find((edge) => edge.loop)!;

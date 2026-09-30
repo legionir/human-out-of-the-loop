@@ -248,7 +248,6 @@
               "kind": {
                 "enum": [
                   "planner",
-                  "execute",
                   "review"
                 ]
               }
@@ -266,6 +265,80 @@
                 "required": [
                   "personaRef"
                 ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "execute"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "bindings"
+            ],
+            "properties": {
+              "bindings": {
+                "description": "An execute node either binds one pinned persona (personaRef) or declares that the runtime assigns each plan step's persona (personaSource: \"plan-step\"). Exactly one is required, matching the owner decision D-WP-014.",
+                "oneOf": [
+                  {
+                    "required": [
+                      "personaRef"
+                    ],
+                    "not": {
+                      "required": [
+                        "personaSource"
+                      ]
+                    }
+                  },
+                  {
+                    "required": [
+                      "personaSource"
+                    ],
+                    "not": {
+                      "required": [
+                        "personaRef"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "intake",
+                  "planner",
+                  "review",
+                  "condition",
+                  "approval",
+                  "end"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "bindings": {
+                "not": {
+                  "required": [
+                    "personaSource"
+                  ]
+                }
               }
             }
           }
@@ -518,8 +591,13 @@
         },
         "modelProfileRef": {
           "$ref": "#/$defs/id"
+        },
+        "personaSource": {
+          "const": "plan-step",
+          "description": "execute only (D-WP-014): the runtime assigns each plan step's persona (PlanStep.assignedPersona); the current HOOTL flow has no single executor persona to pin. Mutually exclusive with personaRef."
         }
-      }
+      },
+      "description": "Node bindings. planner/review require personaRef; execute requires exactly one of personaRef/personaSource."
     },
     "errorPolicy": {
       "type": "object",

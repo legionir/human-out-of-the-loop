@@ -222,6 +222,20 @@ function validateWorkflowProfileSemanticsUnchecked(profile: WorkflowProfileDocum
     }
     for (const [skillIndex, id] of (node.bindings?.skillRefs ?? []).entries()) requireDependency('skill', id, `/workflow/nodes/${index}/bindings/skillRefs/${skillIndex}`, node.id);
     if (node.kind === 'review' && typeof node.config.rubricRef === 'string') requireDependency('rubric', node.config.rubricRef, `/workflow/nodes/${index}/config/rubricRef`, node.id);
+    const personaSource = node.bindings?.personaSource;
+    if (personaSource !== undefined) {
+      if (personaSource !== 'plan-step') {
+        addDiagnostic('bindings.persona-source-invalid', `personaSource must be "plan-step"`, `/workflow/nodes/${index}/bindings/personaSource`, node.id);
+      } else if (node.kind !== 'execute') {
+        addDiagnostic('bindings.persona-source-unsupported', `Only an "execute" node may declare personaSource "plan-step" (node "${node.id}" is a "${node.kind}" node)`, `/workflow/nodes/${index}/bindings/personaSource`, node.id);
+      }
+      if (node.bindings?.personaRef !== undefined) {
+        addDiagnostic('bindings.persona-binding-ambiguous', `Node "${node.id}" declares both personaRef and personaSource; exactly one is required`, `/workflow/nodes/${index}/bindings`, node.id);
+      }
+    }
+    if (node.kind === 'execute' && node.bindings?.personaRef === undefined && personaSource === undefined) {
+      addDiagnostic('bindings.persona-binding-missing', `Execute node "${node.id}" must declare either bindings.personaRef or bindings.personaSource "plan-step"`, `/workflow/nodes/${index}/bindings`, node.id);
+    }
     if (typeof node.bindings?.toolsetRef === 'string' && !profile.policies.tools.allowedToolsets.includes(node.bindings.toolsetRef)) {
       addDiagnostic('toolset.not-allowed', `Toolset "${node.bindings.toolsetRef}" is not listed in policies.tools.allowedToolsets`, `/workflow/nodes/${index}/bindings/toolsetRef`, node.id);
     }

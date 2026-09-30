@@ -22,6 +22,28 @@ describe('Workflow Profile v1 structural contract', () => {
     expect(validateWorkflowProfileStructure(readFixture(fixtureNames[0]!))).toEqual([]);
   });
 
+  it('accepts exactly one persona binding on execute: personaRef or personaSource (D-WP-014)', () => {
+    const withSource = readFixture(fixtureNames[0]!);
+    const execute = withSource.workflow.nodes.find((node: any) => node.kind === 'execute');
+    execute.bindings = { skillRefs: [], personaSource: 'plan-step' };
+    expect(validateWorkflowProfileStructure(withSource)).toEqual([]);
+
+    const both = readFixture(fixtureNames[0]!);
+    const bothExecute = both.workflow.nodes.find((node: any) => node.kind === 'execute');
+    bothExecute.bindings = { personaRef: 'hootl.executor', personaSource: 'plan-step' };
+    expect(validateWorkflowProfileStructure(both).some((diagnostic) => diagnostic.stage === 'structural')).toBe(true);
+
+    const neither = readFixture(fixtureNames[0]!);
+    const neitherExecute = neither.workflow.nodes.find((node: any) => node.kind === 'execute');
+    neitherExecute.bindings = { skillRefs: [] };
+    expect(validateWorkflowProfileStructure(neither).some((diagnostic) => diagnostic.stage === 'structural')).toBe(true);
+
+    const wrongKind = readFixture(fixtureNames[0]!);
+    const planner = wrongKind.workflow.nodes.find((node: any) => node.kind === 'planner');
+    planner.bindings = { personaRef: 'hootl.planner', personaSource: 'plan-step' };
+    expect(validateWorkflowProfileStructure(wrongKind).length).toBeGreaterThan(0);
+  });
+
   it('returns a structural diagnostic when a Proxy throws during Ajv property access', () => {
     const profile = readFixture(fixtureNames[0]!);
     const hostile = new Proxy(profile, {

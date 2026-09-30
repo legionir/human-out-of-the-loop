@@ -51,6 +51,8 @@ export interface WorkflowNode {
   outputs: Record<string, WorkflowPort>;
   bindings?: {
     personaRef?: string;
+    /** `execute` only: the runtime assigns each plan step's persona (D-WP-014). */
+    personaSource?: 'plan-step';
     skillRefs?: string[];
     toolsetRef?: string;
     modelProfileRef?: string;
