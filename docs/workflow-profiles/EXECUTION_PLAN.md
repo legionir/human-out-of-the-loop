@@ -897,3 +897,21 @@ CLI + server 51 files / 576 tests, the full suite 150 files / 1,985 tests with o
 `J-05`, e2e `profiles` 12/12, gates 9/9, tsc/build clean, and CI run `36779326761` on the exact head
 **success 10/10**. Nothing here closes Step 3: the owner's own review and decisions remain the gate.
 
+### Phase 10 self-review CI record (2026-09-30; append-only)
+
+The owner-requested self-review pushed the fix head `aa240b3` with the U-7 record in `496b4ce`; run
+`36779326761` on `496b4ce` is **success 10/10** (all three OSes × Node 22/24/26, the three e2e legs,
+the Workflow Profile gate step and the CLI smoke), and the local evidence at that head is the focused
+suites 19/19, profile + CLI + server 51 files / 576 tests, the full suite 150 files / 1,985 tests with
+only the pre-existing `J-05`, e2e `profiles` 12/12 and gates 9/9.
+
+The follow-up head `e7fa5dd` (documentation only: the self-review record in `PHASE10_REVIEW.md` §8 and
+this section) reddened exactly one leg — run `36780235692`, **failure 1/10**, `macos-latest / node 24`,
+unit + integration — in
+`src/cli/__tests__/cli.test.ts`: "logs --follow streams new entries as they are appended (followLog):
+Error: followLog never emitted the first appended entry" (a wall-clock/file-watch timing test that does
+not touch Workflow Profiles, on a diff of two Markdown files). As with `f3bd11a` and `45f4fe3`,
+rerunning only the failed jobs is not permitted for this integration (`gh run rerun` refuses the run
+and the REST endpoint answers 403), so the red leg is recorded here rather than hidden; the
+authoritative exact-head evidence stays the green code head `496b4ce`.
+
