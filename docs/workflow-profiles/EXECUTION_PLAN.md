@@ -462,7 +462,13 @@ being hidden. Step 3 (independent review and PR handoff) remains 🟡 and needs 
 is bound to a single branch (`arena/01a0f205-human-out-of-the-loop`), so the phase PRs with
 R-ID/test/CI-head evidence are presented as one phase-by-phase handoff in PR #10 rather than separate
 PRs — a recorded deviation — and the independent architectural/QA/security review is a human gate the
-agent cannot self-issue.
+agent cannot self-issue. PR #10's description now carries the phase-by-phase table (commit, WP-R IDs,
+evidence) and the handoff checklist. The agent's own five-dimension review is recorded in
+`PHASE10_REVIEW.md` together with what it cannot certify (independent review, owner decisions, real
+provider behaviour, cross-platform manual runs, soak). **CI evidence:** run `36757851673` on exact head
+`307b218` is **success 10/10 jobs** (ubuntu/macos/windows × Node 22/24/26 for unit+integration, plus
+the three e2e legs), including the new `profile-gates` step. Earlier phase heads: `1921260`
+(run `36755763589`, success 10/10) and `655d77c` (run `36749650967`, success 10/10).
 
 **Acceptance criteria:**
 migration/rollback آزموده یا عدم نیاز مستند است؛ CI و semantic/schema/security gates روی head هر PR نتیجهٔ ثبت‌شده دارند؛ traceability برای همهٔ R IDs کامل است؛ هیچ unknown مسدودکننده‌ای بی‌صاحب/بی‌موعد نیست؛ PRها فازبندی و قابل‌بازبینی‌اند؛ regressions از baseline تفکیک شده؛ همهٔ docs/examples با implementation همخوانند؛ rollout default-off است؛ merge/release بدون مجوز انجام نشده است.

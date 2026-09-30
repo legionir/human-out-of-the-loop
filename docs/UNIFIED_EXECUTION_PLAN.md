@@ -651,3 +651,12 @@ mtime-resolution sensitive on this sandbox (unchanged since the session base, gr
 recorded as U-6 with a follow-up. The phase-PR-by-phase rule is met as a phase-by-phase handoff in
 PR #10 because this session is bound to one branch — a recorded deviation, not a claim of separate
 PRs.
+
+**Phase 10 Step 3 (2026-09-30; append-only):** the agent's five-dimension review
+(`docs/workflow-profiles/PHASE10_REVIEW.md`) records the architecture, QA, security, operations and
+compatibility findings with their evidence, plus what it cannot certify (independent human review,
+the U-1…U-5 owner decisions, real-provider behaviour, manual cross-platform runs, soak testing). PR
+#10's description is the phase-by-phase handoff (commit → WP-R IDs → evidence → CI head). CI run
+`36757851673` on head `307b218` is **success 10/10**, including the new Workflow Profile gate step.
+Step 3 stays 🟡 until a reviewer other than the implementer signs off and the owner answers the open
+items; no merge, release or activation is performed or requested.
