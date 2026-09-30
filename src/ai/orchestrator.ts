@@ -261,6 +261,13 @@ export interface OrchestratorRunOptions {
     round: number,
   ) => Promise<Record<string, string> | null>;
   /**
+   * Phase 8: per-run Workflow Profile selection. Overrides the instance-level
+   * `config.workflowProfile` for this run only (the server's `POST /api/run { profile }` uses it);
+   * the decision is still made before any session/interaction side effect, and the flag inside
+   * `env` remains the switch, so a per-run value can never enable the profile path by itself.
+   */
+  workflowProfile?: OrchestratorWorkflowProfileOptions;
+  /**
    * Callback to get user confirmation of the plan.
    * REQUIRED — Law 17 mandates explicit user approval before execution.
    * Receives the formatted plan text, returns confirmation result.
@@ -386,7 +393,6 @@ export class Orchestrator {
   private toolCallOptions: ToolCallLogOptions = {};
 
   /** Detail of the last feasibility rejection, for the legacy-shaped infeasible result. */
-  private lastInfeasibleDetail?: string;
 
   /** Phase 7: component sources shared by the resolver and the built-in default profile. */
   private profileComponentSources?: WorkflowProfileComponentSources;
@@ -1095,10 +1101,13 @@ export class Orchestrator {
     // Phase 7: decide the execution path before any session/interaction side effect, so an
     // invalid or unapproved profile cannot leave a half-created run behind. With the flag off
     // this resolves nothing and the legacy path below is exactly what ran before.
-    if (this.config.workflowProfile !== undefined) {
-      const activation = this.resolveWorkflowProfileActivation();
+    // Phase 8: a per-run selection (server `POST /api/run { profile }`) is preferred over the
+    // instance-level one; it goes through the same activation gate, so nothing is bypassed.
+    const profileOptions = options?.workflowProfile ?? this.config.workflowProfile;
+    if (profileOptions !== undefined) {
+      const activation = this.resolveWorkflowProfileActivation(profileOptions);
       if (activation.kind === 'profile') {
-        return this.runWorkflowProfile(userRequest, options, ov, activation, budget);
+        return this.runWorkflowProfile(userRequest, options, ov, activation, budget, profileOptions);
       }
     }
 
@@ -1143,8 +1152,10 @@ export class Orchestrator {
   }
 
   /** Flag + selection + approval gate; throws (fail closed) instead of falling back. */
-  private resolveWorkflowProfileActivation(): WorkflowProfileActivation {
-    const { ports: _ports, ...profileOptions } = this.config.workflowProfile ?? {};
+  private resolveWorkflowProfileActivation(
+    options: OrchestratorWorkflowProfileOptions,
+  ): WorkflowProfileActivation {
+    const { ports: _ports, ...profileOptions } = options;
     return activateWorkflowProfile({ ...profileOptions, sources: this.workflowProfileSources() });
   }
 
@@ -1159,6 +1170,7 @@ export class Orchestrator {
     ov: RunOverrides | undefined,
     activation: Extract<WorkflowProfileActivation, { kind: 'profile' }>,
     budget: BudgetTracker | undefined,
+    profileOptions: OrchestratorWorkflowProfileOptions,
   ): Promise<OrchestratorResult> {
     const sessionId = options?.sessionId ?? this.sessionStore.createSession(options?.sessionLabel);
     const interaction = this.sessionStore.addInteraction(sessionId, userRequest);
@@ -1168,9 +1180,12 @@ export class Orchestrator {
     const mode = options?.mode ?? DEFAULT_RUN_MODE;
     try {
       return await this.runContext.run({ budget, usage: { prompt: 0, completion: 0, total: 0 } }, async () => {
-        const outcome = await this.runProfileBridge(activation, ov, options, runModelId, mode, sessionId, interaction, userRequest);
+        // Run-scoped (not instance-scoped): two concurrent runs must never see each other's
+        // gate detail.
+        const infeasible: { detail?: string } = {};
+        const outcome = await this.runProfileBridge(activation, ov, options, runModelId, mode, sessionId, interaction, userRequest, infeasible, profileOptions);
         if (outcome.failure?.code === PLAN_INFEASIBLE_CODE) {
-          return this.infeasiblePlanResult(this.lastInfeasibleDetail ?? 'the feasibility gate rejected the plan', sessionId, interaction, userRequest);
+          return this.infeasiblePlanResult(infeasible.detail ?? 'the feasibility gate rejected the plan', sessionId, interaction, userRequest);
         }
 
         // Conversation branch: the answer is produced the same way the legacy path produces
@@ -1189,7 +1204,7 @@ export class Orchestrator {
           if (!('escalate' in answered)) return answered;
           // Auto mode: the reply asked to be planned. Plan the same request (mode 'plan'),
           // keeping the answer as the fallback for an infeasible plan — exactly like legacy.
-          const escalated = await this.runProfileBridge(activation, ov, options, runModelId, 'plan', sessionId, interaction, userRequest);
+          const escalated = await this.runProfileBridge(activation, ov, options, runModelId, 'plan', sessionId, interaction, userRequest, {}, profileOptions);
           if (escalated.failure?.code === PLAN_INFEASIBLE_CODE) {
             // The request was actually informational: show the answer the user already has.
             return this.answerResultFromText(answered.fallbackAnswer, sessionId, interaction, userRequest);
@@ -1213,8 +1228,10 @@ export class Orchestrator {
     sessionId: string,
     interaction: ReturnType<SessionStore['addInteraction']>,
     userRequest: string,
+    infeasible: { detail?: string },
+    profileOptions: OrchestratorWorkflowProfileOptions,
   ): Promise<WorkflowProfileBridgeOutcome> {
-    const overrides = this.config.workflowProfile?.ports ?? {};
+    const overrides = profileOptions.ports ?? {};
     const services: WorkflowProfileBridgeServices = {
       planner: this.planner,
       planRuntime: this.createProfilePlanRuntime(ov),
@@ -1234,7 +1251,7 @@ export class Orchestrator {
         } catch (error) {
           // The kernel reports only the failure code; keep the gate's detail for the caller's
           // legacy-shaped infeasible result.
-          if (error instanceof WorkflowProfilePlanInfeasibleError) this.lastInfeasibleDetail = error.detail;
+          if (error instanceof WorkflowProfilePlanInfeasibleError) infeasible.detail = error.detail;
           throw error;
         }
       },

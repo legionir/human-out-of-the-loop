@@ -156,6 +156,7 @@ export function createApp(options: ServerOptions = {}): CreatedServer {
     projectRoot,
     runtimeDir,
     logFilePath: path.join(runtimeDir, 'observability.jsonl'),
+    trustedProject,
     authTokens,
     runTtlMs,
     ready: orchestrator.initialize().catch((err) => {

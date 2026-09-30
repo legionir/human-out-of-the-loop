@@ -30,6 +30,11 @@ import { createBuiltInRubricCatalogue, resolveWorkflowProfileDependencies } from
 import { createWorkflowProfileComponentSources } from '../workflow-profiles/profile-sources.js';
 import { validateWorkflowProfileSemantics } from '../workflow-profiles/profile-semantic-validator.js';
 import { loadProfileRegistries } from '../../cli/commands/profiles.js';
+import { createDefaultWorkflowProfileDocument } from '../workflow-profiles/default-profile.js';
+import { PersonaRegistry } from '../registries/persona-registry.js';
+import { SkillRegistry } from '../registries/skill-registry.js';
+import { ModelRegistry } from '../registries/model-registry.js';
+import { ToolRegistry } from '../registries/tool-registry.js';
 import type { WorkflowProfileDocument } from '../workflow-profiles/profile-types.js';
 
 const mockGenerateObject = vi.mocked(generateObject);
@@ -301,6 +306,40 @@ describe('Phase 9 hardening — profile policy boundaries end to end', () => {
     // regardless of what the request text claims.
     expect(stepToolSurface()).toEqual(legacySurface);
     expect(stepToolSurface()[0]).toEqual(['read_file']);
+  });
+
+  it('hands the user request to the planner, not the node goal (H-2)', async () => {
+    // Found by the Phase 9 hardening pass: the profile path fed the planner its node goal text
+    // ("Decide whether the request needs a plan…") instead of the user's request, because the
+    // request arrives as the entry payload object `{ goal, mode, sessionId }`. The scripted parity
+    // suite could not see it (the model returns the same object whatever the prompt says).
+    installScript();
+    const orch = new Orchestrator({
+      projectRoot: REPO_ROOT, runtimeDir, persistent: true, env: { OPENAI_API_KEY: 'sk-test-dummy' },
+      workflowProfile: {
+        env: { [WORKFLOW_PROFILE_FLAG_ENV_VAR]: '1' },
+        allowBuiltInDefault: true,
+        builtInDefaultApproval: { approved: true, reference: 'hardening test approval' },
+      },
+    });
+    await orch.run(GOAL, { confirmCallback: confirmAccepting });
+
+    // The first structured call is the planner's assessment: its prompt must carry the request.
+    const plannerPrompt = String((mockGenerateObject.mock.calls[0]?.[0] as { prompt?: string } | undefined)?.prompt ?? '');
+    expect(plannerPrompt).toContain(GOAL);
+    // …and not just the node's goal text.
+    const document = createDefaultWorkflowProfileDocument(
+      createWorkflowProfileComponentSources({
+        registries: {
+          personas: loadProfileRegistries(REPO_ROOT).personaRegistry,
+          skills: new SkillRegistry({ toolRegistry: new ToolRegistry() }),
+          models: new ModelRegistry({ env: process.env }),
+        },
+        toolCatalog: { hasDefinition: () => true },
+      }),
+    );
+    const plannerNode = document.workflow.nodes.find((node) => node.id === 'plan')!;
+    expect(plannerPrompt).not.toContain(plannerNode.goal);
   });
 
   it('a cancelled run is terminal and never routed into the review', async () => {

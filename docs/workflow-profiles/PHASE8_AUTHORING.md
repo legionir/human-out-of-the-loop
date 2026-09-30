@@ -253,6 +253,29 @@ hootl run "…"                           # no selection: the legacy path, uncha
   `--profile-file`, an untrusted project profile, and every validation or resolution error all fail
   **before** a session or a plan is created.
 
+### Selecting a profile over the API
+
+The web server accepts the same selection as **one request field** — the profile id, resolved by the
+same code the CLI uses:
+
+```http
+POST /api/run
+{ "message": "…", "profile": "acme.review-fix", "confirm": true }
+→ 202 { "runId": "…", "profileId": "acme.review-fix" }
+→ 400 { "error": "…", "diagnostics": [ { "stage": "semantic", "code": "selection.profile-missing", … } ] }
+```
+
+- The field is per request: requests without it take the legacy path untouched, and the run's
+  `profileId` is reported on `GET /api/runs/:runId` so a client can show which flow ran.
+- Errors are answered before anything is created, as a 400 with the same diagnostics
+  `profiles validate` prints (stage, code, message, and the offending profile/file when known).
+- `profileFile` is **not** accepted over the API: a client-supplied host path would be a new
+  file-reading primitive. Reading the operator directory (`HOOTL_WORKFLOW_PROFILES_DIR`) still gives
+  a server-side way to offer files, and selecting by file remains a CLI action.
+- Trust is the server's own: a project profile is only readable when the server was started with the
+  trust opt-in (the same record the CLI uses). A 400 `selection.profile-missing` therefore also
+  covers "the project profile exists but this server may not read it".
+
 ## 13. Examples
 
 Two examples are shipped, and both are validated by the test suite
@@ -316,10 +339,12 @@ not resolvable and not meant to be selected.
 | A valid profile is discovered and selected in the approved scopes | `workflow-profile-discovery.test.ts` 6/6; `phase8-profiles.test.ts` (list/validate/select, incl. "the CLI's resolved selection activates the profile") 8/8; built-CLI smoke test: `profiles list --trust-project` lists the project profile, `run --profile e2e.demo --yes` runs the profile path and exits 0 |
 | An invalid profile produces diagnostics before the run | `profiles validate` exits 1 with `selection.profile-missing` / `dependency.digest-mismatch` / `file.missing`; `run --profile nope.missing` exits 1 and creates no session; `workflow-profile-examples.test.ts` proves a stale pin is caught |
 | The CLI supports profile selection consistently | `hootl run --profile <id>` / `--profile-file <path>` registered and tested; flags are mutually exclusive; selection is the run's opt-in and goes through the Phase 7 activation gate |
-| Existing server/API stays compatible | **pending owner decision** — the server half of "selection in the existing server/API" needs a decision (per-request selection vs operator-level only), recorded in `EXECUTION_PLAN.md` under Phase 8 Step 2 as **Unknown / Requires Verification**. What is verified meanwhile: no route, request field or config surface was added, and the server suites still pass unchanged (10 files / 76 tests) |
+| The existing server/API supports selection consistently | owner decision **A** (2026-09-30): one new request field, `POST /api/run { profile }`, resolved by the same `resolveProfileSelection()` the CLI uses, before any side effect; `profileFile` is refused over HTTP. `phase8-profile-selection.test.ts` (8 tests): per-request switching, concurrency (a profile request and a legacy request at the same time), untrusted project → 400 with diagnostics, operator directory, unknown id, broken file, `profileFile` refusal, session-scoped selection. Live server smoke: untrusted → 400 `selection.profile-missing`; trusted → 202 + profile-path report |
 | An old request without a profile is preserved | `run` with no selection never resolves a profile (flag off) and takes the legacy path; verified in the built CLI and in the Phase 7 parity suite |
 | The examples are validated in CI | `workflow-profile-examples.test.ts` (7 tests) runs inside the repository suite that CI executes (`scripts/ci-test.mjs` → `vitest run`); local CI-command run: 144 files / 1,946 tests with only the pre-existing `phase-j-checkpoint` J-05 failure |
 | No DSL, eval or editor outside scope was added | the profile modules contain no `eval`, `new Function` or `child_process` usage; `x-` extensions are non-executable scalars; adding a node kind requires a handler and runtime tests (§3) |
 
-Phase 8 status: 🟡 — everything above except the server/API criterion is complete; that single
-criterion is blocked on an owner decision and nothing was invented to paper over it.
+Phase 8 status: 🟢 — every criterion is verified (the server/API criterion after the owner's
+decision, implemented as one request field on the same shared resolution path). The two defects the
+adversarial pass found while this was being proven (H-1 confirmation bypass, H-2 planner goal) are
+recorded with reproductions in [`PHASE9_HARDENING.md`](PHASE9_HARDENING.md).

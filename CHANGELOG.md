@@ -36,6 +36,16 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
   approval whose bound digest is the plan being executed; the refusal is a terminal
   `security-denied` failure (`execute.approval-required`) that no `onError` policy can route or
   retry. Found by the Phase 9 end-to-end hardening pass (`docs/workflow-profiles/PHASE9_HARDENING.md`).
+- The profile path sent the planner its node goal text instead of the user's request (the request
+  arrives as the entry payload object). Both paths now hand the planner the request; a regression
+  test fails without the fix (finding H-2 in the same document).
+
+**API**
+- `POST /api/run` accepts `profile: "<id>"` and runs that request with the selected Workflow
+  Profile, resolved by the same code as `hootl run --profile` and before the run, session or plan
+  exists (400 with diagnostics otherwise). Requests without the field are unchanged, and selection
+  is per request — the flag is never enabled process-wide. `profileFile` is not accepted over the
+  API; selecting by file stays a CLI action.
 
 **Behaviour differences to review before the default profile is activated** (recorded in
 `docs/workflow-profiles/PHASE7_PARITY.md`; the built-in default stays gated until the approval is

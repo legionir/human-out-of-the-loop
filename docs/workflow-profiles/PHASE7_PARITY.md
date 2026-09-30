@@ -326,3 +326,27 @@ authorization and the single human interaction are not weakened (authorization p
 approval + terminal denial/cancellation); existing plan/session data is read without migration; default
 activation is rollbackable and the load-error path executes nothing.
 
+## 10. Addendum (2026-09-30; append-only): one more mapping difference, and two defects found later
+
+Recorded for the release notes and the owner's approval before any default activation:
+
+- **The profile's `rejected` end maps onto the legacy `failure` review outcome.** `Review.outcome`
+  speaks the existing vocabulary (`success` / `partial-success` / `failure` / `cancelled`), so a
+  profile that ends an end node with `outcome: "rejected"` (an unroutable review decision, a
+  refusal) is reported as a **failed** run; the profile's own status stays visible in the report
+  text ("Workflow profile \"rejected\" — …"). Nothing re-executes and no result is lost — it is a
+  vocabulary mapping, recorded here because the owner's approval covers activation behaviour.
+
+Two defects were found later, by the Phase 9 hardening pass, and are **fixed** (they are not
+differences to approve):
+
+- **H-1** — a selected profile whose graph omitted the `approval` node executed its plan with no
+  human confirmation. Execution now requires a granted side-effect approval whose bound digest is
+  the plan being executed; the refusal is a terminal `security-denied` failure no `onError` policy
+  can route around.
+- **H-2** — the profile path handed the planner its node goal text instead of the user's request
+  (the request arrives as the entry payload object `{ goal, mode, sessionId }`, which the goal
+  extraction did not unwrap). Both paths now pass the request, with a regression test that fails
+  without the fix.
+
+Both are recorded with reproductions and evidence in `PHASE9_HARDENING.md`.

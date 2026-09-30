@@ -595,3 +595,32 @@ Phase 7 Step 1 is 🟢. `createDefaultWorkflowProfileDocument(sources)` (`src/ai
 
 Phase 7 is 🟢. `createDefaultWorkflowProfileDocument()` builds the built-in default profile in code with dependency pins computed from resolved persona/rubric content; `activateWorkflowProfile()` is the single fail-closed decision point (flag off ⇒ the legacy path and nothing profile-related resolves; flag on ⇒ a prepared profile or diagnostics, never a fallback or a half-created run; the built-in default additionally requires the recorded `BUILT_IN_DEFAULT_APPROVAL`, still unapproved); `OrchestratorConfig.workflowProfile` wires it to the Orchestrator, which keeps its own session/interaction lifecycle and delegates through its own Planner, FinalReviewer and a PlanRuntime built from the same policy deps. The first parity suite (`workflow-profile-parity.test.ts`, 9 tests) drives the legacy and profile paths with the same scripted model and compares plans, execution, step-agent prompts **and tool surfaces**, acceptance/re-review calls, clarification folding, cancellation, the final report, store data and the fail-closed load path. Two gaps the suite found were fixed in code: the profile path's PlanRuntime was missing the acceptance/status/persist-error callbacks (now a shared handler), and a failed plan execution would have skipped the review (now routed to the review node via `onError`, while authorization denial, approval denial and cancellation stay terminal). Recorded behaviour differences requiring the owner's approval before activation: G-5 (confirmation feedback cannot re-plan in v1), G-2 (answer branch ends `success`), report wording, and no legacy `plan:clarified` entry. Evidence: all Workflow Profile suites 21 files / 235 tests, adjacent suites 76 tests, full repository suite 1,924/1,925 with only the pre-existing J-05, typecheck and build clean. No merge is authorized until all phases are complete; Phase 8 (user authoring/selection) is next.
 
+### 8.12 — Workflow Profiles Phase 8 complete: authoring, discovery, selection over CLI and API (2026-09-30; append-only)
+
+Phase 8 is 🟢. Discovery lives on fixed conventions (`.hootl/workflow-profiles/*.json` behind the
+trust opt-in, `HOOTL_WORKFLOW_PROFILES_DIR`, and an explicitly named file) and never throws on a
+broken file; `resolveProfileSelection()` is the single selection path shared by `hootl run
+--profile/--profile-file` and the server, so the CLI and the API cannot drift apart. The CLI gained
+`profiles list` and `profiles validate <id|file>` (exit 1 on any diagnostic), the API gained one
+request field — `POST /api/run { profile }` — resolved before the run exists (400 with diagnostics
+otherwise; `profileFile` over HTTP is refused, because a client-supplied host path would be a new
+file-reading primitive). Per-request selection rides a new per-run channel on the Orchestrator
+(`OrchestratorRunOptions.workflowProfile`) rather than a second instance, so sessions, plans,
+ownership, cancellation, TTL and SSE are the same objects on both paths by construction; selecting a
+profile for one request leaves every other request on the legacy path, including under concurrency.
+Two real defects were found and fixed during the security pass that this phase's tests drove:
+**H-1** (a selected profile that omitted the approval node executed its plan with no human
+confirmation — now the runtime requires a granted side-effect approval whose bound digest is the
+plan being executed, and the refusal is a terminal `security-denied` failure) and **H-2** (the
+profile path fed the planner its node goal text instead of the user's request, because the request
+arrives as the entry payload object; both paths now pass the request, with a regression test that
+fails without the fix). The user-visible `rejected` end is recorded as `failure` in the legacy
+`Review.outcome` vocabulary (the profile status stays visible in the report) alongside the other
+recorded differences. Authoring docs and two resolvable, CI-validated examples ship with the phase.
+Evidence: `workflow-profile-discovery.test.ts` 6, `phase8-profiles.test.ts` 8,
+`workflow-profile-examples.test.ts` 7, `phase8-profile-selection.test.ts` (server) 8,
+`workflow-profile-hardening.test.ts` 9; all Workflow Profile + CLI + server suites 47 files / 554
+tests; built CLI and a live server smoke (`profiles validate` → exit 0; `run --profile e2e.reject`
+→ profile path; API untrusted → 400 `selection.profile-missing`, trusted → 202 + profile run); CI
+10/10 at the phase heads. No merge, release or default activation is authorized until all phases are
+complete.

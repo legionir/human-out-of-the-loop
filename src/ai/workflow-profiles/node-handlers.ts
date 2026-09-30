@@ -143,10 +143,30 @@ export interface WorkflowProfileHandlerOptions {
 
 const GOAL_INPUT_PORTS = ['goal', 'request', 'description', 'task'] as const;
 
+/**
+ * Fields the entry payload's `request` object carries (the bridge builds
+ * `{ request: { goal, mode, sessionId } }`). A profile may map either the goal string itself or
+ * the whole request object onto the planner/execute goal port; both must reach the node as the
+ * user's request, exactly like the legacy path passes `userRequest` (Phase 9 finding H-2).
+ */
+const GOAL_OBJECT_FIELDS = ['goal', 'request', 'description', 'task', 'text'] as const;
+
+/** The goal text of one input port value: the string itself, or a goal field of a request object. */
+function goalText(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.length > 0) return value;
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  for (const field of GOAL_OBJECT_FIELDS) {
+    const inner = record[field];
+    if (typeof inner === 'string' && inner.length > 0) return inner;
+  }
+  return undefined;
+}
+
 function stringInput(inputs: Readonly<Record<string, unknown>>): string | undefined {
   for (const name of GOAL_INPUT_PORTS) {
-    const value = inputs[name];
-    if (typeof value === 'string' && value.length > 0) return value;
+    const text = goalText(inputs[name]);
+    if (text !== undefined) return text;
   }
   return undefined;
 }

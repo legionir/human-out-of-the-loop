@@ -44,59 +44,26 @@ import {
 } from '../utils/reasoning.js';
 import { createToolLogRenderer, resolveToolLogEnabled } from '../utils/tool-log.js';
 import { parseBudget } from '../../ai/runtime/budget.js';
-import {
-  discoverWorkflowProfiles,
-} from '../../ai/workflow-profiles/profile-discovery.js';
-import { selectWorkflowProfile, WorkflowProfileLoadError } from '../../ai/workflow-profiles/profile-registry.js';
-import { WORKFLOW_PROFILE_FLAG_ENV_VAR } from '../../ai/workflow-profiles/profile-runner.js';
+import { resolveProfileSelection as resolveSelectedWorkflowProfile } from '../../ai/workflow-profiles/profile-selection.js';
 import type { OrchestratorWorkflowProfileOptions } from '../../ai/orchestrator.js';
 
 /**
  * Phase 8 Step 2: resolve `--profile <id>` / `--profile-file <path>` into the activation options.
- * Only the *explicit* selection is turned into an opt-in; `profiles validate` is the introspection
- * path, so nothing is executed or written here.
+ * The resolution itself lives in the workflow-profile module so the CLI and the server cannot
+ * drift apart; only the *explicit* selection is turned into an opt-in, and `profiles validate` is
+ * the introspection path, so nothing is executed or written here.
  */
 export function resolveProfileSelection(
   projectRoot: string,
   trustedProject: boolean,
   opts: Pick<RunCommandOptions, 'profile' | 'profileFile'>,
 ): OrchestratorWorkflowProfileOptions {
-  if (opts.profile !== undefined && opts.profileFile !== undefined) {
-    throw new WorkflowProfileLoadError('--profile and --profile-file are mutually exclusive', [{
-      stage: 'semantic', code: 'selection.conflicting-flags',
-      message: 'Select one profile either by id (--profile) or by file (--profile-file), not both',
-    }]);
-  }
-  const discovered = discoverWorkflowProfiles({
+  return resolveSelectedWorkflowProfile({
     projectRoot,
-    projectOptIn: trustedProject,
-    ...(opts.profileFile ? { file: opts.profileFile } : {}),
+    trustedProject,
+    ...(opts.profile !== undefined ? { profile: opts.profile } : {}),
+    ...(opts.profileFile !== undefined ? { profileFile: opts.profileFile } : {}),
   });
-  // A broken profile file must never be silently ignored: fail before the run starts.
-  if (discovered.diagnostics.length > 0) {
-    throw new WorkflowProfileLoadError('Workflow profile discovery found problems', [...discovered.diagnostics]);
-  }
-  // `--profile-file` names a document, so the id comes from the discovered entry for that file.
-  const fileId = opts.profileFile
-    ? discovered.profiles.find((entry) => path.resolve(entry.file) === path.resolve(opts.profileFile!))?.profile.profile.id
-    : undefined;
-  if (opts.profileFile && fileId === undefined) {
-    throw new WorkflowProfileLoadError('The selected profile file was not registered', [{
-      stage: 'read', code: 'file.not-registered',
-      message: `Profile file ${path.resolve(opts.profileFile)} did not register a profile`, file: path.resolve(opts.profileFile),
-    }]);
-  }
-  // D-WP-003: explicit selection wins; the project default only applies when the user asked for it
-  // by trusting the project and by naming no profile — and even then only through this flag.
-  const selection = selectWorkflowProfile(discovered.registry, {
-    requestedProfileId: (opts.profile ?? fileId)!,
-    projectOptIn: trustedProject,
-    ...(discovered.projectDefaultProfileId ? { projectDefaultProfileId: discovered.projectDefaultProfileId } : {}),
-  });
-  return {
-    env: { ...process.env, [WORKFLOW_PROFILE_FLAG_ENV_VAR]: '1' },
-    selection: { registered: selection },
-  };
 }
 
 export interface RunCommandOptions {

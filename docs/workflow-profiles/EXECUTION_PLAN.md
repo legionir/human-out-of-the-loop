@@ -198,7 +198,7 @@ workflow پس از restart از state و hash/version درست resume می‌ش�
 
 ---
 
-## [🟡] Phase 8: ساخت، انتخاب و اعتبارسنجی Profile توسط کاربر
+## [🟢] Phase 8: ساخت، انتخاب و اعتبارسنجی Profile توسط کاربر
 
 قابلیت سفارشی‌سازی را روی رابط‌های موجود عرضه کن تا کاربر بتواند Profile JSON بسازد/قرار دهد، فهرست و اعتبارسنجی کند و برای یک اجرای مشخص انتخاب کند. این فاز ویرایشگر گرافیکی یا DSL جدید اضافه نمی‌کند؛ JSON همان قالب نویسندگی/انتقال باقی می‌ماند.
 
@@ -215,7 +215,7 @@ visible while selection stays fail-closed. The package registry is untouched, an
 decides precedence: `selectWorkflowProfile` (D-WP-003) still owns explicit > opted-in project
 default > built-in default. Evidence: `workflow-profile-discovery.test.ts` 6/6.
 
-### [🟡] Step 2: افزودن فهرست/اعتبارسنجی/انتخاب در interfaceهای پشتیبانی‌شده
+### [🟢] Step 2: افزودن فهرست/اعتبارسنجی/انتخاب در interfaceهای پشتیبانی‌شده
 
 entry pointهای جاری CLI و server/API را دوباره تأیید و با الگوی config آن‌ها سازگار کن. کاربر بتواند Profileها را فهرست/اعتبارسنجی کند، یک profile ID را برای run انتخاب کند و خطای نسخه/وابستگی/مجوز را پیش از اجرا ببیند. سازگاری clientها و مسیر بدون تعیین profile را حفظ کن. **Unknown / Requires Verification:** نام دقیق command/flag، request field یا UI affordance را از قراردادهای موجود استخراج کن؛ API یا route جدید را از روی حدس نساز.
 
@@ -235,7 +235,26 @@ request without a flag goes to the legacy planner, and `run --profile nope.missi
 with a project-scope profile, all Workflow Profile + CLI suites 34 files / 454 tests, `npm run
 build` clean.
 
-**Unknown / Requires Verification (Step 2, server/API half; owner decision required):** the plan
+**Resolved (owner decision 2026-09-30, option A — per-request selection):** the API now supports
+selection with **one** new request field, `POST /api/run { profile }`, resolved by
+`resolveProfileSelection()` — the same function the CLI uses — before the run, session or plan
+exists; failures answer `400 { error, diagnostics }` (`selection.profile-missing`,
+`project-profile.opt-in-required`, parse/schema/semantic codes). `profileFile` is deliberately
+**refused** with a 400 over HTTP: a client-supplied host path would be a new file-reading
+primitive, so selecting by file stays a CLI/operator action. **Recorded deviation from the option's
+sketch:** the selection rides a new **per-run channel on the shared Orchestrator**
+(`OrchestratorRunOptions.workflowProfile`, preferred over the instance-level option and still gated
+by the flag) instead of a second, per-request Orchestrator instance. Reason: with a second instance
+the sessions/plans, their ownership records, the cancellation manager and the SSE bookkeeping would
+be *different objects* (and every request would re-initialize registries/MCP), whereas the per-run
+channel keeps all of them identical by construction. The observable contract of option A is
+unchanged: per-request selection through the CLI-identical resolution path, per-run only, legacy for
+every request that does not ask for a profile. Evidence: `phase8-profile-selection.test.ts` (8
+tests: per-request switching, concurrency, untrusted project 400, operator directory, unknown id,
+broken file, `profileFile` refusal, session-scoped selection) and a live server smoke (untrusted →
+400 `selection.profile-missing`; trusted → 202 with `profileId` and the profile path's report).
+
+**Original Unknown / Requires Verification record (kept append-only):** the plan
 asks the *existing* server/API to support profile selection "consistently", but the server holds a
 single long-lived Orchestrator (`ServerContext.orchestrator`) whose `workflowProfile` option is a
 constructor argument, and `POST /api/run` has no per-run channel for it. Adding a per-request
@@ -273,7 +292,13 @@ the guide says so. Phase 9 wires these into CI as required.
 **Acceptance criteria:**
 نویسنده می‌تواند فقط با JSON مستندشده Profile سفارشی تعریف کند؛ Profile معتبر در scope مصوب discover و انتخاب می‌شود و Profile نامعتبر قبل از اجرا diagnostic می‌دهد؛ CLI و server/API موجود به‌صورت سازگار انتخاب Profile را پشتیبانی می‌کنند؛ درخواست قدیمی بدون profile حفظ می‌شود؛ نمونه‌ها در CI اعتبارسنجی می‌شوند؛ هیچ DSL، eval یا ویرایشگر خارج از دامنه اضافه نشده است.
 
-**Phase 8 acceptance status (2026-09-30; append-only):** event-based evidence for every criterion is
+**Phase 8 acceptance status update (2026-09-30, after the owner decision; append-only):** the
+server/API criterion is now met as well (per-request `POST /api/run { profile }`, resolved before any
+side effect, `profileFile` refused over HTTP). All eight Phase 8 acceptance criteria are therefore
+verified with tests and built-artifact evidence — see `PHASE8_AUTHORING.md` §16 — and Phase 8 is 🟢
+(Step 1 🟢, Step 2 🟢, Step 3 🟢).
+
+**Phase 8 acceptance status (2026-09-30; append-only, superseded by the update above):** event-based evidence for every criterion is
 recorded in `PHASE8_AUTHORING.md` §16. Seven of the eight verified criteria are met with tests and
 built-CLI evidence; the eighth — per-request selection in the **existing server/API** — is the
 recorded **Unknown / Requires Verification** above. The owner question (options A/B/C) was put on
@@ -282,6 +307,31 @@ was invented or implemented, and Phase 8 stays 🟡. Phase 9 (security hardening
 measurement) does not depend on that decision, so its Step 1 work proceeds under the same append-only
 rule: the deviation is recorded here, Phase 8 is not marked complete, and the decision stays open for
 the owner. No merge, release or default activation is authorized until all phases are complete.
+
+---
+
+## Phase 8 closure (2026-09-30; append-only)
+
+Phase 8 is 🟢. An author writes a JSON profile against `PHASE8_AUTHORING.md`, validates it with
+`hootl profiles validate <id|file>` (exit 1 on any diagnostic), lists what a project can select with
+`hootl profiles list`, and runs one with `hootl run --profile <id> | --profile-file <path>` or
+`POST /api/run { profile }`. Discovery covers exactly the approved scopes (project scope behind the
+trust opt-in, the operator directory, one explicit file) and selection keeps D-WP-003 precedence
+through a single shared resolver, so the CLI and the API cannot drift apart. Every failure —
+unknown id, unreadable/broken file, untrusted project profile, version/schema/semantic/dependency
+problem — is reported before a session, plan or model call exists, and a request without a profile
+keeps the legacy path (verified per request, including under concurrency).
+
+Delivered: `profile-discovery.ts` (+6 tests), `profiles` CLI command with `list`/`validate`
+(+8 tests), the run-side flags, the server field (+8 tests), `PHASE8_AUTHORING.md`, two resolvable
+examples with real pins (+7 tests), and `resolveProfileSelection()` as the single shared selection
+path. Two defects found while proving the boundary are fixed in code rather than documented away:
+H-1 (a profile could omit the confirmation node and execute without a human approval) and H-2 (the
+profile path handed the planner its node goal instead of the user's request); both are recorded with
+reproductions in `PHASE9_HARDENING.md`. `rejected`-end mapping onto the legacy review vocabulary is
+recorded as a behaviour difference (see `PHASE7_PARITY.md` §9). Evidence: all Workflow Profile + CLI
++ server suites 47 files / 554 tests; built CLI and live-server smoke tests; CI 10/10 on the phase
+heads. No merge, release or default activation is authorized until all phases are complete.
 
 ---
 
