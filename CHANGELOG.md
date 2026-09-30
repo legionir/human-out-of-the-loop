@@ -30,6 +30,13 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
   resolvable examples under `docs/workflow-profiles/examples/` (answer-only, bounded review/fix) that
   are validated end to end in the test suite.
 
+**Security**
+- A selected profile could omit the confirmation node and execute its plan without any human
+  confirmation (the legacy path always requires one). Execution now requires a granted side-effect
+  approval whose bound digest is the plan being executed; the refusal is a terminal
+  `security-denied` failure (`execute.approval-required`) that no `onError` policy can route or
+  retry. Found by the Phase 9 end-to-end hardening pass (`docs/workflow-profiles/PHASE9_HARDENING.md`).
+
 **Behaviour differences to review before the default profile is activated** (recorded in
 `docs/workflow-profiles/PHASE7_PARITY.md`; the built-in default stays gated until the approval is
 recorded):

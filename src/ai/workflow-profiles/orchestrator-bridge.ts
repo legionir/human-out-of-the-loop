@@ -163,6 +163,9 @@ export async function runWorkflowProfileBridge(
       })
       : undefined;
 
+  /** Digests of the content a granted side-effect approval bound, for this run only. */
+  const approvedPlanDigests = new Set<string>();
+
   const handlers = createWorkflowProfileHandlers({
     planner: {
       async plan(request) {
@@ -188,7 +191,17 @@ export async function runWorkflowProfileBridge(
         return outcome;
       },
     },
-    executor: createExecutorPort({ planRuntime: planRuntimeView }),
+    executor: createExecutorPort({
+      planRuntime: planRuntimeView,
+      assertExecutable: (planDigest) => {
+        if (typeof planDigest !== 'string' || !approvedPlanDigests.has(planDigest)) {
+          throw new WorkflowNodeError(
+            'Execution requires the confirmed plan: no granted side-effect approval binds this plan.',
+            { category: 'security-denied', code: 'execute.approval-required', retryable: false },
+          );
+        }
+      },
+    }),
     ...(reviewerPort ? { reviewer: reviewerPort } : {}),
     ...(services.confirm
       ? {
@@ -199,6 +212,13 @@ export async function runWorkflowProfileBridge(
               const outcome = await port.request(approvalRequest);
               if (approvalRequest.responseKind === 'text' && outcome.status === 'approved') {
                 clarificationAnswer.text = outcome.answer ?? '';
+              }
+              // Only a granted side-effect approval whose bound digest matches is a licence to
+              // execute; the port already verified the bound content, and the executor gate
+              // compares the digest with the plan it is about to run.
+              if (approvalRequest.approvalType === 'side-effect' && outcome.status === 'approved'
+                && typeof approvalRequest.boundDigest === 'string') {
+                approvedPlanDigests.add(approvalRequest.boundDigest);
               }
               return outcome;
             },

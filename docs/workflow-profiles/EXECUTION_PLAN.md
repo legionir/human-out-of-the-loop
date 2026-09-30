@@ -285,17 +285,34 @@ the owner. No merge, release or default activation is authorized until all phase
 
 ---
 
-## [🔴] Phase 9: hardening امنیتی و سنجش منابع
+## [🟡] Phase 9: hardening امنیتی و سنجش منابع
 
 پس از اتصال handlerها و پیش از rollout، امنیت/adversarial و ظرفیت را با معیارهای مصوب harden کن. مرز اعتماد از Phase 5 برقرار شده؛ این فاز آن را end-to-end می‌بندد و جایگزین تست‌های زودهنگام نیست.
 
-### [🔴] Step 1: آزمون adversarial سرتاسری و policy boundary
+### [🟡] Step 1: آزمون adversarial سرتاسری و policy boundary
 
 تست end-to-end برای profile/Persona/Skill/fetch injection، اجرای code/eval، tool/path escalation، untrusted workspace override، approval/budget downgrade، forged dependency/version/digest، route abuse، error payload leakage، graph بزرگ، nested/overlapping loops، exhaustion، cancellation، restart و persistence failure اضافه کن. ثابت کن injection هیچ‌گاه system policy، authorization، approval، feature flag یا budget را تغییر نمی‌دهد؛ raw exception/secret وارد route/prompt/log نمی‌شود؛ default-off واقعی است؛ denied/cancelled action هیچ‌وقت retry/routed نمی‌شود. تست‌ها از gateهای مراحل قبلی کپی مبهم نباشند؛ اینجا end-to-end و integration کامل پوشش داده شوند.
 
 ### [🔴] Step 2: ارزیابی performance و منابع
 
 با workflow نماینده، load/schema/semantic validation/resolution/run هزینه، node visits، wall time و رشد state را نسبت به baseline اندازه‌گیری کن. اعداد هدف را از baseline و limits مصوب استخراج کن، نه با حدس. prove کن byte cap پیش از parse، counters قبل از call، `maxNodeVisits` hard cap و time/model/tool budgets قبل از runaway موثرند؛ flag خاموش overhead غیرضروری و regression محسوس ندارد. نتیجه و محیط قابل‌بازتولید را ثبت کن.
+
+**Progress (2026-09-30; append-only):** the first end-to-end adversarial pass is in
+`workflow-profile-hardening.test.ts` (8 tests, all green) and it found a real gap: **H-1** — a
+selected profile that omitted the `approval` node executed its plan with no human confirmation at
+all. Fixed at the wiring layer with a runtime gate (`execute.approval-required`,
+category `security-denied`, therefore terminal and unroutable): execution requires a granted
+side-effect approval whose bound digest is the plan being executed, and the node's own
+`requireApprovalForSideEffects` can only be stricter. Reproduction before the fix and the full
+evidence are recorded in `PHASE9_HARDENING.md`. The same suite proves: cancellation and denial stay
+terminal under a routing `onError`, injected request text cannot widen the step tool surface beyond
+the legacy one, and with the flag off a selected hostile document is never resolved. Remaining Step 1
+cases (component-content injection, `eval`/path escalation, restart/persistence replay, large graph,
+nested-loop exhaustion at run level, leakage into persisted session/logs) and Step 2 (performance and
+resource measurement) are listed as open in `PHASE9_HARDENING.md`. Recorded deviation: Phase 8 is
+still 🟡 on its one owner-decision criterion and the owner directed the work to continue, so this
+Step 1 work proceeds append-only with that decision open; no merge/release/default activation is
+authorized until all phases are complete.
 
 **Acceptance criteria:**
 همهٔ security/adversarial E2Eهای تعریف‌شده سبزند؛ هیچ profile/untrusted text مجوز یا policy را تضعیف نمی‌کند؛ default-off و عدم‌اجرای denial/cancel با تست اثبات شده؛ limits قبل از مصرف runaway عمل می‌کنند؛ performance با معیار baseline مصوب سازگار است یا blocker صریح ثبت شده؛ suiteهای قبلی پابرجا هستند.

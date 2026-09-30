@@ -92,6 +92,12 @@ export function createPlannerPort(options: PlannerPortOptions): WorkflowPlannerP
 
 export interface ExecutorPortOptions {
   planRuntime: PlanRuntimeLike;
+  /**
+   * Runtime-level execution gate (Phase 9 Step 1): called with the plan digest the execute node
+   * received. Wiring refuses execution (a terminal `security-denied` failure) unless a granted
+   * side-effect approval binds that digest, so no profile can drop the mandatory confirmation.
+   */
+  assertExecutable?: (planDigest: string | undefined) => void;
 }
 
 /** Map an existing `PlanExecutionResult` onto the execute node's ports. */
@@ -123,6 +129,11 @@ export function createExecutorPort(options: ExecutorPortOptions): WorkflowExecut
       if (request.plan === undefined) {
         throw new Error(`execute node "${request.nodeId}" requires a plan input`);
       }
+      // Phase 9 Step 1: the runtime's own gate, independent of what the profile declares. A profile
+      // cannot remove the mandatory human confirmation before a plan runs (Law 17), so the wiring
+      // layer refuses execution unless a granted side-effect approval binds the very plan being
+      // executed. The failure is a security denial: terminal, never routed or retried.
+      options.assertExecutable?.(request.planDigest);
       const result = await options.planRuntime.execute(request.plan as Plan);
       if (result.status === 'cancelled' || result.status === 'cancelling') {
         // Cancellation is terminal and can never be routed or retried by a profile.
