@@ -273,6 +273,16 @@ the guide says so. Phase 9 wires these into CI as required.
 **Acceptance criteria:**
 نویسنده می‌تواند فقط با JSON مستندشده Profile سفارشی تعریف کند؛ Profile معتبر در scope مصوب discover و انتخاب می‌شود و Profile نامعتبر قبل از اجرا diagnostic می‌دهد؛ CLI و server/API موجود به‌صورت سازگار انتخاب Profile را پشتیبانی می‌کنند؛ درخواست قدیمی بدون profile حفظ می‌شود؛ نمونه‌ها در CI اعتبارسنجی می‌شوند؛ هیچ DSL، eval یا ویرایشگر خارج از دامنه اضافه نشده است.
 
+**Phase 8 acceptance status (2026-09-30; append-only):** event-based evidence for every criterion is
+recorded in `PHASE8_AUTHORING.md` §16. Seven of the eight verified criteria are met with tests and
+built-CLI evidence; the eighth — per-request selection in the **existing server/API** — is the
+recorded **Unknown / Requires Verification** above. The owner question (options A/B/C) was put on
+2026-09-30 and skipped with an instruction to continue; therefore nothing about the server interface
+was invented or implemented, and Phase 8 stays 🟡. Phase 9 (security hardening and resource
+measurement) does not depend on that decision, so its Step 1 work proceeds under the same append-only
+rule: the deviation is recorded here, Phase 8 is not marked complete, and the decision stays open for
+the owner. No merge, release or default activation is authorized until all phases are complete.
+
 ---
 
 ## [🔴] Phase 9: hardening امنیتی و سنجش منابع

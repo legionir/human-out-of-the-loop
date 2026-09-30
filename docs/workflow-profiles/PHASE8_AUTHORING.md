@@ -306,3 +306,20 @@ not resolvable and not meant to be selected.
   dependencies changed (`PHASE6_LIFECYCLE.md`).
 - Nothing in a profile can enable a feature: activation still requires the flag plus a selection,
   and the built-in default additionally requires a recorded owner approval.
+
+
+## 16. Acceptance evidence (Phase 8)
+
+| Acceptance criterion (plan) | Evidence |
+| --- | --- |
+| An author can define a custom profile with documented JSON only | this guide + two resolvable examples; no DSL, expression language, editor or plug-in surface exists — the profile modules contain no `eval`, `new Function` or process spawning |
+| A valid profile is discovered and selected in the approved scopes | `workflow-profile-discovery.test.ts` 6/6; `phase8-profiles.test.ts` (list/validate/select, incl. "the CLI's resolved selection activates the profile") 8/8; built-CLI smoke test: `profiles list --trust-project` lists the project profile, `run --profile e2e.demo --yes` runs the profile path and exits 0 |
+| An invalid profile produces diagnostics before the run | `profiles validate` exits 1 with `selection.profile-missing` / `dependency.digest-mismatch` / `file.missing`; `run --profile nope.missing` exits 1 and creates no session; `workflow-profile-examples.test.ts` proves a stale pin is caught |
+| The CLI supports profile selection consistently | `hootl run --profile <id>` / `--profile-file <path>` registered and tested; flags are mutually exclusive; selection is the run's opt-in and goes through the Phase 7 activation gate |
+| Existing server/API stays compatible | **pending owner decision** — the server half of "selection in the existing server/API" needs a decision (per-request selection vs operator-level only), recorded in `EXECUTION_PLAN.md` under Phase 8 Step 2 as **Unknown / Requires Verification**. What is verified meanwhile: no route, request field or config surface was added, and the server suites still pass unchanged (10 files / 76 tests) |
+| An old request without a profile is preserved | `run` with no selection never resolves a profile (flag off) and takes the legacy path; verified in the built CLI and in the Phase 7 parity suite |
+| The examples are validated in CI | `workflow-profile-examples.test.ts` (7 tests) runs inside the repository suite that CI executes (`scripts/ci-test.mjs` → `vitest run`); local CI-command run: 144 files / 1,946 tests with only the pre-existing `phase-j-checkpoint` J-05 failure |
+| No DSL, eval or editor outside scope was added | the profile modules contain no `eval`, `new Function` or `child_process` usage; `x-` extensions are non-executable scalars; adding a node kind requires a handler and runtime tests (§3) |
+
+Phase 8 status: 🟡 — everything above except the server/API criterion is complete; that single
+criterion is blocked on an owner decision and nothing was invented to paper over it.
