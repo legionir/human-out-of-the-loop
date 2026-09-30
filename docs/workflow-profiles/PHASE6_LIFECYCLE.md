@@ -107,8 +107,24 @@ it invalidates the durability guarantee, so it emits `workflow.persistence.degra
 
 ## 7. CI record (append-only)
 
-Pending: the CI run for the commit that carries this document. It will be appended here, with the
-per-job result, exactly as the Phase 4/5 runs were recorded.
+### 2026-09-30 — run 36717190085 @ `2cdbd6a` (Phase 6 code head)
+
+Result: **failure**, 7/10 jobs green: ubuntu 22/24/26, e2e ubuntu, e2e macos, e2e windows, and
+**windows / node 24** (the job that failed for the Phase 5 head). Two jobs failed:
+
+| Job | Failing test(s) | Annotation |
+| --- | --- | --- |
+| `macos-latest / node 22` | `src/cli/__tests__/cli.test.ts` — "Phase 23 — CLI: mcp + logs — logs --follow streams new entries as they are appended (followLog)" | `Error: followLog never emitted` (stream wait) |
+| `windows-latest / node 22` | `src/cli/__tests__/phase-g.test.ts` — G-09, G-04, G-02 | `Error: Test timed out in 5000ms` (three tests) |
+
+Both failing files are untouched by Phase 6 (`git diff 0bc9288..2cdbd6a -- src/cli` is empty), and the
+failing tests differ from the four already recorded for the Phase 5 heads (`chat-mode.test.ts`
+greeting, `server.test.ts` U1 parity, `u2-registry.test.ts` U2, `phase-g.test.ts` G-04) — the same
+5000 ms-timeout and stream-wait signature now spans several runs, three jobs, and two operating
+systems, with a different subset each time, while `macos-latest / node 24` and `windows-latest /
+node 24` pass on this same commit. No Phase 6-caused failure is established from this evidence, and
+this record does not claim a Windows/macOS-green run for the Phase 6 head: the Phase 4 exact head
+(`506a6ec`) remains the last fully green run (10/10 on attempt 1).
 
 ## 8. Boundaries and open gates
 
