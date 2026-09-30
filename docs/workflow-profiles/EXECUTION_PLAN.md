@@ -398,21 +398,71 @@ are complete (owner instruction).
 
 ---
 
-## [🔴] Phase 10: migration، مستندات، CI و تحویل مرحله‌ای
+## [🟡] Phase 10: migration، مستندات، CI و تحویل مرحله‌ای
 
 فقط بعد از hardening، compatibility/recovery، مستندات و gateهای PR را کامل کن. rollout باید opt-in، قابل‌ردیابی و rollback-safe باشد؛ merge/release همچنان نیازمند مجوز مالک است.
 
-### [🔴] Step 1: migration و عملیات rollout/rollback
+### [🟢] Step 1: migration و عملیات rollout/rollback
 
 راهنمای upgrade نسخهٔ Profile/schema/Runtime و رفتار profile/dependency حذف‌شده یا ناسازگار را بنویس. migration persistent state اگر لازم است idempotent و rollback-aware باشد؛ اگر لازم نیست شواهد عدم نیاز ثبت کن. Feature flag default-off و opt-in enablement را در config/operations مستند کن؛ downgrade باعث تکرار side effect یا افزایش authorization نشود. دادهٔ run، profile digest/version و approval digest را در resume بررسی کن.
 
-### [🔴] Step 2: مستندات، traceability و Gateهای CI
+### [🟢] Step 2: مستندات، traceability و Gateهای CI
 
 Schema/author guide، error/retry semantics، first-match/default، loop bound formula، trust/approval/tool policy، explicit v1 exclusions، migration و release notes را با implementation همگام کن. `R-xxx`→phase/step→test/doc matrix و Decision/Unknown Register را نهایی کن. Gateهای CI باید نمونه‌های default/bounded/error-route را با schema و semantic validators بررسی، parity/generator/typecheck/lint/build/test/security check را اجرا کنند؛ شکست baseline با clean baseline تفکیک شود.
 
-### [🔴] Step 3: بازبینی مستقل و PR-by-phase handoff
+### [🟡] Step 3: بازبینی مستقل و PR-by-phase handoff
 
 برای هر فاز PR جدا و قابل‌بازبینی داشته باش؛ description شامل R IDs، تغییر، test evidence، CI head SHA و dependencies باشد. قبل از ساخت/ادامهٔ branch بعدی CI/review و base commit را کنترل کن؛ branchها را فقط طبق ترتیب dependency rebase کن. PR #5/#6 را تنها اگر gate فاز 1 وابستگی واقعی یافته دنبال کن. بازبینی معماری، QA، امنیت، عملیات و compatibility را انجام بده. statusهای plan را فقط با evidence به‌روز کن؛ merge/release بدون درخواست و مجوز مستقل مالک ممنوع است.
+
+**Phase 10 Steps 1–2 closure (2026-09-30; append-only):**
+
+**Step 1** is 🟢. `PHASE10_OPERATIONS.md` is the upgrade/rollout/rollback guide: the flag matrix and
+its defaults, profile/schema/runtime upgrade behaviour with the diagnostic each situation produces,
+the evidence that **no persistent-state migration is required** (profile runs reuse the existing
+`PlanStore`/`SessionStore` shapes — proved by the parity suite on both the read and the write side —
+and the run-state record is additive, opt-in and ignored by builds that do not know it), the staged
+opt-in rollout procedure, the rollback table with what a rollback does *not* undo, and the
+downgrade guarantees (no repeated side effects, no widened authorization). The plan's resume check is
+implemented and now also *proved*: `workflow-profile-upgrade.test.ts` (3 tests) writes the record a
+killed process leaves behind (the runner persists before the first node), resumes through the real
+Orchestrator, and asserts that (a) the approval node runs again and the user is asked again — a stored
+approval is never authority, (b) a decline stops the run with nothing executed, (c) a profile whose
+content changed is refused before the user is asked, and (d) the approval *record* now carries the
+digest and port it was about: the bridge writes each decision through the new `recordApproval` on the
+prepared run (`appendApprovalRecord` in `profile-run-state.ts`), closing the gap where the field
+existed but no wiring filled it.
+
+One owner decision is recorded as **open** in §7 of the operations guide (U-2 in `TRACEABILITY.md`):
+the durable store and resume decision are implemented and tested, but no CLI or server entry point
+creates a state store or re-drives a stored run. Recommended: keep resume embedder-only for v1 (crash
+safety does not depend on it — nothing is auto-retried and a pending effect refuses continuation);
+alternative: wire `.ai-runtime/workflow-profile-runs/` plus a resume command as a follow-up feature.
+Required before activation.
+
+**Step 2** is 🟢. `TRACEABILITY.md` is the finalized matrix: `WP-R-001`…`WP-R-013` each mapped to the
+phase/step that implemented it, the exact test files, and the documents that describe it, plus the
+decision register (D-WP-001…011 and where each is honoured), the open owner items (U-1…U-6 with owner,
+required-before and recommendation) and the resolved unknowns kept for the record. Documentation is
+synchronised with the implementation: `PHASE8_AUTHORING.md` gained the named-toolset section, the
+troubleshooting rows and the third example; `RELEASE_NOTES.md` states what ships, how to enable it,
+the behaviour differences needing acceptance, upgrade/rollback, the known limitations and the
+pre-activation checklist. The CI gate the plan asks for exists and is wired:
+`scripts/profile-gates.mjs` (also `npm run profile-gates`) validates the built-in **default** profile
+and every shipped example (**bounded** review/fix and **error-route**, plus answer-only) through the
+schema, the semantic validator and fail-closed dependency resolution, asserts the shipped schema file
+*is* the validator's schema, and runs four **negative controls** (unknown top-level key, non-v1 node
+kind, unbounded loop, dangling error route) so a green gate means the validators ran. It is a step in
+`ci.yml` on every matrix leg. Honest gap recorded rather than invented: this repository has **no
+linter** (no config, no script), so the plan's "lint" item has no tool to run; the type check plus the
+suite are the static gates. Baseline separation: the only locally red test is the pre-existing `J-05`
+checkpoint test, which is mtime-resolution sensitive on this sandbox (three consecutive writes share
+one `mtimeMs`), unchanged since the session base (`git diff f1d403f` empty for the test and
+`checkpoint.ts`) and green on CI; it is recorded as U-6 with a follow-up recommendation instead of
+being hidden. Step 3 (independent review and PR handoff) remains 🟡 and needs the owner: this session
+is bound to a single branch (`arena/01a0f205-human-out-of-the-loop`), so the phase PRs with
+R-ID/test/CI-head evidence are presented as one phase-by-phase handoff in PR #10 rather than separate
+PRs — a recorded deviation — and the independent architectural/QA/security review is a human gate the
+agent cannot self-issue.
 
 **Acceptance criteria:**
 migration/rollback آزموده یا عدم نیاز مستند است؛ CI و semantic/schema/security gates روی head هر PR نتیجهٔ ثبت‌شده دارند؛ traceability برای همهٔ R IDs کامل است؛ هیچ unknown مسدودکننده‌ای بی‌صاحب/بی‌موعد نیست؛ PRها فازبندی و قابل‌بازبینی‌اند؛ regressions از baseline تفکیک شده؛ همهٔ docs/examples با implementation همخوانند؛ rollout default-off است؛ merge/release بدون مجوز انجام نشده است.

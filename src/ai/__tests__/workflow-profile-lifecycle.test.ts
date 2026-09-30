@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import type { WorkflowProfileRunStateStore } from '../workflow-profiles/profile-run-state.js';
 import {
   FileWorkflowProfileRunStateStore,
+  appendApprovalRecord,
   MemoryWorkflowProfileRunStateStore,
   PROFILE_RUN_STATE_VERSION,
   createWorkflowProfileRunState,
@@ -99,6 +100,25 @@ describe('Workflow Profile run state store', () => {
     expect(store.load('never-written')).toBeUndefined();
     store.delete('../../etc/passwd');
     expect(store.list()).toEqual([]);
+  });
+
+  it('records approvals append-only, as audit data a resume never reads back', () => {
+    const state = createWorkflowProfileRunState({
+      runId: 'run-approvals', profile: executableProfile(), dependencies: pins(), runtimeVersion: RUNTIME_VERSION,
+      startNodeId: 'start',
+    });
+    const denied = appendApprovalRecord(state, { nodeId: 'confirm', status: 'denied', digest: 'sha256:aa' }, 1);
+    const approved = appendApprovalRecord(denied, { nodeId: 'confirm', status: 'approved', digest: 'sha256:bb', boundPort: 'planText' }, 2);
+
+    // The original state is untouched (the store writes whole records), and order is preserved.
+    expect(state.approvals).toEqual([]);
+    expect(approved.approvals.map(({ nodeId, status, digest }) => `${nodeId}:${status}:${digest}`))
+      .toEqual(['confirm:denied:sha256:aa', 'confirm:approved:sha256:bb']);
+    expect(approved.updatedAtMs).toBe(2);
+    // A decision that resolves but changes nothing is still missing: a resume re-runs the node.
+    expect(evaluateWorkflowProfileResume(approved, {
+      profile: executableProfile(), dependencies: pins(), runtimeVersion: RUNTIME_VERSION,
+    }).action).toBe('resume');
   });
 
   it('keeps memory-store state independent of the caller object', () => {

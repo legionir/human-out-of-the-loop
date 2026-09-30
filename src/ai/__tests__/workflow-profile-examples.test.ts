@@ -8,6 +8,8 @@
  *     never execute anything, so a reader can see the minimum that is still meaningful.
  *   - `examples/bounded-review-fix.example.json` — the full work profile: digest-bound
  *     confirmation, delegated execution, review, and exactly one bounded re-plan loop.
+ *   - `examples/error-route.example.json`   — the same work path with a typed error route: a
+ *     delegated execution failure is mapped into a rejected end instead of aborting the run.
  *
  * Unlike the schema/semantic fixtures next to them (which carry placeholder digests on purpose),
  * these examples pin real component content, so this suite runs the whole authoring path the CLI
@@ -28,6 +30,8 @@ const REPO_ROOT = path.resolve(__dirname, '../../..');
 const EXAMPLES = path.join(REPO_ROOT, 'docs', 'workflow-profiles', 'examples');
 const ANSWER_ONLY = path.join(EXAMPLES, 'answer-only.example.json');
 const BOUNDED = path.join(EXAMPLES, 'bounded-review-fix.example.json');
+const ERROR_ROUTE = path.join(EXAMPLES, 'error-route.example.json');
+const EXAMPLES_WITH_REAL_PINS = [ANSWER_ONLY, BOUNDED, ERROR_ROUTE] as const;
 
 /** Sources built exactly like the CLI's validate path builds them. */
 function sourcesFor(projectRoot: string) {
@@ -44,7 +48,7 @@ describe('Phase 8 — authoring examples', () => {
   beforeEach(() => { home = useIsolatedHome('phase8-examples-'); });
   afterEach(() => { home.restore(); });
 
-  it.each([ANSWER_ONLY, BOUNDED])('the CLI validates %s', async (file) => {
+  it.each(EXAMPLES_WITH_REAL_PINS)('the CLI validates %s', async (file) => {
     const out = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
     try {
       expect(await profilesValidateCommand(file, { projectRoot: REPO_ROOT })).toBe(0);
@@ -53,8 +57,8 @@ describe('Phase 8 — authoring examples', () => {
     }
   });
 
-  it('both examples load and resolve their real dependency pins (resolution throws otherwise)', () => {
-    for (const file of [ANSWER_ONLY, BOUNDED]) {
+  it('every example loads and resolves its real dependency pins (resolution throws otherwise)', () => {
+    for (const file of EXAMPLES_WITH_REAL_PINS) {
       const registered = loadWorkflowProfileFile(file, 'user-selected');
       // Resolution is fail-closed: a single diagnostic throws instead of returning a profile.
       const resolved = resolveWorkflowProfileDependencies(registered.profile, sourcesFor(REPO_ROOT));
@@ -106,6 +110,20 @@ describe('Phase 8 — authoring examples', () => {
     expect(approval.config.approvalType).toBe('side-effect');
   });
 
+  it('the error-route example declares a typed route that cannot turn a failure into a success', () => {
+    const document = loadWorkflowProfileFile(ERROR_ROUTE, 'user-selected').profile;
+    const execute = document.workflow.nodes.find((node) => node.id === 'execute')!;
+    expect(execute.onError).toEqual({ strategy: 'route', routeTo: 'failed', routeMap: { summary: '/failure/code' } });
+    // The route goes to an end whose outcome is `rejected`, so a routed failure is still a failure.
+    const failed = document.workflow.nodes.find((node) => node.id === 'failed')!;
+    expect(failed.kind).toBe('end');
+    expect(failed.config.outcome).toBe('rejected');
+    // And the confirmation is still mandatory before the effect: an error route changes nothing there.
+    const approval = document.workflow.nodes.find((node) => node.id === 'confirm')!;
+    expect(approval.config.approvalType).toBe('side-effect');
+    expect(approval.config.bindsTo).toBe('planText');
+  });
+
   it('a changed pin is caught: the example only passes while the pinned content matches', () => {
     const registered = loadWorkflowProfileFile(ANSWER_ONLY, 'user-selected');
     const stale = structuredClone(registered.profile) as typeof registered.profile;
@@ -121,8 +139,12 @@ describe('Phase 8 — authoring examples', () => {
       .toContain('dependency.digest-mismatch');
   });
 
-  it('a user can discover and select both examples by file', () => {
-    for (const [file, id] of [[ANSWER_ONLY, 'example.answer-only'], [BOUNDED, 'example.bounded-review-fix']] as const) {
+  it('a user can discover and select every example by file', () => {
+    for (const [file, id] of [
+      [ANSWER_ONLY, 'example.answer-only'],
+      [BOUNDED, 'example.bounded-review-fix'],
+      [ERROR_ROUTE, 'example.error-route'],
+    ] as const) {
       const discovered = discoverWorkflowProfiles({ projectRoot: REPO_ROOT, file });
       expect(discovered.diagnostics).toEqual([]);
       expect(discovered.profiles.map((entry) => entry.profile.profile.id)).toContain(id);

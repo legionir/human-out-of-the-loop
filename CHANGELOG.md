@@ -34,6 +34,24 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
   resolvable examples under `docs/workflow-profiles/examples/` (answer-only, bounded review/fix) that
   are validated end to end in the test suite.
 
+**Added**
+- `docs/workflow-profiles/PHASE10_OPERATIONS.md` (upgrade, rollout and rollback operations, including
+  the evidence that no persistent-state migration is required), `docs/workflow-profiles/TRACEABILITY.md`
+  (the `WP-R-001`…`WP-R-013` matrix, the decision register and the open owner items) and
+  `docs/workflow-profiles/RELEASE_NOTES.md` (what ships, how to enable it, the behaviour differences
+  needing acceptance and the pre-activation checklist).
+- A CI gate for the shipped flow documents: `scripts/profile-gates.mjs` (also `npm run profile-gates`,
+  wired into `.github/workflows/ci.yml`) validates the built-in default profile and every example
+  through the schema, the semantic validator and fail-closed dependency resolution, checks that the
+  shipped JSON Schema is the validator's schema, and runs negative controls that prove the validators
+  still refuse unknown keys, non-v1 node kinds, unbounded loops and dangling error routes.
+- `docs/workflow-profiles/examples/error-route.example.json`: the work path with a typed error route
+  (a delegated execution failure becomes a rejected end instead of an abort), validated by the test
+  suite and the CI gate like the other examples.
+- Profile runs now record every approval decision (node, status, bound digest and port) in the run
+  state through the new `recordApproval`/`appendApprovalRecord`; the record is audit data only and a
+  resumed attempt re-runs the approval node and asks the user again.
+
 **Security**
 - A selected profile could omit the confirmation node and execute its plan without any human
   confirmation (the legacy path always requires one). Execution now requires a granted side-effect

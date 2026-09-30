@@ -27,6 +27,7 @@ import { effectiveWorkflowBudget, type WorkflowBudgetLimits } from './profile-bu
 import { narrowAccessPolicy, type AuthoritySnapshot } from './profile-access-guard.js';
 import { createWorkflowProfileEventEmitter, type EventSinkLike, type WorkflowProfileEventEmitter } from './profile-events.js';
 import {
+  appendApprovalRecord,
   applyRunResultToState,
   clearPendingEffect,
   createWorkflowProfileRunState,
@@ -34,6 +35,7 @@ import {
   markPendingEffect,
   storedDependencyPins,
   type WorkflowProfileRunState,
+  type WorkflowProfileApprovalRecord,
   type WorkflowProfileRunStateStore,
 } from './profile-run-state.js';
 import type { WorkflowProfileDocument } from './profile-types.js';
@@ -66,6 +68,12 @@ export interface PreparedWorkflowProfileRun {
   runState(): WorkflowProfileRunState | undefined;
   /** Events emitted by this run (mapped kernel events plus lifecycle records). */
   readonly events: WorkflowProfileEventEmitter;
+  /**
+   * Record one approval decision (node, status, bound digest) in the run state, when a
+   * state store is configured. Audit data: a resumed attempt re-runs the approval node
+   * and re-asks the user, so these records are never authority.
+   */
+  recordApproval(approval: Omit<WorkflowProfileApprovalRecord, 'atMs'> & { atMs?: number }): void;
   /**
    * Mark that a side effect is about to run. The marker is persisted BEFORE the
    * effect, so an interruption between the effect and its commit is detected on
@@ -285,6 +293,10 @@ export function prepareWorkflowProfileRun(options: PrepareWorkflowProfileRunOpti
         }));
       }
       return result;
+    },
+    recordApproval: (approval: Omit<WorkflowProfileApprovalRecord, 'atMs'> & { atMs?: number }): void => {
+      if (!state || !options.stateStore) return;
+      persist(appendApprovalRecord(state, approval, now()));
     },
     recordEffectStart: (nodeId: string, intent: string): string => {
       const attemptId = `effect-${now()}-${Math.trunc(Math.random() * 1e6)}`;

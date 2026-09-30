@@ -297,16 +297,18 @@ POST /api/run
 
 ## 13. Examples
 
-Two examples are shipped, and both are validated by the test suite
-(`src/ai/__tests__/workflow-profile-examples.test.ts`) through the same loader, resolver and CLI
-path described above. They carry **real pins** of the content in `registry/`, so a change to a
-pinned component fails that test until the example is re-pinned — which is exactly the feedback an
-author gets.
+Three examples are shipped, and all of them are validated by the test suite
+(`src/ai/__tests__/workflow-profile-examples.test.ts`) and by the CI gate
+(`node scripts/profile-gates.mjs`, also `npm run profile-gates`) through the same loader, resolver
+and CLI path described above. They carry **real pins** of the content in `registry/`, so a change to
+a pinned component fails both the test and the gate until the example is re-pinned — which is exactly
+the feedback an author gets.
 
 | Example | What it demonstrates |
 | --- | --- |
 | [`examples/answer-only.example.json`](examples/answer-only.example.json) | The smallest useful profile: intake → planner → answer/clarify. It has no `execute` and no `review` node, so it *cannot* perform a side effect; the clarification loop is bounded at 3 rounds. |
 | [`examples/bounded-review-fix.example.json`](examples/bounded-review-fix.example.json) | The full work profile: digest-bound plan confirmation, execution with the `plan-step` persona source, error routing into review, and exactly one bounded re-plan loop (`review` → `plan`, `maxIterations: 1`, fail when exhausted). |
+| [`examples/error-route.example.json`](examples/error-route.example.json) | The work path with the smallest possible error policy: the `execute` node declares `onError: { strategy: "route", routeTo: "failed", routeMap: { summary: "/failure/code" } }`, so a delegated execution failure becomes a typed, `rejected` end instead of an abort — and the confirmation before the effect is unchanged. |
 
 Validate either one straight from the repository:
 

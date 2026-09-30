@@ -628,3 +628,26 @@ complete.
 ### 8.13 — Workflow Profiles Phase 9 complete: hardening and measurement (2026-09-30; append-only)
 
 Phase 9 is 🟢. Step 1 added two end-to-end suites on the real Orchestrator: `workflow-profile-hardening.test.ts` (9 tests — the confirmation gate, the digest binding, terminal denial/cancellation, injected request text not widening the step tool surface, and the flag-off switch) and `workflow-profile-adversarial.test.ts` (7 tests — component-content injection through a profile's own pinned persona, toolset narrowing, a toolset naming an unavailable tool, an unknown approval policy, error-payload leakage into report/session/observability log, graph caps, and an exhausted bounded loop stopping the run before execution). Three findings were fixed rather than documented around: **H-1** (a profile could omit the confirmation node and execute without human approval — now a terminal `security-denied` gate that requires a granted side-effect approval binding the plan being executed), **H-2** (the profile path handed the planner its node goal instead of the user's request), and **H-3** (a profile could pin a `toolset` but nothing wired a `ToolsetRegistry`, so it could never resolve — toolsets now load from the same registry layers as every other component and are re-checked against the live catalog). Step 2 delivered `scripts/profile-bench.mjs`, a reproducible measurement of the built output with its environment recorded, and the tabulated results in `PHASE9_HARDENING.md`: flag-off decision p50 0.000 ms, profile preparation ~0.8 ms, 43 KB validation ~0.7 ms, discovery+selection ~0.6 ms, an over-cap file refused in 0.016 ms versus 1.284 ms to parse a just-under-cap file (cap before parse), and a spent model budget stopping the planner call entirely. The one honest caveat is recorded: no pre-feature baseline exists, so the performance claim is "off by default adds one flag read" rather than a fabricated percentage. Evidence: profile + CLI + server suites 49 files / 565 tests, the CI-command suite, tsc/build clean, and 10/10 CI on the phase heads. No merge, release or default activation until all phases are complete.
+
+### 8.14 — Workflow Profiles Phase 10: operations, traceability and the CI gate (2026-09-30; append-only)
+
+Phase 10 Steps 1–2 are 🟢; Step 3 (independent review and PR handoff) is 🟡 and needs the owner.
+Step 1: `PHASE10_OPERATIONS.md` is the upgrade/rollout/rollback guide, and the plan's resume checks are
+proved end to end by `workflow-profile-upgrade.test.ts` (3 tests) — a killed process leaves the record
+the runner writes before its first node, and the resumed attempt re-runs the approval node and asks
+the user again (a stored approval is never authority), a decline stops the run with nothing executed, a
+changed profile is refused before the user is asked, and the approval record now really carries the
+bound digest and port because the bridge writes each decision through the new `recordApproval`
+(`appendApprovalRecord`). The honest evidence for "no persistent-state migration is required" is
+recorded there too. Step 2: `TRACEABILITY.md` finalizes the `WP-R-001`…`WP-R-013` matrix, the decision
+register (D-WP-001…011), the open owner items (U-1…U-6) and the resolved unknowns; the documentation is
+synchronised (`PHASE8_AUTHORING.md` toolset section + third example, `RELEASE_NOTES.md`); and the CI
+gate `scripts/profile-gates.mjs` (a step in `ci.yml`, also `npm run profile-gates`) validates the
+default profile and all three examples through the schema, the semantic validator and dependency
+resolution, asserts the shipped schema file is the validator's schema, and runs four negative controls
+so a green gate proves the validators ran. Recorded honestly rather than invented: the repository has
+no linter, so that plan item has no tool to run; and the pre-existing `J-05` checkpoint test is
+mtime-resolution sensitive on this sandbox (unchanged since the session base, green on CI) and is
+recorded as U-6 with a follow-up. The phase-PR-by-phase rule is met as a phase-by-phase handoff in
+PR #10 because this session is bound to one branch — a recorded deviation, not a claim of separate
+PRs.

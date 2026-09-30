@@ -61,6 +61,12 @@ jobs:
       - name: Build the CLI
         run: npm run build
 
+      # Phase 10 Step 2: the shipped default/bounded/error-route samples must pass the schema
+      # and semantic validators, and the gate asserts its own refusals so a green step means the
+      # validator ran (see scripts/profile-gates.mjs).
+      - name: Workflow Profile gates (default / bounded / error-route)
+        run: node scripts/profile-gates.mjs
+
       - name: Install the global binary
         run: npm install -g .
 

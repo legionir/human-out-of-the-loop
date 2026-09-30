@@ -187,6 +187,24 @@ export function applyRunResultToState(
 }
 
 /**
+ * Append one approval decision to the run record. Audit data only: nothing reads these
+ * records back as authority (a resume re-runs the approval node), so recording a stale
+ * digest can never authorize work.
+ */
+export function appendApprovalRecord(
+  state: WorkflowProfileRunState,
+  approval: Omit<WorkflowProfileApprovalRecord, 'atMs'> & { atMs?: number },
+  now?: number,
+): WorkflowProfileRunState {
+  const atMs = approval.atMs ?? now ?? Date.now();
+  return {
+    ...state,
+    approvals: [...state.approvals, { ...approval, atMs }],
+    updatedAtMs: atMs,
+  };
+}
+
+/**
  * Mark that an effect is about to run. Written and flushed before the effect, so
  * a crash between the marker and its clearance is detectable as ambiguity.
  */

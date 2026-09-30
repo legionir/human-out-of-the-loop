@@ -210,6 +210,15 @@ export async function runWorkflowProfileBridge(
           return {
             async request(approvalRequest: Parameters<typeof port.request>[0]) {
               const outcome = await port.request(approvalRequest);
+              // Audit trail only: the digest each decision bound is written to the run record,
+              // but a resume re-runs the approval node and this set is per run() call, so a
+              // recorded approval can never authorize a later attempt.
+              prepared.recordApproval({
+                nodeId: approvalRequest.nodeId,
+                status: outcome.status,
+                ...(approvalRequest.boundDigest ? { digest: approvalRequest.boundDigest } : {}),
+                ...(approvalRequest.boundPort ? { boundPort: approvalRequest.boundPort } : {}),
+              });
               if (approvalRequest.responseKind === 'text' && outcome.status === 'approved') {
                 clarificationAnswer.text = outcome.answer ?? '';
               }

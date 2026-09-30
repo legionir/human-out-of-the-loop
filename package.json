@@ -14,7 +14,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "e2e": "node e2e/scenarios/run.mjs"
+    "e2e": "node e2e/scenarios/run.mjs",
+    "profile-gates": "node scripts/profile-gates.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.60",
