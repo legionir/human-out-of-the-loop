@@ -537,3 +537,19 @@ recorded in `PHASE7_PARITY.md` §7 and the G-5 confirmation-denial mapping. Step
 parity tests, plan/session compatibility, rollback) follows. No merge is authorized until all phases
 are complete.
 
+## Phase 7 Step 2 completion record (2026-09-30; append-only)
+
+Step 2 is complete as of the Orchestrator hook: `OrchestratorConfig.workflowProfile` gates the profile
+path per instance, the flag decision is made **before** any session/interaction side effect (flag off ⇒
+nothing profile-related resolves and the legacy path is unchanged; flag on ⇒ a prepared profile or the
+activation diagnostics, never a silent fallback and never a half-created run), and the run reuses the
+Orchestrator's own `Planner`, `FinalReviewer` and a `PlanRuntime` built from the same policy deps, so
+tool authorization, approvals, budgets and usage accounting are unchanged. The result is mapped back
+onto `OrchestratorResult` and the interaction lifecycle. Evidence: `workflow-profile-orchestrator.test.ts`
+(4 tests) plus all Workflow Profile suites **19 files / 217 tests**, the Orchestrator-adjacent suites
+(50 tests) and a clean typecheck/build. Recorded for Step 3: streaming/status callbacks on the profile
+path, the G-5 confirmation-denial mapping and the cancellation-category normalization
+(`PHASE7_PARITY.md` §7–§8). The built-in default stays gated by `BUILT_IN_DEFAULT_APPROVAL` (unapproved),
+so no default activation happens; Step 3 (parity tests, plan/session compatibility and the rollback
+path) is next. No merge is authorized until all phases are complete.
+

@@ -80,6 +80,11 @@ import { emptyReviewUsage, type Review } from './schemas/review.js';
 import { createAgent, type ResolvedAgent } from './agents/agent-factory.js';
 import { DEFAULT_RUN_MODE, type RunMode } from './modes.js';
 import { readOnlyToolIds } from './tools/read-only.js';
+import { activateWorkflowProfile, type WorkflowProfileActivation, type WorkflowProfileActivationOptions } from './workflow-profiles/profile-activation.js';
+import { runWorkflowProfileBridge, type WorkflowProfileBridgeOutcome, type WorkflowProfileBridgeServices } from './workflow-profiles/orchestrator-bridge.js';
+import { createWorkflowProfileComponentSources } from './workflow-profiles/profile-sources.js';
+import type { WorkflowProfileComponentSources } from './workflow-profiles/profile-resolver.js';
+import type { WorkflowProfileRunStateStore } from './workflow-profiles/profile-run-state.js';
 import { detectLanguage, languageSection, type DetectedLanguage } from './language.js';
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -135,7 +140,27 @@ export const OrchestratorConfigSchema = z.object({
  * except `projectRoot` is optional).  `onProgress` (Phase 19) is a
  * callback and is validated structurally, not via the base schema.
  */
+/**
+ * Phase 7 (WP-R-008): opt-in Workflow Profile execution for this Orchestrator.
+ *
+ * When this is absent the profile path does not exist for the instance: `run()` behaves
+ * exactly as before. When it is present, `HOOTL_WORKFLOW_PROFILE` (or `env`) still gates it:
+ * flag off ⇒ the legacy path runs and nothing profile-related resolves; flag on ⇒ one
+ * prepared profile runs or the run fails closed with diagnostics before any session or
+ * interaction side effect.
+ */
+export interface OrchestratorWorkflowProfileOptions extends Omit<WorkflowProfileActivationOptions, 'sources'> {
+  /** Pre-built ports; omitted ⇒ built from this Orchestrator's own services. */
+  ports?: Partial<WorkflowProfileBridgeServices>;
+}
+
 export type OrchestratorConfig = z.input<typeof OrchestratorConfigSchema> & {
+  /**
+   * Phase 7: opt-in Workflow Profile execution. Absent ⇒ the instance has no profile path.
+   * The raw value is used (not the parsed schema output) because it carries a state store
+   * and already-built ports, which zod must not introspect.
+   */
+  workflowProfile?: OrchestratorWorkflowProfileOptions;
   onProgress?: (event: ProgressEvent) => void;
   /**
    * Phase 32: live model thinking (reasoning) text for every agent turn of
@@ -336,8 +361,10 @@ export class Orchestrator {
    * `Required<Omit<…>> & { env: EnvSource }` rather than plain
    * `Required<OrchestratorConfig>`.
    */
-  readonly config: Required<Omit<OrchestratorConfig, 'env' | 'onThought' | 'onToolCall'>> & {
+  readonly config: Required<Omit<OrchestratorConfig, 'env' | 'onThought' | 'onToolCall' | 'workflowProfile'>> & {
     env: EnvSource;
+    /** Phase 7: absent ⇒ this instance has no profile path at all. */
+    workflowProfile?: OrchestratorWorkflowProfileOptions;
     /** Phase 32: absent means "agent turns are not streamed". */
     onThought?: ThoughtSink;
     /** v27.17.3: absent means "no tool-call records". */
@@ -351,6 +378,9 @@ export class Orchestrator {
    * same secret list the journal and the observability log use.
    */
   private toolCallOptions: ToolCallLogOptions = {};
+
+  /** Phase 7: component sources shared by the resolver and the built-in default profile. */
+  private profileComponentSources?: WorkflowProfileComponentSources;
 
   readonly personaRegistry: PersonaRegistry;
   readonly skillRegistry: SkillRegistry;
@@ -459,6 +489,9 @@ export class Orchestrator {
       // not bootstrapped unless the caller explicitly says it is trusted.
       trustedProject: config.trustedProject === true,
       modelRoutes: data.modelRoutes ?? {},
+      // Phase 7: read from the raw config — the zod schema does not carry callbacks
+      // or stores, so the profile options never pass through validation.
+      workflowProfile: config.workflowProfile,
     };
 
     // Phase 27 (CFG-08): resolve the env once, before any registry or
@@ -1050,6 +1083,16 @@ export class Orchestrator {
       budget = new BudgetTracker(parsed);
     }
 
+    // Phase 7: decide the execution path before any session/interaction side effect, so an
+    // invalid or unapproved profile cannot leave a half-created run behind. With the flag off
+    // this resolves nothing and the legacy path below is exactly what ran before.
+    if (this.config.workflowProfile !== undefined) {
+      const activation = this.resolveWorkflowProfileActivation();
+      if (activation.kind === 'profile') {
+        return this.runWorkflowProfile(userRequest, options, ov, activation, budget);
+      }
+    }
+
     if (options?.sessionId && !this.sessionStore.getSession(options.sessionId)) {
       const err = new Error(`Session "${options.sessionId}" not found.`);
       (err as Error & { status?: number }).status = 404;
@@ -1073,6 +1116,198 @@ export class Orchestrator {
     } finally {
       if (interaction) this.liveInteractions.delete(interaction.id);
     }
+  }
+
+  // ─── Phase 7: Workflow Profile path ─────────────────────────────
+
+  /** Component sources for the resolver and the built-in default profile (same content). */
+  private workflowProfileSources(): WorkflowProfileComponentSources {
+    this.profileComponentSources ??= createWorkflowProfileComponentSources({
+      registries: {
+        personas: this.personaRegistry,
+        skills: this.skillRegistry,
+        models: this.modelRegistry,
+      },
+      toolCatalog: { hasDefinition: (id: string) => this.toolRegistry.getDefinition(id) !== undefined },
+    });
+    return this.profileComponentSources;
+  }
+
+  /** Flag + selection + approval gate; throws (fail closed) instead of falling back. */
+  private resolveWorkflowProfileActivation(): WorkflowProfileActivation {
+    const { ports: _ports, ...profileOptions } = this.config.workflowProfile ?? {};
+    return activateWorkflowProfile({ ...profileOptions, sources: this.workflowProfileSources() });
+  }
+
+  /**
+   * Run the prepared profile. The session/interaction lifecycle is the same one the legacy
+   * path uses, and the delegated services are this Orchestrator's own instances, so policy,
+   * tool authorization and usage accounting are the ones already in force.
+   */
+  private async runWorkflowProfile(
+    userRequest: string,
+    options: OrchestratorRunOptions,
+    ov: RunOverrides | undefined,
+    activation: Extract<WorkflowProfileActivation, { kind: 'profile' }>,
+    budget: BudgetTracker | undefined,
+  ): Promise<OrchestratorResult> {
+    const sessionId = options?.sessionId ?? this.sessionStore.createSession(options?.sessionLabel);
+    const interaction = this.sessionStore.addInteraction(sessionId, userRequest);
+    this.observabilityLogger.logSessionCreated(sessionId);
+    if (interaction) this.liveInteractions.add(interaction.id);
+    const runModelId = ov?.modelId ?? this.config.defaultModelId;
+    const mode = options?.mode ?? DEFAULT_RUN_MODE;
+    try {
+      return await this.runContext.run({ budget, usage: { prompt: 0, completion: 0, total: 0 } }, async () => {
+        const overrides = this.config.workflowProfile?.ports ?? {};
+        const services: WorkflowProfileBridgeServices = {
+          planner: this.planner,
+          planRuntime: this.createProfilePlanRuntime(ov),
+          finalReviewer: this.finalReviewer,
+          ...(options.confirmCallback ? { confirm: options.confirmCallback } : {}),
+          modelId: runModelId,
+          mode,
+          ...overrides,
+        };
+        const outcome = await runWorkflowProfileBridge(activation.prepared, {
+          services,
+          input: { request: { goal: userRequest, mode, sessionId } },
+          ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+          onPlan: (plan) => this.persistProfilePlan(plan, sessionId, interaction, runModelId),
+        });
+        this.recordProfileInteraction(sessionId, interaction, outcome, userRequest);
+        return this.orchestratorResultFromProfile(outcome, sessionId, userRequest);
+      });
+    } finally {
+      if (interaction) this.liveInteractions.delete(interaction.id);
+    }
+  }
+
+  /**
+   * PlanRuntime for the profile path: the same delegation target and policy deps the legacy
+   * path uses. Streaming/status callbacks are not wired here yet (recorded as a Step 3 parity
+   * item); policy, scheduling and budgets are.
+   */
+  private createProfilePlanRuntime(ov: RunOverrides | undefined): PlanRuntime {
+    return new PlanRuntime({
+      taskRuntime: this.taskRuntime,
+      planStore: this.planStore,
+      planner: this.planner,
+      feasibilityDeps: {
+        personaRegistry: this.personaRegistry,
+        skillRegistry: this.skillRegistry,
+        toolRegistry: this.toolRegistry,
+      },
+      refs: {
+        personaRegistry: this.personaRegistry,
+        skillRegistry: this.skillRegistry,
+        toolRegistry: this.toolRegistry,
+        modelRegistry: this.modelRegistry,
+      },
+      maxReplanningAttempts: ov?.maxReplanningAttempts ?? this.config.maxReplanningAttempts,
+      defaultModelId: ov?.modelId ?? this.config.defaultModelId,
+      ...(ov?.agentTimeoutMs !== undefined ? { agentTimeoutMs: ov.agentTimeoutMs } : {}),
+      ...(ov?.maxSteps !== undefined ? { maxSteps: ov.maxSteps } : {}),
+      projectRoot: this.config.projectRoot,
+      runtimeDir: this.config.runtimeDir,
+      modelRoutes: this.config.modelRoutes as ModelRoutes | undefined,
+      budgetExceeded: () => (this.activeBudget?.exceeded() ? 'budget exceeded' : undefined),
+    });
+  }
+
+  /**
+   * Stage 3/4 parity: the feasibility/cycle gate still rejects an unusable plan *before* the
+   * user is asked to confirm it, and the plan plus the session link are written before
+   * execution starts, exactly like the legacy path.
+   */
+  private persistProfilePlan(
+    plan: Plan,
+    sessionId: string,
+    interaction: ReturnType<SessionStore['addInteraction']>,
+    runModelId: string,
+  ): void {
+    const feasibility = runFeasibilityGate(plan, {
+      personaRegistry: this.personaRegistry,
+      skillRegistry: this.skillRegistry,
+      toolRegistry: this.toolRegistry,
+    });
+    if (!feasibility.feasible) {
+      const errorMsg = feasibility.errors.map((e) => `[${e.stepId}] ${e.field}: ${e.message}`).join('\n');
+      throw new Error(`The plan is not executable:\n${errorMsg}`);
+    }
+    plan.sessionId = sessionId;
+    plan.modelId = runModelId;
+    this.observabilityLogger.logPlanCreated(plan);
+    this.planStore.save(plan);
+    if (interaction && plan.id) {
+      const known = interaction.planIds ?? [];
+      if (!known.includes(plan.id)) {
+        this.sessionStore.updateInteraction(sessionId, interaction.id, { planIds: [...known, plan.id] });
+      }
+    }
+  }
+
+  /** Interaction outcome for the profile path; the same values the legacy path records. */
+  private recordProfileInteraction(
+    sessionId: string,
+    interaction: ReturnType<SessionStore['addInteraction']>,
+    outcome: WorkflowProfileBridgeOutcome,
+    userRequest: string,
+  ): void {
+    if (!interaction) return;
+    const status: 'success' | 'failure' | 'cancelled' = outcome.status === 'success'
+      ? 'success'
+      : outcome.status === 'cancelled' ? 'cancelled' : 'failure';
+    this.sessionStore.updateInteraction(sessionId, interaction.id, {
+      outcome: status,
+      reviewSummary: outcome.review?.finalSummary ?? outcome.failure?.code ?? `Workflow profile run ${outcome.status}`,
+      completedAt: Date.now(),
+    });
+    void userRequest;
+  }
+
+  /** Map the profile outcome onto the result shape callers (CLI, server) already consume. */
+  private orchestratorResultFromProfile(
+    outcome: WorkflowProfileBridgeOutcome,
+    sessionId: string,
+    userRequest: string,
+  ): OrchestratorResult {
+    const isAnswer = outcome.plan === undefined && outcome.answer !== undefined;
+    const planId = outcome.plan?.id ?? 'none';
+    const reviewOutcome: Review['outcome'] = outcome.status === 'success'
+      ? 'success'
+      : outcome.status === 'cancelled' ? 'cancelled' : 'failure';
+    const review: Review = outcome.review ?? {
+      planId,
+      goal: userRequest,
+      outcome: reviewOutcome,
+      acceptedFindings: [],
+      rejectedFindings: [],
+      incompleteSteps: [],
+      finalSummary: outcome.failure
+        ? `Workflow profile run failed: ${outcome.failure.code} (${outcome.failure.category}, node ${outcome.failure.nodeId})`
+        : (outcome.answer ?? `Workflow profile run ended: ${outcome.status}`),
+      usage: emptyReviewUsage,
+    };
+    const report = isAnswer
+      ? `💬 Answer\n\n${outcome.answer ?? ''}`
+      : `${outcome.status === 'success' ? '✅' : outcome.status === 'rejected' ? '⚠️' : outcome.status === 'cancelled' ? '🛑' : '❌'} Workflow profile "${outcome.status}" — ${review.finalSummary}`;
+    return {
+      kind: isAnswer ? 'answer' : 'plan',
+      review,
+      report,
+      planId,
+      sessionId,
+      executionResult: outcome.execution ?? {
+        planId,
+        status: outcome.status === 'success' ? 'completed' : outcome.status === 'cancelled' ? 'cancelled' : 'failed-partial',
+        completedSteps: 0,
+        failedSteps: 0,
+        totalSteps: 0,
+        incompleteSteps: [],
+        replanningAttempts: 0,
+      },
+    };
   }
 
   private async runInSession(

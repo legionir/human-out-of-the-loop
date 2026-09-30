@@ -228,3 +228,34 @@ typecheck and build clean.
 activation before any session/interaction side effect, the interaction/`OrchestratorResult` mapping),
 which is the next change; the plan keeps Step 2 🔴 until it lands.
 
+## 8. Step 2 Orchestrator hook (append-only, 2026-09-30)
+
+`OrchestratorConfig.workflowProfile` now carries the Phase 7 activation options (`selection`,
+`allowBuiltInDefault`, `builtInDefaultApproval`, `stateStore`, `runId`, `runtimeToolIds`, `env` and
+optional pre-built `ports`). The raw config value is used on purpose: it carries a state store and
+callback-bearing ports that zod must not introspect, and the parsed schema output is unchanged, so an
+instance without the option has no profile path at all.
+
+`run()` decides the path *before* any session or interaction side effect: with the flag off nothing
+profile-related resolves and the legacy path is byte-for-byte the one that ran before; with the flag on
+`activateWorkflowProfile` either yields a prepared run or throws its diagnostics, so an invalid or
+unapproved profile can never leave a half-created run behind (test: no session exists after the
+refusal). `runWorkflowProfile` then keeps the same lifecycle the legacy path uses — session and
+interaction created by the Orchestrator, the interaction outcome recorded with the same
+`success`/`failure`/`cancelled` values, and the result mapped onto `OrchestratorResult`. Delegation uses
+this Orchestrator's own `Planner`, `FinalReviewer` and a `PlanRuntime` built from the same policy deps
+(`feasibilityDeps`, `refs`, replan budget, per-run overrides, `budgetExceeded`), so tool authorization,
+policy and usage accounting stay the ones already in force. The `onPlan` hook runs the feasibility/cycle
+gate before the user is asked to confirm and writes the plan plus the session link before execution
+(stages 3/4 parity).
+
+Recorded for Step 3: the profile path does not yet wire the streaming/status callbacks that the legacy
+`PlanRuntime` construction forwards, so progress events on the profile path are a parity item; the
+confirmation-denial mapping (G-5) needs the same treatment as the cancellation normalization.
+
+Evidence: `workflow-profile-orchestrator.test.ts` (4 tests: flag off never validates the selected
+document — the legacy 404 session check is what fires; not-selected and not-approved refusals with zero
+sessions created; and an approved-default answer-branch run end to end with the interaction recorded).
+All Workflow Profile suites: **19 files / 217 tests**; `chat-mode`, `c4-clarification` and
+`phase-b-orchestration` (50 tests) stay green; typecheck and build clean.
+
