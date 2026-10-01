@@ -269,6 +269,8 @@ export function clearPendingEffect(state: WorkflowProfileRunState): WorkflowProf
  * identity (same self-healing rule as the file locks the other stores use).
  */
 export interface WorkflowProfileRunLease {
+  /** Atomically claim this prepared lease for execution; required when a store shares local handles. */
+  claim?(): boolean;
   /** Give the lease back; idempotent per handle. */
   release(): void;
 }
@@ -286,10 +288,38 @@ export interface WorkflowProfileRunStateStore {
 }
 
 /**
- * In-process bookkeeping for the file store's leases, so a nested prepare inside the same process
- * shares the lease instead of stealing it from itself (mirrors `heldLocks` in `file-lock.ts`).
+ * In-process bookkeeping shares one file lease between prepared handles from this process, while
+ * allowing only one of those handles to claim execution. This closes the same-process race without
+ * mistaking a second preparation (including a simulated restart) for a second live process.
  */
-const heldRunLeases = new Map<string, number>();
+interface HeldRunLease {
+  references: number;
+  active: boolean;
+  identity?: string;
+  claimedBy?: symbol;
+}
+const heldRunLeases = new Map<string, HeldRunLease>();
+
+function makeRunLeaseHandle(state: HeldRunLease, onInvalidate: () => void): WorkflowProfileRunLease {
+  const token = Symbol('workflow-profile-run-lease');
+  let released = false;
+  return {
+    claim: () => {
+      if (released || !state.active || state.claimedBy !== undefined) return false;
+      state.claimedBy = token;
+      return true;
+    },
+    release: () => {
+      if (released) return;
+      released = true;
+      state.references = Math.max(0, state.references - 1);
+      if (state.claimedBy === token || state.references === 0) {
+        state.active = false;
+        onInvalidate();
+      }
+    },
+  };
+}
 
 function hashedFileName(id: string): string {
   return contentDigest(id).slice('sha256:'.length, 'sha256:'.length + 32) + '.json';
@@ -351,22 +381,14 @@ export class FileWorkflowProfileRunStateStore implements WorkflowProfileRunState
     return `${this.pathFor(runId)}.lease`;
   }
 
-  private leaseHandle(leasePath: string): WorkflowProfileRunLease {
-    return {
-      release: () => {
-        const depth = heldRunLeases.get(leasePath) ?? 0;
-        if (depth <= 1) {
-          heldRunLeases.delete(leasePath);
-          try {
-            fs.unlinkSync(leasePath);
-          } catch {
-            // Already gone (a self-healed predecessor, or a racing release): nothing to do.
-          }
-          return;
-        }
-        heldRunLeases.set(leasePath, depth - 1);
-      },
-    };
+  private leaseHandle(leasePath: string, state: HeldRunLease): WorkflowProfileRunLease {
+    return makeRunLeaseHandle(state, () => {
+      // An old prepared handle must never remove a newer lease at the same path. Compare both the
+      // in-process generation and the on-disk inode+contents before unlinking.
+      if (heldRunLeases.get(leasePath) !== state) return;
+      heldRunLeases.delete(leasePath);
+      this.breakStaleLease(leasePath, state.identity);
+    });
   }
 
   /**
@@ -409,12 +431,12 @@ export class FileWorkflowProfileRunStateStore implements WorkflowProfileRunState
 
   tryLease(runId: string): WorkflowProfileRunLease | undefined {
     const leasePath = this.leasePathFor(runId);
-    const depth = heldRunLeases.get(leasePath);
-    if (depth !== undefined) {
-      // Re-entrant within this process: the same lease is shared, never duplicated on disk.
-      heldRunLeases.set(leasePath, depth + 1);
-      return this.leaseHandle(leasePath);
+    const current = heldRunLeases.get(leasePath);
+    if (current?.active) {
+      current.references += 1;
+      return this.leaseHandle(leasePath, current);
     }
+    if (current) heldRunLeases.delete(leasePath);
     fs.mkdirSync(this.dir, { recursive: true });
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -425,8 +447,9 @@ export class FileWorkflowProfileRunStateStore implements WorkflowProfileRunState
         } finally {
           fs.closeSync(fd);
         }
-        heldRunLeases.set(leasePath, 1);
-        return this.leaseHandle(leasePath);
+        const state: HeldRunLease = { references: 1, active: true, identity: lockIdentity(leasePath) };
+        heldRunLeases.set(leasePath, state);
+        return this.leaseHandle(leasePath, state);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
         // The identity is captured BEFORE the holder is judged: it must describe the lease this
@@ -449,6 +472,7 @@ export class FileWorkflowProfileRunStateStore implements WorkflowProfileRunState
 
 export class MemoryWorkflowProfileRunStateStore implements WorkflowProfileRunStateStore {
   private readonly states = new Map<string, WorkflowProfileRunState>();
+  private readonly leases = new Map<string, HeldRunLease>();
 
   save(state: WorkflowProfileRunState): void {
     this.states.set(state.runId, JSON.parse(JSON.stringify(state)) as WorkflowProfileRunState);
@@ -467,9 +491,17 @@ export class MemoryWorkflowProfileRunStateStore implements WorkflowProfileRunSta
     this.states.delete(runId);
   }
 
-  /** Single-process store: there is no other runner to exclude. */
-  tryLease(): WorkflowProfileRunLease {
-    return { release: () => {} };
+  /** Single-process store: coordinate prepared handles and execution claims in memory. */
+  tryLease(runId: string): WorkflowProfileRunLease {
+    let state = this.leases.get(runId);
+    if (!state?.active) {
+      state = { references: 0, active: true };
+      this.leases.set(runId, state);
+    }
+    state.references += 1;
+    return makeRunLeaseHandle(state, () => {
+      if (this.leases.get(runId) === state) this.leases.delete(runId);
+    });
   }
 }
 

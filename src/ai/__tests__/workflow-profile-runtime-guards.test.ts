@@ -25,7 +25,7 @@ import { generateText } from 'ai';
 import type { LanguageModel } from 'ai';
 import { createAgent, type ResolvedAgent } from '../agents/agent-factory.js';
 import { AgentRuntime } from '../runtime/agent-runtime.js';
-import { EventBus, type AgentCompletedEvent } from '../runtime/event-bus.js';
+import { EventBus, type AgentCompletedEvent, type AgentErrorEvent } from '../runtime/event-bus.js';
 import { MemoryPlanStore } from '../runtime/plan-store.js';
 import { PlanRuntime } from '../runtime/plan-runtime.js';
 import { createPlan, type Plan } from '../schemas/plan.js';
@@ -37,15 +37,21 @@ const mockGenerateText = vi.mocked(generateText);
 const mockCreateAgent = vi.mocked(createAgent);
 
 /** A TaskRuntime stand-in: records the agent each dispatch received, completes immediately. */
-function stubTaskRuntime() {
-  const created: Array<{ agent: ResolvedAgent; planStepId?: string }> = [];
+function stubTaskRuntime(onCreate?: () => void) {
+  const created: Array<{
+    agent: ResolvedAgent;
+    planStepId?: string;
+    executionGuards?: { beforeModelCall?: () => string | undefined; beforeToolCall?: (toolName: string) => string | undefined };
+  }> = [];
   return {
     created,
-    createTask: vi.fn((request: { agent: ResolvedAgent; planStepId?: string }) => {
-      created.push({ agent: request.agent, planStepId: request.planStepId });
+    createTask: vi.fn((request: { agent: ResolvedAgent; planStepId?: string; executionGuards?: { beforeModelCall?: () => string | undefined; beforeToolCall?: (toolName: string) => string | undefined } }) => {
+      created.push({ agent: request.agent, planStepId: request.planStepId, executionGuards: request.executionGuards });
+      onCreate?.();
       return `task-${created.length}`;
     }),
     getResult: vi.fn(() => ({ status: 'completed' as const, summary: 'done' })),
+    cancelTask: vi.fn(() => true),
     waitForAny: vi.fn(async () => {}),
     waitForAll: vi.fn(async () => {}),
   };
@@ -162,6 +168,40 @@ describe('F-12 — the profile budget stops the run before it dispatches more wo
     expect(unguarded.status).toBe('completed');
     expect(taskRuntime.createTask).toHaveBeenCalledTimes(1);
   });
+
+  it('cancels already-dispatched PlanRuntime tasks when the execution is cancelled', async () => {
+    mockCreateAgent.mockReturnValue(agentWithTools());
+    let signalCreated!: () => void;
+    const taskCreated = new Promise<void>((resolve) => { signalCreated = resolve; });
+    const taskRuntime = stubTaskRuntime(signalCreated);
+    const runtime = runtimeWith(taskRuntime);
+    const running = runtime.execute(oneStepPlan());
+
+    await taskCreated;
+    runtime.cancel('user-cancelled');
+    const result = await running;
+
+    expect(taskRuntime.cancelTask).toHaveBeenCalledWith('task-1');
+    expect(result.status).toBe('cancelled');
+
+    // A fresh plan on this shared runtime must not inherit the previous attempt's cancellation.
+    const next = await runtime.execute(oneStepPlan());
+    expect(next.status).toBe('completed');
+    expect(taskRuntime.createTask).toHaveBeenCalledTimes(2);
+  });
+
+  it('rejects overlapping executions on the same runtime rather than sharing guards or cancellation', async () => {
+    mockCreateAgent.mockReturnValue(agentWithTools());
+    const taskRuntime = stubTaskRuntime();
+    const runtime = runtimeWith(taskRuntime);
+
+    const first = runtime.execute(oneStepPlan());
+    const second = runtime.execute(oneStepPlan());
+
+    await expect(second).rejects.toThrow('Concurrent execute() calls on one runtime are not supported');
+    expect((await first).status).toBe('completed');
+    expect(taskRuntime.createTask).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('F-12 — the agent runtime reports its model calls', () => {
@@ -196,5 +236,77 @@ describe('F-12 — the agent runtime reports its model calls', () => {
     } as never);
     await runtime.run({ agent, prompt: 'hello', eventBus: bus, taskId: 't2', maxSteps: 5 });
     expect(events[1]!.modelCalls).toBe(1);
+  });
+
+  it('refuses the next model request before the SDK sends it when the live guard is exhausted', async () => {
+    let providerRequests = 0;
+    mockGenerateText.mockImplementation((async (options: unknown) => {
+      const sdkOptions = options as { prepareStep?: (context: { messages: unknown[] }) => unknown };
+      // Simulate the SDK calling prepareStep immediately before its provider request.
+      sdkOptions.prepareStep!({ messages: [] });
+      providerRequests += 1;
+      return { text: 'unexpected', usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 }, steps: [{}] };
+    }) as never);
+
+    const result = await new AgentRuntime().run({
+      agent: { ...agentWithTools(), tools: {} },
+      prompt: 'hello',
+      eventBus: new EventBus(),
+      taskId: 'guarded-model',
+      executionGuards: { beforeModelCall: () => 'budget.model-calls-exceeded' },
+    });
+
+    expect(providerRequests).toBe(0);
+    expect(result.success).toBe(false);
+    expect(result.errors[0]).toContain('budget.model-calls-exceeded');
+  });
+
+  it('reports every model request already attempted when a later request fails before token usage', async () => {
+    mockGenerateText.mockImplementation((async (options: unknown) => {
+      const sdkOptions = options as { prepareStep?: (context: { messages: unknown[] }) => unknown };
+      sdkOptions.prepareStep!({ messages: [] });
+      sdkOptions.prepareStep!({ messages: [] });
+      throw new Error('provider failed after two requests');
+    }) as never);
+    const bus = new EventBus();
+    const errors: AgentErrorEvent[] = [];
+    bus.subscribe('agent:error', (event) => errors.push(event as AgentErrorEvent));
+
+    await new AgentRuntime().run({
+      agent: { ...agentWithTools(), tools: {} },
+      prompt: 'hello',
+      eventBus: bus,
+      taskId: 'partial-model-budget',
+      executionGuards: { beforeModelCall: () => undefined },
+    });
+
+    expect(errors[0]?.modelCalls).toBe(2);
+    expect(errors[0]?.usage).toBeUndefined();
+  });
+
+  it('refuses a tool implementation before its side effect when the live guard is exhausted', async () => {
+    const sideEffect = vi.fn(async () => 'should not run');
+    mockGenerateText.mockImplementation((async (options: unknown) => {
+      const sdkOptions = options as {
+        tools?: Record<string, { execute: (input: unknown, callOptions?: { toolCallId?: string }) => Promise<unknown> }>;
+      };
+      await sdkOptions.tools!.dangerous!.execute({}, { toolCallId: 'call-guarded' });
+      return { text: 'unexpected', usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 }, steps: [{}] };
+    }) as never);
+
+    const result = await new AgentRuntime().run({
+      agent: {
+        ...agentWithTools(),
+        tools: { dangerous: { description: 'dangerous operation', execute: sideEffect } as never },
+      },
+      prompt: 'call the tool',
+      eventBus: new EventBus(),
+      taskId: 'guarded-tool',
+      executionGuards: { beforeToolCall: () => 'budget.tool-calls-exceeded' },
+    });
+
+    expect(sideEffect).not.toHaveBeenCalled();
+    expect(result.success).toBe(false);
+    expect(result.errors[0]).toContain('budget.tool-calls-exceeded');
   });
 });
