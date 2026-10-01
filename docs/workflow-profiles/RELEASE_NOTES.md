@@ -133,3 +133,25 @@ private as the plans and sessions beside them. Details and the exact guarantee/l
 - [ ] CI green on the exact head SHA being handed over.
 - [ ] Merge/release authorisation (standing instruction: merges stay frozen until all phases are
       complete and the owner authorises).
+
+## 7. Second review follow-up (2026-10-01)
+
+A second independent static review of the profile stack reported five findings (four P1, one P2); all
+five were re-verified as real and are fixed in `6b36348`, each with a regression test:
+
+- the declared tool surface can no longer be bypassed by the skill fallback or by a re-planned step
+  (the runtime bounds the tools of every agent it builds, not only the plan's step list) — F-11;
+- the profile's model-call counter is charged per model call the run actually made, and an exhausted
+  dimension stops the delegated run **before** the next dispatch, reporting the terminal `budget.*`
+  limit and still charging what already ran — F-12;
+- a crash between "the effect reported back" and "the settled progress is persisted" can no longer
+  hide the pending-effect marker — F-13;
+- every store-backed run (not only a resume) holds an exclusive lease, and a stale lease is broken
+  atomically by identity, so two processes can never run one run id — F-14;
+- a pause is stored with the node its inputs belong to, so a resume cannot hand a node another
+  node's inputs — F-15.
+
+Evidence: CI `36843874529` @ `6b36348` **success 10/10**; locally the CI-equivalent suite
+2,017/2,017, profile gates 9/9, e2e `profiles` 12/12, `tsc --noEmit` and `npm run build` clean. The
+built-in default remains unapproved and off; the merge of this stack proceeds per the owner's
+2026-10-01 directive.

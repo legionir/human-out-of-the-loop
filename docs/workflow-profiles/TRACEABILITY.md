@@ -133,3 +133,28 @@ unchanged since the session base and green on CI; no Workflow Profile test is re
 - Measurements: `PHASE9_HARDENING.md` §Step 2, reproducible via `node scripts/profile-bench.mjs`.
 - Operations, rollout/rollback, upgrade: `PHASE10_OPERATIONS.md`.
 - Authoring: `PHASE8_AUTHORING.md`; contract details: `PHASE2_*`…`PHASE7_PARITY.md`.
+
+## 3c. Second independent-review backlog (2026-10-01; closed)
+
+The owner attached a **second independent static review** (against `d48c4cc`; no local test run) with
+five findings — four P1, one P2. All five were re-verified here as real and fixed in `6b36348`:
+
+| # | Issue | Status | Required before |
+| --- | --- | --- | --- |
+| F-11 | Declared surface could be bypassed by the skill fallback and by re-planned steps | **Fixed** (`6b36348`) — the runtime narrows every dispatch, filters every built agent's tools and narrows re-planned steps; the bridge hands the surface to the runtime (`toolSurfaceFor`) | Phase 6/9 🟢 |
+| F-12 | Budget undercount: one charge per agent run, and exhaustion discovered after the work ran | **Fixed** (`6b36348`) — `modelCalls` (SDK steps) reported and charged; a per-dispatch budget guard stops before the next dispatch and still charges the calls already made | Phase 6/9 🟢 |
+| F-13 | Effect marker cleared before the settled progress was persisted | **Fixed** (`6b36348`) — the marker is dropped in the same write that persists the progress (`effectOutcomeKnown`) | Phase 6 🟢 |
+| F-14 | Only resumes leased; stale leases broken with a racy check-then-unlink | **Fixed** (`6b36348`) — every store-backed run leases (`run.locked`/`resume.locked`), stale breaks are an atomic rename + inode/content identity CAS | Phase 6 🟢 |
+| F-15 | A pause before a node paired that node's inputs with the previous node's id | **Fixed** (`6b36348`) — `resumeNodeId` pairs inputs with the stopping node; the durable layer stores the pair | Phase 6 🟢 |
+
+**Evidence:** CI `36843874529` @ `6b36348` **success 10/10** (ubuntu/macos/windows × Node 22/24/26,
+three e2e legs, type check, build, profile gates, CLI smoke); locally `scripts/ci-test.mjs`
+2,017/2,017, the full `src/ai` suite 127 files / 1,707 tests, profile gates 9/9, e2e `profiles` 12/12,
+`tsc --noEmit` and `npm run build` clean. Regression coverage:
+`workflow-profile-runtime-guards.test.ts` + `workflow-profile-review-fixes.test.ts` +
+`workflow-profile-lifecycle.test.ts`.
+
+**Merge status (supersedes the hold recorded in §3b):** the owner's 2026-10-01 directive ("PR #9
+ready — mergeable as a stack, tests green; before merge verify everything is correct, and review the
+attached report") closes the wait; the report is reviewed and its five findings are fixed above, so
+the verified stack merge proceeds. The merge event is recorded in the PR timeline.

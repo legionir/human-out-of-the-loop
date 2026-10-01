@@ -188,3 +188,20 @@ owner's merge authorization (2026-10-01) — the merge itself is on hold at the 
 (`EXECUTION_PLAN.md`, Phase 10 Step 3). Final evidence CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke); locally 52 files / 598 tests in the
 profile + CLI + server suites, the CI-equivalent sweep 2,006/2,007 with only the pre-existing `J-05`,
 profile gates 9/9, e2e `profiles` 12/12, `tsc --noEmit` and `npm run build` clean.
+
+**Second independent review (2026-10-01, report attached by the owner) — all five findings verified real and fixed (`6b36348`):**
+
+| # | Status | Fix / evidence |
+| --- | --- | --- |
+| F-11 (P1) | **Fixed** (`6b36348`) | The declared surface was narrowed onto the plan only; a step naming no tools still got a skill's tools from `createAgent`, and a re-planned step brought its own. The runtime now applies the surface to every dispatch, filters every built agent's `tools`, narrows re-planned steps, and the bridge hands the surface to the runtime (`toolSurfaceFor`). |
+| F-12 (P1) | **Fixed** (`6b36348`) | One model call was charged per agent run whatever the SDK step count, and an exhausted budget was noticed only after work ran. `agent-runtime.ts` reports `modelCalls` (SDK steps) on the agent events, the usage recorder charges it, the executor port guards each dispatch with the kernel's live budget (`budget.*` stop → terminal budget limit, already-made calls charged) and the handle reaches the adapter. |
+| F-13 (P1) | **Fixed** (`6b36348`) | The durable `pendingEffect` was cleared before the settled progress was persisted. The outcome now stays in memory and the marker is dropped in the same write that persists the progress, so a crash in the window keeps both fail-closed. |
+| F-14 (P1) | **Fixed** (`6b36348`) | Only resumes leased, and a stale lease was broken with a check-then-unlink that could delete a lease another process just took. Every store-backed run leases (`run.locked`/`resume.locked`), and the stale break is an atomic rename with an inode+content identity CAS, mirroring `breakStaleLock`. |
+| F-15 (P2) | **Fixed** (`6b36348`) | A limit checked before a node ran reported that node's inputs under the previous node's id. `WorkflowRunResult.resumeNodeId` pairs the inputs with the node, and the durable layer stores the pair. |
+
+Regression coverage: `workflow-profile-runtime-guards.test.ts` (new) plus the extended
+`workflow-profile-review-fixes.test.ts` and `workflow-profile-lifecycle.test.ts`. Exact-head evidence:
+CI `36843874529` @ `6b36348` **success 10/10**; locally the full `src/ai` suite 127 files / 1,707
+tests, `scripts/ci-test.mjs` 2,017/2,017, profile gates 9/9, e2e `profiles` 12/12, `tsc --noEmit` and
+`npm run build` clean. The merge proceeds per the owner's 2026-10-01 directive (see
+`EXECUTION_PLAN.md`, Phase 10 Step 3).

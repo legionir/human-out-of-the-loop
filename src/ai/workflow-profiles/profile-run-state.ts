@@ -263,9 +263,10 @@ export function clearPendingEffect(state: WorkflowProfileRunState): WorkflowProf
 // ─── Store ────────────────────────────────────────────────────────
 
 /**
- * F-4: the exclusive right to continue one stored run. A resume takes the lease before anything
- * executes; a second live process is refused (`resume.locked`), and a lease whose holder died is
- * taken over (same self-healing rule as the file locks the other stores use).
+ * F-4/F-14: the exclusive right to run or continue one stored run. Every store-backed attempt takes
+ * the lease before anything executes; a second live process is refused (`run.locked` for a fresh
+ * run, `resume.locked` for a resume), and a lease whose holder died is taken over atomically, by
+ * identity (same self-healing rule as the file locks the other stores use).
  */
 export interface WorkflowProfileRunLease {
   /** Give the lease back; idempotent per handle. */

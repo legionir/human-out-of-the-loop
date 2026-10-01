@@ -1053,3 +1053,46 @@ Workflow Profile gate step and the CLI smoke). Local at the same head: profile +
 itself is pinned by the new parity test (both paths escalate an answer that defers to `@plan` into a
 plan) — the same test fails against the previous head with `resume.already-terminal`.
 
+## Phase 10 second independent-review findings — F-11…F-15 fixed (2026-10-01; append-only)
+
+A **second independent static review** (the report attached by the owner on 2026-10-01; static, no
+local test run) reported five findings — four P1, one P2. Each was re-verified against the code in
+this session; **all five are real**, and each is fixed with a regression test:
+
+- **F-11 (P1) tool-surface bypass** — the declared surface was narrowed onto the plan only, so a step
+  that names no tools still received its skill's tools from `createAgent`, and a re-planned step
+  brought its own. The runtime now applies the surface to every dispatch, filters the tools of every
+  agent it builds and narrows re-planned steps; the bridge hands the same surface to the runtime
+  (`toolSurfaceFor`).
+- **F-12 (P1) budget undercount** — one model call was charged per agent run whatever the SDK step
+  count, and an exhausted profile budget was only noticed after the work ran. `agent-runtime.ts`
+  reports `modelCalls` (SDK steps) on `AgentCompletedEvent`/`AgentErrorEvent`,
+  `createEventBusExecutionUsage` charges it, the executor port turns the kernel's live budget handle
+  into a per-dispatch guard (`budgetExceeded`; a stop is reported as a terminal `budget.*` limit and
+  the calls already made are still charged), and `node-handlers.ts` passes the handle down.
+- **F-13 (P1) effect-marker window** — `recordEffectCommitted` deleted the durable `pendingEffect`
+  before the settled progress was persisted, so a crash in between looked like "no effect in flight".
+  The outcome is now kept in memory and the marker is dropped in the same write that persists the
+  progress (`applyRunResultToState(..., { effectOutcomeKnown: true })`).
+- **F-14 (P1) lease gaps** — only resumes leased, and a stale lease was broken with a
+  check-then-unlink that could delete a lease another process had just acquired. Every store-backed
+  run now leases (`run.locked` fresh / `resume.locked` resume) and the stale break is an atomic
+  rename with an inode+content identity CAS (`lockIdentity`, the lease is linked back on a mismatch),
+  mirroring `breakStaleLock`.
+- **F-15 (P2) pause pairing** — a limit checked before a node ran reported that node's inputs under
+  the *previous* node's id, so a resume could hand a node someone else's inputs. `WorkflowRunResult`
+  carries `resumeNodeId` (refreshed with `resumeInputs` at the loop top) and the durable layer pairs
+  `currentNodeId`/`nodeInputs` from it.
+
+**Exact-head evidence for the fix commit (`6b36348`):** CI `36843874529` @ `6b36348` **success 10/10**
+(ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI
+smoke); locally `tsc --noEmit` and `npm run build` clean, the full `src/ai` suite 127 files / 1,707
+tests green, the CI-equivalent sweep `scripts/ci-test.mjs` 2,017/2,017, profile gates 9/9 and e2e
+`profiles` 12/12. Regression coverage: `workflow-profile-runtime-guards.test.ts` (new) plus the
+extended `workflow-profile-review-fixes.test.ts` and `workflow-profile-lifecycle.test.ts`.
+
+**Merge status:** the owner's earlier hold (native stack #11 would land PR #9 as well — see the Step 3
+note above) is **superseded by the owner's directive of 2026-10-01** ("PR #9 ready — mergeable as a
+stack, tests green; before merge verify everything is correct, and review the attached report"): the
+report is reviewed and its findings are fixed above, so the verified stack merge proceeds without
+further waiting. The merge event itself is recorded in the PR timeline.

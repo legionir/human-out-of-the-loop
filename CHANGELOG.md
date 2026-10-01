@@ -2043,3 +2043,26 @@ this project explicitly allowed them (see "Breaking-change policy").
 ## [17.0.0] — previous baseline
 
 17 phases, 334 tests, library-only (no CLI/UI). See `PLAN.md`.
+
+**Second review (2026-10-01) — all five findings fixed (`6b36348`):**
+- **F-11:** the declared surface could be bypassed (a step naming no tools got its skill's tools from
+  `createAgent`, and a re-planned step brought its own). The runtime now narrows every dispatch,
+  filters every built agent's tools and narrows re-planned steps, and the bridge hands the surface to
+  the runtime (`toolSurfaceFor`).
+- **F-12:** one model call was charged per agent run whatever the SDK step count, and an exhausted
+  budget was noticed only after the work ran. The agent runtime reports `modelCalls` (SDK steps), the
+  usage recorder charges it, and the executor port stops before the next dispatch once a budget
+  dimension is exhausted — reported as a terminal `budget.*` limit, with the calls already made
+  charged.
+- **F-13:** the durable `pendingEffect` was cleared before the settled progress was persisted; the
+  marker is now dropped in the same write that persists the progress.
+- **F-14:** every store-backed run leases (fresh: `run.locked`; resume: `resume.locked`), and a stale
+  lease is broken by an atomic rename with an inode+content identity CAS instead of a racy unlink.
+- **F-15:** a limit checked before a node ran paired that node's inputs with the previous node's id;
+  `WorkflowRunResult.resumeNodeId` now pairs them, so a resume cannot hand a node someone else's
+  inputs.
+
+**Evidence:** CI `36843874529` @ `6b36348` **success 10/10**; `scripts/ci-test.mjs` 2,017/2,017; the
+full `src/ai` suite 127 files / 1,707 tests; profile gates 9/9; e2e `profiles` 12/12; `tsc --noEmit`
+and `npm run build` clean. `TRACEABILITY.md` §3c holds the ledger. Per the owner's 2026-10-01
+directive the verified stack merge proceeds; the merge event is recorded in the PR timeline.
