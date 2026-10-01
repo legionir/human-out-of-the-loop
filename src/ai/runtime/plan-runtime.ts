@@ -1,4 +1,5 @@
 import type { TaskRuntime } from './task-runtime.js';
+import type { AgentExecutionGuards } from './agent-runtime.js';
 import type { PlanStore } from './plan-store.js';
 import type { Planner } from '../planning/planner.js';
 import { runFeasibilityGate, type FeasibilityGateDeps } from '../planning/feasibility-gate.js';
@@ -106,6 +107,9 @@ export interface PlanRuntimeExecutionOptions {
   toolSurface?: ExecutionToolSurface;
   /** Returns a budget-exhaustion reason (a `budget.*` code) or undefined. Consulted before dispatch. */
   budgetExceeded?: () => string | undefined;
+  /** Call-level guards; a returned code cancels in-flight tasks before that provider/tool call. */
+  beforeModelCall?: () => string | undefined;
+  beforeToolCall?: (toolName: string) => string | undefined;
 }
 
 export interface PlanExecutionResult {
@@ -172,6 +176,10 @@ export class PlanRuntime {
   /** F-11/F-12: the per-execution guard set by `execute`, restored when that execution ends. */
   private activeToolSurface: { allow?: ReadonlySet<string>; deny: ReadonlySet<string> } | undefined;
   private activeBudgetExceeded: (() => string | undefined) | undefined;
+  private activeExecutionGuards: AgentExecutionGuards | undefined;
+  private activePlan: Plan | undefined;
+  /** Execution policy and cancellation state are instance-scoped; reject overlapping plans. */
+  private executionActive = false;
 
   constructor(config: PlanRuntimeConfig) {
     this.config = config as Required<
@@ -243,8 +251,20 @@ export class PlanRuntime {
   }
 
   async execute(plan: Plan, options?: PlanRuntimeExecutionOptions): Promise<PlanExecutionResult> {
+    // Execution policy and cancellation are instance-scoped. Concurrent calls would overwrite the
+    // active plan/guards and let one run cancel or spend another run's budget; fail closed instead.
+    if (this.executionActive) {
+      throw new Error('[PlanRuntime] Concurrent execute() calls on one runtime are not supported.');
+    }
+    this.executionActive = true;
+    // Cancellation belongs to one execution attempt. This runtime is reused for later plans; a
+    // budget stop or user cancellation must not poison the next run.
+    this.cancelled = false;
     const previousSurface = this.activeToolSurface;
     const previousGuard = this.activeBudgetExceeded;
+    const previousExecutionGuards = this.activeExecutionGuards;
+    const previousPlan = this.activePlan;
+    this.activePlan = plan;
     this.activeToolSurface = options?.toolSurface
       ? {
           ...(options.toolSurface.allow ? { allow: new Set(options.toolSurface.allow) } : {}),
@@ -252,6 +272,20 @@ export class PlanRuntime {
         }
       : undefined;
     this.activeBudgetExceeded = options?.budgetExceeded;
+    this.activeExecutionGuards = options?.beforeModelCall || options?.beforeToolCall
+      ? {
+          ...(options.beforeModelCall ? { beforeModelCall: () => {
+            const reason = options.beforeModelCall!();
+            if (reason) this.cancel(reason);
+            return reason;
+          } } : {}),
+          ...(options.beforeToolCall ? { beforeToolCall: (toolName: string) => {
+            const reason = options.beforeToolCall!(toolName);
+            if (reason) this.cancel(reason);
+            return reason;
+          } } : {}),
+        }
+      : undefined;
     try {
       // 1. Mark as running and persist
       plan.status = 'running';
@@ -358,6 +392,9 @@ export class PlanRuntime {
     } finally {
       this.activeToolSurface = previousSurface;
       this.activeBudgetExceeded = previousGuard;
+      this.activeExecutionGuards = previousExecutionGuards;
+      this.activePlan = previousPlan;
+      this.executionActive = false;
     }
   }
 
@@ -414,11 +451,17 @@ export class PlanRuntime {
   }
 
   /**
-   * Signal cancellation.  The loop will stop dispatching new
-   * steps at the next iteration (Phase 13).
+   * Signal cancellation. The loop stops dispatching new steps, and any task already running for
+   * the active plan is cancelled through TaskRuntime so its AbortSignal reaches the agent/tools.
    */
-  cancel(): void {
+  cancel(reason?: string): void {
     this.cancelled = true;
+    if (reason && this.activePlan) this.activePlan.cancelReason = reason;
+    // Cancel every task already dispatched for this plan. TaskRuntime aborts its per-task
+    // controller, which reaches AgentRuntime and the underlying tool's abortSignal.
+    for (const step of this.activePlan?.steps ?? []) {
+      if (step.status === 'running' && step.taskId) this.config.taskRuntime.cancelTask(step.taskId);
+    }
   }
 
   // ── Private: dispatch ─────────────────────────────────────────
@@ -470,6 +513,7 @@ export class PlanRuntime {
           ? { agentTimeoutMs: this.config.agentTimeoutMs }
           : {}),
         ...(this.config.maxSteps !== undefined ? { maxSteps: this.config.maxSteps } : {}),
+        ...(this.activeExecutionGuards ? { executionGuards: this.activeExecutionGuards } : {}),
       });
 
       step.taskId = taskId;

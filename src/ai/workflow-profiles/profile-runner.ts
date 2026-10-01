@@ -263,6 +263,12 @@ export function prepareWorkflowProfileRun(options: PrepareWorkflowProfileRunOpti
       }
       started = true;
       try {
+        if (lease?.claim && !lease.claim()) {
+          throw new WorkflowProfileLoadError(`Workflow Profile run "${runId}" is already claimed by another prepared runner`, [{
+            stage: 'read', code: resumingStoredRun ? 'resume.locked' : 'run.locked', profileId: profile.profile.id,
+            message: 'Another prepared runner owns this run attempt; prepare a fresh attempt after it settles',
+          }]);
+        }
         let resumeFrom: WorkflowProfileRunState | undefined;
         if (options.stateStore) {
           if (resumingStoredRun) {

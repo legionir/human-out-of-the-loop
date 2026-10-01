@@ -109,6 +109,13 @@ function stepsHaveToolCalls(steps: ReadonlyArray<SdkStepLike> | undefined): bool
   return steps.some((step) => Array.isArray(step.toolCalls) && step.toolCalls.length > 0);
 }
 
+export interface AgentExecutionGuards {
+  /** Called synchronously immediately before each model request/SDK step. */
+  beforeModelCall?: () => string | undefined;
+  /** Called synchronously before each local tool's implementation can run. */
+  beforeToolCall?: (toolName: string) => string | undefined;
+}
+
 export interface AgentRunOptions {
   /** The fully-resolved agent from AgentFactory (Phase 5/6) */
   agent: ResolvedAgent;
@@ -136,6 +143,8 @@ export interface AgentRunOptions {
    * which is surfaced as a structured failure (code "ABORTED").
    */
   signal?: AbortSignal;
+  /** Per-task budget hooks; a returned code refuses that call before it reaches the provider/tool. */
+  executionGuards?: AgentExecutionGuards;
   /**
    * Phase 32: live model thinking (reasoning) text.
    *
@@ -279,6 +288,7 @@ function withRuntimeToolHooks<T extends Record<string, unknown>>(
     planContext: { planId?: string; planStepId?: string };
     toolsUsed: string[];
     emittedCallIds: Set<string>;
+    beforeToolCall?: (toolName: string) => string | undefined;
   }
 ): T {
   const wrapped: Record<string, unknown> = {};
@@ -296,6 +306,13 @@ function withRuntimeToolHooks<T extends Record<string, unknown>>(
         if (signal?.aborted) {
           const reason = signal.reason;
           throw reason instanceof Error ? reason : new Error('Aborted');
+        }
+        const budgetReason = ctx.beforeToolCall?.(name);
+        if (budgetReason) {
+          // The guard owner aborts the task synchronously; do not emit a tool-call event or invoke
+          // the underlying implementation after the profile budget has been reserved/exhausted.
+          const reason = signal?.reason;
+          throw reason instanceof Error ? reason : new Error(budgetReason);
         }
         ctx.toolsUsed.push(name);
         const callId = options?.toolCallId ?? `call-${randomUUID()}`;
@@ -380,6 +397,7 @@ export class AgentRuntime {
       planId,
       planStepId,
       signal,
+      executionGuards,
       onThought,
       onToolCall,
       toolCallOptions,
@@ -416,6 +434,19 @@ export class AgentRuntime {
     let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     const usageAcc: { value?: TokenUsage } = {};
     const settledRef: { promise?: Promise<void> } = {};
+    let attemptedModelCalls = 0;
+    const activeExecutionGuards: AgentExecutionGuards | undefined = executionGuards
+      ? {
+          ...executionGuards,
+          ...(executionGuards.beforeModelCall ? {
+            beforeModelCall: () => {
+              const reason = executionGuards.beforeModelCall!();
+              if (!reason) attemptedModelCalls += 1;
+              return reason;
+            },
+          } : {}),
+        }
+      : undefined;
     const runController = new AbortController();
     const abortSignal =
       signal && typeof AbortSignal.any === 'function'
@@ -442,6 +473,7 @@ export class AgentRuntime {
         planContext,
         usageAcc,
         signal: abortSignal,
+        ...(activeExecutionGuards ? { executionGuards: activeExecutionGuards } : {}),
         ...(onThought ? { onThought } : {}),
         ...(onToolCall ? { onToolCall } : {}),
         ...(toolCallOptions ? { toolCallOptions } : {}),
@@ -500,7 +532,7 @@ export class AgentRuntime {
         usage: sdkResult.usage as TokenUsage | undefined,
         // F-12: budget accounting charges one model call per SDK step, not one per agent run —
         // `stopWhen: stepCountIs(maxSteps)` lets a single run make several model calls.
-        modelCalls: sdkResult.modelCalls ?? 1,
+        modelCalls: Math.max(sdkResult.modelCalls ?? 1, attemptedModelCalls),
         ...planContext,
       });
 
@@ -538,6 +570,7 @@ export class AgentRuntime {
       errors.push(message);
 
       // Emit error event (C-06: include partial usage so aggregators see it)
+      const failedModelCalls = Math.max(attemptedModelCalls, usageAcc.value ? 1 : 0);
       eventBus.emit({
         type: 'agent:error',
         taskId,
@@ -546,8 +579,8 @@ export class AgentRuntime {
         status: 'error',
         error: message,
         code,
-        // F-12: with usage there was at least one call; the exact count is unknown on this path.
-        ...(usageAcc.value ? { usage: usageAcc.value, modelCalls: 1 } : {}),
+        ...(usageAcc.value ? { usage: usageAcc.value } : {}),
+        ...(failedModelCalls > 0 ? { modelCalls: failedModelCalls } : {}),
         ...planContext,
       });
 
@@ -584,6 +617,7 @@ export class AgentRuntime {
     usageAcc: { value?: TokenUsage };
     /** Phase 22: cancellation signal, forwarded to generateText */
     signal?: AbortSignal;
+    executionGuards?: AgentExecutionGuards;
     /** Phase 32: live thinking text (switches the turn to `streamText`) */
     onThought?: ThoughtSink;
     /** v27.17.3: structured tool-call records */
@@ -604,6 +638,7 @@ export class AgentRuntime {
       planContext,
       usageAcc,
       signal,
+      executionGuards,
       onThought,
       onToolCall,
       toolCallOptions,
@@ -634,6 +669,7 @@ export class AgentRuntime {
           planContext,
           toolsUsed,
           emittedCallIds,
+          ...(executionGuards?.beforeToolCall ? { beforeToolCall: executionGuards.beforeToolCall } : {}),
         })
       : undefined;
 
@@ -651,9 +687,14 @@ export class AgentRuntime {
       }
     };
 
-    const prepareStep = (({ messages }: { messages: unknown[] }) => ({
-      messages: trimConversationMessages(messages, contextBudgetChars),
-    })) as never;
+    const prepareStep = (({ messages }: { messages: unknown[] }) => {
+      const budgetReason = executionGuards?.beforeModelCall?.();
+      if (budgetReason) {
+        const reason = signal?.reason;
+        throw reason instanceof Error ? reason : new Error(budgetReason);
+      }
+      return { messages: trimConversationMessages(messages, contextBudgetChars) };
+    }) as never;
 
     const generateOptions: Parameters<typeof generateText>[0] = withGenerationSettings(
       {
@@ -700,6 +741,7 @@ export class AgentRuntime {
           maxSteps,
           tools,
           signal,
+          executionGuards,
           onThought,
           context: { taskId, agentId, ...planContext },
           generationSettings: agent.generationSettings,
@@ -828,11 +870,12 @@ export class AgentRuntime {
     generationSettings?: ResolvedAgent['generationSettings'];
     tools?: ResolvedAgent['tools'];
     signal?: AbortSignal;
+    executionGuards?: AgentExecutionGuards;
     onThought: ThoughtSink;
     context: { taskId?: string; agentId?: string; planId?: string; planStepId?: string };
     contextBudgetChars?: number;
   }): Promise<SdkRunOutcome> {
-    const { model, system, prompt, maxSteps, tools, signal, onThought, context, generationSettings } =
+    const { model, system, prompt, maxSteps, tools, signal, executionGuards, onThought, context, generationSettings } =
       params;
     const budgetChars = params.contextBudgetChars ?? DEFAULT_CONTEXT_BUDGET_CHARS;
 
@@ -853,9 +896,14 @@ export class AgentRuntime {
           // `delta.reasoning_content`, which the SDK's chat chunk schema
           // drops; the raw chunk still carries it.
           includeRawChunks: true,
-          prepareStep: (({ messages }: { messages: unknown[] }) => ({
-            messages: trimConversationMessages(messages, budgetChars),
-          })) as never,
+          prepareStep: (({ messages }: { messages: unknown[] }) => {
+            const budgetReason = executionGuards?.beforeModelCall?.();
+            if (budgetReason) {
+              const reason = signal?.reason;
+              throw reason instanceof Error ? reason : new Error(budgetReason);
+            }
+            return { messages: trimConversationMessages(messages, budgetChars) };
+          }) as never,
         },
         generationSettings
       )

@@ -236,7 +236,7 @@ export async function runWorkflowProfileBridge(
       // F-2: measure the window from the run's own events (see the Orchestrator's provider).
       usageRecorder = services.executionUsage?.begin(planArg);
       // F-8: the run's abort signal reaches the delegated runtime, which stops dispatching new
-      // steps; in-flight work finishes and the loop reports the plan as `cancelled`.
+      // steps and cancels tasks already in flight before the loop reports `cancelled`.
       const signal = meta?.signal;
       const forwardCancel = (): void => services.planRuntime.cancel?.();
       if (signal) {

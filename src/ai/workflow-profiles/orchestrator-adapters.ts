@@ -60,6 +60,9 @@ export interface PlanRuntimeExecutionMeta {
   signal?: AbortSignal;
   toolSurface?: ExecutionToolSurface;
   budgetExceeded?: () => string | undefined;
+  /** Atomically reserve each actual call before the delegated runtime sends it. */
+  beforeModelCall?: () => string | undefined;
+  beforeToolCall?: (toolName: string) => string | undefined;
 }
 
 export interface PlanRuntimeLike {
@@ -72,10 +75,10 @@ export interface PlanRuntimeLike {
    */
   execute(plan: Plan, meta?: PlanRuntimeExecutionMeta): Promise<PlanExecutionResult>;
   /**
-   * Ask the delegated runtime to stop dispatching new steps (F-8). The wiring calls this when the
-   * run's abort signal fires mid-execution; in-flight work finishes, nothing new starts.
+   * Cancel the delegated runtime when the run's abort signal fires. Implementations should stop
+   * dispatching new steps and propagate cancellation to tasks already in flight (F-8).
    */
-  cancel?(): void;
+  cancel?(reason?: string): void;
 }
 
 export interface FinalReviewerLike {
@@ -153,9 +156,16 @@ export function createEventBusExecutionUsage(eventBus: EventBus): ExecutionUsage
           toolCalls += 1;
           return;
         }
-        if ((event.type === 'agent:completed' || event.type === 'agent:error') && event.usage) {
-          // F-12: one charge per model call the run reported (an SDK step), not one per agent run.
-          modelCalls += event.modelCalls ?? 1;
+        if (event.type === 'agent:completed' || event.type === 'agent:error') {
+          // F-12: failed/aborted provider requests may have no token usage, but still carry the
+          // reserved call count. Prefer it; older events without that field count as one only when
+          // they report usage proving a request completed.
+          const reported = (event as { modelCalls?: unknown }).modelCalls;
+          if (typeof reported === 'number' && Number.isSafeInteger(reported) && reported > 0) {
+            modelCalls += reported;
+          } else if (event.usage) {
+            modelCalls += 1;
+          }
         }
       });
       return {
@@ -245,11 +255,31 @@ export function createExecutorPort(options: ExecutorPortOptions): WorkflowExecut
       // A dimension with no headroom reports its own `budget.*` code, so an exhausted budget stops
       // new work instead of being discovered only after it ran.
       const budget = request.budget;
+      // Reserve calls synchronously before they reach the provider/tool. Reservations are scoped to
+      // this delegated plan and prevent parallel steps from spending the same remaining allowance.
+      // Actual usage is still charged from the plan's events when it settles.
+      let reservedModelCalls = 0;
+      let reservedToolCalls = 0;
+      let budgetStopReason: string | undefined;
+      const reserveCall = (kind: 'model' | 'tool'): string | undefined => {
+        if (!budget) return undefined;
+        const remaining = budget.remaining();
+        const left = kind === 'model'
+          ? remaining.maxModelCalls - reservedModelCalls
+          : remaining.maxToolCalls - reservedToolCalls;
+        if (left <= 0) {
+          budgetStopReason = kind === 'model' ? 'budget.model-calls-exceeded' : 'budget.tool-calls-exceeded';
+          return budgetStopReason;
+        }
+        if (kind === 'model') reservedModelCalls += 1;
+        else reservedToolCalls += 1;
+        return undefined;
+      };
       const budgetExceeded = budget
         ? (): string | undefined => {
+          if (budgetStopReason) return budgetStopReason;
           const remaining = budget.remaining();
-          if (remaining.maxModelCalls <= 0) return 'budget.model-calls-exceeded';
-          if (remaining.maxToolCalls <= 0) return 'budget.tool-calls-exceeded';
+          if (remaining.maxModelCalls - reservedModelCalls <= 0) return 'budget.model-calls-exceeded';
           if (remaining.maxDurationSeconds <= 0) return 'budget.duration-exceeded';
           return undefined;
         }
@@ -259,22 +289,44 @@ export function createExecutorPort(options: ExecutorPortOptions): WorkflowExecut
         ...(request.toolsetRef ? { toolsetRef: request.toolsetRef } : {}),
         ...(request.personaRef ? { personaRef: request.personaRef } : {}),
       });
-      const result = await options.planRuntime.execute(executed, {
-        nodeId: request.nodeId,
-        ...(request.signal ? { signal: request.signal } : {}),
-        ...(surface ? { toolSurface: surface } : {}),
-        ...(budgetExceeded ? { budgetExceeded } : {}),
-      });
+      const measuredUsage = (): { modelCalls?: number; toolCalls?: number } | undefined => {
+        const measured = options.usageFor?.(executed);
+        const modelCalls = Math.max(measured?.modelCalls ?? 0, reservedModelCalls);
+        const toolCalls = Math.max(measured?.toolCalls ?? 0, reservedToolCalls);
+        return measured || modelCalls > 0 || toolCalls > 0 ? { modelCalls, toolCalls } : undefined;
+      };
+      const chargeInterruptedUsage = (): void => {
+        const usage = measuredUsage();
+        if (usage?.modelCalls) budget?.consumeModelCall(usage.modelCalls);
+        if (usage?.toolCalls) budget?.consumeToolCall(usage.toolCalls);
+      };
+      let result: PlanExecutionResult;
+      try {
+        result = await options.planRuntime.execute(executed, {
+          nodeId: request.nodeId,
+          ...(request.signal ? { signal: request.signal } : {}),
+          ...(surface ? { toolSurface: surface } : {}),
+          ...(budgetExceeded ? { budgetExceeded } : {}),
+          ...(budget ? {
+            beforeModelCall: () => reserveCall('model'),
+            beforeToolCall: () => reserveCall('tool'),
+          } : {}),
+        });
+      } catch (error) {
+        // A thrown delegated execution has no outcome for the kernel to charge. Preserve all calls
+        // that reached their pre-call reservation, even if the provider returned no token usage.
+        chargeInterruptedUsage();
+        throw error;
+      }
       if (result.status === 'cancelled' || result.status === 'cancelling') {
-        // F-12: a guard stop names the exhausted dimension — report it as the terminal budget
-        // failure it is (the kernel applies the profile's `onLimit`), not as a bare cancellation.
+        // F-12: account for calls already spent/reserved on either a budget stop or user cancellation;
+        // neither path returns usage to the kernel, and a resume must not regain that allowance.
+        const usage = measuredUsage();
+        if (usage?.modelCalls) budget?.consumeModelCall(usage.modelCalls);
+        if (usage?.toolCalls) budget?.consumeToolCall(usage.toolCalls);
+        // A guard stop names the exhausted dimension — report it as the terminal budget failure it
+        // is (the kernel applies the profile's `onLimit`), not as a bare cancellation.
         if (result.cancelReason?.startsWith('budget.')) {
-          // F-12: the calls the run made before the guard stopped it are measured and charged here,
-          // because no outcome is returned for the caller to charge (an uncharged stop would let a
-          // resumed run spend the same calls again).
-          const measured = options.usageFor?.(executed);
-          if (measured?.modelCalls) budget?.consumeModelCall(measured.modelCalls);
-          if (measured?.toolCalls) budget?.consumeToolCall(measured.toolCalls);
           throw new WorkflowNodeError('the delegated plan stopped: profile budget exhausted', {
             category: 'budget', code: result.cancelReason, retryable: false,
           });
@@ -284,8 +336,9 @@ export function createExecutorPort(options: ExecutorPortOptions): WorkflowExecut
           category: 'cancelled', code: 'execute.cancelled', retryable: false,
         });
       }
-      // F-2: charge what the delegated execution actually consumed, measured by the wiring.
-      return executorOutcomeFromResult(result, options.usageFor?.(executed));
+      // F-2: charge what the delegated execution actually consumed, using measured events and call
+      // reservations as a lower bound when a provider outcome omitted usage.
+      return executorOutcomeFromResult(result, measuredUsage());
     },
   };
 }

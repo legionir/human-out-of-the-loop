@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EventBus, type AgentEvent } from './event-bus.js';
-import { AgentRuntime, type AgentRunResult } from './agent-runtime.js';
+import { AgentRuntime, type AgentExecutionGuards, type AgentRunResult } from './agent-runtime.js';
 import type { ThoughtSink } from './thought-stream.js';
 import type { ToolCallLogOptions, ToolCallSink } from './tool-call-log.js';
 import type { ResolvedAgent } from '../agents/agent-factory.js';
@@ -69,6 +69,8 @@ export interface CreateTaskOptions {
    */
   agentTimeoutMs?: number;
   maxSteps?: number;
+  /** Per-task execution guards, used by delegated Profile runs for live budget enforcement. */
+  executionGuards?: AgentExecutionGuards;
   /**
    * Phase 32: per-task thinking sink (wins over `TaskRuntimeConfig.onThought`).
    */
@@ -194,7 +196,7 @@ export class TaskRuntime {
   /** U3: per-task execution overrides (runOverrides from Orchestrator.run). */
   private readonly taskOverrides = new Map<
     string,
-    Pick<CreateTaskOptions, 'agentTimeoutMs' | 'maxSteps' | 'onThought' | 'onToolCall'>
+    Pick<CreateTaskOptions, 'agentTimeoutMs' | 'maxSteps' | 'onThought' | 'onToolCall' | 'executionGuards'>
   >();
   private readonly runtime: AgentRuntime;
   private readonly runningPromises = new Map<string, Promise<AgentRunResult>>();
@@ -269,13 +271,15 @@ export class TaskRuntime {
       options.agentTimeoutMs !== undefined ||
       options.maxSteps !== undefined ||
       options.onThought !== undefined ||
-      options.onToolCall !== undefined
+      options.onToolCall !== undefined ||
+      options.executionGuards !== undefined
     ) {
       this.taskOverrides.set(taskId, {
         agentTimeoutMs: options.agentTimeoutMs,
         maxSteps: options.maxSteps,
         ...(options.onThought !== undefined ? { onThought: options.onThought } : {}),
         ...(options.onToolCall !== undefined ? { onToolCall: options.onToolCall } : {}),
+        ...(options.executionGuards !== undefined ? { executionGuards: options.executionGuards } : {}),
       });
     }
 
@@ -409,6 +413,7 @@ export class TaskRuntime {
             ...(timeoutMs !== undefined ? { timeoutMs } : {}),
             // U3: max tool-call iterations (config or per-run override)
             ...(maxSteps !== undefined ? { maxSteps } : {}),
+            ...(overrides.executionGuards ? { executionGuards: overrides.executionGuards } : {}),
             // Phase 20 (CORR-03/05): carry plan context on emitted events
             ...(task.planId !== undefined ? { planId: task.planId } : {}),
             ...(task.planStepId !== undefined ? { planStepId: task.planStepId } : {}),

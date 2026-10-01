@@ -230,8 +230,11 @@ describe('F-2 — delegated usage is measured and charged', () => {
       type: 'agent:error', planId: 'plan-1', usage: { promptTokens: 1, completionTokens: 0, totalTokens: 1 },
     } as AgentEvent);
     emit({ type: 'agent:completed', planId: 'plan-2' } as AgentEvent);
+    // An aborted/failed provider call can have no token usage, but its reserved model-call count
+    // still has to be charged so a resume cannot regain that allowance.
+    emit({ type: 'agent:error', planId: 'plan-1', modelCalls: 3 } as AgentEvent);
     const end = recorder.end();
-    expect(end).toEqual({ modelCalls: 2, toolCalls: 1 });
+    expect(end).toEqual({ modelCalls: 5, toolCalls: 1 });
 
     // The window is closed: later events do not count.
     emit({ type: 'agent:tool_call', planId: 'plan-1', toolName: 'read_file' } as AgentEvent);
@@ -300,6 +303,62 @@ describe('F-2 — delegated usage is measured and charged', () => {
     await expect(handlers.execute!({ node, inputs: { plan: twoStepPlan }, attempt: 1, visit: 1, budget: starvedTools }))
       .rejects.toMatchObject({ options: { category: 'budget', code: 'budget.insufficient-tool-calls' } });
     expect(executor.execute).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['model', 'beforeModelCall', 'budget.model-calls-exceeded'],
+    ['tool', 'beforeToolCall', 'budget.tool-calls-exceeded'],
+  ] as const)('reserves positive %s-call budgets before permitting each actual call', async (_kind, guardName, expectedCode) => {
+    const consumeModelCall = vi.fn();
+    const consumeToolCall = vi.fn();
+    const budget = {
+      consumeModelCall, consumeToolCall, elapsedMs: () => 0,
+      remaining: () => ({ maxNodeVisits: 10, maxDurationSeconds: 60, maxModelCalls: 1, maxToolCalls: 1 }),
+      usage: () => ({ visits: 0, durationMs: 0, modelCalls: 0, toolCalls: 0 }),
+    };
+    const runtimeExecute = vi.fn<PlanRuntimeLike['execute']>(async (_plan, meta) => {
+      const reserve = guardName === 'beforeModelCall'
+        ? meta?.beforeModelCall
+        : meta?.beforeToolCall ? () => meta.beforeToolCall!('read_file') : undefined;
+      expect(reserve?.()).toBeUndefined(); // The single available call is allowed.
+      const denied = reserve?.(); // A second call is rejected before dispatch.
+      return { ...execution, status: 'cancelled', cancelReason: denied };
+    });
+    const port = createExecutorPort({ planRuntime: { execute: runtimeExecute }, usageFor: () => undefined });
+
+    await expect(port.execute({
+      nodeId: 'work', goal: confinedGoal('goal'), plan: planWith(['read_file']),
+      mode: 'assisted', requireApprovalForSideEffects: true, budget: budget as never,
+    })).rejects.toMatchObject({ options: { category: 'budget', code: expectedCode } });
+    if (_kind === 'model') {
+      expect(consumeModelCall).toHaveBeenCalledWith(1);
+      expect(consumeToolCall).not.toHaveBeenCalled();
+    } else {
+      expect(consumeModelCall).not.toHaveBeenCalled();
+      expect(consumeToolCall).toHaveBeenCalledWith(1);
+    }
+  });
+
+  it('charges reserved calls when a user cancellation returns no usage events', async () => {
+    const consumeModelCall = vi.fn();
+    const consumeToolCall = vi.fn();
+    const budget = {
+      consumeModelCall, consumeToolCall, elapsedMs: () => 0,
+      remaining: () => ({ maxNodeVisits: 10, maxDurationSeconds: 60, maxModelCalls: 2, maxToolCalls: 2 }),
+      usage: () => ({ visits: 0, durationMs: 0, modelCalls: 0, toolCalls: 0 }),
+    };
+    const runtimeExecute = vi.fn<PlanRuntimeLike['execute']>(async (_plan, meta) => {
+      expect(meta?.beforeModelCall?.()).toBeUndefined();
+      return { ...execution, status: 'cancelled' };
+    });
+    const port = createExecutorPort({ planRuntime: { execute: runtimeExecute }, usageFor: () => undefined });
+
+    await expect(port.execute({
+      nodeId: 'work', goal: confinedGoal('goal'), plan: planWith([]),
+      mode: 'assisted', requireApprovalForSideEffects: true, budget: budget as never,
+    })).rejects.toMatchObject({ options: { category: 'cancelled', code: 'execute.cancelled' } });
+    expect(consumeModelCall).toHaveBeenCalledWith(1);
+    expect(consumeToolCall).not.toHaveBeenCalled();
   });
 });
 
@@ -470,6 +529,38 @@ describe('F-4 — a resume holds an exclusive run lease', () => {
       await exited;
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('allows same-process preparation but grants execution to only one prepared runner', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wp-lease-same-process-'));
+    const store = new FileWorkflowProfileRunStateStore(dir);
+    const { document, components } = documentWithToolset({}, {});
+    const first = prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-same-process', stateStore: store });
+    const second = prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-same-process', stateStore: store });
+
+    const running = first.run({ input: { goal: 'g' }, handlers: { intake: () => ({ goal: 'g' }) } });
+    await expect(second.run({ input: { goal: 'g' }, handlers: { intake: () => ({ goal: 'g' }) } }))
+      .rejects.toThrow(/run\\.locked|already claimed/);
+    await running;
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('does not let a stale same-process handle remove a newer lease generation', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wp-lease-generation-'));
+    const store = new FileWorkflowProfileRunStateStore(dir);
+    const { document, components } = documentWithToolset({}, {});
+    const first = prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-generation', stateStore: store });
+    const stale = prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-generation', stateStore: store });
+    await first.run({ input: { goal: 'g' }, handlers: { intake: () => ({ goal: 'g' }) } });
+
+    const current = prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-generation', stateStore: store });
+    await expect(stale.run({ input: { goal: 'g' }, handlers: { intake: () => ({ goal: 'g' }) } }))
+      .rejects.toThrow(/run\\.locked|already claimed/);
+    expect(() => readFileSync(leasePathFor(dir, 'run-generation'), 'utf8')).not.toThrow();
+    await expect(current.run({ input: { goal: 'g' }, handlers: { intake: () => ({ goal: 'g' }) } }))
+      .rejects.toThrow(/already-terminal/);
+    expect(() => readFileSync(leasePathFor(dir, 'run-generation'), 'utf8')).toThrow();
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('releases the lease when the attempt settles, so a later attempt can lease again', async () => {
