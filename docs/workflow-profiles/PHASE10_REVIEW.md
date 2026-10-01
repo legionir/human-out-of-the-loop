@@ -162,3 +162,16 @@ severity notes for the record: F-1 and F-5 are *narrowing/consent* gaps, not wid
 and persona intersections still hold, and the digest binding still requires a granted approval — but
 they are acceptance-criteria violations all the same, which is why the phases are re-opened.
 
+## 10. Fix status — F-1, F-2, F-3, F-6, F-8 (2026-10-01; append-only)
+
+| # | Status | Fix / evidence |
+| --- | --- | --- |
+| F-1 | **Fixed** (`220af0b`) | The declared tool surface (pinned or node-bound toolset, minus the toolset's and the profile's deny lists) is narrowed onto every plan step before the delegated `PlanRuntime` sees it; a `*` step becomes exactly that surface. The step's own persona bound still applies, so nothing widens. |
+| F-2 | **Fixed** (`220af0b`) | `createEventBusExecutionUsage` counts the plan's own `agent:completed`/`agent:error`/`agent:tool_call` events; the executor port returns that usage and the handler charges it. A plan whose minimum the remaining budget cannot fund is refused before delegation (`budget.insufficient-model-calls` / `budget.insufficient-tool-calls`). |
+| F-3 | **Fixed** (`220af0b`) | `recordEffectStart` is persisted before the delegated call; the marker is committed only when the runtime reports back. A kill (or a throw) leaves `pendingEffect`, and the existing resume gate refuses with `resume.ambiguous-effect`. |
+| F-6 | **Fixed** (`220af0b`) | The approval port passes the captured plan to the confirm callback, so the server's `run.planId` and the CLI's `currentPlanId` are set on the profile path and `/api/plans/:id/confirm` / Ctrl-C `cancelPlan` can resolve it. |
+| F-8 | **Fixed** (`220af0b`) | The run's abort signal is forwarded to `PlanRuntime.cancel()`; the pipeline still reports a terminal cancellation. |
+
+Regression coverage: `src/ai/__tests__/workflow-profile-review-fixes.test.ts` (14 tests). Exact-head
+evidence CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke). Still open and blocking the re-opened phases: F-4, F-5, F-7 (and F-10 for
+the Phase 7 parity claim).

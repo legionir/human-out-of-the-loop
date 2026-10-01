@@ -83,15 +83,18 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
   API; selecting by file stays a CLI action.
 
 **Known gaps — independent review of 2026-09-30 (fixes in progress):**
-- **Fixed:** auto-mode escalation on the profile path re-ran the prepared run and crashed with
+- **Fixed (`220af0b`, `36810452453` 10/10):** the declared tool surface now narrows every plan step
+  before the delegated runtime sees it (F-1); the delegated execution is charged from the usage the
+  run's own events report, and a plan the remaining budget cannot fund is refused before it starts
+  (F-2); the delegated call is a persisted `pendingEffect` until the runtime reports back, so a kill
+  mid-effect refuses an automatic retry (F-3); the confirm callback receives the captured plan, so
+  `POST /api/plans/:id/confirm` and Ctrl-C `cancelPlan` work on the profile path (F-6); the run's
+  abort signal reaches the delegated runtime (F-8).
+- **Fixed earlier:** auto-mode escalation on the profile path re-ran the prepared run and crashed with
   `resume.already-terminal`; the escalated attempt is now its own run (fresh id), with a parity
   regression (F-9).
-- **Open:** the declared tool surface is not enforced at the execution call site (F-1); the profile
-  counters are not charged for the delegated plan execution (F-2); the effect markers are never
-  called, so a crash mid-execution can repeat a side effect on resume (F-3); the run record has no
-  lease, so two runners can resume one run (F-4); an approval that binds content need not have shown
-  it (F-5); a manual server confirmation cannot resolve for a profile run (F-6); a mid-graph pause
-  resumes without its node inputs (F-7); cancellation is not forwarded to the delegated runtime (F-8);
+- **Open:** the run record has no lease, so two runners can resume one run (F-4); an approval that
+  binds content need not have shown it (F-5); a mid-graph pause resumes without its node inputs (F-7);
   the profile planner does not receive the session history (F-10). Phases 6 and 9 are 🟡 again;
   `TRACEABILITY.md` §3b lists the required work.
 

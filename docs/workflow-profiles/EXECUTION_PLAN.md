@@ -157,6 +157,13 @@ approval node به mechanism interaction/callback موجود متصل شود؛ �
 > and F-4 in `PHASE10_REVIEW.md` §9; the fix list is in the Phase 10 addendum at the end of this file.
 > Nothing about the budget/authority *evaluation* changed — what changed is that the wiring to the
 > real call site is incomplete, so the phase cannot claim 🟢.
+>
+> **F-fix progress (2026-10-01, `220af0b`):** F-1 (the declared tool surface now narrows every plan
+> step before the delegated runtime sees it), F-2 (the delegated execution is charged with the usage
+> the run's own events report, and a plan the remaining budget cannot fund is refused before it
+> starts) and F-3 (the delegated execution is a persisted `pendingEffect` until the runtime reports
+> back) are fixed end to end and pinned by `workflow-profile-review-fixes.test.ts`;
+> CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke). F-4 (run-record lease/CAS) and F-7 (mid-graph resume inputs) keep this phase 🟡.
 
 اجرای Profile باید در کنار حلقهٔ فعلی دارای وضعیت قابل‌بازیابی، توقف امن، بودجهٔ نهایی، رخدادهای قابل‌مشاهده و مجوزهای واقعی باشد. وضعیت اجرای Profile با plan/session موجود هم‌زیست می‌شود و فرمت ذخیره‌شدهٔ قدیمی را نمی‌شکند.
 
@@ -352,6 +359,12 @@ heads. No merge, release or default activation is authorized until all phases ar
 > approver (F-5). The Phase 9 hardening tests measured the kernel/ports, not the adapter wiring, so the
 > criteria are re-opened until the wiring is fixed and tested through the real adapters. See
 > `PHASE10_REVIEW.md` §9 and the Phase 10 addendum below.
+>
+> **F-fix progress (2026-10-01, `220af0b`):** F-1 (narrowing enforced at the execution call site),
+> F-2 (limits charged from measured usage, with a pre-consumption refusal) and F-8 (the abort signal
+> reaches `PlanRuntime.cancel()`) are fixed end to end and pinned by
+> `workflow-profile-review-fixes.test.ts`; CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke). F-5 (a bound approval must have been shown
+> to the approver) keeps this phase 🟡.
 
 پس از اتصال handlerها و پیش از rollout، امنیت/adversarial و ظرفیت را با معیارهای مصوب harden کن. مرز اعتماد از Phase 5 برقرار شده؛ این فاز آن را end-to-end می‌بندد و جایگزین تست‌های زودهنگام نیست.
 
@@ -965,6 +978,26 @@ so one attempt has one runner (F-4); make an approval that binds content require
 shown, or show it automatically (F-5); pass the captured plan to the confirm callback (F-6); restore the
 inputs a resumed node needs, or restrict resume to nodes whose inputs come from the run (F-7); forward
 cancellation to the delegated runtime (F-8); hand the session history to the profile planner.
+
+**Fix backlog progress (2026-10-01, `220af0b`) — F-1, F-2, F-3, F-6, F-8 fixed:** the declared tool
+surface (pinned or node-bound toolset, minus the toolset's and the profile's deny lists) is narrowed
+onto every plan step before the delegated `PlanRuntime` sees it, and a wildcard step becomes exactly
+that surface (F-1); the delegated execution is charged with the usage counted from the run's own
+events (`createEventBusExecutionUsage`), and the execute node refuses to start a plan whose minimum
+(one model call per step, any tool call when tools are declared) the remaining budget cannot fund
+(F-2); the delegated call is a persisted `pendingEffect` from before the call until the runtime
+reports back, so a kill or a throw leaves a marker the resume gate refuses
+(`resume.ambiguous-effect`) (F-3); the confirm callback receives the captured plan, so the server
+sets `run.planId` and the CLI sets `currentPlanId` on the profile path too, which makes
+`POST /api/plans/:id/confirm` and Ctrl-C `cancelPlan` work there (F-6); and the run's abort signal
+reaches `PlanRuntime.cancel()`, which stops dispatching new steps (F-8). Regression coverage:
+`src/ai/__tests__/workflow-profile-review-fixes.test.ts` (14 tests, one behavior each). Evidence at
+the exact head `220af0b`: CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke); locally the profile + CLI + server suites pass 51 files /
+591 tests and the CI-equivalent sweep is 1,999/2,000 with only the pre-existing `J-05`; profile gates
+9/9; e2e `profiles` 12/12; `tsc --noEmit` and `npm run build` clean. **Still open:** F-4 (lease/CAS on
+the run record), F-5 (a bound approval must have been shown), F-7 (mid-graph resume inputs) and F-10
+(session history parity); Phases 6 and 9 therefore stay 🟡, and F-1's `personaRef`/`skillRefs` note is
+covered by the step's own persona bound (documented in the fix).
 
 **Exact-head evidence for the F-9 fix and the review record (`8ca5fe0`):** CI run `36808692988` is
 **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, the
