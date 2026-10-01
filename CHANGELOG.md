@@ -2066,3 +2066,5 @@ this project explicitly allowed them (see "Breaking-change policy").
 full `src/ai` suite 127 files / 1,707 tests; profile gates 9/9; e2e `profiles` 12/12; `tsc --noEmit`
 and `npm run build` clean. `TRACEABILITY.md` §3c holds the ledger. Per the owner's 2026-10-01
 directive the verified stack merge proceeds; the merge event is recorded in the PR timeline.
+
+**Merged (`8e2036c`, 2026-10-01):** the verified stack (PR #9 + PR #10, native stack #11) was merged with GitHub's stack-aware endpoint into `main` (merge commit `8e2036c`); CI `36845511269` @ `8e2036c` on `main` is **success 10/10**. No release was published; the built-in default stays unapproved and off.
