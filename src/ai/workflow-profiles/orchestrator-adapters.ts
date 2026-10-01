@@ -14,6 +14,7 @@
  * the runtime re-checks policy before any effect (Phase 6).
  */
 import { formatPlanForUser, summarizePlan, type PlanSummary } from '../planning/plan-confirmation.js';
+import type { EventBus } from '../runtime/event-bus.js';
 import type { Plan } from '../schemas/plan.js';
 import type { PlanExecutionResult } from '../runtime/plan-runtime.js';
 import type { Review } from '../schemas/review.js';
@@ -41,7 +42,17 @@ export interface PlannerLike {
 }
 
 export interface PlanRuntimeLike {
-  execute(plan: Plan): Promise<PlanExecutionResult>;
+  /**
+   * Execute the confirmed plan. `meta` carries the execute node and the run's abort signal when the
+   * wiring provides them, so an implementation can mark the side-effect window and stop dispatching
+   * new steps when the run is cancelled (F-3/F-8).
+   */
+  execute(plan: Plan, meta?: { nodeId?: string; signal?: AbortSignal }): Promise<PlanExecutionResult>;
+  /**
+   * Ask the delegated runtime to stop dispatching new steps (F-8). The wiring calls this when the
+   * run's abort signal fires mid-execution; in-flight work finishes, nothing new starts.
+   */
+  cancel?(): void;
 }
 
 export interface FinalReviewerLike {
@@ -53,7 +64,12 @@ export interface AcceptanceCheckerLike {
 }
 
 export interface ConfirmCallbackLike {
-  (planText: string): Promise<{ confirmed: boolean; feedback?: string }>;
+  /**
+   * `plan` is the captured plan the question is about, when the node has one (F-6): callers that
+   * must remember which plan is being confirmed (server `run.planId`, CLI `currentPlanId`) read it
+   * from this argument; callers that only need the rendered text ignore it.
+   */
+  (planText: string, plan?: Plan): Promise<{ confirmed: boolean; feedback?: string }>;
 }
 
 const DEFAULT_RENDER_PLAN = (plan: unknown): string => formatPlanForUser(summarizePlan(plan as Plan));
@@ -90,6 +106,44 @@ export function createPlannerPort(options: PlannerPortOptions): WorkflowPlannerP
 
 // ─── Executor ─────────────────────────────────────────────────────
 
+/**
+ * F-2: measures what a delegated plan execution consumed, from the run's own events.
+ * `begin` starts a measurement window; `end` closes it and returns the counted model/tool calls.
+ */
+export interface ExecutionUsageSource {
+  begin(plan: Plan): { end(): { modelCalls: number; toolCalls: number } };
+}
+
+/**
+ * Count what the delegated plan really consumed while it runs (F-2). One model call per completed or
+ * failed agent run that reported usage, one tool call per `agent:tool_call`; only events carrying the
+ * plan's own id are counted, so unrelated traffic can never inflate the profile's counters.
+ */
+export function createEventBusExecutionUsage(eventBus: EventBus): ExecutionUsageSource {
+  return {
+    begin(plan) {
+      let modelCalls = 0;
+      let toolCalls = 0;
+      const unsubscribe = eventBus.subscribe('*', (event) => {
+        if (event.planId !== plan.id) return;
+        if (event.type === 'agent:tool_call') {
+          toolCalls += 1;
+          return;
+        }
+        if ((event.type === 'agent:completed' || event.type === 'agent:error') && event.usage) {
+          modelCalls += 1;
+        }
+      });
+      return {
+        end: () => {
+          unsubscribe();
+          return { modelCalls, toolCalls };
+        },
+      };
+    },
+  };
+}
+
 export interface ExecutorPortOptions {
   planRuntime: PlanRuntimeLike;
   /**
@@ -98,13 +152,26 @@ export interface ExecutorPortOptions {
    * side-effect approval binds that digest, so no profile can drop the mandatory confirmation.
    */
   assertExecutable?: (planDigest: string | undefined) => void;
+  /**
+   * Measured usage of the delegated execution (F-2): the wiring counts what the run's own events
+   * reported for this plan, so the profile's counters are charged with real numbers instead of
+   * being skipped. Absent ⇒ no usage is reported (the counters stay a lower bound).
+   */
+  usageFor?: (plan: Plan) => { modelCalls?: number; toolCalls?: number } | undefined;
+  /**
+   * Narrowing of the plan the profile may execute (F-1): the wiring filters each step's tool list to
+   * the profile's declared tool surface *before* the plan is handed to the runtime, so a pinned
+   * toolset or a deny list is enforced at the real call site, not only in the authority snapshot.
+   */
+  narrowPlan?: (plan: Plan, request: { nodeId: string; toolsetRef?: string; personaRef?: string }) => Plan;
 }
 
 /** Map an existing `PlanExecutionResult` onto the execute node's ports. */
-export function executorOutcomeFromResult(result: PlanExecutionResult): {
+export function executorOutcomeFromResult(result: PlanExecutionResult, usage?: { modelCalls?: number; toolCalls?: number }): {
   status: 'completed' | 'failed' | 'partial';
   summary: string;
   artifacts?: unknown[];
+  usage?: { modelCalls?: number; toolCalls?: number };
   failure?: { category: 'tool' | 'validation'; code: string; retryable: boolean };
 } {
   const failed = result.failedSteps > 0 || result.incompleteSteps.length > 0;
@@ -117,6 +184,7 @@ export function executorOutcomeFromResult(result: PlanExecutionResult): {
     status,
     summary,
     artifacts: result.incompleteSteps.map((step) => ({ ...step })),
+    ...(usage && (usage.modelCalls || usage.toolCalls) ? { usage: { ...usage } } : {}),
     ...(status === 'failed'
       ? { failure: { category: 'tool' as const, code: 'execute.plan-failed', retryable: false } }
       : {}),
@@ -134,14 +202,27 @@ export function createExecutorPort(options: ExecutorPortOptions): WorkflowExecut
       // layer refuses execution unless a granted side-effect approval binds the very plan being
       // executed. The failure is a security denial: terminal, never routed or retried.
       options.assertExecutable?.(request.planDigest);
-      const result = await options.planRuntime.execute(request.plan as Plan);
+      // F-1: the plan the runtime receives is the profile's tool surface narrowed onto each step, so
+      // a pinned toolset/deny list is enforced where the tools are actually handed out.
+      const executed = options.narrowPlan
+        ? options.narrowPlan(request.plan as Plan, {
+          nodeId: request.nodeId,
+          ...(request.toolsetRef ? { toolsetRef: request.toolsetRef } : {}),
+          ...(request.personaRef ? { personaRef: request.personaRef } : {}),
+        })
+        : (request.plan as Plan);
+      const result = await options.planRuntime.execute(executed, {
+        nodeId: request.nodeId,
+        ...(request.signal ? { signal: request.signal } : {}),
+      });
       if (result.status === 'cancelled' || result.status === 'cancelling') {
         // Cancellation is terminal and can never be routed or retried by a profile.
         throw new WorkflowNodeError('plan execution was cancelled', {
           category: 'cancelled', code: 'execute.cancelled', retryable: false,
         });
       }
-      return executorOutcomeFromResult(result);
+      // F-2: charge what the delegated execution actually consumed, measured by the wiring.
+      return executorOutcomeFromResult(result, options.usageFor?.(executed));
     },
   };
 }

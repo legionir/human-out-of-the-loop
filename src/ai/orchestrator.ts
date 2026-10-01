@@ -91,6 +91,7 @@ import {
   type WorkflowProfileBridgeOutcome,
   type WorkflowProfileBridgeServices,
 } from './workflow-profiles/orchestrator-bridge.js';
+import { createEventBusExecutionUsage } from './workflow-profiles/orchestrator-adapters.js';
 import { createWorkflowProfileComponentSources } from './workflow-profiles/profile-sources.js';
 import type { WorkflowProfileComponentSources } from './workflow-profiles/profile-resolver.js';
 import { FileWorkflowProfileRunStateStore, type WorkflowProfileRunStateStore } from './workflow-profiles/profile-run-state.js';
@@ -1319,6 +1320,9 @@ export class Orchestrator {
       planRuntime: this.createProfilePlanRuntime(ov),
       finalReviewer: this.finalReviewer,
       ...(options.confirmCallback ? { confirm: options.confirmCallback } : {}),
+      // F-2: what the delegated plan execution really consumed, measured from this run's own
+      // events while the plan runtime is executing it (see `createEventBusExecutionUsage`).
+      executionUsage: createEventBusExecutionUsage(this.eventBus),
       modelId: runModelId,
       mode,
       ...overrides,

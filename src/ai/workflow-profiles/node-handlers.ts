@@ -26,6 +26,7 @@ import { confineUntrustedContent, confineUntrustedRecord, contentDigest } from '
 import type { ConfinedUntrustedContent } from './untrusted-content.js';
 import { WorkflowNodeError } from './profile-kernel.js';
 import type { WorkflowFailureCategory, WorkflowNodeHandler, WorkflowNodeInvocation } from './profile-kernel.js';
+import type { Plan } from '../schemas/plan.js';
 import type { WorkflowNode } from './profile-types.js';
 
 // ─── Ports the host wires ─────────────────────────────────────────
@@ -291,6 +292,31 @@ export function createWorkflowProfileHandlers(
     const { node, inputs, signal } = invocation;
     if (!services.executor) throw serviceMissing(node, 'Executor');
     const goalText = stringInput(inputs) ?? node.goal;
+    // F-2 (limits before consumption): the delegated plan executes outside the kernel, so the
+    // kernel's per-node charge cannot see its calls. Refuse to start when the remaining budget
+    // cannot fund even the minimum the plan needs — one model call per step, and any tool call at
+    // all when a step declares tools but the tool budget is exhausted. The measured usage is
+    // charged after execution (see `usageFor`), so the counters reflect reality either way.
+    const plan = (inputs.plan ?? undefined) as Plan | undefined;
+    const stepCount = Array.isArray(plan?.steps) ? plan.steps.length : 0;
+    if (stepCount > 0) {
+      const remaining = invocation.budget.remaining();
+      if (remaining.maxModelCalls < stepCount) {
+        throw new WorkflowNodeError(
+          `The delegated plan needs at least ${stepCount} model call(s) (one per step) but the profile budget allows ${remaining.maxModelCalls}`,
+          { category: 'budget', code: 'budget.insufficient-model-calls', retryable: false },
+        );
+      }
+      const declaresTools = plan!.steps.some(
+        (step): boolean => Array.isArray(step.assignedTools) && step.assignedTools.length > 0,
+      );
+      if (declaresTools && remaining.maxToolCalls === 0) {
+        throw new WorkflowNodeError(
+          'The delegated plan declares tools but the profile budget allows no tool call',
+          { category: 'budget', code: 'budget.insufficient-tool-calls', retryable: false },
+        );
+      }
+    }
     let outcome: WorkflowExecutorOutcome;
     try {
       outcome = await services.executor.execute({

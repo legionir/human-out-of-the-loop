@@ -27,6 +27,7 @@ import {
   type FinalReviewerLike,
   type PlannerLike,
   type PlanRuntimeLike,
+  type ExecutionUsageSource,
 } from './orchestrator-adapters.js';
 import { createWorkflowProfileHandlers, type WorkflowReviewerPort } from './node-handlers.js';
 import { confineUntrustedContent } from './untrusted-content.js';
@@ -72,6 +73,12 @@ export interface WorkflowProfileBridgeServices {
   renderPlan?: (plan: unknown) => string;
   modelId?: string;
   mode?: RunMode;
+  /**
+   * F-2: measures what the delegated plan execution actually consumed, from the run's own events.
+   * `begin` is called immediately before the plan is handed to the runtime and `end` right after it
+   * returns (or throws), so the counters are charged with real numbers.
+   */
+  executionUsage?: ExecutionUsageSource;
 }
 
 export interface WorkflowProfileBridgeOptions {
@@ -102,6 +109,84 @@ export interface WorkflowProfileBridgeOutcome {
   answer?: string;
 }
 
+/**
+ * F-1: the tool surface the profile itself declares for execution.
+ *
+ * Only the profile's *tool* declarations narrow a delegated plan: the toolsets it lists in
+ * `policies.tools.allowedToolsets` (an empty list means "no narrowing", the documented default), the
+ * toolset a node binds by id, and the always-subtracting `policies.tools.deniedTools`. Persona pins
+ * are deliberately not part of this surface — a plan step runs under its own plan-step persona, so
+ * using the profile's planner/reviewer personas here would strip every step's tools.
+ *
+ * `undefined` means "no narrowing at all"; a surface with no `allow` list applies the deny list only.
+ */
+interface DeclaredToolSurface {
+  /** Positive allow-list. Absent ⇒ every step tool is kept unless denied. */
+  readonly allow?: ReadonlyArray<string>;
+  /** Tools that must never reach a step, whatever it declares. */
+  readonly deny: ReadonlyArray<string>;
+}
+
+function declaredExecutionToolSurface(
+  prepared: PreparedWorkflowProfileRun,
+  request: { toolsetRef?: string },
+): DeclaredToolSurface | undefined {
+  const tools = (prepared.profile.policies as { tools?: { allowedToolsets?: string[]; deniedTools?: string[] } }).tools;
+  const profileDenied = Array.isArray(tools?.deniedTools) ? tools!.deniedTools! : [];
+  const bound = request.toolsetRef;
+  const named = bound !== undefined ? [bound] : (Array.isArray(tools?.allowedToolsets) ? tools!.allowedToolsets! : []);
+  if (bound === undefined && named.length === 0 && profileDenied.length === 0) return undefined;
+
+  const byId = new Map(
+    prepared.resolved.dependencies
+      .filter((dependency) => dependency.kind === 'toolset')
+      .map((dependency) => [dependency.id, dependency.content as { tools?: unknown; deniedTools?: unknown }]),
+  );
+  const deny = new Set<string>(profileDenied);
+  const allow = new Set<string>();
+  for (const id of named) {
+    const content = byId.get(id);
+    // A named toolset that did not resolve contributes nothing (fail closed): with an `allow` list
+    // present that keeps the surface empty instead of silently permitting the un-narrowed runtime set.
+    if (!content) continue;
+    if (Array.isArray(content.tools)) for (const tool of content.tools) if (typeof tool === 'string') allow.add(tool);
+    if (Array.isArray(content.deniedTools)) for (const tool of content.deniedTools) if (typeof tool === 'string') deny.add(tool);
+  }
+  return {
+    ...(named.length > 0 ? { allow: Object.freeze([...allow].sort()) } : {}),
+    deny: Object.freeze([...deny].sort()),
+  };
+}
+
+/** F-1: filter every plan step's declared tools to the surface (order kept, duplicates dropped). */
+function narrowPlanToToolSurface(plan: Plan, surface: DeclaredToolSurface): Plan {
+  const allow = surface.allow ? new Set(surface.allow) : undefined;
+  const deny = new Set(surface.deny);
+  const steps = plan.steps.map((step) => {
+    const declared = Array.isArray(step.assignedTools) ? step.assignedTools : [];
+    const narrowed: string[] = [];
+    for (const tool of declared) {
+      if (tool === '*') {
+        // `*` means "whatever the runtime permits". With a declared allow surface the effective set
+        // is exactly that surface (minus denies); without one the wildcard cannot be enumerated at
+        // this layer, so it stays a wildcard — the step persona and the runtime catalog still bound
+        // it, and a profile that needs an exact surface pins a toolset.
+        if (allow) {
+          for (const id of surface.allow!) if (!deny.has(id) && !narrowed.includes(id)) narrowed.push(id);
+        } else if (!narrowed.includes('*')) {
+          narrowed.push('*');
+        }
+        continue;
+      }
+      if (deny.has(tool)) continue;
+      if (allow && !allow.has(tool)) continue;
+      if (!narrowed.includes(tool)) narrowed.push(tool);
+    }
+    return { ...step, assignedTools: narrowed };
+  });
+  return { ...plan, steps };
+}
+
 /** Run the prepared profile; the caller maps the outcome onto its own lifecycle. */
 export async function runWorkflowProfileBridge(
   prepared: PreparedWorkflowProfileRun,
@@ -129,12 +214,48 @@ export async function runWorkflowProfileBridge(
     ...(services.modelId ? { modelId: services.modelId } : {}),
     ...(services.mode ? { mode: services.mode } : {}),
   });
+  // F-1: the profile's declared tool surface, per execute node, applied to the plan the runtime runs.
+  const narrowFor = (request: { nodeId: string; toolsetRef?: string; personaRef?: string }): ((plan: Plan) => Plan) => {
+    const surface = declaredExecutionToolSurface(prepared, request);
+    return surface === undefined ? (plan: Plan) => plan : (plan: Plan) => narrowPlanToToolSurface(plan, surface);
+  };
+
   // Capture views: new objects, so the caller's services are never patched.
+  type ExecutionUsageRecorder = { end(): { modelCalls: number; toolCalls: number } };
+  let usageRecorder: ExecutionUsageRecorder | undefined;
+  let usageForPlan: { modelCalls: number; toolCalls: number } | undefined;
   const planRuntimeView: PlanRuntimeLike = {
-    async execute(planArg: Plan): Promise<PlanExecutionResult> {
-      const result = await services.planRuntime.execute(planArg);
-      execution = result;
-      return result;
+    async execute(planArg: Plan, meta?: { nodeId?: string; signal?: AbortSignal }): Promise<PlanExecutionResult> {
+      // F-3: the delegated execution is the profile's side-effect window. The marker is persisted
+      // BEFORE the runtime is called — where the security gate already passed — and cleared only
+      // once the call reports back (a returned result, success or failed-partial, is a known
+      // outcome). A process killed inside the window — or a call that throws — leaves a detectable
+      // `pendingEffect`, and a resume refuses instead of repeating the work.
+      prepared.recordEffectStart(meta?.nodeId ?? 'execute', 'delegated plan execution');
+      // F-2: measure the window from the run's own events (see the Orchestrator's provider).
+      usageRecorder = services.executionUsage?.begin(planArg);
+      // F-8: the run's abort signal reaches the delegated runtime, which stops dispatching new
+      // steps; in-flight work finishes and the loop reports the plan as `cancelled`.
+      const signal = meta?.signal;
+      const forwardCancel = (): void => services.planRuntime.cancel?.();
+      if (signal) {
+        if (signal.aborted) forwardCancel();
+        else signal.addEventListener('abort', forwardCancel, { once: true });
+      }
+      let outcomeKnown = false;
+      try {
+        const result = await services.planRuntime.execute(planArg);
+        execution = result;
+        outcomeKnown = true;
+        return result;
+      } finally {
+        signal?.removeEventListener('abort', forwardCancel);
+        usageForPlan = usageRecorder?.end();
+        usageRecorder = undefined;
+        // A throw means the outcome of the side effect is unknown: the marker stays for the resume
+        // gate to refuse an automatic retry (F-3), exactly like a killed process.
+        if (outcomeKnown) prepared.recordEffectCommitted();
+      }
     },
   };
   /**
@@ -193,6 +314,11 @@ export async function runWorkflowProfileBridge(
     },
     executor: createExecutorPort({
       planRuntime: planRuntimeView,
+      narrowPlan: (plan, request) => narrowFor(request)(plan),
+      usageFor: (plan) => {
+        void plan;
+        return usageForPlan;
+      },
       assertExecutable: (planDigest) => {
         if (typeof planDigest !== 'string' || !approvedPlanDigests.has(planDigest)) {
           throw new WorkflowNodeError(
@@ -206,7 +332,15 @@ export async function runWorkflowProfileBridge(
     ...(services.confirm
       ? {
         approvals: (() => {
-          const port = createApprovalPort({ confirm: services.confirm });
+          // F-6: the callback receives the captured plan (when there is one), so the caller can
+          // record the plan it is asking about — the server sets `run.planId` from it and the CLI
+          // sets `currentPlanId`, which is what makes `/api/plans/:id/confirm` and Ctrl-C work on
+          // the profile path.
+          const port = createApprovalPort({
+            // `plan` is captured by the closure, not read when the port is built: the question is
+            // asked after planning, so the callback must see the plan of this run.
+            confirm: (prompt: string) => services.confirm!(prompt, plan),
+          });
           return {
             async request(approvalRequest: Parameters<typeof port.request>[0]) {
               const outcome = await port.request(approvalRequest);

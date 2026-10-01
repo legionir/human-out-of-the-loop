@@ -97,7 +97,7 @@ describe('Workflow Profile executor adapter', () => {
     const execute = vi.fn(() => Promise.resolve(executionResult()));
     const port = createExecutorPort({ planRuntime: { execute } });
     const outcome = await port.execute({ nodeId: 'work', goal: confined('g'), plan: { id: 'p1' }, mode: 'assisted', requireApprovalForSideEffects: true });
-    expect(execute).toHaveBeenCalledWith({ id: 'p1' });
+    expect(execute).toHaveBeenCalledWith({ id: 'p1' }, { nodeId: 'work' });
     expect(outcome.status).toBe('completed');
     await expect(port.execute({ nodeId: 'work', goal: confined('g'), mode: 'assisted', requireApprovalForSideEffects: true })).rejects.toThrow(/requires a plan/);
 
