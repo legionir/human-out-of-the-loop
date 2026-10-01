@@ -82,11 +82,15 @@ Nothing else about the legacy path changes, and the parity suite fails if the pl
 agents, execution result or review summary diverge (the differences above are the documented
 exceptions).
 
-**Not activation-ready yet (independent review, 2026-09-30):** an independent static review of the
-handoff head found ten issues, all re-verified (F-1…F-4 enforcement/resume, F-5 blind-approval
-possibility, F-6 server confirmation, F-7 resume inputs, F-8 cancellation, F-10 session history);
-F-9 was a crash and is fixed. Phases 6 and 9 are 🟡 again and the fix backlog is in
-`TRACEABILITY.md` §3b and `EXECUTION_PLAN.md`. **Do not activate or merge on this document alone.**
+**Independent review (2026-09-30) — all ten findings fixed (2026-10-01):** an independent static
+review of the handoff head found ten issues; every one was re-verified as real and every one is now
+fixed and pinned by a regression test (F-1 tool-surface narrowing at the execution call site, F-2
+measured/charged delegated usage with a pre-consumption refusal, F-3 persisted pending-effect markers,
+F-4 run lease, F-5 shown-content approvals, F-6 confirm plan id, F-7 resume inputs, F-8 cancellation
+forwarding, F-9 escalation re-run, F-10 session history). Phases 6, 7 and 9 are 🟢 again at `987e197`
+(CI run `36812950278`, 10/10). **Still not activation-ready:** Phase 10 Step 3 (the owner's sign-off
+on `PHASE10_REVIEW.md`) and the U-3 activation approval are outstanding, the built-in default stays
+unapproved and off, and merges remain frozen. **Do not activate or merge on this document alone.**
 
 **Host requirements (U-5, documented 2026-09-30):** the server never accepts `projectRoot` from a
 request, every profile/component file is identity-checked and digest-verified, but nothing in code can

@@ -148,7 +148,7 @@ approval node به mechanism interaction/callback موجود متصل شود؛ �
 
 ---
 
-## [🟡] Phase 6: lifecycle پایدار، بودجه و enforcement امنیتی
+## [🟢] Phase 6: lifecycle پایدار، بودجه و enforcement امنیتی
 
 > **Re-opened (2026-09-30, independent review).** The enforcement acceptance criteria are **not** met
 > end to end: the toolset/permission guard has no non-test caller, the profile's counters are not
@@ -163,7 +163,17 @@ approval node به mechanism interaction/callback موجود متصل شود؛ �
 > the run's own events report, and a plan the remaining budget cannot fund is refused before it
 > starts) and F-3 (the delegated execution is a persisted `pendingEffect` until the runtime reports
 > back) are fixed end to end and pinned by `workflow-profile-review-fixes.test.ts`;
-> CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke). F-4 (run-record lease/CAS) and F-7 (mid-graph resume inputs) keep this phase 🟡.
+> CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke).
+>
+> **Re-verified 🟢 (2026-10-01, `987e197`):** F-4 (a resume takes an exclusive, self-healing run lease;
+> a live second process is refused with `resume.locked`) and F-7 (the kernel reports the inputs of the
+> node that stopped the run, the record stores them for an `ask-user` pause, and a resume hands them
+> back — a legacy record without them refuses with `resume.inputs-missing`) are fixed too, so every
+> Phase 6 finding is closed. Re-verification at the exact head CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke); locally the profile +
+> CLI + server suites pass 52 files / 598 tests, the CI-equivalent sweep is 2,006/2,007 with only the
+> pre-existing `J-05`, profile gates 9/9, e2e `profiles` 12/12, `tsc --noEmit` and `npm run build`
+> clean. The authority/budget contract itself was never in question: this closes the wiring gaps the
+> review found against it.
 
 اجرای Profile باید در کنار حلقهٔ فعلی دارای وضعیت قابل‌بازیابی، توقف امن، بودجهٔ نهایی، رخدادهای قابل‌مشاهده و مجوزهای واقعی باشد. وضعیت اجرای Profile با plan/session موجود هم‌زیست می‌شود و فرمت ذخیره‌شدهٔ قدیمی را نمی‌شکند.
 
@@ -348,9 +358,15 @@ recorded as a behaviour difference (see `PHASE7_PARITY.md` §9). Evidence: all W
 + server suites 47 files / 554 tests; built CLI and live-server smoke tests; CI 10/10 on the phase
 heads. No merge, release or default activation is authorized until all phases are complete.
 
+**F-10 closed (2026-10-01, `987e197`):** the parity gap the review recorded (the profile planner did
+not receive the session history) is fixed — the profile run now installs the same per-run
+`withSessionHistory` scope the legacy path uses, so prior turns reach the profile planner while
+concurrent runs in other sessions stay isolated. Pinned by the parity suite (it fails on the previous
+head) and re-verified by CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke).
+
 ---
 
-## [🟡] Phase 9: hardening امنیتی و سنجش منابع
+## [🟢] Phase 9: hardening امنیتی و سنجش منابع
 
 > **Re-opened (2026-09-30, independent review).** The Phase 9 acceptance criteria include "limits act
 > before consumption" and "no profile/untrusted text weakens or widens policy". The review found that
@@ -363,8 +379,13 @@ heads. No merge, release or default activation is authorized until all phases ar
 > **F-fix progress (2026-10-01, `220af0b`):** F-1 (narrowing enforced at the execution call site),
 > F-2 (limits charged from measured usage, with a pre-consumption refusal) and F-8 (the abort signal
 > reaches `PlanRuntime.cancel()`) are fixed end to end and pinned by
-> `workflow-profile-review-fixes.test.ts`; CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke). F-5 (a bound approval must have been shown
-> to the approver) keeps this phase 🟡.
+> `workflow-profile-review-fixes.test.ts`; CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke).
+>
+> **Re-verified 🟢 (2026-10-01, `987e197`):** F-5 is fixed as well — the semantic validator refuses a
+> profile whose `bindsTo` port is not in `show` (`approval.bound-content-not-shown`), and the approval
+> handler enforces the same rule at the runtime boundary before any interaction. Re-verification at the
+> exact head CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke); the same local evidence as Phase 6 (52 files / 598 tests; the
+> CI-equivalent sweep 2,006/2,007 with only `J-05`; gates 9/9; e2e `profiles` 12/12).
 
 پس از اتصال handlerها و پیش از rollout، امنیت/adversarial و ظرفیت را با معیارهای مصوب harden کن. مرز اعتماد از Phase 5 برقرار شده؛ این فاز آن را end-to-end می‌بندد و جایگزین تست‌های زودهنگام نیست.
 
@@ -520,6 +541,13 @@ answers", `Test timed out in 10000ms`). Re-running only the failed jobs is not p
 integration (`gh run rerun` → "cannot be rerun"; the REST `rerun-failed-jobs` endpoint → HTTP 403), so
 the green exact head for the *code* is `307b218` and the docs-only heads are recorded as flaky, not as
 profile failures.
+
+**Review outcome (2026-10-01, append-only):** the independent architectural/QA/security review was
+performed and every finding verified real (`PHASE10_REVIEW.md` §9); all ten are now fixed and pinned by
+regression tests (§10 and the addendum at the end of this file), and Phases 6, 7 and 9 are 🟢 again at
+`987e197` (CI `36812950278`, 10/10). Step 3 itself stays 🟡 only for the owner's own sign-off on
+`PHASE10_REVIEW.md` (U-3 activation approval and U-6/U-7 remain owner-gated), and the merge/release
+authorization stays with the owner.
 
 **Acceptance criteria:**
 migration/rollback آزموده یا عدم نیاز مستند است؛ CI و semantic/schema/security gates روی head هر PR نتیجهٔ ثبت‌شده دارند؛ traceability برای همهٔ R IDs کامل است؛ هیچ unknown مسدودکننده‌ای بی‌صاحب/بی‌موعد نیست؛ PRها فازبندی و قابل‌بازبینی‌اند؛ regressions از baseline تفکیک شده؛ همهٔ docs/examples با implementation همخوانند؛ rollout default-off است؛ merge/release بدون مجوز انجام نشده است.
@@ -994,10 +1022,23 @@ reaches `PlanRuntime.cancel()`, which stops dispatching new steps (F-8). Regress
 `src/ai/__tests__/workflow-profile-review-fixes.test.ts` (14 tests, one behavior each). Evidence at
 the exact head `220af0b`: CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke); locally the profile + CLI + server suites pass 51 files /
 591 tests and the CI-equivalent sweep is 1,999/2,000 with only the pre-existing `J-05`; profile gates
-9/9; e2e `profiles` 12/12; `tsc --noEmit` and `npm run build` clean. **Still open:** F-4 (lease/CAS on
-the run record), F-5 (a bound approval must have been shown), F-7 (mid-graph resume inputs) and F-10
-(session history parity); Phases 6 and 9 therefore stay 🟡, and F-1's `personaRef`/`skillRefs` note is
-covered by the step's own persona bound (documented in the fix).
+9/9; e2e `profiles` 12/12; `tsc --noEmit` and `npm run build` clean. F-1's `personaRef`/`skillRefs`
+note is covered by the step's own persona bound (documented in the fix).
+
+**Fix backlog complete (2026-10-01, `85cf218` + `987e197`):** the remaining findings are fixed and
+pinned by the same regression file — F-4: resuming a stored attempt takes an exclusive run lease first
+(O_EXCL file next to the record, holder identified by pid, a dead holder's lease taken over, a live
+second process refused with `resume.locked`, released when the attempt settles); F-5: an approval that
+binds content must show it (semantic validator `approval.bound-content-not-shown` + the same rule at
+the runtime boundary before any interaction); F-7: the kernel reports the inputs the stopping node
+received (`resumeInputs`), an `ask-user` pause stores them (`nodeInputs`), a resume hands them back,
+and a legacy record without them refuses a mid-graph resume (`resume.inputs-missing`) instead of
+failing inside the node; F-10: the profile planner now runs inside the same per-run session-history
+scope as the legacy planner (parity test pins it). With F-1…F-10 all fixed, Phases 6, 7 and 9 are 🟢
+again at CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke); locally the profile + CLI + server suites pass 52 files / 598 tests, the
+CI-equivalent sweep is 2,006/2,007 with only the pre-existing `J-05`, profile gates 9/9 and e2e
+`profiles` 12/12. Phase 10 Step 3 (the owner's sign-off on the review report) stays 🟡, the built-in
+default stays unapproved and off, and merges remain frozen.
 
 **Exact-head evidence for the F-9 fix and the review record (`8ca5fe0`):** CI run `36808692988` is
 **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, the

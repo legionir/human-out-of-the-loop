@@ -155,7 +155,7 @@ below; the required work is in `EXECUTION_PLAN.md` (Phase 10 addendum) and Phase
 | F-7 | Resume restores no node inputs/outputs | **Confirmed for paused runs.** A killed first run restarts at the record's start node (safe for inputs); an `ask-user` pause persists the last visited node, and a resume from a mid-graph node (e.g. `execute`) finds none of the inputs the planner/approval produced | Phase 6 criterion |
 | F-8 | Cancellation does not reach the delegated `PlanRuntime` | **Confirmed.** The handler passes `signal` to the executor, the adapter drops it, and `PlanRuntime.execute` receives only the plan; the CLI path additionally never sets `currentPlanId` (F-6) | A long delegated execution cannot be interrupted through the profile path |
 | F-9 | Auto-escalation re-runs the prepared run | **Confirmed by reproduction, fixed.** The escalated attempt reused the same prepared run and threw `resume.already-terminal`; a scratch test failed before the fix. Now the escalation is resolved as its own attempt with a fresh run id, and a parity test pins the legacy-identical outcome | Fixed in this stretch; regression in `workflow-profile-parity.test.ts` |
-| F-10 | The profile planner gets no session history | **Confirmed.** The legacy path wraps the request with `withSessionHistory`; the profile path returns earlier and the bridge sends only the current request | Recorded as a parity gap; the profile session can still be continued, the planner just cannot see prior turns |
+| F-10 | The profile planner gets no session history | **Confirmed.** The legacy path wraps the request with `withSessionHistory`; the profile path returns earlier and the bridge sends only the current request | Recorded as a parity gap; **fixed in `987e197`** (see §10) |
 
 **Not confirmed by this verification:** nothing in the report was found to be a false positive. Two
 severity notes for the record: F-1 and F-5 are *narrowing/consent* gaps, not widening — the runtime
@@ -172,6 +172,18 @@ they are acceptance-criteria violations all the same, which is why the phases ar
 | F-6 | **Fixed** (`220af0b`) | The approval port passes the captured plan to the confirm callback, so the server's `run.planId` and the CLI's `currentPlanId` are set on the profile path and `/api/plans/:id/confirm` / Ctrl-C `cancelPlan` can resolve it. |
 | F-8 | **Fixed** (`220af0b`) | The run's abort signal is forwarded to `PlanRuntime.cancel()`; the pipeline still reports a terminal cancellation. |
 
-Regression coverage: `src/ai/__tests__/workflow-profile-review-fixes.test.ts` (14 tests). Exact-head
-evidence CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke). Still open and blocking the re-opened phases: F-4, F-5, F-7 (and F-10 for
-the Phase 7 parity claim).
+Regression coverage: `src/ai/__tests__/workflow-profile-review-fixes.test.ts` (20 tests).
+
+**Follow-up fixes (2026-10-01):**
+
+| # | Status | Fix / evidence |
+| --- | --- | --- |
+| F-4 | **Fixed** (`85cf218`) | A resume takes an exclusive run lease before anything executes: an O_EXCL lease file next to the record, holder identified by pid and taken over when dead, a live second process refused with `resume.locked`, released when the attempt settles. |
+| F-5 | **Fixed** (`85cf218`) | An approval that binds content must show it: `approval.bound-content-not-shown` at load time and the same refusal at the runtime boundary before any interaction. |
+| F-7 | **Fixed** (`85cf218`) | The kernel reports the inputs the stopping node received, the run record stores them for an `ask-user` pause, and a resume hands them back; a legacy record without them refuses a mid-graph resume (`resume.inputs-missing`). |
+| F-10 | **Fixed** (`987e197`) | The profile run now installs the same per-run session-history scope the legacy path uses; the parity suite pins it and fails on the previous head. |
+
+All ten findings are closed; Phases 6, 7 and 9 are 🟢 again and Phase 10 Step 3 (owner sign-off) is
+the only Phase-10 item open. Final evidence CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke); locally 52 files / 598 tests in the
+profile + CLI + server suites, the CI-equivalent sweep 2,006/2,007 with only the pre-existing `J-05`,
+profile gates 9/9, e2e `profiles` 12/12, `tsc --noEmit` and `npm run build` clean.

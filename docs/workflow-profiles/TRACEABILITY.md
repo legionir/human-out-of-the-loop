@@ -58,7 +58,11 @@ restated here in one line each, with where the implementation honours it.
 | U-7 | **Profile-native `handoff`/`ask-user` outcomes in the legacy vocabulary.** A run that stops at a limit with `onLimit: handoff`/`ask-user` (or an end node with `outcome: "handoff"`) finishes with run status `handoff`; the Orchestrator maps it onto the legacy review/interaction outcome `failure` (the legacy union has no `handoff`). The durable record keeps the pause correctly (`awaitingUser: true`, non-terminal, `resumable`), and the report line shows `Workflow profile "handoff"` — only the session interaction is labelled `failure`. Opened by the 2026-09-30 self-review. | Pouya | Activation | Recommendation: map `handoff` → `partial-success` (work produced, not finished here) and leave an `ask-user` pause's interaction `pending` (the run is resumable), keeping the profile status in the report line; exit codes unchanged. Until decided the behaviour fails closed and is visible; the built-in default uses `onLimit: fail` and no `fail`-free flow ships (the schema fixture exercises a handoff end). |
 | U-6 | **Pre-existing `J-05` checkpoint test is environment-sensitive.** On this sandbox it fails deterministically (`keeps only the newest snapshots of a plan and prunes old plans`, keeping `s1`,`s2` instead of `s2`,`s3`): consecutive writes land on the **same mtime** here (probe: three files, one distinct `mtimeMs`), so the "newest two" tie-break falls to name order. It passes on GitHub runners (all 10 jobs green on the phase heads) and the file plus `checkpoint.ts` are unchanged since the session base (`git diff f1d403f` empty). | Repository maintainers | Next checkpoint change | Not a regression from this work and not hidden: keep CI as the authority, and make pruning deterministic (order by a recorded sequence/`snapshotId`, not by equal mtimes) the next time `checkpoint.ts` is touched. |
 
-## 3b. Independent-review fix backlog (2026-09-30; blocks the re-opened phases)
+## 3b. Independent-review fix backlog (2026-09-30; closed 2026-10-01)
+
+**Status: all ten findings are fixed** — F-1/F-2/F-3/F-6/F-8 in `220af0b`, F-9 in `8ca5fe0`,
+F-4/F-5/F-7 in `85cf218`, F-10 in `987e197`. The section below keeps the ledger and the evidence;
+Phases 6, 7 and 9 are 🟢 again.
 
 An independent static review of head `57c9761` found ten issues; all ten were re-verified as real
 (`PHASE10_REVIEW.md` §9). Phases 6 and 9 are 🟡 again until F-1…F-4 and F-5…F-8 are fixed and tested
@@ -70,19 +74,21 @@ mechanism for F-4 (lock vs compare-and-swap).
 | F-1 | Declared tool surface not enforced at the execution call site | **Fixed** (`220af0b`) — the declared surface (pinned/bound toolset − toolset/profile deny lists) is narrowed onto every plan step before the runtime sees it; wildcard steps become exactly that surface | Phase 6 🟢 (F-4/F-7 remain) |
 | F-2 | Profile counters not charged for delegated plan execution | **Fixed** (`220af0b`) — `createEventBusExecutionUsage` counts the plan's own `agent:*` events; the port returns the usage and the handler charges it, after refusing to start a plan the remaining budget cannot fund | Phase 6/9 🟢 (F-4/F-5/F-7 remain) |
 | F-3 | Effect markers never called; resume can repeat a side effect | **Fixed** (`220af0b`) — `recordEffectStart` is persisted before the delegated call and committed only once it reports back; a kill or throw leaves `pendingEffect` and the resume gate refuses (`resume.ambiguous-effect`) | Phase 6 🟢 (F-4/F-7 remain) |
-| F-4 | No lease/CAS: two runners can resume one run | Open — mechanism is an owner call | Phase 6 🟢 |
-| F-5 | An approval that binds content need not have shown it | Open — fix (require or auto-show the bound content) | Phase 9 🟢 |
+| F-4 | No lease/CAS: two runners can resume one run | **Fixed** (`85cf218`) — a resume takes an O_EXCL run lease (self-healing by pid, `resume.locked` for a live second process) and releases it when the attempt settles | Phase 6 🟢 |
+| F-5 | An approval that binds content need not have shown it | **Fixed** (`85cf218`) — `bindsTo ∉ show` is refused at load (`approval.bound-content-not-shown`) and again at the runtime boundary before any interaction | Phase 9 🟢 |
 | F-6 | Manual server confirmation cannot resolve (no plan id on the profile confirm callback) | **Fixed** (`220af0b`) — the confirm callback receives the captured plan, so the server sets `run.planId` and the CLI sets `currentPlanId` on the profile path too | Phase 8/10 acceptance |
-| F-7 | Resume restores no inputs for a mid-graph pause | Open — fix (persist node payloads or restrict resume) | Phase 6 🟢 |
+| F-7 | Resume restores no inputs for a mid-graph pause | **Fixed** (`85cf218`) — the kernel reports the stopping node's inputs, an `ask-user` pause stores them, a resume hands them back; a legacy record without them refuses (`resume.inputs-missing`) | Phase 6 🟢 |
 | F-8 | Cancellation not forwarded to the delegated runtime | **Fixed** (`220af0b`) — the run's abort signal reaches `PlanRuntime.cancel()`, which stops dispatching new steps | Phase 9 🟢 (F-5 remains) |
 | F-9 | Auto-escalation re-ran the prepared run (crash) | **Fixed** — fresh attempt + parity regression | done |
-| F-10 | Session history not given to the profile planner | Open — parity fix | Phase 7 parity claim |
+| F-10 | Session history not given to the profile planner | **Fixed** (`987e197`) — the profile run installs the same per-run session-history scope as the legacy path; pinned by the parity suite | Phase 7 parity claim |
 
-**Fix evidence (2026-10-01):** F-1, F-2, F-3, F-6 and F-8 are fixed in `220af0b` (six files; the fix
-`F-1`…`F-8` regression file `workflow-profile-review-fixes.test.ts`, 14 tests) and verified at that
-exact head by CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke); locally the same head passes 52 files / 591 tests in the profile + CLI
-+ server suites and the CI-equivalent sweep reports 1,999/2,000 with only the pre-existing `J-05`.
-Phases 6 and 9 stay 🟡 until F-4/F-5/F-7 (and F-10 for the Phase 7 parity claim) are fixed the same way.
+**Fix evidence (2026-10-01):** F-1, F-2, F-3, F-6 and F-8 are fixed in `220af0b` (CI `36810452453` @ `220af0b` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, three e2e legs, type check, build, profile gates, CLI smoke));
+F-4, F-5 and F-7 are fixed in `85cf218`; F-10 is fixed in `987e197` — all ten review findings are
+closed, every one pinned by `workflow-profile-review-fixes.test.ts` (20 tests) or the parity suite.
+Final evidence at the exact head CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke); locally the profile + CLI + server suites pass
+52 files / 598 tests, the CI-equivalent sweep reports 2,006/2,007 with only the pre-existing `J-05`,
+profile gates 9/9, e2e `profiles` 12/12, `tsc --noEmit` and `npm run build` clean. Phases 6, 7 and 9
+are 🟢 again; Phase 10 Step 3 (owner sign-off) stays 🟡.
 
 **Resolved unknowns (kept for the record, no owner needed):**
 

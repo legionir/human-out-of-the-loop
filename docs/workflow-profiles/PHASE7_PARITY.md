@@ -277,6 +277,10 @@ registry, and compares the observable surface. All nine cases pass:
 | Existing data + rollback | a legacy plan and session created on disk are read back by the profile path (same step statuses, same session, appended interaction); the same configuration with the flag off runs the legacy path again |
 | Load error safety | flag on + invalid selected document: `WorkflowProfileLoadError`, **no session, no plan, no step agent, no model call** |
 
+A third parity gap was found by the 2026-09-30 independent review (F-10: the profile planner received
+no session history) and is fixed in `987e197` — the profile run installs the same per-run
+`withSessionHistory` scope the legacy path uses, pinned by `workflow-profile-parity.test.ts`.
+
 Two parity gaps found while building this were fixed rather than documented away:
 
 - **Acceptance/streaming callbacks.** The profile path's `PlanRuntime` was built without

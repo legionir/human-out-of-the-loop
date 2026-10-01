@@ -93,10 +93,15 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
 - **Fixed earlier:** auto-mode escalation on the profile path re-ran the prepared run and crashed with
   `resume.already-terminal`; the escalated attempt is now its own run (fresh id), with a parity
   regression (F-9).
-- **Open:** the run record has no lease, so two runners can resume one run (F-4); an approval that
-  binds content need not have shown it (F-5); a mid-graph pause resumes without its node inputs (F-7);
-  the profile planner does not receive the session history (F-10). Phases 6 and 9 are 🟡 again;
-  `TRACEABILITY.md` §3b lists the required work.
+- **Fixed (`85cf218`, `987e197`):** resuming a stored run now takes an exclusive run lease
+  (`resume.locked` for a live second process, self-healing when the holder died) — F-4; an approval
+  that binds content must show it, refused at load time and at the runtime boundary — F-5; a resume
+  hands a mid-graph pause the inputs it was waiting on, and a legacy record without them refuses
+  instead of failing inside the node — F-7; the profile planner receives the session history exactly
+  like the legacy planner — F-10.
+- **Closed:** every finding of the independent review is fixed (F-1…F-10). Phases 6, 7 and 9 are 🟢
+  again; the built-in default stays unapproved and off, and Phase 10 Step 3 (owner sign-off) is the
+  remaining Phase-10 item. `TRACEABILITY.md` §3b holds the fix ledger.
 
 **Behaviour differences — decided by the owner on 2026-09-30 (U-4)** (recorded in
 `docs/workflow-profiles/PHASE7_PARITY.md`, the decision record in `PHASE10_OPERATIONS.md` §9; the
