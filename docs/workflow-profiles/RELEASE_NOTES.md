@@ -89,8 +89,9 @@ measured/charged delegated usage with a pre-consumption refusal, F-3 persisted p
 F-4 run lease, F-5 shown-content approvals, F-6 confirm plan id, F-7 resume inputs, F-8 cancellation
 forwarding, F-9 escalation re-run, F-10 session history). Phases 6, 7 and 9 are 🟢 again at `987e197`
 (CI run `36812950278`, 10/10). **Still not activation-ready:** the owner authorized merging PR #10
-into the phase-2 contract branch on 2026-10-01, but the U-3 activation approval is still outstanding —
-the built-in default stays unapproved and off. **Do not activate on this document alone.**
+on 2026-10-01 and then directed a hold while the stack scope is decided (PR #10 is part of GitHub's
+native stack #11 with PR #9); the U-3 activation approval is still outstanding — the built-in default
+stays unapproved and off. **Do not activate on this document alone.**
 
 **Host requirements (U-5, documented 2026-09-30):** the server never accepts `projectRoot` from a
 request, every profile/component file is identity-checked and digest-verified, but nothing in code can

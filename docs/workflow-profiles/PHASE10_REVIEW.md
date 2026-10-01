@@ -184,6 +184,7 @@ Regression coverage: `src/ai/__tests__/workflow-profile-review-fixes.test.ts` (2
 | F-10 | **Fixed** (`987e197`) | The profile run now installs the same per-run session-history scope the legacy path uses; the parity suite pins it and fails on the previous head. |
 
 All ten findings are closed; Phases 6, 7 and 9 are 🟢 again and Phase 10 Step 3 closed with the
-owner's merge authorization (2026-10-01). Final evidence CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke); locally 52 files / 598 tests in the
+owner's merge authorization (2026-10-01) — the merge itself is on hold at the owner's direction
+(`EXECUTION_PLAN.md`, Phase 10 Step 3). Final evidence CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke); locally 52 files / 598 tests in the
 profile + CLI + server suites, the CI-equivalent sweep 2,006/2,007 with only the pre-existing `J-05`,
 profile gates 9/9, e2e `profiles` 12/12, `tsc --noEmit` and `npm run build` clean.

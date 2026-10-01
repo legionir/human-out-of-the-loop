@@ -548,9 +548,9 @@ regression tests (§10 and the addendum at the end of this file), and Phases 6, 
 `987e197` (CI `36812950278`, 10/10). **Step 3 closed with the owner's merge authorization
 (2026-10-01):** the owner explicitly asked for PR #10 to be merged — the independent authorization the
 plan requires — and with all ten findings fixed and every acceptance criterion evidenced, no Phase-10
-item is left open. U-3 (default activation) is explicitly **not** granted: `BUILT_IN_DEFAULT_APPROVAL`
-stays `approved: false`; U-6 and U-7 remain recorded open items for the next checkpoint/activation
-work.
+item is left open. **Merge authorized but on hold (owner direction, 2026-10-01):** the owner authorized the merge and then directed a hold, because PR #10 is part of GitHub's native stack #11 (base `main` @ `ee3fa3f`): its lower PR #9 (`feat/workflow-profile-phase2-contract-20260929`, draft, Phase 2) and PR #10 would be merged together by GitHub's stack-aware API, and a plain merge (or a base retarget of a stacked PR) is refused. The owner is deciding between unstacking #10 from the stack and merging the whole stack; until then no merge has been performed. U-3 (default activation) is explicitly **not** granted:
+`BUILT_IN_DEFAULT_APPROVAL` stays `approved: false`; U-6 and U-7 remain recorded open items for the
+next checkpoint/activation work.
 
 **Acceptance criteria:**
 migration/rollback آزموده یا عدم نیاز مستند است؛ CI و semantic/schema/security gates روی head هر PR نتیجهٔ ثبت‌شده دارند؛ traceability برای همهٔ R IDs کامل است؛ هیچ unknown مسدودکننده‌ای بی‌صاحب/بی‌موعد نیست؛ PRها فازبندی و قابل‌بازبینی‌اند؛ regressions از baseline تفکیک شده؛ همهٔ docs/examples با implementation همخوانند؛ rollout default-off است؛ merge/release بدون مجوز انجام نشده است.
@@ -1040,9 +1040,10 @@ failing inside the node; F-10: the profile planner now runs inside the same per-
 scope as the legacy planner (parity test pins it). With F-1…F-10 all fixed, Phases 6, 7 and 9 are 🟢
 again at CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke); locally the profile + CLI + server suites pass 52 files / 598 tests, the
 CI-equivalent sweep is 2,006/2,007 with only the pre-existing `J-05`, profile gates 9/9 and e2e
-`profiles` 12/12. Phase 10 Step 3 closed with the owner's merge authorization (2026-10-01) — the merge
-act is PR #10's merge commit; the built-in default stays unapproved and off, and release or default
-activation still require the owner's explicit authorization.
+`profiles` 12/12. Phase 10 Step 3 closed with the owner's merge authorization (2026-10-01); the merge
+itself is on hold at the owner's direction (native stack #11 would also land PR #9 — see the Step 3
+note above), so no merge commit exists. The built-in default stays unapproved and off, and release or
+default activation still require the owner's explicit authorization.
 
 **Exact-head evidence for the F-9 fix and the review record (`8ca5fe0`):** CI run `36808692988` is
 **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, the

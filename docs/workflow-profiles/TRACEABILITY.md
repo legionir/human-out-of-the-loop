@@ -6,9 +6,9 @@ register. This is that place. It is written from the repository as it stands (no
 states): every test file named here exists, and every document named here is in this directory.
 
 Status of the feature as a whole: **all ten phases implemented and 🟢; nothing activated by
-default; the owner authorized merging PR #10 on 2026-10-01 (the standing "do not merge until all
-phases are complete" instruction was fulfilled and lifted for it); release and default activation
-still require the owner's explicit authorisation.**
+default; the owner authorized merging PR #10 on 2026-10-01 and directed a hold while the stack scope
+is decided (PR #10 is part of native stack #11 with PR #9 — see `EXECUTION_PLAN.md`, Phase 10 Step 3);
+release and default activation still require the owner's explicit authorisation.**
 
 ## 1. Requirement matrix (`WP-R-001` … `WP-R-013`)
 
@@ -89,7 +89,8 @@ closed, every one pinned by `workflow-profile-review-fixes.test.ts` (20 tests) o
 Final evidence at the exact head CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke); locally the profile + CLI + server suites pass
 52 files / 598 tests, the CI-equivalent sweep reports 2,006/2,007 with only the pre-existing `J-05`,
 profile gates 9/9, e2e `profiles` 12/12, `tsc --noEmit` and `npm run build` clean. Phases 6, 7 and 9
-are 🟢 again; Phase 10 Step 3 closed with the owner's merge authorization (2026-10-01).
+are 🟢 again; Phase 10 Step 3 closed with the owner's merge authorization (2026-10-01); the merge is
+on hold at the owner's direction. **Merge authorized but on hold (owner direction, 2026-10-01):** the owner authorized the merge and then directed a hold, because PR #10 is part of GitHub's native stack #11 (base `main` @ `ee3fa3f`): its lower PR #9 (`feat/workflow-profile-phase2-contract-20260929`, draft, Phase 2) and PR #10 would be merged together by GitHub's stack-aware API, and a plain merge (or a base retarget of a stacked PR) is refused. The owner is deciding between unstacking #10 from the stack and merging the whole stack; until then no merge has been performed.
 
 **Resolved unknowns (kept for the record, no owner needed):**
 
