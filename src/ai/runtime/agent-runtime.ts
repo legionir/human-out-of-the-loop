@@ -62,6 +62,11 @@ interface SdkStepLike {
 interface SdkRunOutcome {
   text: string;
   steps?: ReadonlyArray<SdkStepLike>;
+  /**
+   * F-12: how many model calls this run made. `steps` cannot travel to the completion event
+   * (it holds tool payloads), so the count is derived where the SDK result is still in scope.
+   */
+  modelCalls?: number;
   /** Raw SDK usage — normalized with `toTokenUsage` by the caller. */
   usage?: unknown;
   finishReason?: string;
@@ -493,6 +498,9 @@ export class AgentRuntime {
         summary,
         toolsUsed: [...new Set(toolsUsed)],
         usage: sdkResult.usage as TokenUsage | undefined,
+        // F-12: budget accounting charges one model call per SDK step, not one per agent run —
+        // `stopWhen: stepCountIs(maxSteps)` lets a single run make several model calls.
+        modelCalls: sdkResult.modelCalls ?? 1,
         ...planContext,
       });
 
@@ -538,7 +546,8 @@ export class AgentRuntime {
         status: 'error',
         error: message,
         code,
-        ...(usageAcc.value ? { usage: usageAcc.value } : {}),
+        // F-12: with usage there was at least one call; the exact count is unknown on this path.
+        ...(usageAcc.value ? { usage: usageAcc.value, modelCalls: 1 } : {}),
         ...planContext,
       });
 
@@ -582,7 +591,7 @@ export class AgentRuntime {
     /** v27.17.3: how those records resolve a tool's type, and what to redact */
     toolCallOptions?: ToolCallLogOptions;
     contextBudgetChars?: number;
-  }): Promise<{ text: string; usage?: TokenUsage; reaskedWithoutStreaming?: boolean }> {
+  }): Promise<{ text: string; usage?: TokenUsage; modelCalls?: number; reaskedWithoutStreaming?: boolean }> {
     const {
       agent,
       prompt,
@@ -792,6 +801,9 @@ export class AgentRuntime {
     return {
       text: result.text ?? '',
       usage: usageAcc.value ?? usage,
+      // F-12: one model call per SDK step; a missing/empty `steps` (older providers, test mocks)
+      // is one call, never zero.
+      modelCalls: Array.isArray(result.steps) && result.steps.length > 0 ? result.steps.length : 1,
       ...(reaskedWithoutStreaming ? { reaskedWithoutStreaming: true } : {}),
     };
   }

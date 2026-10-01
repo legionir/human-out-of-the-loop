@@ -525,4 +525,177 @@ This update supersedes the initial D-WP open-decision statuses in §8 while pres
 
 **Evidence:** `Orchestrator.run()` delegates through private `runInSession()` and is composite; `PlanRuntime` exposes `execute/resume/cancel` and owns DAG scheduling. `mcp-connector.ts` concatenates prefix and raw name without normalization, but `ToolDefinitionSchema` currently applies the restricted local-ID regex to MCP IDs; source-aware validation is therefore a required Phase 2/3 change. Current profile schema/examples occupy 35,763 / 10,107 / 7,461 / 4,002 bytes, all below the approved 1 MiB cap. Boundary tests and live/fixture MCP compatibility tests remain future implementation work.
 
-**Current gate:** Phase 1 stays 🟡 pending PR #8 review/merge (Step 5). Step 3 is 🟢 and Step 4 is 🟢 for the approved read-only design spike; adapter integration is not implemented or claimed. Phase 2 and Runtime code remain 🔴; do not start them until Phase 1's review/merge gate is complete. PR #8 contains documentation and declarative contract/fixture updates only; no file or branch deletion is authorized or performed.
+**Current gate at that historical update:** Phase 1 was 🟡 pending PR #8 review/merge (Step 5). This gate is superseded by the append-only completion note below; no prior history is removed.
+
+### 8.2 — Phase 1 post-merge completion and Phase 2 status (2026-09-29 20:38 GMT+3:30; append-only)
+
+PR #8 merged to `main` as `ee3fa3f67d695a251974d5bb94ce53ab6e605b5a`; post-merge CI run `36601818036` completed successfully. Phase 1 Step 5 and its Gate are 🟢. The PR #8 source branch remains intact; no artifact was deleted. The Phase 2 implementation is being prepared as a separate branch/PR based on this `main` head.
+
+The related planning-time failure/lifecycle defect is recorded as **separate, not yet implemented work**: retain the entire transcript/context after planning failure; Retry resends the last user message verbatim with its conversation history; repeat failures preserve history and show Retry/Abort again; Abort stops the active attempt, retains history and the last message, and permits a new request. This is not part of the Workflow Profile Phase 2 code scope and must not be reported as implemented.
+
+### 8.3 — Workflow Profiles Phase 2 contract completion (2026-09-30; append-only)
+
+The Phase 2 contract (canonical Draft 2020-12 JSON Schema, bounded read/loader/registry boundaries, and a separate semantic validator) is implemented on `feat/workflow-profile-phase2-contract-20260929` and accepted at head `f1d403fdc30c548ba9036646e8b8cf35652867c5`. CI run `36701156470`, attempt 2, passed 10/10 jobs on that exact SHA; the PR diff contains 19 added/modified files and no deletions or renames.
+
+Local full-repository verification on the same tree: `npm run typecheck`, `npm run build`, and all 63 Workflow Profile tests pass; the repository-wide `npm test` reports 1,761 of 1,762 tests passing, with one pre-existing environment-dependent failure in `phase-j-checkpoint` J-05 whose files are byte-identical to `main` (equal `mtimeMs` on this sandbox filesystem; recorded as out-of-scope and not fixed). Independent public-API probes confirm the three shipped examples load with zero diagnostics and that the approved 1 MiB cap is enforced at the read stage before parse.
+
+WP-R-001 and WP-R-002 verification targets are exercised by the Phase 2 suites; the remaining WP-R targets stay planned for later phases. PR #9 remains Draft: merge, approval, and release require explicit owner authorization, and Phase 3 must be based on the merged Phase 2 commit or an owner-approved base. The pre-Runtime-integration gates (host-guaranteed stable/trusted/non-attacker-writable profile roots; the authoritative Runtime compatibility/enforcement contract) remain open.
+
+### 8.4 — Workflow Profiles Phase 3 resolution (2026-09-30; append-only)
+
+Phase 3 is implemented as static, pre-activation dependency resolution: `src/ai/workflow-profiles/profile-digest.ts` (typed `sha256` digest over canonical JSON with a kind/id envelope), `profile-resolver.ts` (per-kind resolution against the existing persona, skill, model-profile registries plus the named toolset registry and the built-in rubric catalogue, with aggregated fail-closed diagnostics), and `toolsets.ts` (named versioned toolsets and the strictest-intersection effective tool set). Reviewer decision domains are now compared with the digest-pinned rubric's real domain before activation, closing the Phase 2 deferral.
+
+Two conservative owner-delegated decisions are recorded in `docs/workflow-profiles/PHASE3_RESOLUTION.md`: **D-WP-010** (v1 rubrics come only from a code-owned built-in catalogue; user-authored rubrics need a separate owner decision) and **D-WP-011** (digest envelope and resolved-content projection contract, including resolved SKILL.md text for skills). Local evidence: `npm run typecheck`, `npm run build`, and 79 Workflow Profile tests across five files pass on Node v22.22.3, including resolution against real repository components. WP-R-003 and WP-R-004 verification targets are exercised; WP-R-005 onward remain planned.
+
+No Runtime execution, feature flag, or Orchestrator integration is included. PR #9 stays Draft; per the owner instruction of 2026-09-30 nothing is merged until every phase is complete. The trusted-host stable-root guarantee and the authoritative Runtime compatibility/enforcement contract remain pre-integration gates.
+
+### 8.5 — Workflow Profiles Phase 4 kernel (2026-09-30; append-only)
+
+Phase 4 implements the deterministic outer-control kernel and its opt-in access path: `src/ai/workflow-profiles/profile-predicate.ts` (one data-only predicate/port-domain contract shared by the semantic validator and the runtime), `profile-kernel.ts` (explicit state machine, first-match edge selection by ascending priority then declaration order, single-default fallback, typed normal and error-route mappings, run-scoped monotonic loop counters with fail/route exhaustion, the strictest-of three hard node-visit cap, and typed retry/route with a sanitized failure envelope), and `profile-runner.ts` (`HOOTL_WORKFLOW_PROFILE` default-off and the validated schema-version → structural → semantic → resolution → frozen-profile pipeline). Terminal categories — `security-denied`, `approval-denied`, `cancelled`, `visit-cap`, `budget` — can never be retried or routed, and raw exception text never reaches a node, event, or result.
+
+Local evidence: `npm run typecheck`, `npm run build`, and 103 Workflow Profile tests across seven files pass on Node v22.22.3 (kernel 16, predicate 8, semantic 27, resolver 16, registry 21, schema 11, MCP-ID 4); the full repository suite is 1,801/1,802 with only the pre-existing phase-j J-05 mtime-tie failure. Recorded semantics and the acceptance mapping are in `docs/workflow-profiles/PHASE4_KERNEL.md`.
+
+No model or tool execution, handler, approval interaction, persistence/resume, budget enforcement at the real call site, EventBus observability, or Orchestrator integration is included; those are Phases 5–7. PR #9 stays Draft, and per the owner instruction of 2026-09-30 nothing is merged until every phase is complete. The trusted-host stable-root guarantee and the authoritative Runtime compatibility/enforcement contract remain pre-integration gates.
+
+### 8.6 — Workflow Profiles Phase 5 handlers (2026-09-30; append-only)
+
+Phase 5 connects the kernel to existing capabilities without duplicating them: `src/ai/workflow-profiles/untrusted-content.ts` is the single confinement implementation (labelled `<untrusted-data>` blocks, zero-width delimiter neutralization, byte cap with the truncation stated inline, digest over the raw untruncated content), `node-handlers.ts` adapts intake plus planner/execute/review/approval over injected service ports — `condition` and `end` remain kernel-computed — and `orchestrator-adapters.ts` wires those ports to `Planner.plan`, `PlanRuntime.execute` (still the sole inner DAG scheduler), `FinalReviewer`/`AcceptanceChecker`, and the existing confirm callback.
+
+Recorded owner-delegated decisions: **D-WP-012** (an approval node passes through any input port it also declares as an output, so a gated plan can flow onward; contracts cannot widen) and **D-WP-013** (side-effect approvals bind to the digest of the bound port and the approval must return the digest it approved — mismatch aborts as terminal; the text-confirm adapter echoes the digest it displayed, and out-of-band hosts must return their own approved digest). Denial, expiry, and cancellation are terminal and never routed or retried; an approval decision is data and is not a tool authorization.
+
+Local evidence: `npm run typecheck`, `npm run build`, and 144 Workflow Profile tests across eleven files pass on Node v22.22.3, including a semantically validated seven-kind profile and the adversarial injection matrix; the full repository suite is 1,842/1,843 with only the pre-existing phase-j J-05 mtime-tie failure. Details are in `docs/workflow-profiles/PHASE5_HANDLERS.md`.
+
+No Orchestrator entry point, feature-flag activation, persistence/resume, real-call-site budget enforcement, or EventBus observability is included; those are Phases 6–7. PR #9 stays Draft, and per the owner instruction of 2026-09-30 nothing is merged until every phase is complete.
+
+### 8.7 — Workflow Profiles Phase 6 durable lifecycle (2026-09-30; append-only)
+
+Phase 6 makes profile execution durable and self-limiting: `src/ai/workflow-profiles/profile-budget.ts` is the single per-dimension budget contract (schema maxima, strictest-of folding across profile/runtime/user-session, `onLimit`→status mapping, run-scoped counters that a resume continues), `profile-run-state.ts` stores a versioned record before any work (profile hash, schema/runtime versions, saved dependency pins, node/status, loop and budget counters, declared authority, approvals, linked plan/session, pending effect) through the existing atomic write helper and re-verifies all of it before a resume can touch an effect, `profile-access-guard.ts` narrows tools/approval/budget to the strictest effective policy and enforces it at the call site (`assertToolAccess`, `assertSideEffectAuthorized`, `assertNoAuthorityIncrease`), and `profile-events.ts` reports the lifecycle through the existing EventBus-shaped sink with secret scrubbing and a degraded-not-throwing failure mode. `profile-runner.ts` now materializes the run record, refuses any resume whose profile/pins/version/authority changed, and keeps an `ask-user` limit resumable.
+
+Recorded contract consequences (no new owner decision): an `ask-user` limit is a pause — the kernel reports `limit: 'ask-user'`, the record keeps every counter with `awaitingUser: true` and status `interrupted`, resuming an exhausted budget pauses again instead of granting calls, and a caller offering wider authority is refused; a failing state-store write is fail-closed (rethrown after `workflow.persistence.degraded`) while a failing event sink only degrades; the visit cap keeps its Phase 4 code/category and now follows `onLimit` for its terminal status. The existing result-only stores still cannot prove whether an interrupted effect committed, so a pending effect is never auto-retried — a real intent/effect/commit journal stays part of the open Runtime compatibility/enforcement contract gate.
+
+Local evidence: `npm run typecheck`, `npm run build`, and 180 Workflow Profile tests across fourteen files pass on Node v22.22.3 (budget 11, lifecycle 15, enforcement 10 added); the full repository suite is 1,878/1,879 with only the pre-existing phase-j J-05 mtime-tie failure. Details are in `docs/workflow-profiles/PHASE6_LIFECYCLE.md`.
+
+The guards are enforcement primitives at the profile/adapter boundary: no Orchestrator entry point exists, `HOOTL_WORKFLOW_PROFILE` remains off by default, no profile is activated, and the live Orchestrator tool call site is not wired yet — that belongs to the Runtime integration phase. PR #9 stays Draft, and per the owner instruction of 2026-09-30 nothing is merged until every phase is complete.
+
+### 8.8 — Workflow Profiles Phase 7 extraction and blocking decision (2026-09-30; append-only)
+
+Phase 7 (default profile and current-behaviour parity) is 🟡: Step 1's extraction is complete and recorded in `docs/workflow-profiles/PHASE7_PARITY.md`. The real stage order — entry/session, planning assessment (with the answer branch and the `[[NEEDS_PLAN]]` escalation), the bounded clarification loop, the feasibility/cycle gate, plan persistence and the session link, the single plan-confirmation interaction, execution with per-step personas and acceptance plus automatic re-planning, cancellation, and the final review/report — is derived from `orchestrator.ts` and the characterization suites, and every stage is mapped to a profile construct with the delegation boundary (PlanRuntime stays the sole inner-DAG scheduler/validator) stated explicitly. The extraction also surfaced and fixed a tool-surface bug: the runner's authority snapshot now derives the declared tool surface from the content of the profile's pinned personas/toolsets, so `allowedToolsets: []` means "no narrowing" instead of "permit nothing".
+
+Step 2 (Orchestrator wiring) is **blocked on owner decision D-WP-014**: v1 requires `bindings.personaRef` on `execute`, but the current flow assigns a persona per plan step (`plan-runtime.ts` `buildAgentForStep` ← `step.assignedPersona`) and the registry ships `planner`/`reviewer` (both used by the runtime) but no executor persona. The recorded options are (1) author a HOOTL-owned `hootl.executor` persona mirroring the runtime's step prompt, (2) make `personaRef` optional for `execute` as a versioned v1 contract change, or (3) defer activation and ship the modeling plus the parity harness only. No profile is activated and `HOOTL_WORKFLOW_PROFILE` stays off by default; Steps 2–3 remain 🔴 until the owner decides.
+
+### 8.9 — D-WP-014 resolved: `personaSource: "plan-step"` for `execute` nodes (2026-09-30; append-only)
+
+The owner decided D-WP-014 in favour of the standards-conformant contract change: an `execute` node may declare `bindings.personaSource: "plan-step"` ("the runtime assigns each plan step's persona") instead of a pinned `personaRef`. `planner`/`review` nodes still require `personaRef`; the two bindings are mutually exclusive and exactly one is required on `execute`; `personaSource` is rejected on every other node kind and its value is a closed single-value domain, so a profile cannot name an arbitrary persona source. Implementation: `docs/workflow-profiles/workflow-profile.schema.json` (`$defs/bindings` plus the execute-only `allOf` branch, twelve entries total), `src/ai/workflow-profiles/profile-types.ts`, and `src/ai/workflow-profiles/profile-semantic-validator.ts` (new codes `bindings.persona-source-invalid`, `bindings.persona-source-unsupported`, `bindings.persona-binding-ambiguous`, `bindings.persona-binding-missing`). Evidence: schema + semantic suites 40/40, all Workflow Profile suites 14 files / 183 tests, `npm run build` clean, on that commit's head. Nothing is weakened: the binding does not resolve a persona itself, does not add registry content, and cannot widen tools, approvals or budgets. The default profile built in Phase 7 Step 1 uses this binding for its `execute` node; the earlier blocking record in §8.8 is preserved as history.
+
+### 8.10 — Workflow Profiles Phase 7 Step 1: the default profile artifact (2026-09-30; append-only)
+
+Phase 7 Step 1 is 🟢. `createDefaultWorkflowProfileDocument(sources)` (`src/ai/workflow-profiles/default-profile.ts`) builds the built-in default profile in code, with dependency pins computed from the resolved persona/rubric content and a fail-closed `default-profile.component-missing` error when one is unavailable, so a placeholder-pinned default profile is not constructible. The graph models the extracted flow: `request` → `plan` with three exhaustive routes on the planner's required `kind` discriminator, a three-question clarification loop (`clarification-rounds`, `onExhausted: fail`, matching `maxClarificationRounds`), a digest-bound `confirm` approval (binds `planText`, the text the user is shown; the same `planDigest` is threaded to `execute`), delegated execution with `personaSource: "plan-step"` (D-WP-014), and a `review` node that accepts the built-in rubric's full `pass`/`revise`/`reject` domain and ends at `finish` (pass) or `rejected` (revise/reject). Budgets are sized so the profile never cuts a legitimate run short (`maxNodeVisits: 40` ≥ the conservative static bound 36; 1 h / 500 model calls / 2000 tool calls), and `allowedToolsets: []` adds no narrowing. Two intentional differences are recorded for the owner before any activation (Step 3 requires plan + release notes + owner approval): **G-5**, a confirmation denial with feedback cannot re-plan in v1 (the digest-bound decision port is an object and v1 predicates address one top-level scalar port; feedback terminates fail-closed like a cancellation), and **G-2**, the answer branch ends `success` while the `answered` interaction status stays the entry point's job. Recorded in `docs/workflow-profiles/PHASE7_PARITY.md` §5 with the artifact's evidence (new 11-test suite, all Workflow Profile suites 15 files / 194 tests, typecheck and build clean). Phase 7 remains 🟡 until Step 2 (Orchestrator wiring) and Step 3 (parity tests) are complete; no merge is authorized until all phases are complete.
+
+### 8.11 — Workflow Profiles Phase 7 complete: default profile, Orchestrator hook, parity (2026-09-30; append-only)
+
+Phase 7 is 🟢. `createDefaultWorkflowProfileDocument()` builds the built-in default profile in code with dependency pins computed from resolved persona/rubric content; `activateWorkflowProfile()` is the single fail-closed decision point (flag off ⇒ the legacy path and nothing profile-related resolves; flag on ⇒ a prepared profile or diagnostics, never a fallback or a half-created run; the built-in default additionally requires the recorded `BUILT_IN_DEFAULT_APPROVAL`, still unapproved); `OrchestratorConfig.workflowProfile` wires it to the Orchestrator, which keeps its own session/interaction lifecycle and delegates through its own Planner, FinalReviewer and a PlanRuntime built from the same policy deps. The first parity suite (`workflow-profile-parity.test.ts`, 9 tests) drives the legacy and profile paths with the same scripted model and compares plans, execution, step-agent prompts **and tool surfaces**, acceptance/re-review calls, clarification folding, cancellation, the final report, store data and the fail-closed load path. Two gaps the suite found were fixed in code: the profile path's PlanRuntime was missing the acceptance/status/persist-error callbacks (now a shared handler), and a failed plan execution would have skipped the review (now routed to the review node via `onError`, while authorization denial, approval denial and cancellation stay terminal). Recorded behaviour differences requiring the owner's approval before activation: G-5 (confirmation feedback cannot re-plan in v1), G-2 (answer branch ends `success`), report wording, and no legacy `plan:clarified` entry. Evidence: all Workflow Profile suites 21 files / 235 tests, adjacent suites 76 tests, full repository suite 1,924/1,925 with only the pre-existing J-05, typecheck and build clean. No merge is authorized until all phases are complete; Phase 8 (user authoring/selection) is next.
+
+### 8.12 — Workflow Profiles Phase 8 complete: authoring, discovery, selection over CLI and API (2026-09-30; append-only)
+
+Phase 8 is 🟢. Discovery lives on fixed conventions (`.hootl/workflow-profiles/*.json` behind the
+trust opt-in, `HOOTL_WORKFLOW_PROFILES_DIR`, and an explicitly named file) and never throws on a
+broken file; `resolveProfileSelection()` is the single selection path shared by `hootl run
+--profile/--profile-file` and the server, so the CLI and the API cannot drift apart. The CLI gained
+`profiles list` and `profiles validate <id|file>` (exit 1 on any diagnostic), the API gained one
+request field — `POST /api/run { profile }` — resolved before the run exists (400 with diagnostics
+otherwise; `profileFile` over HTTP is refused, because a client-supplied host path would be a new
+file-reading primitive). Per-request selection rides a new per-run channel on the Orchestrator
+(`OrchestratorRunOptions.workflowProfile`) rather than a second instance, so sessions, plans,
+ownership, cancellation, TTL and SSE are the same objects on both paths by construction; selecting a
+profile for one request leaves every other request on the legacy path, including under concurrency.
+Two real defects were found and fixed during the security pass that this phase's tests drove:
+**H-1** (a selected profile that omitted the approval node executed its plan with no human
+confirmation — now the runtime requires a granted side-effect approval whose bound digest is the
+plan being executed, and the refusal is a terminal `security-denied` failure) and **H-2** (the
+profile path fed the planner its node goal text instead of the user's request, because the request
+arrives as the entry payload object; both paths now pass the request, with a regression test that
+fails without the fix). The user-visible `rejected` end is recorded as `failure` in the legacy
+`Review.outcome` vocabulary (the profile status stays visible in the report) alongside the other
+recorded differences. Authoring docs and two resolvable, CI-validated examples ship with the phase.
+Evidence: `workflow-profile-discovery.test.ts` 6, `phase8-profiles.test.ts` 8,
+`workflow-profile-examples.test.ts` 7, `phase8-profile-selection.test.ts` (server) 8,
+`workflow-profile-hardening.test.ts` 9; all Workflow Profile + CLI + server suites 47 files / 554
+tests; built CLI and a live server smoke (`profiles validate` → exit 0; `run --profile e2e.reject`
+→ profile path; API untrusted → 400 `selection.profile-missing`, trusted → 202 + profile run); CI
+10/10 at the phase heads. No merge, release or default activation is authorized until all phases are
+complete.
+
+### 8.13 — Workflow Profiles Phase 9 complete: hardening and measurement (2026-09-30; append-only)
+
+Phase 9 is 🟢. Step 1 added two end-to-end suites on the real Orchestrator: `workflow-profile-hardening.test.ts` (9 tests — the confirmation gate, the digest binding, terminal denial/cancellation, injected request text not widening the step tool surface, and the flag-off switch) and `workflow-profile-adversarial.test.ts` (7 tests — component-content injection through a profile's own pinned persona, toolset narrowing, a toolset naming an unavailable tool, an unknown approval policy, error-payload leakage into report/session/observability log, graph caps, and an exhausted bounded loop stopping the run before execution). Three findings were fixed rather than documented around: **H-1** (a profile could omit the confirmation node and execute without human approval — now a terminal `security-denied` gate that requires a granted side-effect approval binding the plan being executed), **H-2** (the profile path handed the planner its node goal instead of the user's request), and **H-3** (a profile could pin a `toolset` but nothing wired a `ToolsetRegistry`, so it could never resolve — toolsets now load from the same registry layers as every other component and are re-checked against the live catalog). Step 2 delivered `scripts/profile-bench.mjs`, a reproducible measurement of the built output with its environment recorded, and the tabulated results in `PHASE9_HARDENING.md`: flag-off decision p50 0.000 ms, profile preparation ~0.8 ms, 43 KB validation ~0.7 ms, discovery+selection ~0.6 ms, an over-cap file refused in 0.016 ms versus 1.284 ms to parse a just-under-cap file (cap before parse), and a spent model budget stopping the planner call entirely. The one honest caveat is recorded: no pre-feature baseline exists, so the performance claim is "off by default adds one flag read" rather than a fabricated percentage. Evidence: profile + CLI + server suites 49 files / 565 tests, the CI-command suite, tsc/build clean, and 10/10 CI on the phase heads. No merge, release or default activation until all phases are complete.
+
+### 8.14 — Workflow Profiles Phase 10: operations, traceability and the CI gate (2026-09-30; append-only)
+
+Phase 10 Steps 1–2 are 🟢; Step 3 (independent review and PR handoff) is 🟡 and needs the owner.
+Step 1: `PHASE10_OPERATIONS.md` is the upgrade/rollout/rollback guide, and the plan's resume checks are
+proved end to end by `workflow-profile-upgrade.test.ts` (3 tests) — a killed process leaves the record
+the runner writes before its first node, and the resumed attempt re-runs the approval node and asks
+the user again (a stored approval is never authority), a decline stops the run with nothing executed, a
+changed profile is refused before the user is asked, and the approval record now really carries the
+bound digest and port because the bridge writes each decision through the new `recordApproval`
+(`appendApprovalRecord`). The honest evidence for "no persistent-state migration is required" is
+recorded there too. Step 2: `TRACEABILITY.md` finalizes the `WP-R-001`…`WP-R-013` matrix, the decision
+register (D-WP-001…011), the open owner items (U-1…U-6) and the resolved unknowns; the documentation is
+synchronised (`PHASE8_AUTHORING.md` toolset section + third example, `RELEASE_NOTES.md`); and the CI
+gate `scripts/profile-gates.mjs` (a step in `ci.yml`, also `npm run profile-gates`) validates the
+default profile and all three examples through the schema, the semantic validator and dependency
+resolution, asserts the shipped schema file is the validator's schema, and runs four negative controls
+so a green gate proves the validators ran. Recorded honestly rather than invented: the repository has
+no linter, so that plan item has no tool to run; and the pre-existing `J-05` checkpoint test is
+mtime-resolution sensitive on this sandbox (unchanged since the session base, green on CI) and is
+recorded as U-6 with a follow-up. The phase-PR-by-phase rule is met as a phase-by-phase handoff in
+PR #10 because this session is bound to one branch — a recorded deviation, not a claim of separate
+PRs.
+
+**Phase 10 Step 3 (2026-09-30; append-only):** the agent's five-dimension review
+(`docs/workflow-profiles/PHASE10_REVIEW.md`) records the architecture, QA, security, operations and
+compatibility findings with their evidence, plus what it cannot certify (independent human review,
+the U-1…U-5 owner decisions, real-provider behaviour, manual cross-platform runs, soak testing). PR
+#10's description is the phase-by-phase handoff (commit → WP-R IDs → evidence → CI head). CI run
+`36757851673` on head `307b218` is **success 10/10**, including the new Workflow Profile gate step;
+the docs-only follow-up head `f3bd11a` (run `36758702602`) is recorded as failure 1/10 on
+`windows-latest / node 22` from two unrelated hook timeouts (`u3-run-options`, `phase-h`) — no profile
+test failed and the rerun-only-failed-job remedy is not permitted for that run.
+Step 3 stays 🟡 until a reviewer other than the implementer signs off and the owner answers the open
+items; no merge, release or activation is performed or requested.
+
+### 8.15 — Workflow Profiles Phase 10: owner decisions U-1/U-2 (resume) and U-4 (behaviour differences) implemented (2026-09-30; append-only)
+
+**U-1 (runtime version), owner chose activation:** a profile run records the package version
+(`packageVersion()` in `registries/layout.ts`) unless the host declares `runtimeVersion`; a resume
+whose recorded version differs is refused (`resume.runtime-version-changed`). **U-2 (resume surface),
+owner chose option A — wired:** a selected profile records itself under
+`<projectRoot>/.ai-runtime/workflow-profile-runs/`, `hootl profiles runs [--json]` lists the records
+(newest first; unreadable files are skipped), and `hootl run --resume <runId> "…"` continues one —
+re-selecting the profile content it was selected from and continuing its session; a missing or
+finished run exits 1 (`resume.profile-missing` / `resume.already-terminal`) and `--resume` together
+with `--profile*` is a usage error (exit 2). The guarantees hold: a stored approval is never authority
+(the resumed attempt re-runs the approval node and asks again), a pending effect refuses continuation
+(`resume.ambiguous-effect`), and resume is not exposed over HTTP (the server records under its own run
+id only). Evidence: `workflow-profile-resume-wiring.test.ts` (4), `workflow-profile-upgrade.test.ts`
+(3), `phase8-profiles.test.ts` (CLI), e2e `profiles` scenario 12/12 (kill → list → resume).
+
+**U-4 (behaviour differences), decided case by case:** G-5 **accepted** (a confirmation denial with
+feedback stays terminal, fail-closed) and G-2 **accepted** (the answer branch ends `success`).
+**Report wording aligned:** `orchestratorResultFromProfile` now renders the legacy
+`formatReviewForUser` block and appends one line, `Workflow profile "<status>" (profile path[,
+executed])`, so both paths show the same FINAL REPORT. **R-3 changed:** a `rejected` end reached
+**before** execution is reported as `cancelled` (a refusal — the same outcome a declined confirmation
+reports on the legacy path), while a `rejected` end **after** execution stays `failure`; the profile's
+own status always stays in the report line. Implemented through `rejectedWithoutExecution()` in
+`src/ai/orchestrator.ts`, which governs the interaction status, the review outcome and the synthetic
+execution-result status. Evidence: the new R-3 regression in `workflow-profile-hardening.test.ts`
+(both directions; 10/10 in that file), the shared-report assertions in
+`workflow-profile-parity.test.ts` (9), and the updated API-visible expectation in
+`phase8-profile-selection.test.ts`. Decision record: `PHASE10_OPERATIONS.md` §9; superseded text in
+`PHASE7_PARITY.md` §9–§10 is struck through with the decision applied. **Exact-head CI:** run
+`36773662406` on head `86dbe88` is **success 10/10** (all three OSes × Node 22/24/26, the three e2e
+legs, the Workflow Profile gate step), and the resume head `73e578b` is **success 10/10** in run
+`36770114778`. `BUILT_IN_DEFAULT_APPROVAL`
+stays `approved: false`, the flag stays off, Step 3 stays 🟡 pending the owner's review of
+`PHASE10_REVIEW.md`, and merges remain frozen by the owner's instruction.

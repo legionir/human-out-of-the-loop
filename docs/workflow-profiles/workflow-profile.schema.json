@@ -2,11 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "urn:hootl:workflow-profile:1",
   "title": "HOOTL Workflow Profile",
-  "description": "HOOTL v1 declarative workflow profile. Profile, persona, skill and registry content are untrusted data. A profile may only tighten Runtime tools, approvals and budgets. No inheritance, node templates, sub-workflows, parallel fan-out or executable expressions are supported in v1. Validate the schema first, then run the separate semantic validator.",
+  "description": "HOOTL v1 declarative workflow profile. Profile, persona, skill and registry content are untrusted data. A profile may only tighten Runtime tools, approvals and budgets. No inheritance, node templates, sub-workflows, parallel fan-out or executable expressions are supported in v1. Validate the schema first, then run the separate semantic validator. Extensions use only x-* JSON scalar metadata, at most 16 fields per extension-enabled object and strings up to 1024 characters. Total-property caps leave room for every declared standard property plus 16 extensions; the semantic validator enforces the x-* count independently. This Schema validates structure; semantic graph validation is a separate step.",
   "type": "object",
   "additionalProperties": false,
+  "maxProperties": 23,
   "patternProperties": {
-    "^x-": {}
+    "^x-[a-z0-9][a-z0-9._-]{0,63}$": {
+      "$ref": "#/$defs/xExtensionValue"
+    }
   },
   "required": [
     "schemaVersion",
@@ -53,13 +56,14 @@
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {
-        "^x-": {}
+        "^x-[a-z0-9][a-z0-9._-]{0,63}$": {
+          "$ref": "#/$defs/xExtensionValue"
+        }
       },
       "required": [
         "id",
         "name",
         "version",
-        "runtime",
         "author"
       ],
       "properties": {
@@ -81,15 +85,18 @@
         "runtime": {
           "type": "object",
           "additionalProperties": false,
+          "description": "Optional, non-operative compatibility metadata. Phase 2 validates its shape only and defines no authoritative Workflow Runtime version or compatibility check. It must not be used to authorize execution. A version contract and enforcement are required before Runtime integration.",
           "required": [
             "minVersion"
           ],
           "properties": {
             "minVersion": {
-              "$ref": "#/$defs/semver"
+              "$ref": "#/$defs/semver",
+              "description": "Syntax-only metadata in Phase 2; not compared with an installed runtime."
             },
             "maxVersion": {
-              "$ref": "#/$defs/semver"
+              "$ref": "#/$defs/semver",
+              "description": "Syntax-only metadata in Phase 2; not compared with an installed runtime."
             }
           }
         },
@@ -111,7 +118,9 @@
           },
           "uniqueItems": true
         }
-      }
+      },
+      "maxProperties": 24,
+      "description": "Extensions are limited to 16 x-* scalar fields; objects, arrays, executable content, and unknown non-x fields are rejected. The total-property cap leaves room for all declared standard properties plus 16 extensions; semantic validation enforces the x-* count independently."
     },
     "dependency": {
       "type": "object",
@@ -179,7 +188,9 @@
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {
-        "^x-": {}
+        "^x-[a-z0-9][a-z0-9._-]{0,63}$": {
+          "$ref": "#/$defs/xExtensionValue"
+        }
       },
       "required": [
         "id",
@@ -237,7 +248,6 @@
               "kind": {
                 "enum": [
                   "planner",
-                  "execute",
                   "review"
                 ]
               }
@@ -255,6 +265,80 @@
                 "required": [
                   "personaRef"
                 ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "execute"
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "bindings"
+            ],
+            "properties": {
+              "bindings": {
+                "description": "An execute node either binds one pinned persona (personaRef) or declares that the runtime assigns each plan step's persona (personaSource: \"plan-step\"). Exactly one is required, matching the owner decision D-WP-014.",
+                "oneOf": [
+                  {
+                    "required": [
+                      "personaRef"
+                    ],
+                    "not": {
+                      "required": [
+                        "personaSource"
+                      ]
+                    }
+                  },
+                  {
+                    "required": [
+                      "personaSource"
+                    ],
+                    "not": {
+                      "required": [
+                        "personaRef"
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "intake",
+                  "planner",
+                  "review",
+                  "condition",
+                  "approval",
+                  "end"
+                ]
+              }
+            },
+            "required": [
+              "kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "bindings": {
+                "not": {
+                  "required": [
+                    "personaSource"
+                  ]
+                }
               }
             }
           }
@@ -431,7 +515,9 @@
             }
           }
         }
-      ]
+      ],
+      "maxProperties": 25,
+      "description": "Extensions are limited to 16 x-* scalar fields; objects, arrays, executable content, and unknown non-x fields are rejected. The total-property cap leaves room for all declared standard properties plus 16 extensions; semantic validation enforces the x-* count independently."
     },
     "ports": {
       "type": "object",
@@ -505,8 +591,13 @@
         },
         "modelProfileRef": {
           "$ref": "#/$defs/id"
+        },
+        "personaSource": {
+          "const": "plan-step",
+          "description": "execute only (D-WP-014): the runtime assigns each plan step's persona (PlanStep.assignedPersona); the current HOOTL flow has no single executor persona to pin. Mutually exclusive with personaRef."
         }
-      }
+      },
+      "description": "Node bindings. planner/review require personaRef; execute requires exactly one of personaRef/personaSource."
     },
     "errorPolicy": {
       "type": "object",
@@ -1002,7 +1093,9 @@
       "type": "object",
       "additionalProperties": false,
       "patternProperties": {
-        "^x-": {}
+        "^x-[a-z0-9][a-z0-9._-]{0,63}$": {
+          "$ref": "#/$defs/xExtensionValue"
+        }
       },
       "required": [
         "from",
@@ -1083,7 +1176,9 @@
             }
           }
         }
-      ]
+      ],
+      "maxProperties": 24,
+      "description": "Extensions are limited to 16 x-* scalar fields; objects, arrays, executable content, and unknown non-x fields are rejected. The total-property cap leaves room for all declared standard properties plus 16 extensions; semantic validation enforces the x-* count independently."
     },
     "loopExhausted": {
       "type": "object",
@@ -1244,7 +1339,7 @@
     },
     "result": {
       "type": "array",
-      "description": "Exactly one entry per end node. Each fromNode must be an end node, port must be one of its outputs, outcome must equal config.outcome, and every end node must be represented. The end config explicitly maps emitted output ports to input ports.",
+      "description": "Exactly one entry per end node. Each fromNode must be an end node, port must be one of its outputs, outcome must equal config.outcome, and every end node must be represented. The end config explicitly maps emitted output ports to input ports. The separate semantic validator enforces the v1 result.kind-to-port.type table: response -> string|number|integer|boolean|object|array; artifact -> artifact|file; proposal|handoff -> object. Port type any is not accepted for any result kind.",
       "minItems": 1,
       "maxItems": 20,
       "items": {
@@ -1285,7 +1380,7 @@
     "id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9._-]{1,127}$",
-      "description": "Provisional v1 identifier pattern. Unknown / Requires Verification: compare with real registry and MCP tool identifiers in Phase 1 before freezing the contract."
+      "description": "Profile, node, dependency, and port identifiers use the stable v1 lowercase identifier pattern."
     },
     "portName": {
       "type": "string",
@@ -1296,7 +1391,7 @@
       "minLength": 1,
       "maxLength": 256,
       "pattern": "^[^\\x00-\\x1F\\x7F-\\x9F]+$",
-      "description": "Exact tool registry ID; no normalization. Schema maxLength counts characters, while the semantic validator enforces at most 256 UTF-8 bytes and no control characters. Local tools additionally retain the registry local-ID rule; MCP IDs are matched exactly."
+      "description": "Exact tool registry ID; no normalization. Schema maxLength counts characters, while semantic validation enforces at most 256 UTF-8 bytes and no control characters. Local tools retain their restricted registry ID rule; MCP IDs are matched exactly."
     },
     "digest": {
       "type": "string",
@@ -1340,6 +1435,24 @@
       "type": "string",
       "pattern": "^/(?:failure/(?:category|code|retryable)|node/(?:id|attempt)|inputs/[a-zA-Z][a-zA-Z0-9_-]{0,63})$",
       "description": "Only stable failure metadata and the failed node input snapshot may be routed; raw exception text is not available."
+    },
+    "xExtensionValue": {
+      "oneOf": [
+        {
+          "type": "string",
+          "maxLength": 1024
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Extension values are non-executable JSON scalars only; strings are limited to 1024 characters."
     }
   }
 }

@@ -5,6 +5,123 @@ All notable changes to this project. The format follows
 delivery plans (`docs/history/` — `EXECUTION_PLAN_V2.md`, `CLI_COMPLETION_PLAN.md`,
 `UI_COMPLETION_PLAN.md`, `PLAN.md`).
 
+## [Unreleased] — Workflow Profiles (opt-in, off by default)
+
+Workflow Profiles let a JSON document describe the run's control flow (intake, planner, bounded
+clarification, digest-bound plan approval, delegated execution, review, ends) while `PlanRuntime`
+stays the only inner-DAG scheduler. **`HOOTL_WORKFLOW_PROFILE` is off by default: without an explicit
+opt-in nothing profile-related is resolved and the existing path runs unchanged.**
+
+**Added**
+- Draft 2020-12 schema, semantic validation, dependency resolution with content-digest pins, the
+  execution kernel, node handlers/adapters, durable run state with resume guards, budgets,
+  authorization guard and events (Phases 2–6).
+- The built-in default profile (`src/ai/workflow-profiles/default-profile.ts`), built in code with
+  pins computed from resolved component content, and the activation seam plus run bridge that wire it
+  to the Orchestrator behind the flag (Phase 7).
+- Authoring and selection (Phase 8): discovery on fixed conventions (`.hootl/workflow-profiles/`
+  project scope behind the trust opt-in, `HOOTL_WORKFLOW_PROFILES_DIR`, and a single explicit file),
+  `hootl profiles list`, `hootl profiles validate <id|file>` (schema, semantics and dependency pins;
+  exit 1 on any diagnostic) and `hootl run --profile <id> | --profile-file <path>`. Selecting a
+  profile for a run is the opt-in: it enables the flag for that run only, and every failure
+  (unknown id, unreadable/broken file, untrusted project profile, stale pin) happens before a session
+  or plan exists. A run without a selection never resolves a profile.
+- Named toolsets are loadable from the registry layers (`<layer>/toolsets/<id>.json`, project
+  overrides package) and are wired into both the run and `profiles validate`, so a profile can pin a
+  `toolset` dependency. A toolset still cannot add access: every tool id is re-checked against the
+  live catalog and the effective set stays an intersection (Phase 9 finding H-3).
+- `docs/workflow-profiles/PHASE8_AUTHORING.md`, the self-contained authoring guide, plus two
+  resolvable examples under `docs/workflow-profiles/examples/` (answer-only, bounded review/fix) that
+  are validated end to end in the test suite.
+
+**Added**
+- Durable, resumable Workflow Profile runs: a selected profile records itself under
+  `<projectRoot>/.ai-runtime/workflow-profile-runs/` by default (with the package version as the
+  runtime version unless the host declares one), `hootl profiles runs [--json]` lists the recorded
+  runs with status, node, counters and whether they can be resumed, and
+  `hootl run --resume <runId> "…"` continues an interrupted one — re-selecting the same profile
+  content (by id, or from the file it was selected from) and continuing its session. A stored
+  approval is never authority: the resumed attempt runs the approval node and asks again. Nothing is
+  auto-retried (a pending effect refuses continuation) and a finished run is refused as history.
+- `docs/workflow-profiles/PHASE10_OPERATIONS.md` (upgrade, rollout and rollback operations, including
+  the evidence that no persistent-state migration is required), `docs/workflow-profiles/TRACEABILITY.md`
+  (the `WP-R-001`…`WP-R-013` matrix, the decision register and the open owner items) and
+  `docs/workflow-profiles/RELEASE_NOTES.md` (what ships, how to enable it, the behaviour differences
+  needing acceptance and the pre-activation checklist).
+- A CI gate for the shipped flow documents: `scripts/profile-gates.mjs` (also `npm run profile-gates`,
+  wired into `.github/workflows/ci.yml`) validates the built-in default profile and every example
+  through the schema, the semantic validator and fail-closed dependency resolution, checks that the
+  shipped JSON Schema is the validator's schema, and runs negative controls that prove the validators
+  still refuse unknown keys, non-v1 node kinds, unbounded loops and dangling error routes.
+- `docs/workflow-profiles/examples/error-route.example.json`: the work path with a typed error route
+  (a delegated execution failure becomes a rejected end instead of an abort), validated by the test
+  suite and the CI gate like the other examples.
+- Profile runs now record every approval decision (node, status, bound digest and port) in the run
+  state through the new `recordApproval`/`appendApprovalRecord`; the record is audit data only and a
+  resumed attempt re-runs the approval node and asks the user again.
+
+**Security**
+- A selected profile could omit the confirmation node and execute its plan without any human
+  confirmation (the legacy path always requires one). Execution now requires a granted side-effect
+  approval whose bound digest is the plan being executed; the refusal is a terminal
+  `security-denied` failure (`execute.approval-required`) that no `onError` policy can route or
+  retry. Found by the Phase 9 end-to-end hardening pass (`docs/workflow-profiles/PHASE9_HARDENING.md`).
+- The profile path sent the planner its node goal text instead of the user's request (the request
+  arrives as the entry payload object). Both paths now hand the planner the request; a regression
+  test fails without the fix (finding H-2 in the same document).
+- Phase 9 hardening: end-to-end adversarial coverage for component-content injection, toolset
+  narrowing, a toolset naming an unavailable tool, an unknown approval policy, error-payload leakage
+  into the report/session/log, graph caps and an exhausted bounded loop; findings and the
+  reproducible measurements (byte cap before parse, counters before calls, flag-off cost) are
+  recorded in `docs/workflow-profiles/PHASE9_HARDENING.md`.
+
+**API**
+- `POST /api/run` accepts `profile: "<id>"` and runs that request with the selected Workflow
+  Profile, resolved by the same code as `hootl run --profile` and before the run, session or plan
+  exists (400 with diagnostics otherwise). Requests without the field are unchanged, and selection
+  is per request — the flag is never enabled process-wide. `profileFile` is not accepted over the
+  API; selecting by file stays a CLI action.
+
+**Known gaps — independent review of 2026-09-30 (fixes in progress):**
+- **Fixed (`220af0b`, `36810452453` 10/10):** the declared tool surface now narrows every plan step
+  before the delegated runtime sees it (F-1); the delegated execution is charged from the usage the
+  run's own events report, and a plan the remaining budget cannot fund is refused before it starts
+  (F-2); the delegated call is a persisted `pendingEffect` until the runtime reports back, so a kill
+  mid-effect refuses an automatic retry (F-3); the confirm callback receives the captured plan, so
+  `POST /api/plans/:id/confirm` and Ctrl-C `cancelPlan` work on the profile path (F-6); the run's
+  abort signal reaches the delegated runtime (F-8).
+- **Fixed earlier:** auto-mode escalation on the profile path re-ran the prepared run and crashed with
+  `resume.already-terminal`; the escalated attempt is now its own run (fresh id), with a parity
+  regression (F-9).
+- **Fixed (`85cf218`, `987e197`):** resuming a stored run now takes an exclusive run lease
+  (`resume.locked` for a live second process, self-healing when the holder died) — F-4; an approval
+  that binds content must show it, refused at load time and at the runtime boundary — F-5; a resume
+  hands a mid-graph pause the inputs it was waiting on, and a legacy record without them refuses
+  instead of failing inside the node — F-7; the profile planner receives the session history exactly
+  like the legacy planner — F-10.
+- **Closed:** every finding of the independent review is fixed (F-1…F-10). Phases 6, 7 and 9 are 🟢
+  again and Phase 10 Step 3 closed with the owner's merge authorization (2026-10-01); the merge is on
+  hold at the owner's direction while the stack scope is decided (PR #10 is part of native stack #11
+  with PR #9 — `EXECUTION_PLAN.md`, Phase 10 Step 3). The built-in default stays unapproved and off.
+  `TRACEABILITY.md` §3b holds the fix ledger.
+
+**Behaviour differences — decided by the owner on 2026-09-30 (U-4)** (recorded in
+`docs/workflow-profiles/PHASE7_PARITY.md`, the decision record in `PHASE10_OPERATIONS.md` §9; the
+built-in default stays gated until the approval is recorded):
+- **Accepted:** a plan-confirmation denial with feedback cannot re-plan in v1 (the digest-bound
+  decision port is an object and v1 predicates address one top-level scalar port): the run ends
+  fail-closed, like a cancellation.
+- **Accepted:** the answer branch ends with the run status `success`; the interaction status
+  `answered` stays the entry point's job, and an answer outcome without text ends with no response
+  value.
+- **Changed — report aligned:** the profile path now renders the legacy `FINAL REPORT` block and
+  appends one line naming the profile status and whether the run executed.
+- **Changed — `rejected` ends (R-3):** a `rejected` end reached before anything executed is reported
+  as `cancelled` (a refusal, like a declined confirmation on the legacy path); a `rejected` end
+  **after** execution stays `failure`. Both directions are pinned by a regression test.
+- A failed plan execution is routed to the review (the current flow reviews failures instead of
+  aborting), so the run is reported rather than terminated at the execution node.
+
 ## [27.17.17] — 2026-09-27 — Real provider runs and a green CI matrix
 
 Found by running the CLI against a real OpenAI-compatible gateway (`real-provider.yml`) and by the first real Actions runs of the CI matrix. Suite: **vitest 1693/1693** (also with `TMPDIR` behind a symlink), **e2e 209/209**; CI green on ubuntu/macos/windows × node 22/24/26.
@@ -1926,3 +2043,26 @@ this project explicitly allowed them (see "Breaking-change policy").
 ## [17.0.0] — previous baseline
 
 17 phases, 334 tests, library-only (no CLI/UI). See `PLAN.md`.
+
+**Second review (2026-10-01) — all five findings fixed (`6b36348`):**
+- **F-11:** the declared surface could be bypassed (a step naming no tools got its skill's tools from
+  `createAgent`, and a re-planned step brought its own). The runtime now narrows every dispatch,
+  filters every built agent's tools and narrows re-planned steps, and the bridge hands the surface to
+  the runtime (`toolSurfaceFor`).
+- **F-12:** one model call was charged per agent run whatever the SDK step count, and an exhausted
+  budget was noticed only after the work ran. The agent runtime reports `modelCalls` (SDK steps), the
+  usage recorder charges it, and the executor port stops before the next dispatch once a budget
+  dimension is exhausted — reported as a terminal `budget.*` limit, with the calls already made
+  charged.
+- **F-13:** the durable `pendingEffect` was cleared before the settled progress was persisted; the
+  marker is now dropped in the same write that persists the progress.
+- **F-14:** every store-backed run leases (fresh: `run.locked`; resume: `resume.locked`), and a stale
+  lease is broken by an atomic rename with an inode+content identity CAS instead of a racy unlink.
+- **F-15:** a limit checked before a node ran paired that node's inputs with the previous node's id;
+  `WorkflowRunResult.resumeNodeId` now pairs them, so a resume cannot hand a node someone else's
+  inputs.
+
+**Evidence:** CI `36843874529` @ `6b36348` **success 10/10**; `scripts/ci-test.mjs` 2,017/2,017; the
+full `src/ai` suite 127 files / 1,707 tests; profile gates 9/9; e2e `profiles` 12/12; `tsc --noEmit`
+and `npm run build` clean. `TRACEABILITY.md` §3c holds the ledger. Per the owner's 2026-10-01
+directive the verified stack merge proceeds; the merge event is recorded in the PR timeline.

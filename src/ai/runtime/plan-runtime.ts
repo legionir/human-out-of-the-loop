@@ -90,6 +90,24 @@ export interface PlanRuntimeConfig {
   budgetExceeded?: () => string | undefined;
 }
 
+/**
+ * F-11: the tool surface a profile declared for the delegated execution. `allow` absent means
+ * "no positive list"; `deny` always removes. The runtime applies it to every step's declared tools
+ * AND to the tools each built agent finally receives, so skill-provided tools and replanned steps
+ * cannot get around it.
+ */
+export interface ExecutionToolSurface {
+  readonly allow?: ReadonlyArray<string>;
+  readonly deny: ReadonlyArray<string>;
+}
+
+/** Per-execution options: the profile's tool surface and live budget guard (F-11/F-12). */
+export interface PlanRuntimeExecutionOptions {
+  toolSurface?: ExecutionToolSurface;
+  /** Returns a budget-exhaustion reason (a `budget.*` code) or undefined. Consulted before dispatch. */
+  budgetExceeded?: () => string | undefined;
+}
+
 export interface PlanExecutionResult {
   planId: string;
   status: PlanStatus;
@@ -106,6 +124,12 @@ export interface PlanExecutionResult {
   replanningAttempts: number;
   /** B-10: at least one persist failed during this run. */
   persistenceDegraded?: boolean;
+  /**
+   * F-12: why the plan stopped, when it was cancelled by a guard — `budget.*` when the profile's
+   * own budget stopped the dispatch, so the wiring can report a budget limit (with the profile's
+   * `onLimit` status) instead of a bare cancellation.
+   */
+  cancelReason?: string;
 }
 
 // ─── PlanRuntime ─────────────────────────────────────────────────
@@ -145,6 +169,9 @@ export class PlanRuntime {
   /** B-10 */
   private persistFailures = 0;
   persistenceDegraded = false;
+  /** F-11/F-12: the per-execution guard set by `execute`, restored when that execution ends. */
+  private activeToolSurface: { allow?: ReadonlySet<string>; deny: ReadonlySet<string> } | undefined;
+  private activeBudgetExceeded: (() => string | undefined) | undefined;
 
   constructor(config: PlanRuntimeConfig) {
     this.config = config as Required<
@@ -163,110 +190,175 @@ export class PlanRuntime {
    * This method blocks (async) until the plan is fully done or
    * has definitively failed.  It does NOT return early or ask
    * for human input.
+   *
+   * Phase 9 Step 1 (F-11/F-12): an optional per-run guard narrows the effective tool surface and
+   * stops the loop before it dispatches a step once the run's budget is exhausted.
+   *
+   * `toolSurface` is the profile's declared tool surface. It is enforced on the plan steps *and*
+   * on the tools each built agent actually receives, so a skill's tools or a replanned step cannot
+   * route around it (the plan-level narrowing of `narrowPlan` alone cannot see either).
+   *
+   * `budgetExceeded` is the profile's live budget: the loop consults it before dispatching each
+   * step, so an exhausted profile budget stops new work instead of being discovered after it ran.
    */
-  async execute(plan: Plan): Promise<PlanExecutionResult> {
-    // 1. Mark as running and persist
-    plan.status = 'running';
-    this.persist(plan);
-    this.notify(plan, 'plan:started');
-    // B-08: a crash after a step was stored `done` but before judgment
-    // left it unjudged. Resume must judge, not skip.
-    await this.runAcceptanceChecks(plan);
+  /** The live budget guard (F-12): the per-run profile budget first, then the instance config. */
+  private budgetReason(): string | undefined {
+    return this.activeBudgetExceeded?.() ?? this.config.budgetExceeded?.();
+  }
 
-    // 2. Main execution loop
-    while (!(await this.shouldExitOrReplan(plan))) {
-      // Phase 29: cross-process cancellation.  `hootl plans cancel <id>`
-      // runs in ANOTHER process and can only persist the new status, so
-      // the loop has to re-read the store to notice it — without this the
-      // run ignored the cancellation and even overwrote it with
-      // 'completed'.  Running agents are not killed (the step in flight
-      // finishes); the loop stops before dispatching more work.
-      if (this.persistedStatus(plan) === 'cancelled') {
-        plan.status = 'cancelled';
-        this.persist(plan);
-        this.notify(plan, 'plan:cancelled');
-        break;
-      }
-      const budgetReason = this.config.budgetExceeded?.();
-      if (budgetReason) {
-        plan.status = 'cancelled';
-        plan.cancelReason = budgetReason;
-        this.persist(plan);
-        this.notify(plan, 'plan:cancelled');
-        break;
-      }
-
-      // Check cancellation (Phase 13)
-      if (this.cancelled) {
-        plan.status = 'cancelled';
-        this.persist(plan);
-        this.notify(plan, 'plan:cancelled');
-        break;
-      }
-
-      // 3. Get ready steps and prioritize
-      const ready = this.getReadyStepsPrioritized(plan);
-
-      if (ready.length === 0) {
-        // No steps are ready — check if we're stuck
-        if (this.isStuck(plan)) {
-          // Try re-planning
-          const replanned = await this.attemptReplanning(plan);
-          if (!replanned) {
-            // Re-planning exhausted or failed — exit with failed-partial
-            plan.status = 'failed-partial';
-            this.persist(plan);
-            this.notify(plan, 'plan:failed-partial');
-            break;
-          }
-          continue; // Re-evaluate with the patched plan
+  /**
+   * F-11: narrow a step's declared tools to the surface (same rules as the profile wiring's
+   * `narrowPlanToToolSurface`, applied here so a step the runtime created while re-planning obeys
+   * the surface too). `*` expands to the allow list when one exists; without one it stays a
+   * wildcard, which the agent-level filter below still bounds.
+   */
+  private narrowTools(tools: ReadonlyArray<string>): string[] {
+    const surface = this.activeToolSurface;
+    if (!surface) return [...tools];
+    const narrowed: string[] = [];
+    for (const tool of tools) {
+      if (tool === '*') {
+        if (surface.allow) {
+          for (const id of surface.allow) if (!surface.deny.has(id) && !narrowed.includes(id)) narrowed.push(id);
+        } else if (!narrowed.includes('*')) {
+          narrowed.push('*');
         }
-
-        // F-05: wait for ANY running step, then loop so newly-ready
-        // dependents can dispatch without waiting for the rest of the wave.
-        await this.waitForNextCompletion(plan);
         continue;
       }
-
-      // 4. Dispatch currently-ready steps as tasks
-      const dispatchPromises = ready.map((step) => this.dispatchStep(plan, step));
-
-      // Use allSettled so one failure doesn't block others
-      await Promise.allSettled(dispatchPromises);
-
-      // 5–6. Persist + judge the first completion (B-14 / B-08), then
-      // re-evaluate readiness so C can start while B is still running.
-      await this.waitForNextCompletion(plan);
-      this.notify(plan, 'plan:steps-updated');
+      if (surface.deny.has(tool)) continue;
+      if (surface.allow && !surface.allow.has(tool)) continue;
+      if (!narrowed.includes(tool)) narrowed.push(tool);
     }
+    return narrowed;
+  }
 
-    // 7. Determine final status
-    // Minimal fix: spec's shouldExit returns true when cancelled, so loop exits
-    // without entering the inner cancelled block. Ensure cancelled status is set.
-    if (this.cancelled) {
-      plan.status = 'cancelled';
+  /** F-11: the hard bound — remove every tool the surface does not permit from a built agent. */
+  private filterAgentTools(agent: ResolvedAgent): ResolvedAgent {
+    const surface = this.activeToolSurface;
+    if (!surface) return agent;
+    for (const id of Object.keys(agent.tools)) {
+      if (surface.deny.has(id) || (surface.allow && !surface.allow.has(id))) delete agent.tools[id];
     }
-    // Phase 29: a cross-process cancel that arrived while the LAST step was
-    // still running never re-enters the loop (all steps are done, so
-    // shouldExit() is already true) — honour it here too instead of
-    // reporting 'completed'.
-    if (this.persistedStatus(plan) === 'cancelled') {
-      plan.status = 'cancelled';
-    }
-    if (plan.status === 'running') {
-      // R1-05: a `superseded` step (a failed attempt a successful re-plan
-      // replaced) must not keep the plan at `failed-partial`.
-      const allDone = plan.steps.every((s) => s.status === 'done' || s.status === 'superseded');
-      plan.status = allDone ? 'completed' : 'failed-partial';
-    }
-    if (plan.status === 'cancelled') {
-      this.notify(plan, 'plan:cancelled');
-    }
-    plan.completedAt = Date.now();
-    this.persist(plan);
-    this.notify(plan, 'plan:finished');
+    return agent;
+  }
 
-    return this.buildResult(plan);
+  async execute(plan: Plan, options?: PlanRuntimeExecutionOptions): Promise<PlanExecutionResult> {
+    const previousSurface = this.activeToolSurface;
+    const previousGuard = this.activeBudgetExceeded;
+    this.activeToolSurface = options?.toolSurface
+      ? {
+          ...(options.toolSurface.allow ? { allow: new Set(options.toolSurface.allow) } : {}),
+          deny: new Set(options.toolSurface.deny),
+        }
+      : undefined;
+    this.activeBudgetExceeded = options?.budgetExceeded;
+    try {
+      // 1. Mark as running and persist
+      plan.status = 'running';
+      this.persist(plan);
+      this.notify(plan, 'plan:started');
+      // B-08: a crash after a step was stored `done` but before judgment
+      // left it unjudged. Resume must judge, not skip.
+      await this.runAcceptanceChecks(plan);
+
+      // 2. Main execution loop
+      while (!(await this.shouldExitOrReplan(plan))) {
+        // Phase 29: cross-process cancellation.  `hootl plans cancel <id>`
+        // runs in ANOTHER process and can only persist the new status, so
+        // the loop has to re-read the store to notice it — without this the
+        // run ignored the cancellation and even overwrote it with
+        // 'completed'.  Running agents are not killed (the step in flight
+        // finishes); the loop stops before dispatching more work.
+        if (this.persistedStatus(plan) === 'cancelled') {
+          plan.status = 'cancelled';
+          this.persist(plan);
+          this.notify(plan, 'plan:cancelled');
+          break;
+        }
+        const budgetReason = this.budgetReason();
+        if (budgetReason) {
+          plan.status = 'cancelled';
+          plan.cancelReason = budgetReason;
+          this.persist(plan);
+          this.notify(plan, 'plan:cancelled');
+          break;
+        }
+
+        // Check cancellation (Phase 13)
+        if (this.cancelled) {
+          plan.status = 'cancelled';
+          this.persist(plan);
+          this.notify(plan, 'plan:cancelled');
+          break;
+        }
+
+        // 3. Get ready steps and prioritize
+        const ready = this.getReadyStepsPrioritized(plan);
+
+        if (ready.length === 0) {
+          // No steps are ready — check if we're stuck
+          if (this.isStuck(plan)) {
+            // Try re-planning
+            const replanned = await this.attemptReplanning(plan);
+            if (!replanned) {
+              // Re-planning exhausted or failed — exit with failed-partial
+              plan.status = 'failed-partial';
+              this.persist(plan);
+              this.notify(plan, 'plan:failed-partial');
+              break;
+            }
+            continue; // Re-evaluate with the patched plan
+          }
+
+          // F-05: wait for ANY running step, then loop so newly-ready
+          // dependents can dispatch without waiting for the rest of the wave.
+          await this.waitForNextCompletion(plan);
+          continue;
+        }
+
+        // 4. Dispatch currently-ready steps as tasks
+        const dispatchPromises = ready.map((step) => this.dispatchStep(plan, step));
+
+        // Use allSettled so one failure doesn't block others
+        await Promise.allSettled(dispatchPromises);
+
+        // 5–6. Persist + judge the first completion (B-14 / B-08), then
+        // re-evaluate readiness so C can start while B is still running.
+        await this.waitForNextCompletion(plan);
+        this.notify(plan, 'plan:steps-updated');
+      }
+
+      // 7. Determine final status
+      // Minimal fix: spec's shouldExit returns true when cancelled, so loop exits
+      // without entering the inner cancelled block. Ensure cancelled status is set.
+      if (this.cancelled) {
+        plan.status = 'cancelled';
+      }
+      // Phase 29: a cross-process cancel that arrived while the LAST step was
+      // still running never re-enters the loop (all steps are done, so
+      // shouldExit() is already true) — honour it here too instead of
+      // reporting 'completed'.
+      if (this.persistedStatus(plan) === 'cancelled') {
+        plan.status = 'cancelled';
+      }
+      if (plan.status === 'running') {
+        // R1-05: a `superseded` step (a failed attempt a successful re-plan
+        // replaced) must not keep the plan at `failed-partial`.
+        const allDone = plan.steps.every((s) => s.status === 'done' || s.status === 'superseded');
+        plan.status = allDone ? 'completed' : 'failed-partial';
+      }
+      if (plan.status === 'cancelled') {
+        this.notify(plan, 'plan:cancelled');
+      }
+      plan.completedAt = Date.now();
+      this.persist(plan);
+      this.notify(plan, 'plan:finished');
+
+      return this.buildResult(plan);
+    } finally {
+      this.activeToolSurface = previousSurface;
+      this.activeBudgetExceeded = previousGuard;
+    }
   }
 
   /**
@@ -336,7 +428,9 @@ export class PlanRuntime {
    */
   private async dispatchStep(plan: Plan, step: PlanStep): Promise<void> {
     try {
-      const budgetReason = this.config.budgetExceeded?.();
+      // F-11: the surface applies to every dispatch, including steps a re-plan introduced.
+      if (this.activeToolSurface) step.assignedTools = this.narrowTools(step.assignedTools);
+      const budgetReason = this.budgetReason();
       if (budgetReason) {
         plan.status = 'cancelled';
         plan.cancelReason = budgetReason;
@@ -397,7 +491,7 @@ export class PlanRuntime {
     // The plan's goal is written in the user's language; the step's summary and
     // notes must come back in it.
     const languageHint = plan ? detectLanguage(plan.goal) : undefined;
-    return createAgent({
+    const agent = createAgent({
       agentDefinition: {
         id: `plan-step-${step.id}`,
         name: `Step ${step.id}`,
@@ -409,6 +503,10 @@ export class PlanRuntime {
       refs: this.config.refs,
       ...(languageHint ? { languageHint } : {}),
     });
+    // F-11: the hard bound. `createAgent` falls back to a skill's tools when the step names none,
+    // so filtering the plan alone would leave that path open; the surface is enforced on what the
+    // step agent is actually handed.
+    return this.filterAgentTools(agent);
   }
 
   // ── Private: status sync ──────────────────────────────────────
@@ -674,7 +772,10 @@ Produce a new plan that:
 
       // Phase 30 (P7): keep terminal steps (done AND failed) so an abandoned
       // sub-goal never disappears from the plan; see `replan-merge.ts`.
-      const mergedSteps = mergeReplannedSteps(plan.steps, newPlan.steps, this.replanningCount);
+      const mergedSteps = mergeReplannedSteps(plan.steps, newPlan.steps, this.replanningCount)
+        // F-11: a re-plan produces steps the profile wiring never saw; the surface is applied here
+        // so their declared tools obey it too (the agent-level filter bounds what is handed out).
+        .map((step) => (this.activeToolSurface ? { ...step, assignedTools: this.narrowTools(step.assignedTools) } : step));
       const mergedPlan: Plan = { ...plan, steps: mergedSteps };
 
       // R1-06: validate the MERGED plan, not the raw model output — a
@@ -897,6 +998,7 @@ Produce a new plan that:
       totalSteps: plan.steps.length,
       incompleteSteps,
       replanningAttempts: this.replanningCount,
+      ...(plan.cancelReason ? { cancelReason: plan.cancelReason } : {}),
       ...(this.persistenceDegraded ? { persistenceDegraded: true } : {}),
     };
   }

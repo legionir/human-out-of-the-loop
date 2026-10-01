@@ -73,7 +73,7 @@ function sleepSync(ms: number): void {
 }
 
 /** True when the process that created the lock file is still running. */
-function isProcessAlive(pid: number): boolean {
+export function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
@@ -114,8 +114,12 @@ export function isLockHeld(lockPath: string): boolean {
  */
 export const LOCK_HARD_STALE_MS = 10 * 60 * 1000;
 
-/** Inode + contents: an inode number alone is reused at once by some filesystems. */
-function lockIdentity(file: string): string | undefined {
+/**
+ * Inode + contents: an inode number alone is reused at once by some filesystems.
+ * Exported for the profile run lease, which needs the same identity check before breaking a
+ * lease whose holder died (see `breakStaleLock`, which it mirrors with the same tombstone trick).
+ */
+export function lockIdentity(file: string): string | undefined {
   try {
     return `${fs.statSync(file).ino}:${fs.readFileSync(file, 'utf8')}`;
   } catch {

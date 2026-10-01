@@ -12,7 +12,7 @@ import { z } from 'zod';
  */
 export const ToolDefinitionSchema = z
   .object({
-    id: z.string().min(1).regex(/^[a-z0-9_-]+$/),
+    id: z.string().min(1),
     name: z.string().min(1),
     description: z.string().min(1),
     source: z.enum(['local', 'mcp']).default('local'),
@@ -30,6 +30,23 @@ export const ToolDefinitionSchema = z
   .refine((data) => data.source !== 'mcp' || !!data.mcpServerId, {
     message: 'mcpServerId is required when source="mcp"',
     path: ['mcpServerId'],
+  })
+  .superRefine((data, context) => {
+    if (data.source === 'local') {
+      if (!/^[a-z0-9_-]+$/.test(data.id)) {
+        context.addIssue({ code: 'custom', path: ['id'], message: 'Local tool id must match ^[a-z0-9_-]+$' });
+      }
+      return;
+    }
+
+    // MCP names are opaque identifiers: preserve exact spelling and validate
+    // only their bounded UTF-8 representation and control-character safety.
+    if (new TextEncoder().encode(data.id).byteLength > 256) {
+      context.addIssue({ code: 'custom', path: ['id'], message: 'MCP tool id must be at most 256 UTF-8 bytes' });
+    }
+    if (/[\u0000-\u001f\u007f-\u009f]/u.test(data.id)) {
+      context.addIssue({ code: 'custom', path: ['id'], message: 'MCP tool id must not contain control characters' });
+    }
   });
 
 export type ToolDefinition = z.infer<typeof ToolDefinitionSchema>;

@@ -44,6 +44,32 @@ import {
 } from '../utils/reasoning.js';
 import { createToolLogRenderer, resolveToolLogEnabled } from '../utils/tool-log.js';
 import { parseBudget } from '../../ai/runtime/budget.js';
+import { resolveProfileSelection as resolveSelectedWorkflowProfile } from '../../ai/workflow-profiles/profile-selection.js';
+import {
+  loadResumableWorkflowProfileRun,
+  openWorkflowProfileRunStore,
+} from '../../ai/workflow-profiles/profile-resume.js';
+import { WorkflowProfileLoadError } from '../../ai/workflow-profiles/profile-registry.js';
+import type { OrchestratorWorkflowProfileOptions } from '../../ai/orchestrator.js';
+
+/**
+ * Phase 8 Step 2: resolve `--profile <id>` / `--profile-file <path>` into the activation options.
+ * The resolution itself lives in the workflow-profile module so the CLI and the server cannot
+ * drift apart; only the *explicit* selection is turned into an opt-in, and `profiles validate` is
+ * the introspection path, so nothing is executed or written here.
+ */
+export function resolveProfileSelection(
+  projectRoot: string,
+  trustedProject: boolean,
+  opts: Pick<RunCommandOptions, 'profile' | 'profileFile'>,
+): OrchestratorWorkflowProfileOptions {
+  return resolveSelectedWorkflowProfile({
+    projectRoot,
+    trustedProject,
+    ...(opts.profile !== undefined ? { profile: opts.profile } : {}),
+    ...(opts.profileFile !== undefined ? { profileFile: opts.profileFile } : {}),
+  });
+}
 
 export interface RunCommandOptions {
   /** Default: '.' (or the global config's projectRoot) */
@@ -106,6 +132,16 @@ export interface RunCommandOptions {
    * `registry/mcp-servers` layer is allowed to spawn.
    */
   trustProject?: boolean;
+  /** Phase 8: run with this discovered Workflow Profile (explicit user selection). */
+  profile?: string;
+  /** Phase 8: run with this Workflow Profile file (explicit user selection). */
+  profileFile?: string;
+  /**
+   * Phase 10 (U-2): resume a recorded profile run (see `hootl profiles runs`). The stored record
+   * supplies the profile and the session; the request text is supplied again, because the kernel
+   * keeps no cross-run input state.
+   */
+  resume?: string;
   /** J-03: token count or `$1.50`. */
   budget?: string;
   /** J-07: plan only and print an estimate; nothing is executed. */
@@ -398,6 +434,50 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     opts.runHooks.onToolCall = toolLog;
   }
 
+  // Phase 10 (U-2): `--resume <runId>` reads the recorded run state first, so a missing or finished
+  // run fails before anything else happens. The stored record supplies the profile and session; the
+  // guards that decide whether the profile, dependencies and authority still match run inside the
+  // runner, before any node executes.
+  let resumeState: ReturnType<typeof loadResumableWorkflowProfileRun> | undefined;
+  if (opts.resume !== undefined) {
+    if (opts.profile !== undefined || opts.profileFile !== undefined) {
+      err(chalk.red('--resume cannot be combined with --profile/--profile-file: the recorded run names its profile.'));
+      return { exitCode: 2 };
+    }
+    try {
+      resumeState = loadResumableWorkflowProfileRun(
+        openWorkflowProfileRunStore(path.join(projectRoot, '.ai-runtime')),
+        opts.resume,
+      );
+    } catch (error) {
+      if (error instanceof WorkflowProfileLoadError) {
+        err(chalk.red(error.message));
+        for (const diagnostic of error.diagnostics) err(chalk.dim(`  ${diagnostic.code}: ${diagnostic.message}`));
+        err(chalk.dim('List recorded runs with `hootl profiles runs`.'));
+        return { exitCode: 1 };
+      }
+      throw error;
+    }
+  }
+
+  // Phase 8: an explicitly selected Workflow Profile turns the profile path on for this run —
+  // selection is the opt-in the flag documents. Discovery/validation happens here, before the
+  // session and the plan exist, so a bad profile fails before any side effect. A resume selects the
+  // profile its record names, through the same resolution path.
+  const profileSelection = resumeState
+    // A run started from an explicit file is resumed from that file: the id alone would not be
+    // discoverable. The resume guard compares the profile hash, so a tampered record cannot
+    // substitute different content for the one the interrupted attempt was running.
+    ? resolveProfileSelection(projectRoot, trustedProject, resumeState.profileFile
+      ? { profileFile: resumeState.profileFile }
+      : { profile: resumeState.profileId })
+    : opts.profile !== undefined || opts.profileFile !== undefined
+      ? resolveProfileSelection(projectRoot, trustedProject, opts)
+      : undefined;
+  const resumeOptions = resumeState
+    ? { runId: resumeState.runId, stateStore: openWorkflowProfileRunStore(path.join(projectRoot, '.ai-runtime')) }
+    : undefined;
+
   const orchestrator =
     opts.orchestrator ??
     new Orchestrator({
@@ -405,6 +485,7 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
       persistent,
       ...extraOrch,
       ...(model ? { defaultModelId: model } : {}),
+      ...(profileSelection ? { workflowProfile: { ...profileSelection, ...(resumeOptions ?? {}) } } : {}),
       onProgress: (event: ProgressEvent) => renderer(event),
       ...(showThinking ? { onThought: reasoning } : {}),
       onToolCall: toolLog,
@@ -416,6 +497,15 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     // Previously an unknown --model fell through to the planner, whose error
     // was swallowed into an empty "clarification needed" report.
     await orchestrator.initialize();
+
+    // Phase 10 (U-2): a resumed profile run continues in the session its record names, when that
+    // session still exists. A record from a non-persistent run has no session to continue, so the
+    // run simply starts a fresh one (the resume guards compare the profile, pins and authority,
+    // not the session).
+    const resumeSessionId = opts.session ??
+      (resumeState?.sessionId && orchestrator.sessionStore.getSession(resumeState.sessionId)
+        ? resumeState.sessionId
+        : undefined);
 
     // Phase 29: `--session <id>` pointing at a session that does not exist
     // used to be accepted silently — the run reported the bogus id as its
@@ -504,8 +594,13 @@ export async function runCommand(goal: string, opts: RunCommandOptions): Promise
     }
 
     // ── Full run (Human-Out-Of-Loop after confirmation) ───────
+    if (resumeState) {
+      out(color.dim(
+        `Resuming profile run ${resumeState.runId} (${resumeState.profileId}) from node "${resumeState.currentNodeId}".`,
+      ));
+    }
     const result: OrchestratorResult = await orchestrator.run(requested, {
-      sessionId: opts.session,
+      sessionId: resumeSessionId,
       abortSignal: abortController.signal,
       // v27.17.0: auto (default) / chat / plan — the prefix in the goal wins.
       mode: resolved.mode,

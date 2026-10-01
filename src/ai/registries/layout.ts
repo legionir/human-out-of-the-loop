@@ -64,6 +64,24 @@ export function packageRoot(): string | undefined {
   }
 }
 
+/**
+ * Version of the installed package (its manifest), or undefined when unreadable.
+ *
+ * Phase 10 (U-1): this is the declared runtime version. A profile run records it in its run state,
+ * so a resume across two builds is refused (`resume.runtime-version-changed`) instead of continuing
+ * on assumptions about behaviour that may have changed.
+ */
+export function packageVersion(): string | undefined {
+  const root = packageRoot();
+  if (!root) return undefined;
+  try {
+    const raw = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8')) as { version?: unknown };
+    return typeof raw.version === 'string' ? raw.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Absolute path to the packaged registry, or undefined when unavailable. */
 export function packageRegistryDir(): string | undefined {
   const root = packageRoot();

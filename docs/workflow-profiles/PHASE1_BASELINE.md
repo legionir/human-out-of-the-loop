@@ -1,6 +1,6 @@
 # Workflow Profiles — Phase 1 Baseline & Decision Register
 
-**Status:** 🟡 Phase 1 in progress; implementation is intentionally stopped before Phase 2 until the owner decisions below are resolved.
+**Status at initial baseline (historical):** 🟡 Phase 1 was in progress and Phase 2 was blocked pending owner decisions; later completion and superseding status are recorded in §8 and the Phase 1 completion handoff.
 **Baseline:** `main` at `ff7c030afaa20b8a343cdb090b3b2db16384279e` (2026-09-29).
 **Scope:** discovery, design traceability, and a reversible architecture spike only. No Runtime code or existing behavior changed in this phase.
 
@@ -99,4 +99,22 @@ This addendum records Pouya Rahimi's confirmed decisions after the initial basel
 
 Read-only source evidence at baseline `main` (`ff7c030afaa20b8a343cdb090b3b2db16384279e`): `Orchestrator.run()` enters private `runInSession()` and owns intake/planning/clarification/confirmation before delegating a confirmed plan to `PlanRuntime.execute()`. Public `PlanRuntime` lifecycle is `execute(plan)`, `resume(planId)`, and `cancel()`; it schedules the inner DAG. No public staged Orchestrator API or Profile Runtime exists. This rules out composing existing public calls alone, but does not require another scheduler: the owner-approved solution is an internal, narrow adapter to existing services, with PlanRuntime unchanged as the inner scheduler. This is a design/read-only spike, not executable integration evidence.
 
-The Phase 1 owner-decision blockers are resolved. **Step 3 is 🟢**: owner decisions are recorded, the Schema now requires dependency digests and allows an exact bounded MCP ID shape, and all three structural examples carry clearly labelled placeholder digests. **Step 4 is 🟢 for its read-only design spike**: the architecture boundary and narrow internal adapter are owner-approved; no implementation/integration success is claimed. **Step 5 remains 🟡** while PR #8 awaits review/merge. Phase 1 remains 🟡; Phase 2 and all Runtime implementation remain 🔴 and must not begin from this PR. PR #8 remains a documentation/contract Draft; no files or branches are deleted.
+The Phase 1 owner-decision blockers are resolved. **Step 3 is 🟢**: owner decisions are recorded, the Schema now requires dependency digests and allows an exact bounded MCP ID shape, and all three structural examples carry clearly labelled placeholder digests. **Step 4 is 🟢 for its read-only design spike**: the architecture boundary and narrow internal adapter are owner-approved; no implementation/integration success is claimed. **Step 5 was 🟡** pending PR #8 review/merge at the time of this baseline. The completion and post-merge CI evidence are recorded in the append-only update below; no historical evidence is removed.
+
+## Phase 1 completion and Phase 2 handoff (2026-09-29 20:38 GMT+3:30; append-only)
+
+PR #8 merged to `main` at `ee3fa3f67d695a251974d5bb94ce53ab6e605b5a`. Post-merge CI run `36601818036` is completed with conclusion `success`. Phase 1 Step 5 and the Phase 1 Gate are now 🟢. The source branch `feat/workflow-profile-phase1-baseline-20260929` is preserved. Phase 2 may proceed on a new branch from this merge commit; it does not authorize Runtime activation or any later phase.
+
+## 9. D-WP-009 — owner-confirmed extension metadata policy (2026-09-29 21:33 GMT+3:30; append-only)
+
+Pouya confirmed that `x-*` extension metadata is limited to JSON scalar values only; each extension-enabled object may contain at most 16 such fields; extension strings are limited to 1,024 characters; the overall Profile file remains capped at 1 MiB (1,048,576 UTF-8 bytes). Arrays, objects, executable content, and extension keys outside the existing bounded key pattern are rejected. This resolves the remaining owner-policy question for Phase 2. Contract tests cover the 16/17-field boundary at each extension-enabled object, non-scalar values, string length, and the file-size boundary. This approval does not authorize workflow execution or later phases.
+
+## 10. D-WP-003 Profile-ID collision clarification (2026-09-29; append-only)
+
+The earlier baseline observation that `registryLayersFor()` lets project registry entries override matching package registry IDs describes the pre-existing Persona/Skill-style registries; it is not itself the Workflow Profile ID collision contract. The owner-confirmed Profile selection order is explicit user selection, then an explicitly opted-in project Profile, then built-in default, with exactly one active Profile and no composition. The decision does not specify same-ID collision/override semantics across Profile scopes. Phase 2 currently rejects duplicate Profile IDs across scopes and tests that fail-closed behavior. Do not transfer the old package→project override rule to Profiles. Whether fail-closed duplicate handling is the final Profile contract, or an explicit scoped-ID/override rule is desired, remains an owner decision before Phase 2 acceptance; no override is inferred.
+
+
+
+## 11. Superseding Profile ID collision decision (2026-09-30; append-only)
+
+Section 10 retains the historical state before Pouya's later delegation. Under Pouya's instruction to apply the agent's conservative recommendations, the current Workflow Profile rule is **global fail-closed for duplicate IDs across all scopes**. Selection order (explicit user selection, opted-in project Profile, then built-in default) does not authorize same-ID override or disambiguation. The Phase 2 registry and tests implement this rule. This supersedes only the unresolved-decision sentence in §10; no historical evidence is removed.

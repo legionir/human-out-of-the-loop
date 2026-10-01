@@ -44,6 +44,11 @@ export interface RunState {
   abortController?: AbortController;
   /** A-08: bearer token that created this run (undefined when auth is off). */
   ownerToken?: string;
+  /**
+   * Phase 8: the Workflow Profile this run was explicitly selected to use, when the request asked
+   * for one. `undefined` means the legacy path.
+   */
+  profileId?: string;
   /** A-05: idle TTL while awaiting clarification/confirmation. */
   ttlTimer?: ReturnType<typeof setTimeout>;
 }
@@ -56,6 +61,11 @@ export interface ServerContext {
   projectRoot: string;
   runtimeDir: string;
   logFilePath: string;
+  /**
+   * Phase 8: whether this project is trusted, i.e. whether `.hootl/workflow-profiles` may be read.
+   * Same trust record the CLI uses (`resolveAndMaybePersistTrust`).
+   */
+  trustedProject?: boolean;
   /** One-time orchestrator initialization (lazy — first request triggers it). */
   ready: Promise<void>;
   /** A-01: configured bearer tokens. Empty = auth middleware is off. */

@@ -2135,6 +2135,74 @@ scenarios.ctrlc = async () => {
   return root;
 };
 
+/**
+ * Phase 10 (U-2): a Workflow Profile run records itself durably, survives a crash, and resumes.
+ *
+ * The crash is real: the CLI is killed the moment its run record appears (the runner writes it
+ * before the first node), and the resume then goes through the same command a user would type. This
+ * is the one place the whole chain is exercised together — CLI flag, durable store, selection by the
+ * recorded profile, the resume guards, and the session the record names.
+ */
+scenarios.profiles = async () => {
+  const root = makeProject('profiles');
+  const profileFile = path.join(REPO, 'docs', 'workflow-profiles', 'examples', 'bounded-review-fix.example.json');
+  const runsDir = path.join(root, '.ai-runtime', 'workflow-profile-runs');
+  const storedRuns = () => {
+    if (!fs.existsSync(runsDir)) return [];
+    return fs.readdirSync(runsDir).filter((name) => name.endsWith('.json')).map((name) => {
+      try { return JSON.parse(fs.readFileSync(path.join(runsDir, name), 'utf-8')); } catch { return undefined; }
+    }).filter(Boolean);
+  };
+
+  // ── 1. a real profile run through the CLI, then killed mid-flight ──
+  const live = spawnCli(runArgs('write the project notes WRITE:notes/profile.txt', root, ['--profile-file', profileFile]));
+  const appeared = await waitForCondition(() => storedRuns().length > 0, 30_000, 20);
+  check('profiles: the run records itself before the first node', appeared);
+  const killed = live.child.kill('SIGKILL');
+  await live.closed;
+  check('profiles: the interrupted process left an interrupted record',
+    storedRuns().some((run) => run.status === 'interrupted'), JSON.stringify(storedRuns().map((r) => r.status)));
+
+  // ── 2. the operator sees it, and it is offered for resume ──
+  const listed = await run(['profiles', 'runs', '--json', '--project-root', root]);
+  const runs = JSON.parse(listed.stdout).runs;
+  const interrupted = runs.find((entry) => entry.status === 'interrupted');
+  check('profiles: `profiles runs --json` lists the interrupted run', Boolean(interrupted),
+    listed.stdout.trim().replace(/\s+/g, ' ').slice(0, 160));
+  check('profiles: it names the profile and is marked resumable',
+    interrupted?.profileId === 'example.bounded-review-fix' && interrupted?.resumable === true, JSON.stringify(interrupted));
+
+  // ── 3. finishing it is refused; an unknown id too ──
+  const unknown = await run(runArgs('anything', root, ['--resume', 'no-such-run']));
+  check('profiles: an unknown run id is refused with exit 1',
+    unknown.code === 1 && /No stored Workflow Profile run/.test(unknown.stdout + unknown.stderr), `exit=${unknown.code}`);
+
+  // ── 4. resuming the interrupted run executes the work ──
+  const resumed = await run(runArgs('write the project notes WRITE:notes/profile.txt', root, ['--resume', interrupted.runId]));
+  check('profiles: the resumed run exits 0', resumed.code === 0, `exit=${resumed.code} ${(resumed.stderr || '').split('\n')[0]}`);
+  check('profiles: it said it was resuming', /Resuming profile run/.test(resumed.stdout + resumed.stderr));
+  // The profile path delegates execution to the existing runtime, so the evidence is the plan it
+  // ran: the same plan record every other run writes, with its steps completed.
+  const resumedPlan = planStore(root).plans[0];
+  check('profiles: the resumed run executed every step',
+    Boolean(resumedPlan) && resumedPlan.steps.length > 0 && resumedPlan.steps.every((step) => step.status === 'done'),
+    JSON.stringify(resumedPlan?.steps?.map((step) => step.status)));
+  check('profiles: the log records the resumed execution',
+    readLog(root).some((entry) => entry.eventType === 'step:completed'));
+  const after = storedRuns().find((entry) => entry.runId === interrupted.runId);
+  check('profiles: the record is now terminal', after?.status === 'success', `status=${after?.status}`);
+
+  // ── 5. and a finished run cannot be resumed again ──
+  const again = await run(runArgs('write the project notes WRITE:notes/profile.txt', root, ['--resume', interrupted.runId]));
+  check('profiles: resuming a finished run is refused',
+    again.code === 1 && /already finished/.test(again.stdout + again.stderr), `exit=${again.code}`);
+
+  // ── 6. --resume and --profile cannot be combined (the record names its profile) ──
+  const conflicting = await run(runArgs('anything', root, ['--resume', interrupted.runId, '--profile-file', profileFile]));
+  check('profiles: --resume with --profile-file is a usage error (exit 2)', conflicting.code === 2, `exit=${conflicting.code}`);
+  return root;
+};
+
 // ─── runner ──────────────────────────────────────────────────────
 
 async function main() {

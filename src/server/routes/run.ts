@@ -22,7 +22,9 @@
 import { randomUUID } from 'node:crypto';
 import { Router } from 'express';
 import type { Plan } from '../../ai/schemas/plan.js';
-import type { RunOverrides } from '../../ai/orchestrator.js';
+import type { OrchestratorWorkflowProfileOptions, RunOverrides } from '../../ai/orchestrator.js';
+import { resolveProfileSelection } from '../../ai/workflow-profiles/profile-selection.js';
+import { WorkflowProfileLoadError } from '../../ai/workflow-profiles/profile-registry.js';
 import { parseRunMode, type RunMode } from '../../ai/modes.js';
 import { parseModePrefix, resolveRunMode } from '../../cli/utils/mode-prefix.js';
 import { loadGlobalConfig } from '../../cli/utils/config.js';
@@ -41,7 +43,7 @@ export function runRouter(ctx: ServerContext): Router {
   const router = Router();
 
   router.post('/api/run', async (req, res) => {
-    const { message, sessionId, confirm, model, timeoutMs, maxSteps, maxReplans, mode, previewId } =
+    const { message, sessionId, confirm, model, timeoutMs, maxSteps, maxReplans, mode, previewId, profile } =
       (req.body ?? {}) as {
         message?: unknown;
         sessionId?: unknown;
@@ -55,6 +57,8 @@ export function runRouter(ctx: ServerContext): Router {
         mode?: unknown;
         /** H-08: execute a previously previewed plan. */
         previewId?: unknown;
+        /** Phase 8: run this request with the named Workflow Profile (see GET /api/profiles). */
+        profile?: unknown;
       };
     // NOTE (UI security step): `projectRoot` intentionally does NOT come
     // from the request body — it is fixed server-side (config/env).
@@ -84,6 +88,47 @@ export function runRouter(ctx: ServerContext): Router {
         return;
       }
       if (sendSessionForbidden(ctx, req, res, sessionId)) return;
+    }
+
+    // Phase 8: an explicit Workflow Profile for THIS run. Selection is the opt-in: the resolved
+    // options carry the flag for this run only, and every problem (unknown id, untrusted project,
+    // broken file, stale dependency pin) is answered here — before a run, session or plan exists.
+    // `profileFile` is deliberately NOT accepted over HTTP: a client-supplied host path would be a
+    // new "read any JSON file" primitive. Use the CLI (--profile-file) or an operator directory.
+    if ('profileFile' in ((req.body ?? {}) as Record<string, unknown>)) {
+      res.status(400).json({
+        error: '"profileFile" is not accepted over the API; select by id or use the CLI --profile-file.',
+      });
+      return;
+    }
+    let profileOptions: OrchestratorWorkflowProfileOptions | undefined;
+    if (profile != null) {
+      if (typeof profile !== 'string' || profile.trim() === '') {
+        res.status(400).json({ error: '"profile" must be a non-empty profile id when present.' });
+        return;
+      }
+      try {
+        profileOptions = resolveProfileSelection({
+          projectRoot: ctx.projectRoot,
+          trustedProject: ctx.trustedProject === true,
+          profile: profile.trim(),
+        });
+      } catch (error) {
+        if (error instanceof WorkflowProfileLoadError) {
+          res.status(400).json({
+            error: error.message,
+            diagnostics: error.diagnostics.map((diagnostic) => ({
+              stage: diagnostic.stage,
+              code: diagnostic.code,
+              message: diagnostic.message,
+              ...(diagnostic.profileId ? { profileId: diagnostic.profileId } : {}),
+              ...(diagnostic.file ? { file: diagnostic.file } : {}),
+            })),
+          });
+          return;
+        }
+        throw error;
+      }
     }
     const autoConfirm = confirm === true;
 
@@ -163,6 +208,9 @@ export function runRouter(ctx: ServerContext): Router {
       createdAt: Date.now(),
       abortController,
       ownerToken: getAuthToken(req),
+      ...(profileOptions?.selection?.registered
+        ? { profileId: profileOptions.selection.registered.profile.profile.id }
+        : {}),
     });
     const run = ctx.runs.get(runId)!;
 
@@ -177,6 +225,10 @@ export function runRouter(ctx: ServerContext): Router {
           ...(preview ? { preparedPlan: preview.plan } : {}),
           // U3: per-run overrides (validated above)
           ...(Object.keys(runOverrides).length > 0 ? { runOverrides } : {}),
+          // Phase 8: per-run profile selection (resolved above; the flag inside is per run).
+          // Phase 10 (U-2): the profile run records itself under this run's id, so the durable
+          // record and GET /api/runs/:runId name the same attempt.
+          ...(profileOptions ? { workflowProfile: { ...profileOptions, runId } } : {}),
           // U5: interactive clarification.  The planner asks questions during
           // PLANNING (before any plan id exists), so the SSE channel for this
           // event is keyed by the runId — the run state also carries the
@@ -247,7 +299,11 @@ export function runRouter(ctx: ServerContext): Router {
       }
     })();
 
-    res.status(202).json({ runId, autoConfirm });
+    res.status(202).json({
+      runId,
+      autoConfirm,
+      ...(run.profileId ? { profileId: run.profileId } : {}),
+    });
   });
 
   /**

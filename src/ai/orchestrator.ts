@@ -2,6 +2,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { z } from 'zod';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { packageVersion } from './registries/layout.js';
 import { registryLayersFor, type RegistryScope } from './registries/layout.js';
 import { EventBus } from './runtime/event-bus.js';
 import type { EnvSource } from './env.js';
@@ -80,6 +81,20 @@ import { emptyReviewUsage, type Review } from './schemas/review.js';
 import { createAgent, type ResolvedAgent } from './agents/agent-factory.js';
 import { DEFAULT_RUN_MODE, type RunMode } from './modes.js';
 import { readOnlyToolIds } from './tools/read-only.js';
+import { activateWorkflowProfile, type WorkflowProfileActivation, type WorkflowProfileActivationOptions } from './workflow-profiles/profile-activation.js';
+import { ToolsetRegistry, loadToolsetsFromDirectory } from './workflow-profiles/toolsets.js';
+import { workflowProfileRunsDir } from './workflow-profiles/profile-resume.js';
+import {
+  PLAN_INFEASIBLE_CODE,
+  runWorkflowProfileBridge,
+  WorkflowProfilePlanInfeasibleError,
+  type WorkflowProfileBridgeOutcome,
+  type WorkflowProfileBridgeServices,
+} from './workflow-profiles/orchestrator-bridge.js';
+import { createEventBusExecutionUsage } from './workflow-profiles/orchestrator-adapters.js';
+import { createWorkflowProfileComponentSources } from './workflow-profiles/profile-sources.js';
+import type { WorkflowProfileComponentSources } from './workflow-profiles/profile-resolver.js';
+import { FileWorkflowProfileRunStateStore, type WorkflowProfileRunStateStore } from './workflow-profiles/profile-run-state.js';
 import { detectLanguage, languageSection, type DetectedLanguage } from './language.js';
 
 // ─── Types ────────────────────────────────────────────────────────
@@ -135,7 +150,44 @@ export const OrchestratorConfigSchema = z.object({
  * except `projectRoot` is optional).  `onProgress` (Phase 19) is a
  * callback and is validated structurally, not via the base schema.
  */
+/**
+ * Phase 7 (WP-R-008): opt-in Workflow Profile execution for this Orchestrator.
+ *
+ * When this is absent the profile path does not exist for the instance: `run()` behaves
+ * exactly as before. When it is present, `HOOTL_WORKFLOW_PROFILE` (or `env`) still gates it:
+ * flag off ⇒ the legacy path runs and nothing profile-related resolves; flag on ⇒ one
+ * prepared profile runs or the run fails closed with diagnostics before any session or
+ * interaction side effect.
+ */
+export interface OrchestratorWorkflowProfileOptions extends Omit<WorkflowProfileActivationOptions, 'sources'> {
+  /** Pre-built ports; omitted ⇒ built from this Orchestrator's own services. */
+  ports?: Partial<WorkflowProfileBridgeServices>;
+  /**
+   * Phase 10 (U-2): durable run-state store (inherited from the activation options). Omitted ⇒ this
+   * Orchestrator writes `<runtimeDir>/workflow-profile-runs`, so an interrupted run is visible to
+   * `hootl profiles runs` and resumable with `hootl run --resume`. Pass `null` to keep the run's
+   * state in memory only (a host that manages its own store), or a store to use that one.
+   */
+  stateStore?: WorkflowProfileRunStateStore | null;
+}
+
+/**
+ * R-3 (owner decision 2026-09-30): a profile end reached with `rejected` **before anything
+ * executed** is a refusal (most often the user declining the plan), which the legacy path reports as
+ * `cancelled`; the same end *after* an execution is a rejection of work that ran and stays a
+ * `failure`. The distinction is the execution itself, not the profile text.
+ */
+function rejectedWithoutExecution(outcome: WorkflowProfileBridgeOutcome): boolean {
+  return outcome.status === 'rejected' && outcome.execution === undefined;
+}
+
 export type OrchestratorConfig = z.input<typeof OrchestratorConfigSchema> & {
+  /**
+   * Phase 7: opt-in Workflow Profile execution. Absent ⇒ the instance has no profile path.
+   * The raw value is used (not the parsed schema output) because it carries a state store
+   * and already-built ports, which zod must not introspect.
+   */
+  workflowProfile?: OrchestratorWorkflowProfileOptions;
   onProgress?: (event: ProgressEvent) => void;
   /**
    * Phase 32: live model thinking (reasoning) text for every agent turn of
@@ -229,6 +281,13 @@ export interface OrchestratorRunOptions {
     questions: string[],
     round: number,
   ) => Promise<Record<string, string> | null>;
+  /**
+   * Phase 8: per-run Workflow Profile selection. Overrides the instance-level
+   * `config.workflowProfile` for this run only (the server's `POST /api/run { profile }` uses it);
+   * the decision is still made before any session/interaction side effect, and the flag inside
+   * `env` remains the switch, so a per-run value can never enable the profile path by itself.
+   */
+  workflowProfile?: OrchestratorWorkflowProfileOptions;
   /**
    * Callback to get user confirmation of the plan.
    * REQUIRED — Law 17 mandates explicit user approval before execution.
@@ -336,8 +395,10 @@ export class Orchestrator {
    * `Required<Omit<…>> & { env: EnvSource }` rather than plain
    * `Required<OrchestratorConfig>`.
    */
-  readonly config: Required<Omit<OrchestratorConfig, 'env' | 'onThought' | 'onToolCall'>> & {
+  readonly config: Required<Omit<OrchestratorConfig, 'env' | 'onThought' | 'onToolCall' | 'workflowProfile'>> & {
     env: EnvSource;
+    /** Phase 7: absent ⇒ this instance has no profile path at all. */
+    workflowProfile?: OrchestratorWorkflowProfileOptions;
     /** Phase 32: absent means "agent turns are not streamed". */
     onThought?: ThoughtSink;
     /** v27.17.3: absent means "no tool-call records". */
@@ -351,6 +412,12 @@ export class Orchestrator {
    * same secret list the journal and the observability log use.
    */
   private toolCallOptions: ToolCallLogOptions = {};
+
+  /** Detail of the last feasibility rejection, for the legacy-shaped infeasible result. */
+
+  /** Phase 7: component sources shared by the resolver and the built-in default profile. */
+  private profileComponentSources?: WorkflowProfileComponentSources;
+  private profileRunStateStore?: WorkflowProfileRunStateStore;
 
   readonly personaRegistry: PersonaRegistry;
   readonly skillRegistry: SkillRegistry;
@@ -459,6 +526,9 @@ export class Orchestrator {
       // not bootstrapped unless the caller explicitly says it is trusted.
       trustedProject: config.trustedProject === true,
       modelRoutes: data.modelRoutes ?? {},
+      // Phase 7: read from the raw config — the zod schema does not carry callbacks
+      // or stores, so the profile options never pass through validation.
+      workflowProfile: config.workflowProfile,
     };
 
     // Phase 27 (CFG-08): resolve the env once, before any registry or
@@ -1050,6 +1120,19 @@ export class Orchestrator {
       budget = new BudgetTracker(parsed);
     }
 
+    // Phase 7: decide the execution path before any session/interaction side effect, so an
+    // invalid or unapproved profile cannot leave a half-created run behind. With the flag off
+    // this resolves nothing and the legacy path below is exactly what ran before.
+    // Phase 8: a per-run selection (server `POST /api/run { profile }`) is preferred over the
+    // instance-level one; it goes through the same activation gate, so nothing is bypassed.
+    const profileOptions = options?.workflowProfile ?? this.config.workflowProfile;
+    if (profileOptions !== undefined) {
+      const activation = this.resolveWorkflowProfileActivation(profileOptions);
+      if (activation.kind === 'profile') {
+        return this.runWorkflowProfile(userRequest, options, ov, activation, budget, profileOptions);
+      }
+    }
+
     if (options?.sessionId && !this.sessionStore.getSession(options.sessionId)) {
       const err = new Error(`Session "${options.sessionId}" not found.`);
       (err as Error & { status?: number }).status = 404;
@@ -1073,6 +1156,463 @@ export class Orchestrator {
     } finally {
       if (interaction) this.liveInteractions.delete(interaction.id);
     }
+  }
+
+  // ─── Phase 7: Workflow Profile path ─────────────────────────────
+
+  /**
+   * Component sources for the resolver and the built-in default profile (same content).
+   *
+   * Phase 9 (finding H-3): named toolsets are loaded from the same registry layers as every other
+   * component (`<layer>/toolsets/*.json`), so a profile that pins a `toolset` dependency resolves in
+   * a real run. A toolset never adds access: `ToolsetRegistry.register` rejects any tool the live
+   * catalog does not have, and the effective set stays an intersection.
+   */
+  private workflowProfileSources(): WorkflowProfileComponentSources {
+    if (!this.profileComponentSources) {
+      const toolCatalog = { hasDefinition: (id: string) => this.toolRegistry.getDefinition(id) !== undefined };
+      const toolsetRegistry = new ToolsetRegistry({ tools: toolCatalog });
+      for (const [index, layer] of registryLayersFor(this.config.projectRoot, { env: this.env }).entries()) {
+        const loaded = loadToolsetsFromDirectory(path.join(layer.dir, 'toolsets'), toolsetRegistry, {
+          required: false,
+          override: index > 0,
+        });
+        for (const failure of loaded.errors) {
+          this.observabilityLogger.logSystemError(
+            'workflow-profile-toolsets',
+            `Toolset file "${failure.file}" could not be registered: ${failure.error}`,
+          );
+        }
+      }
+      this.profileComponentSources = createWorkflowProfileComponentSources({
+        registries: {
+          personas: this.personaRegistry,
+          skills: this.skillRegistry,
+          models: this.modelRegistry,
+          toolsets: toolsetRegistry,
+        },
+        toolCatalog,
+      });
+    }
+    return this.profileComponentSources;
+  }
+
+  /**
+   * The durable store a profile run records itself in when the caller did not choose one.
+   *
+   * Phase 10 (U-2): this is what makes an interrupted run visible (`hootl profiles runs`) and
+   * resumable (`hootl run --resume <runId>`). It is the same `runtimeDir` the plan/session stores
+   * use, and it is created lazily, so an installation that never selects a profile never has it.
+   */
+  private defaultProfileRunStateStore(): WorkflowProfileRunStateStore {
+    if (!this.profileRunStateStore) {
+      this.profileRunStateStore = new FileWorkflowProfileRunStateStore(
+        workflowProfileRunsDir(this.config.runtimeDir),
+      );
+    }
+    return this.profileRunStateStore;
+  }
+
+  /** Flag + selection + approval gate; throws (fail closed) instead of falling back. */
+  private resolveWorkflowProfileActivation(
+    options: OrchestratorWorkflowProfileOptions,
+  ): WorkflowProfileActivation {
+    const { ports: _ports, stateStore, ...profileOptions } = options;
+    return activateWorkflowProfile({
+      ...profileOptions,
+      // Phase 10 (U-1): the runtime version is the package version unless the host declares one, so
+      // a resume across two builds is refused instead of continuing on changed behaviour.
+      runtimeVersion: profileOptions.runtimeVersion ?? packageVersion() ?? 'unversioned',
+      // Phase 10 (U-2): durable by default; `null` opts out explicitly.
+      ...(stateStore === null ? {} : { stateStore: stateStore ?? this.defaultProfileRunStateStore() }),
+      sources: this.workflowProfileSources(),
+    });
+  }
+
+  /**
+   * Run the prepared profile. The session/interaction lifecycle is the same one the legacy
+   * path uses, and the delegated services are this Orchestrator's own instances, so policy,
+   * tool authorization and usage accounting are the ones already in force.
+   */
+  private async runWorkflowProfile(
+    userRequest: string,
+    options: OrchestratorRunOptions,
+    ov: RunOverrides | undefined,
+    activation: Extract<WorkflowProfileActivation, { kind: 'profile' }>,
+    budget: BudgetTracker | undefined,
+    profileOptions: OrchestratorWorkflowProfileOptions,
+  ): Promise<OrchestratorResult> {
+    const sessionId = options?.sessionId ?? this.sessionStore.createSession(options?.sessionLabel);
+    const interaction = this.sessionStore.addInteraction(sessionId, userRequest);
+    this.observabilityLogger.logSessionCreated(sessionId);
+    // F-10: the profile planner gets the same session-history block the legacy planner gets. The
+    // block is scoped to this run's async chain (AsyncLocalStorage in the Planner), so concurrent
+    // runs in other sessions never see it. Like the legacy path, the block is built *after* the
+    // current request was added, so the previous turns are what the planner reads.
+    const sessionForHistory = this.sessionStore.getSession(sessionId);
+    const historyBlock = sessionForHistory
+      ? formatSessionHistory(sessionForHistory.interactions)
+      : undefined;
+    if (interaction) this.liveInteractions.add(interaction.id);
+    const runModelId = ov?.modelId ?? this.config.defaultModelId;
+    const mode = options?.mode ?? DEFAULT_RUN_MODE;
+    try {
+      return await this.runContext.run({ budget, usage: { prompt: 0, completion: 0, total: 0 } }, () =>
+        this.planner.withSessionHistory(historyBlock, async () => {
+        // Run-scoped (not instance-scoped): two concurrent runs must never see each other's
+        // gate detail.
+        const infeasible: { detail?: string } = {};
+        const outcome = await this.runProfileBridge(activation, ov, options, runModelId, mode, sessionId, interaction, userRequest, infeasible, profileOptions);
+        if (outcome.failure?.code === PLAN_INFEASIBLE_CODE) {
+          return this.infeasiblePlanResult(infeasible.detail ?? 'the feasibility gate rejected the plan', sessionId, interaction, userRequest);
+        }
+
+        // Conversation branch: the answer is produced the same way the legacy path produces
+        // it — the chat persona with the read-only tools, the planner draft as the fallback —
+        // so the answer text, its usage accounting and the interaction outcome are identical.
+        if (outcome.plan === undefined && outcome.answer !== undefined) {
+          const answered = await this.answerRun({
+            userRequest,
+            sessionId,
+            ...(interaction ? { interactionId: interaction.id } : {}),
+            modelId: runModelId,
+            ...(outcome.answer ? { draft: outcome.answer } : {}),
+            mode,
+            escalateToPlan: mode === 'auto',
+          });
+          if (!('escalate' in answered)) return answered;
+          // Auto mode: the reply asked to be planned. Plan the same request (mode 'plan'),
+          // keeping the answer as the fallback for an infeasible plan — exactly like legacy.
+          //
+          // A prepared run executes at most once (that is what makes a stored record mean
+          // "resume this attempt"), so the escalation must be its own attempt: it is resolved
+          // again, with a fresh run id, instead of re-running the answered one. Keeping the
+          // caller's pinned id would make the escalated attempt collide with the record the
+          // answer already wrote — and would refuse it as `already-terminal`.
+          const { runId: _answeredRunId, ...escalationOptions } = profileOptions;
+          const escalatedActivation = this.resolveWorkflowProfileActivation(escalationOptions);
+          if (escalatedActivation.kind !== 'profile') {
+            // Unreachable: this branch only runs on the profile path. Fail closed to the answer
+            // rather than silently running the legacy path with a profile's request.
+            return this.answerResultFromText(answered.fallbackAnswer, sessionId, interaction, userRequest);
+          }
+          const escalated = await this.runProfileBridge(escalatedActivation, ov, options, runModelId, 'plan', sessionId, interaction, userRequest, {}, escalationOptions);
+          if (escalated.failure?.code === PLAN_INFEASIBLE_CODE) {
+            // The request was actually informational: show the answer the user already has.
+            return this.answerResultFromText(answered.fallbackAnswer, sessionId, interaction, userRequest);
+          }
+          return this.orchestratorResultFromProfile(escalated, sessionId, userRequest);
+        }
+        return this.orchestratorResultFromProfile(outcome, sessionId, userRequest);
+        }));
+    } finally {
+      if (interaction) this.liveInteractions.delete(interaction.id);
+    }
+  }
+
+  /** One kernel run with this Orchestrator's services; records the interaction outcome. */
+  private async runProfileBridge(
+    activation: Extract<WorkflowProfileActivation, { kind: 'profile' }>,
+    ov: RunOverrides | undefined,
+    options: OrchestratorRunOptions,
+    runModelId: string,
+    mode: RunMode,
+    sessionId: string,
+    interaction: ReturnType<SessionStore['addInteraction']>,
+    userRequest: string,
+    infeasible: { detail?: string },
+    profileOptions: OrchestratorWorkflowProfileOptions,
+  ): Promise<WorkflowProfileBridgeOutcome> {
+    const overrides = profileOptions.ports ?? {};
+    const services: WorkflowProfileBridgeServices = {
+      planner: this.planner,
+      planRuntime: this.createProfilePlanRuntime(ov),
+      finalReviewer: this.finalReviewer,
+      ...(options.confirmCallback ? { confirm: options.confirmCallback } : {}),
+      // F-2: what the delegated plan execution really consumed, measured from this run's own
+      // events while the plan runtime is executing it (see `createEventBusExecutionUsage`).
+      executionUsage: createEventBusExecutionUsage(this.eventBus),
+      modelId: runModelId,
+      mode,
+      ...overrides,
+    };
+    const outcome = await runWorkflowProfileBridge(activation.prepared, {
+      services,
+      input: { request: { goal: userRequest, mode, sessionId } },
+      ...(options.abortSignal ? { signal: options.abortSignal } : {}),
+      onPlan: (plan) => {
+        try {
+          this.persistProfilePlan(plan, sessionId, interaction, runModelId);
+        } catch (error) {
+          // The kernel reports only the failure code; keep the gate's detail for the caller's
+          // legacy-shaped infeasible result.
+          if (error instanceof WorkflowProfilePlanInfeasibleError) infeasible.detail = error.detail;
+          throw error;
+        }
+      },
+    });
+    this.recordProfileInteraction(sessionId, interaction, outcome, userRequest);
+    return outcome;
+  }
+
+  /**
+   * Stage 3 parity: the feasibility/cycle gate rejected the plan, so the run ends with the
+   * same observable result the legacy path reports (kind `plan`, review failure, the gate
+   * message) — never a half-executed plan.
+   */
+  private infeasiblePlanResult(
+    detail: string,
+    sessionId: string,
+    interaction: ReturnType<SessionStore['addInteraction']>,
+    userRequest: string,
+  ): OrchestratorResult {
+    const summary = `Plan failed feasibility check:\n${detail}`;
+    if (interaction) {
+      this.sessionStore.updateInteraction(sessionId, interaction.id, {
+        outcome: 'failure', reviewSummary: summary, completedAt: Date.now(),
+      });
+    }
+    return {
+      kind: 'plan',
+      review: {
+        planId: 'none', goal: userRequest, outcome: 'failure', acceptedFindings: [], rejectedFindings: [],
+        incompleteSteps: [], finalSummary: summary, usage: emptyReviewUsage,
+      },
+      report: `❌ Plan infeasible:\n${detail}`,
+      planId: 'none',
+      sessionId,
+      executionResult: {
+        planId: 'none', status: 'failed-partial', completedSteps: 0, failedSteps: 0, totalSteps: 0,
+        incompleteSteps: [], replanningAttempts: 0,
+      },
+    };
+  }
+
+  /** The escalated-answer fallback: the answer already produced, reported as an answer run. */
+  private answerResultFromText(
+    text: string,
+    sessionId: string,
+    interaction: ReturnType<SessionStore['addInteraction']>,
+    userRequest: string,
+  ): OrchestratorResult {
+    if (interaction) {
+      this.sessionStore.updateInteraction(sessionId, interaction.id, {
+        outcome: 'success', reviewSummary: text, completedAt: Date.now(),
+      });
+    }
+    return {
+      kind: 'answer',
+      review: {
+        planId: 'none', goal: userRequest, outcome: 'success', acceptedFindings: [], rejectedFindings: [],
+        incompleteSteps: [], finalSummary: text, usage: this.totalReviewUsage(),
+      },
+      report: `💬 Answer\n\n${text}`,
+      planId: 'none',
+      sessionId,
+      executionResult: {
+        planId: 'none', status: 'completed', completedSteps: 0, failedSteps: 0, totalSteps: 0,
+        incompleteSteps: [], replanningAttempts: 0,
+      },
+    };
+  }
+
+  /**
+   * Phase 30/37: the plan-status callback both execution paths use — re-plan and step
+   * transitions reach the observability log, the Journal and the streaming manager, so a
+   * profile run is as observable as a legacy one.
+   */
+  private planStatusChangeHandler(): (plan: Plan, event: string) => void {
+    return (p, event) => {
+
+        // Phase 30 (P7): re-planning was invisible — the runtime emits
+        // `plan:replanning-attempt-N` / `plan:replanned`, and nothing
+        // translated or logged them, so the JSONL log and the terminal both
+        // stayed silent while the plan was rewritten.
+        if (event.startsWith('plan:replanning-attempt-')) {
+          this.observabilityLogger.logPlanReplanning(p, Number(event.split('-').pop()) || 1);
+        } else if (event === 'plan:replanned') {
+          this.observabilityLogger.logPlanReplanned(p);
+        }
+        // Phase 30 (P10 follow-up): step:started/completed/failed were
+        // emitted by the runtime but never translated into the log.
+        logStepEvent(this.observabilityLogger, p, event);
+
+        // Phase 37: plan/step transitions belong in the Journal too — the
+        // Journal answers "what did the AI do", and a run's structure is part
+        // of that answer.  Tool calls carry the plan/step ids already, so
+        // these records are what makes a journal line traceable to its step.
+        const stepEvent = parseStepEvent(event);
+        if (stepEvent) {
+          const step = p.steps.find((candidate) => candidate.id === stepEvent.stepId);
+          this.journal.log({
+            ts: new Date().toISOString(),
+            kind: 'step',
+            planId: p.id,
+            planStepId: stepEvent.stepId,
+            ok: stepEvent.phase !== 'failed',
+            summary:
+              stepEvent.phase === 'running'
+                ? `step ${stepEvent.stepId} started: ${step?.description ?? ''}`.slice(0, 300)
+                : stepEvent.phase === 'done'
+                  ? `step ${stepEvent.stepId} completed`
+                  : `step ${stepEvent.stepId} failed${step?.failureType ? ` (${step.failureType})` : ''}`,
+            ...(stepEvent.phase === 'failed' && step?.resultSummary
+              ? { error: step.resultSummary }
+              : {}),
+          });
+        }
+        this.streamingManager.handlePlanStatusChange(p, event);
+    };
+  }
+
+  /**
+   * PlanRuntime for the profile path: the same delegation target and policy deps the legacy
+   * path uses. Streaming/status callbacks are not wired here yet (recorded as a Step 3 parity
+   * item); policy, scheduling and budgets are.
+   */
+  private createProfilePlanRuntime(ov: RunOverrides | undefined): PlanRuntime {
+    return new PlanRuntime({
+      taskRuntime: this.taskRuntime,
+      planStore: this.planStore,
+      planner: this.planner,
+      feasibilityDeps: {
+        personaRegistry: this.personaRegistry,
+        skillRegistry: this.skillRegistry,
+        toolRegistry: this.toolRegistry,
+      },
+      refs: {
+        personaRegistry: this.personaRegistry,
+        skillRegistry: this.skillRegistry,
+        toolRegistry: this.toolRegistry,
+        modelRegistry: this.modelRegistry,
+      },
+      maxReplanningAttempts: ov?.maxReplanningAttempts ?? this.config.maxReplanningAttempts,
+      defaultModelId: ov?.modelId ?? this.config.defaultModelId,
+      ...(ov?.agentTimeoutMs !== undefined ? { agentTimeoutMs: ov.agentTimeoutMs } : {}),
+      ...(ov?.maxSteps !== undefined ? { maxSteps: ov.maxSteps } : {}),
+      projectRoot: this.config.projectRoot,
+      runtimeDir: this.config.runtimeDir,
+      modelRoutes: this.config.modelRoutes as ModelRoutes | undefined,
+      budgetExceeded: () => (this.activeBudget?.exceeded() ? 'budget exceeded' : undefined),
+      // The same observability/streaming callback, acceptance hook and persist-error
+      // reporting the legacy path uses, so a profile run is as observable and as
+      // acceptance-checked as a legacy one.
+      onStatusChange: this.planStatusChangeHandler(),
+      acceptanceChecker: this.acceptanceChecker,
+      onPersistError: (err) => {
+        this.observabilityLogger.logSystemError('plan-persist', err instanceof Error ? err.message : String(err));
+      },
+    });
+  }
+
+  /**
+   * Stage 3/4 parity: the feasibility/cycle gate still rejects an unusable plan *before* the
+   * user is asked to confirm it, and the plan plus the session link are written before
+   * execution starts, exactly like the legacy path.
+   */
+  private persistProfilePlan(
+    plan: Plan,
+    sessionId: string,
+    interaction: ReturnType<SessionStore['addInteraction']>,
+    runModelId: string,
+  ): void {
+    plan.sessionId = sessionId;
+    plan.modelId = runModelId;
+    this.observabilityLogger.logPlanCreated(plan);
+    // Persisted at creation, before the gate and before the confirmation — exactly like the
+    // legacy path, so a pending confirmation is visible to the user and an infeasible plan is
+    // still inspectable (rather than silently disappearing).
+    this.planStore.save(plan);
+    if (interaction && plan.id) {
+      const known = interaction.planIds ?? [];
+      if (!known.includes(plan.id)) {
+        this.sessionStore.updateInteraction(sessionId, interaction.id, { planIds: [...known, plan.id] });
+      }
+    }
+    const feasibility = runFeasibilityGate(plan, {
+      personaRegistry: this.personaRegistry,
+      skillRegistry: this.skillRegistry,
+      toolRegistry: this.toolRegistry,
+    });
+    if (!feasibility.feasible) {
+      const errorMsg = feasibility.errors.map((e) => `[${e.stepId}] ${e.field}: ${e.message}`).join('\n');
+      // Typed so the caller can report the legacy feasibility outcome instead of a generic
+      // planner failure (and, for an escalated answer, fall back to that answer).
+      throw new WorkflowProfilePlanInfeasibleError(errorMsg);
+    }
+  }
+
+  /** Interaction outcome for the profile path; the same values the legacy path records. */
+  private recordProfileInteraction(
+    sessionId: string,
+    interaction: ReturnType<SessionStore['addInteraction']>,
+    outcome: WorkflowProfileBridgeOutcome,
+    userRequest: string,
+  ): void {
+    if (!interaction) return;
+    // R-3 (owner decision): a `rejected` end that never executed is the user's refusal — the legacy
+    // path records a declined confirmation as `cancelled`. A rejection *after* execution stays a
+    // failure, because work ran and its result was rejected.
+    const status: 'success' | 'failure' | 'cancelled' = outcome.status === 'success'
+      ? 'success'
+      : outcome.status === 'cancelled' || rejectedWithoutExecution(outcome) ? 'cancelled' : 'failure';
+    this.sessionStore.updateInteraction(sessionId, interaction.id, {
+      outcome: status,
+      reviewSummary: outcome.review?.finalSummary ?? outcome.failure?.code ?? `Workflow profile run ${outcome.status}`,
+      completedAt: Date.now(),
+    });
+    void userRequest;
+  }
+
+  /** Map the profile outcome onto the result shape callers (CLI, server) already consume. */
+  private orchestratorResultFromProfile(
+    outcome: WorkflowProfileBridgeOutcome,
+    sessionId: string,
+    userRequest: string,
+  ): OrchestratorResult {
+    const isAnswer = outcome.plan === undefined && outcome.answer !== undefined;
+    const planId = outcome.plan?.id ?? 'none';
+    const reviewOutcome: Review['outcome'] = outcome.status === 'success'
+      ? 'success'
+      : outcome.status === 'cancelled' || rejectedWithoutExecution(outcome) ? 'cancelled' : 'failure';
+    const review: Review = outcome.review ?? {
+      planId,
+      goal: userRequest,
+      outcome: reviewOutcome,
+      acceptedFindings: [],
+      rejectedFindings: [],
+      incompleteSteps: [],
+      // The bridge has already normalized a cancellation category onto `cancelled`, so the
+      // summary must not call a cancelled run "failed" while the report below says CANCELLED.
+      finalSummary: outcome.failure
+        ? `Workflow profile run ${reviewOutcome === 'cancelled' ? 'cancelled' : 'failed'}: ${outcome.failure.code} (${outcome.failure.category}, node ${outcome.failure.nodeId})`
+        : (outcome.answer ?? `Workflow profile run ended: ${outcome.status}`),
+      usage: emptyReviewUsage,
+    };
+    // The trailing line keeps the profile's own identity. It prints the bridge-normalized status, so
+    // a cancelled run can never read "failure" here while the FINAL REPORT above it says CANCELLED
+    // (the review *outcome* may still differ from the profile status by design, e.g. a rejected end
+    // reported with the legacy failure vocabulary after execution).
+    const report = isAnswer
+      ? `💬 Answer\n\n${outcome.answer ?? ''}`
+      : `${formatFinalReview(review)}\n\nWorkflow profile "${outcome.status}" (profile path${outcome.execution ? ', executed' : ', no execution'})`;
+    return {
+      kind: isAnswer ? 'answer' : 'plan',
+      review,
+      report,
+      planId,
+      sessionId,
+      executionResult: outcome.execution ?? {
+        planId,
+        status: outcome.status === 'success' ? 'completed'
+          : outcome.status === 'cancelled' || rejectedWithoutExecution(outcome) ? 'cancelled' : 'failed-partial',
+        completedSteps: 0,
+        failedSteps: 0,
+        totalSteps: 0,
+        incompleteSteps: [],
+        replanningAttempts: 0,
+      },
+    };
   }
 
   private async runInSession(
@@ -1697,46 +2237,7 @@ export class Orchestrator {
       runtimeDir: this.config.runtimeDir,
       modelRoutes: this.config.modelRoutes as ModelRoutes | undefined,
       budgetExceeded: () => (this.activeBudget?.exceeded() ? 'budget exceeded' : undefined),
-      onStatusChange: (p, event) => {
-        // Phase 30 (P7): re-planning was invisible — the runtime emits
-        // `plan:replanning-attempt-N` / `plan:replanned`, and nothing
-        // translated or logged them, so the JSONL log and the terminal both
-        // stayed silent while the plan was rewritten.
-        if (event.startsWith('plan:replanning-attempt-')) {
-          this.observabilityLogger.logPlanReplanning(p, Number(event.split('-').pop()) || 1);
-        } else if (event === 'plan:replanned') {
-          this.observabilityLogger.logPlanReplanned(p);
-        }
-        // Phase 30 (P10 follow-up): step:started/completed/failed were
-        // emitted by the runtime but never translated into the log.
-        logStepEvent(this.observabilityLogger, p, event);
-
-        // Phase 37: plan/step transitions belong in the Journal too — the
-        // Journal answers "what did the AI do", and a run's structure is part
-        // of that answer.  Tool calls carry the plan/step ids already, so
-        // these records are what makes a journal line traceable to its step.
-        const stepEvent = parseStepEvent(event);
-        if (stepEvent) {
-          const step = p.steps.find((candidate) => candidate.id === stepEvent.stepId);
-          this.journal.log({
-            ts: new Date().toISOString(),
-            kind: 'step',
-            planId: p.id,
-            planStepId: stepEvent.stepId,
-            ok: stepEvent.phase !== 'failed',
-            summary:
-              stepEvent.phase === 'running'
-                ? `step ${stepEvent.stepId} started: ${step?.description ?? ''}`.slice(0, 300)
-                : stepEvent.phase === 'done'
-                  ? `step ${stepEvent.stepId} completed`
-                  : `step ${stepEvent.stepId} failed${step?.failureType ? ` (${step.failureType})` : ''}`,
-            ...(stepEvent.phase === 'failed' && step?.resultSummary
-              ? { error: step.resultSummary }
-              : {}),
-          });
-        }
-        this.streamingManager.handlePlanStatusChange(p, event);
-      },
+      onStatusChange: this.planStatusChangeHandler(),
       // Phase 20 (CORR-04): explicit acceptance hook instead of the old
       // EventBus-subscription wiring (wireAcceptanceChecker removed).
       acceptanceChecker: this.acceptanceChecker,
