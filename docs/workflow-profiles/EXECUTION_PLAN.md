@@ -966,3 +966,11 @@ shown, or show it automatically (F-5); pass the captured plan to the confirm cal
 inputs a resumed node needs, or restrict resume to nodes whose inputs come from the run (F-7); forward
 cancellation to the delegated runtime (F-8); hand the session history to the profile planner.
 
+**Exact-head evidence for the F-9 fix and the review record (`8ca5fe0`):** CI run `36808692988` is
+**success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, the
+Workflow Profile gate step and the CLI smoke). Local at the same head: profile + CLI + server suites
+51 files / 577 tests; the CI-equivalent full suite 150 files / 1,986 tests with only the pre-existing
+`J-05`; e2e `profiles` 12/12; profile gates 9/9; `tsc --noEmit` and `npm run build` clean. The fix
+itself is pinned by the new parity test (both paths escalate an answer that defers to `@plan` into a
+plan) — the same test fails against the previous head with `resume.already-terminal`.
+
