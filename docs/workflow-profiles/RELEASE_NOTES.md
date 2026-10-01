@@ -82,6 +82,12 @@ Nothing else about the legacy path changes, and the parity suite fails if the pl
 agents, execution result or review summary diverge (the differences above are the documented
 exceptions).
 
+**Not activation-ready yet (independent review, 2026-09-30):** an independent static review of the
+handoff head found ten issues, all re-verified (F-1…F-4 enforcement/resume, F-5 blind-approval
+possibility, F-6 server confirmation, F-7 resume inputs, F-8 cancellation, F-10 session history);
+F-9 was a crash and is fixed. Phases 6 and 9 are 🟡 again and the fix backlog is in
+`TRACEABILITY.md` §3b and `EXECUTION_PLAN.md`. **Do not activate or merge on this document alone.**
+
 **Host requirements (U-5, documented 2026-09-30):** the server never accepts `projectRoot` from a
 request, every profile/component file is identity-checked and digest-verified, but nothing in code can
 prove the operator's directory is unwritable by another local user — run HOOTL in a directory only the

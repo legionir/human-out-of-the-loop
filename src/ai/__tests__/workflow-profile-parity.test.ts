@@ -262,6 +262,29 @@ describe('Phase 7 parity — legacy path vs profile path', () => {
     expect(session?.interactions[0]?.outcome).toBe('cancelled');
   });
 
+  it('auto mode: an answer that asks to be planned is escalated into a plan on the profile path', async () => {
+    // Regression for the independent review's F-9: the escalation used to re-run the *same*
+    // prepared run, which executes at most once, so it threw `resume.already-terminal`. It is now
+    // resolved as its own attempt (fresh run id), exactly like the legacy path plans the same
+    // request after the chat reply defers to `@plan`.
+    const chatDefers = { text: `${ANSWER} [[NEEDS_PLAN: true]]` };
+    installScript({ assessments: [{ isClear: true, needsClarification: [], kind: 'answer', answer: 'draft' }] });
+    mockGenerateText.mockResolvedValue({ ...chatDefers, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, steps: [] } as never);
+    const legacyResult = await legacy().run(GOAL, { confirmCallback: confirmAccepting });
+    expect(legacyResult.kind).toBe('plan');
+
+    mockGenerateObject.mockReset();
+    mockGenerateText.mockReset();
+    installScript({ assessments: [{ isClear: true, needsClarification: [], kind: 'answer', answer: 'draft' }] });
+    mockGenerateText.mockResolvedValue({ ...chatDefers, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, steps: [] } as never);
+    const profileOrch = approvedDefault();
+    const profileResult = await profileOrch.run(GOAL, { confirmCallback: confirmAccepting });
+    expect(profileResult.kind).toBe('plan');
+    expect(profileResult.review.outcome).toBe('success');
+    // Both paths executed the escalated plan.
+    expect(stepSystemPrompts().length).toBeGreaterThan(0);
+  });
+
   it('reuses legacy plan and session data, and rolls back to the legacy path on demand', async () => {
     // A legacy run first: its plan and session must stay readable afterwards.
     installScript({ assessments: [{ plan: planOf() }] });

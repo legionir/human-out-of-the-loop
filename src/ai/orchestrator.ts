@@ -1273,7 +1273,20 @@ export class Orchestrator {
           if (!('escalate' in answered)) return answered;
           // Auto mode: the reply asked to be planned. Plan the same request (mode 'plan'),
           // keeping the answer as the fallback for an infeasible plan — exactly like legacy.
-          const escalated = await this.runProfileBridge(activation, ov, options, runModelId, 'plan', sessionId, interaction, userRequest, {}, profileOptions);
+          //
+          // A prepared run executes at most once (that is what makes a stored record mean
+          // "resume this attempt"), so the escalation must be its own attempt: it is resolved
+          // again, with a fresh run id, instead of re-running the answered one. Keeping the
+          // caller's pinned id would make the escalated attempt collide with the record the
+          // answer already wrote — and would refuse it as `already-terminal`.
+          const { runId: _answeredRunId, ...escalationOptions } = profileOptions;
+          const escalatedActivation = this.resolveWorkflowProfileActivation(escalationOptions);
+          if (escalatedActivation.kind !== 'profile') {
+            // Unreachable: this branch only runs on the profile path. Fail closed to the answer
+            // rather than silently running the legacy path with a profile's request.
+            return this.answerResultFromText(answered.fallbackAnswer, sessionId, interaction, userRequest);
+          }
+          const escalated = await this.runProfileBridge(escalatedActivation, ov, options, runModelId, 'plan', sessionId, interaction, userRequest, {}, escalationOptions);
           if (escalated.failure?.code === PLAN_INFEASIBLE_CODE) {
             // The request was actually informational: show the answer the user already has.
             return this.answerResultFromText(answered.fallbackAnswer, sessionId, interaction, userRequest);

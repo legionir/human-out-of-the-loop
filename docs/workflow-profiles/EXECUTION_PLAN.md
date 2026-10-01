@@ -148,7 +148,15 @@ approval node به mechanism interaction/callback موجود متصل شود؛ �
 
 ---
 
-## [🟢] Phase 6: lifecycle پایدار، بودجه و enforcement امنیتی
+## [🟡] Phase 6: lifecycle پایدار، بودجه و enforcement امنیتی
+
+> **Re-opened (2026-09-30, independent review).** The enforcement acceptance criteria are **not** met
+> end to end: the toolset/permission guard has no non-test caller, the profile's counters are not
+> charged for the delegated plan execution (no usage is returned), and the effect markers
+> (`recordEffectStart`/`recordEffectCommitted`) are never called by the bridge. Findings F-1, F-2, F-3
+> and F-4 in `PHASE10_REVIEW.md` §9; the fix list is in the Phase 10 addendum at the end of this file.
+> Nothing about the budget/authority *evaluation* changed — what changed is that the wiring to the
+> real call site is incomplete, so the phase cannot claim 🟢.
 
 اجرای Profile باید در کنار حلقهٔ فعلی دارای وضعیت قابل‌بازیابی، توقف امن، بودجهٔ نهایی، رخدادهای قابل‌مشاهده و مجوزهای واقعی باشد. وضعیت اجرای Profile با plan/session موجود هم‌زیست می‌شود و فرمت ذخیره‌شدهٔ قدیمی را نمی‌شکند.
 
@@ -335,7 +343,15 @@ heads. No merge, release or default activation is authorized until all phases ar
 
 ---
 
-## [🟢] Phase 9: hardening امنیتی و سنجش منابع
+## [🟡] Phase 9: hardening امنیتی و سنجش منابع
+
+> **Re-opened (2026-09-30, independent review).** The Phase 9 acceptance criteria include "limits act
+> before consumption" and "no profile/untrusted text weakens or widens policy". The review found that
+> the delegated execution does not charge the profile counters (F-2), the declared tool surface is not
+> enforced at the execution call site (F-1) and the approved content need not have been shown to the
+> approver (F-5). The Phase 9 hardening tests measured the kernel/ports, not the adapter wiring, so the
+> criteria are re-opened until the wiring is fixed and tested through the real adapters. See
+> `PHASE10_REVIEW.md` §9 and the Phase 10 addendum below.
 
 پس از اتصال handlerها و پیش از rollout، امنیت/adversarial و ظرفیت را با معیارهای مصوب harden کن. مرز اعتماد از Phase 5 برقرار شده؛ این فاز آن را end-to-end می‌بندد و جایگزین تست‌های زودهنگام نیست.
 
@@ -914,4 +930,39 @@ not touch Workflow Profiles, on a diff of two Markdown files). As with `f3bd11a`
 rerunning only the failed jobs is not permitted for this integration (`gh run rerun` refuses the run
 and the REST endpoint answers 403), so the red leg is recorded here rather than hidden; the
 authoritative exact-head evidence stays the green code head `496b4ce`.
+
+## Phase 10 independent-review findings and re-opened phases (2026-09-30; append-only)
+
+An **independent static review** of head `57c9761` (not the implementer; no local test run) reported ten
+findings and recommended against acceptance/merge. Each finding was re-verified here against the code
+and, where needed, with a reproduction test (`PHASE10_REVIEW.md` §9 records the per-item verdict):
+
+- **Fixed in this stretch (`F-9`)** — auto-mode escalation re-ran the *same* prepared run, which the
+  runner refuses as `already-terminal`; reproduced by a failing test, fixed by resolving the escalated
+  attempt as its own run (fresh id), and pinned by a new parity test (both paths now escalate an
+  answer that defers to `@plan` into a plan).
+- **Re-opened Phase 6 and Phase 9 criteria** — F-1 (the declared tool surface is not enforced at the
+  execution call site: `assertToolAccess`/`assertSideEffectAuthorized` have no non-test caller and the
+  executor adapter drops `toolsetRef`/`personaRef`), F-2 (the delegated execution is not charged to the
+  profile's counters: the adapter returns no usage), F-3 (the effect markers exist but the bridge never
+  calls them, so a kill mid-execution leaves no `pendingEffect` and a resume can repeat side effects)
+  and F-4 (no lease/CAS on the run record: two processes can resume the same run).
+- **Open, verified** — F-5 (an approval that binds content need not have shown it:
+  `bindsTo ∉ show` is accepted today), F-6 (the server's confirm callback never receives the plan on the
+  profile path, so `POST /api/plans/:id/confirm` cannot resolve a manual profile confirmation), F-7 (a
+  resume restarts from the recorded node with no node outputs restored, which breaks an `ask-user`
+  pause located after the planner), F-8 (the abort signal is not forwarded to the delegated
+  `PlanRuntime`), and the session-history parity gap (the profile path does not hand the session
+  history to the planner the way `withSessionHistory` does on the legacy path).
+- **Honest consequence:** Phase 6 and Phase 9 are 🟡 again, Phase 10 Step 3 stays 🟡 with the owner, and
+  the default profile stays unapproved and off. Merges remain frozen.
+
+**Required work before the re-opened phases can be 🟢 again** (no owner decision blocks F-1…F-3, F-5…F-8;
+F-4's mechanism does): enforce the declared tool surface at the execution call site (F-1); return real
+usage from the executor port and charge it before/around the delegated calls (F-2); call
+`recordEffectStart`/`recordEffectCommitted` around the execute node (F-3); add a run-record lease or CAS
+so one attempt has one runner (F-4); make an approval that binds content require that content to be
+shown, or show it automatically (F-5); pass the captured plan to the confirm callback (F-6); restore the
+inputs a resumed node needs, or restrict resume to nodes whose inputs come from the run (F-7); forward
+cancellation to the delegated runtime (F-8); hand the session history to the profile planner.
 

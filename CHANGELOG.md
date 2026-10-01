@@ -82,6 +82,19 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
   is per request — the flag is never enabled process-wide. `profileFile` is not accepted over the
   API; selecting by file stays a CLI action.
 
+**Known gaps — independent review of 2026-09-30 (fixes in progress):**
+- **Fixed:** auto-mode escalation on the profile path re-ran the prepared run and crashed with
+  `resume.already-terminal`; the escalated attempt is now its own run (fresh id), with a parity
+  regression (F-9).
+- **Open:** the declared tool surface is not enforced at the execution call site (F-1); the profile
+  counters are not charged for the delegated plan execution (F-2); the effect markers are never
+  called, so a crash mid-execution can repeat a side effect on resume (F-3); the run record has no
+  lease, so two runners can resume one run (F-4); an approval that binds content need not have shown
+  it (F-5); a manual server confirmation cannot resolve for a profile run (F-6); a mid-graph pause
+  resumes without its node inputs (F-7); cancellation is not forwarded to the delegated runtime (F-8);
+  the profile planner does not receive the session history (F-10). Phases 6 and 9 are 🟡 again;
+  `TRACEABILITY.md` §3b lists the required work.
+
 **Behaviour differences — decided by the owner on 2026-09-30 (U-4)** (recorded in
 `docs/workflow-profiles/PHASE7_PARITY.md`, the decision record in `PHASE10_OPERATIONS.md` §9; the
 built-in default stays gated until the approval is recorded):

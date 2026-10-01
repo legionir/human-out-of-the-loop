@@ -138,3 +138,27 @@ CI-equivalent full suite 150 files / 1,985 tests with only the pre-existing `J-0
 12/12; profile gates 9/9; `tsc --noEmit` and `npm run build` clean; CI run `36779326761` on the exact
 head **success 10/10**.
 
+## 9. Independent review findings — verification (2026-09-30; append-only)
+
+An independent static review of head `57c9761` reported ten findings and recommended against
+acceptance. Each was re-verified against the code (and, for F-9, with a reproduction test). Verdicts
+below; the required work is in `EXECUTION_PLAN.md` (Phase 10 addendum) and Phases 6 and 9 are 🟡 again.
+
+| # | Finding (as reported) | Verdict | Evidence / consequence |
+| --- | --- | --- | --- |
+| F-1 | The profile's toolset limit never reaches execution | **Confirmed.** `assertToolAccess`/`assertSideEffectAuthorized` (`profile-access-guard.ts`) have no non-test caller, and `createExecutorPort` ignores `personaRef`/`skillRefs`/`toolsetRef`/`modelProfileRef`. The declared surface feeds only the resume authority snapshot, so a profile that pins a narrow toolset does not narrow the delegated run | Never widens beyond the runtime (persona ∩ runtime still apply), but the promised narrowing is not delivered — a Phase 6 Step 3 criterion |
+| F-2 | `maxToolCalls` is not enforced over the delegated runtime's calls | **Confirmed.** The execute handler charges `outcome.usage`, which `executorOutcomeFromResult` never returns; the guard the profile installs is bypassed inside `PlanRuntime`, whose only budget hook is the CLI `--budget` tracker | Phase 6/9 criterion ("limits act before consumption") not met for delegated work |
+| F-3 | A side effect can be repeated after a crash | **Confirmed.** `recordEffectStart`/`recordEffectCommitted` exist but nothing calls them; the record is written at start and after the kernel returns, so a kill during execution leaves no `pendingEffect`, and a resume replays the plan | Directly against the plan's "an ambiguous side effect is never repeated automatically" |
+| F-4 | Two processes can resume one run | **Confirmed.** The store has no lock/lease/CAS; `save` is last-writer-wins and each process keeps its own `started` flag | Needs a decision on the mechanism (lock file with stale detection vs CAS column) |
+| F-5 | An approval that binds content need not have shown it | **Confirmed.** The semantic validator checks `bindsTo` and `show` ports separately and never requires `bindsTo ∈ show`; the default renderer shows only `show` + the digest | The digest binding is enforced, but consent can be blind; against D-WP-004's "the exact plan shown" |
+| F-6 | A manual server confirmation can hang until timeout | **Confirmed.** `createApprovalPort` calls `confirm(render(request))` with one argument, so the server's `run.planId` (set from the callback's optional plan) stays undefined and `findAwaitingRun` cannot match `/api/plans/:id/confirm` | Also explains why the CLI's Ctrl-C `cancelPlan` cannot address a profile run (F-8's first half) |
+| F-7 | Resume restores no node inputs/outputs | **Confirmed for paused runs.** A killed first run restarts at the record's start node (safe for inputs); an `ask-user` pause persists the last visited node, and a resume from a mid-graph node (e.g. `execute`) finds none of the inputs the planner/approval produced | Phase 6 criterion |
+| F-8 | Cancellation does not reach the delegated `PlanRuntime` | **Confirmed.** The handler passes `signal` to the executor, the adapter drops it, and `PlanRuntime.execute` receives only the plan; the CLI path additionally never sets `currentPlanId` (F-6) | A long delegated execution cannot be interrupted through the profile path |
+| F-9 | Auto-escalation re-runs the prepared run | **Confirmed by reproduction, fixed.** The escalated attempt reused the same prepared run and threw `resume.already-terminal`; a scratch test failed before the fix. Now the escalation is resolved as its own attempt with a fresh run id, and a parity test pins the legacy-identical outcome | Fixed in this stretch; regression in `workflow-profile-parity.test.ts` |
+| F-10 | The profile planner gets no session history | **Confirmed.** The legacy path wraps the request with `withSessionHistory`; the profile path returns earlier and the bridge sends only the current request | Recorded as a parity gap; the profile session can still be continued, the planner just cannot see prior turns |
+
+**Not confirmed by this verification:** nothing in the report was found to be a false positive. Two
+severity notes for the record: F-1 and F-5 are *narrowing/consent* gaps, not widening — the runtime
+and persona intersections still hold, and the digest binding still requires a granted approval — but
+they are acceptance-criteria violations all the same, which is why the phases are re-opened.
+
