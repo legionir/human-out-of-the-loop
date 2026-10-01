@@ -187,6 +187,26 @@ describe('Phase 7 parity — legacy path vs profile path', () => {
     expect(interactions(profileOrch)?.interactions[0]).toMatchObject({ outcome: 'success' });
   });
 
+  it('F-10: the profile planner sees the session history, like the legacy planner', async () => {
+    installScript({ assessments: [{ plan: planOf() }] });
+    const orch = approvedDefault();
+    const session = orch.sessionStore.createSession();
+    const prior = orch.sessionStore.addInteraction(session, 'earlier request about the widget catalogue')!;
+    orch.sessionStore.updateInteraction(session, prior.id, {
+      outcome: 'success', completedAt: Date.now(), reviewSummary: 'catalogue shipped',
+    } as never);
+
+    await orch.run(GOAL, { sessionId: session, confirmCallback: confirmAccepting });
+    // Whatever structured call the planner made (assessment and/or plan generation), the previous
+    // turn must be in its prompt — before F-10 the profile path sent none of them.
+    const plannerPrompts = mockGenerateObject.mock.calls
+      .filter((call) => ['PlannerAssessment', 'ExecutionPlan'].includes((call[0] as { schemaName?: string } | undefined)?.schemaName ?? ''))
+      .map((call) => String((call[0] as { prompt?: string } | undefined)?.prompt ?? ''));
+    expect(plannerPrompts.length).toBeGreaterThan(0);
+    expect(plannerPrompts.some((prompt) => prompt.includes('earlier request about the widget catalogue'))).toBe(true);
+    expect(plannerPrompts.some((prompt) => prompt.includes('catalogue shipped'))).toBe(true);
+  });
+
   it('answer branch: no plan, no confirmation, same answer outcome', async () => {
     installScript({ assessments: [{ isClear: true, needsClarification: [], kind: 'answer', answer: 'draft' }] });
     mockGenerateText.mockResolvedValue({ text: ANSWER, usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 }, steps: [] } as never);

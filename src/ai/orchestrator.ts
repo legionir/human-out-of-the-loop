@@ -1245,11 +1245,20 @@ export class Orchestrator {
     const sessionId = options?.sessionId ?? this.sessionStore.createSession(options?.sessionLabel);
     const interaction = this.sessionStore.addInteraction(sessionId, userRequest);
     this.observabilityLogger.logSessionCreated(sessionId);
+    // F-10: the profile planner gets the same session-history block the legacy planner gets. The
+    // block is scoped to this run's async chain (AsyncLocalStorage in the Planner), so concurrent
+    // runs in other sessions never see it. Like the legacy path, the block is built *after* the
+    // current request was added, so the previous turns are what the planner reads.
+    const sessionForHistory = this.sessionStore.getSession(sessionId);
+    const historyBlock = sessionForHistory
+      ? formatSessionHistory(sessionForHistory.interactions)
+      : undefined;
     if (interaction) this.liveInteractions.add(interaction.id);
     const runModelId = ov?.modelId ?? this.config.defaultModelId;
     const mode = options?.mode ?? DEFAULT_RUN_MODE;
     try {
-      return await this.runContext.run({ budget, usage: { prompt: 0, completion: 0, total: 0 } }, async () => {
+      return await this.runContext.run({ budget, usage: { prompt: 0, completion: 0, total: 0 } }, () =>
+        this.planner.withSessionHistory(historyBlock, async () => {
         // Run-scoped (not instance-scoped): two concurrent runs must never see each other's
         // gate detail.
         const infeasible: { detail?: string } = {};
@@ -1295,7 +1304,7 @@ export class Orchestrator {
           return this.orchestratorResultFromProfile(escalated, sessionId, userRequest);
         }
         return this.orchestratorResultFromProfile(outcome, sessionId, userRequest);
-      });
+        }));
     } finally {
       if (interaction) this.liveInteractions.delete(interaction.id);
     }
