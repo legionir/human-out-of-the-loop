@@ -448,7 +448,7 @@ are complete (owner instruction).
 
 ---
 
-## [🟡] Phase 10: migration، مستندات، CI و تحویل مرحله‌ای
+## [🟢] Phase 10: migration، مستندات، CI و تحویل مرحله‌ای
 
 فقط بعد از hardening، compatibility/recovery، مستندات و gateهای PR را کامل کن. rollout باید opt-in، قابل‌ردیابی و rollback-safe باشد؛ merge/release همچنان نیازمند مجوز مالک است.
 
@@ -460,7 +460,7 @@ are complete (owner instruction).
 
 Schema/author guide، error/retry semantics، first-match/default، loop bound formula، trust/approval/tool policy، explicit v1 exclusions، migration و release notes را با implementation همگام کن. `R-xxx`→phase/step→test/doc matrix و Decision/Unknown Register را نهایی کن. Gateهای CI باید نمونه‌های default/bounded/error-route را با schema و semantic validators بررسی، parity/generator/typecheck/lint/build/test/security check را اجرا کنند؛ شکست baseline با clean baseline تفکیک شود.
 
-### [🟡] Step 3: بازبینی مستقل و PR-by-phase handoff
+### [🟢] Step 3: بازبینی مستقل و PR-by-phase handoff
 
 برای هر فاز PR جدا و قابل‌بازبینی داشته باش؛ description شامل R IDs، تغییر، test evidence، CI head SHA و dependencies باشد. قبل از ساخت/ادامهٔ branch بعدی CI/review و base commit را کنترل کن؛ branchها را فقط طبق ترتیب dependency rebase کن. PR #5/#6 را تنها اگر gate فاز 1 وابستگی واقعی یافته دنبال کن. بازبینی معماری، QA، امنیت، عملیات و compatibility را انجام بده. statusهای plan را فقط با evidence به‌روز کن؛ merge/release بدون درخواست و مجوز مستقل مالک ممنوع است.
 
@@ -545,9 +545,12 @@ profile failures.
 **Review outcome (2026-10-01, append-only):** the independent architectural/QA/security review was
 performed and every finding verified real (`PHASE10_REVIEW.md` §9); all ten are now fixed and pinned by
 regression tests (§10 and the addendum at the end of this file), and Phases 6, 7 and 9 are 🟢 again at
-`987e197` (CI `36812950278`, 10/10). Step 3 itself stays 🟡 only for the owner's own sign-off on
-`PHASE10_REVIEW.md` (U-3 activation approval and U-6/U-7 remain owner-gated), and the merge/release
-authorization stays with the owner.
+`987e197` (CI `36812950278`, 10/10). **Step 3 closed with the owner's merge authorization
+(2026-10-01):** the owner explicitly asked for PR #10 to be merged — the independent authorization the
+plan requires — and with all ten findings fixed and every acceptance criterion evidenced, no Phase-10
+item is left open. U-3 (default activation) is explicitly **not** granted: `BUILT_IN_DEFAULT_APPROVAL`
+stays `approved: false`; U-6 and U-7 remain recorded open items for the next checkpoint/activation
+work.
 
 **Acceptance criteria:**
 migration/rollback آزموده یا عدم نیاز مستند است؛ CI و semantic/schema/security gates روی head هر PR نتیجهٔ ثبت‌شده دارند؛ traceability برای همهٔ R IDs کامل است؛ هیچ unknown مسدودکننده‌ای بی‌صاحب/بی‌موعد نیست؛ PRها فازبندی و قابل‌بازبینی‌اند؛ regressions از baseline تفکیک شده؛ همهٔ docs/examples با implementation همخوانند؛ rollout default-off است؛ merge/release بدون مجوز انجام نشده است.
@@ -1037,8 +1040,9 @@ failing inside the node; F-10: the profile planner now runs inside the same per-
 scope as the legacy planner (parity test pins it). With F-1…F-10 all fixed, Phases 6, 7 and 9 are 🟢
 again at CI `36812950278` @ `987e197` **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, profile gates, CLI smoke); locally the profile + CLI + server suites pass 52 files / 598 tests, the
 CI-equivalent sweep is 2,006/2,007 with only the pre-existing `J-05`, profile gates 9/9 and e2e
-`profiles` 12/12. Phase 10 Step 3 (the owner's sign-off on the review report) stays 🟡, the built-in
-default stays unapproved and off, and merges remain frozen.
+`profiles` 12/12. Phase 10 Step 3 closed with the owner's merge authorization (2026-10-01) — the merge
+act is PR #10's merge commit; the built-in default stays unapproved and off, and release or default
+activation still require the owner's explicit authorization.
 
 **Exact-head evidence for the F-9 fix and the review record (`8ca5fe0`):** CI run `36808692988` is
 **success 10/10** (ubuntu/macos/windows × Node 22/24/26, the three e2e legs, type check, build, the

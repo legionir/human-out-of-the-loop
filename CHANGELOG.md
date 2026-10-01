@@ -100,8 +100,8 @@ opt-in nothing profile-related is resolved and the existing path runs unchanged.
   instead of failing inside the node — F-7; the profile planner receives the session history exactly
   like the legacy planner — F-10.
 - **Closed:** every finding of the independent review is fixed (F-1…F-10). Phases 6, 7 and 9 are 🟢
-  again; the built-in default stays unapproved and off, and Phase 10 Step 3 (owner sign-off) is the
-  remaining Phase-10 item. `TRACEABILITY.md` §3b holds the fix ledger.
+  again and Phase 10 Step 3 closed with the owner's merge authorization (2026-10-01); the built-in
+  default stays unapproved and off. `TRACEABILITY.md` §3b holds the fix ledger.
 
 **Behaviour differences — decided by the owner on 2026-09-30 (U-4)** (recorded in
 `docs/workflow-profiles/PHASE7_PARITY.md`, the decision record in `PHASE10_OPERATIONS.md` §9; the
