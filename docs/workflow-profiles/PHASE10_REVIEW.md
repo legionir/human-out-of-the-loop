@@ -205,3 +205,11 @@ CI `36843874529` @ `6b36348` **success 10/10**; locally the full `src/ai` suite 
 tests, `scripts/ci-test.mjs` 2,017/2,017, profile gates 9/9, e2e `profiles` 12/12, `tsc --noEmit` and
 `npm run build` clean. The merge proceeds per the owner's 2026-10-01 directive (see
 `EXECUTION_PLAN.md`, Phase 10 Step 3).
+
+**Merge performed (2026-10-01):** the verified stack was merged with GitHub's stack-aware endpoint
+(`PUT /repos/legionir/human-out-of-the-loop/pulls/10/merge-async`, `merge_method: merge`, expected
+head `f6b8e5b`): merge commit `8e2036ce107544f47f3620abf36989596b440a29` ("Merge pull request #10 …")
+is the head of `main`, PR #9 and PR #10 are both `MERGED`, and native stack #11 is closed. CI
+`36845511269` @ `8e2036c` on `main` is **success 10/10**. Nothing beyond this stack was merged, no
+release was published, and the built-in default stays unapproved (`BUILT_IN_DEFAULT_APPROVAL`
+`approved: false`) and off.
