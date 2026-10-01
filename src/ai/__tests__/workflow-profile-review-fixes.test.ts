@@ -18,10 +18,12 @@ import {
   type PlanRuntimeLike,
 } from '../workflow-profiles/orchestrator-adapters.js';
 import { createWorkflowProfileHandlers, type WorkflowExecutorPort } from '../workflow-profiles/node-handlers.js';
+import { runWorkflowProfileKernel } from '../workflow-profiles/profile-kernel.js';
+import type { WorkflowProfileDocument } from '../workflow-profiles/profile-types.js';
 import { runWorkflowProfileBridge, type WorkflowProfileBridgeServices } from '../workflow-profiles/orchestrator-bridge.js';
 import { createDefaultWorkflowProfileDocument } from '../workflow-profiles/default-profile.js';
 import { componentProjection, dependencyDigest } from '../workflow-profiles/profile-digest.js';
-import { MemoryWorkflowProfileRunStateStore } from '../workflow-profiles/profile-run-state.js';
+import { FileWorkflowProfileRunStateStore, MemoryWorkflowProfileRunStateStore } from '../workflow-profiles/profile-run-state.js';
 import {
   prepareWorkflowProfileRun,
   WORKFLOW_PROFILE_FLAG_ENV_VAR,
@@ -29,6 +31,11 @@ import {
 } from '../workflow-profiles/profile-runner.js';
 import { createBuiltInRubricCatalogue, type WorkflowProfileComponentSources } from '../workflow-profiles/profile-resolver.js';
 import { EventBus, type AgentEvent } from '../runtime/event-bus.js';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { once } from 'node:events';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { Plan } from '../schemas/plan.js';
 import type { PlanExecutionResult } from '../runtime/plan-runtime.js';
 import { emptyReviewUsage } from '../schemas/review.js';
@@ -108,6 +115,8 @@ const bridgeServices = (overrides: Partial<WorkflowProfileBridgeServices> = {}):
   confirm: vi.fn(async (_prompt: string, _plan?: Plan) => ({ confirmed: true })),
   ...overrides,
 });
+
+const objectPort = () => ({ type: 'object', required: true });
 
 function confinedGoal(text: string) {
   return {
@@ -361,6 +370,250 @@ describe('F-6 — confirmation exposes the plan it is asking about', () => {
     });
     expect(confirm).toHaveBeenCalled();
     expect(confirm.mock.calls[0]![1]).toBeUndefined();
+  });
+});
+
+// ─── F-4: one run, one runner ──────────────────────────────────────
+
+describe('F-4 — a resume holds an exclusive run lease', () => {
+  const holdLock = (): ChildProcess => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1 << 30)'], { stdio: 'ignore' });
+    return child;
+  };
+  const waitForPid = (child: ChildProcess): number => {
+    if (child.pid === undefined) throw new Error('child has no pid');
+    return child.pid;
+  };
+  const leasePathFor = (dir: string, runId: string): string =>
+    join(dir, `${contentDigest(runId).slice('sha256:'.length, 'sha256:'.length + 32)}.json.lease`);
+
+  it('refuses the lease to a live foreign holder and takes it over once that holder is gone', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wp-lease-'));
+    const child = holdLock();
+    try {
+      const store = new FileWorkflowProfileRunStateStore(dir);
+      writeFileSync(leasePathFor(dir, 'run-f4'), JSON.stringify({ pid: waitForPid(child), acquiredAt: Date.now() }));
+      expect(store.tryLease('run-f4')).toBeUndefined();
+    } finally {
+      const exited = once(child, 'exit');
+      child.kill('SIGKILL');
+      // Wait for the reaped child: a zombie still answers `kill(pid, 0)`, exactly like a live process.
+      await exited;
+    }
+    // The holder is dead: the next attempt takes the lease over instead of hanging forever.
+    const store = new FileWorkflowProfileRunStateStore(dir);
+    const lease = store.tryLease('run-f4');
+    expect(lease).toBeDefined();
+    expect(() => readFileSync(leasePathFor(dir, 'run-f4'), 'utf8')).not.toThrow();
+    lease!.release();
+    expect(() => readFileSync(leasePathFor(dir, 'run-f4'), 'utf8')).toThrow();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('refuses to prepare a resume while another live process holds the lease', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wp-lease-locked-'));
+    const child = holdLock();
+    try {
+      const store = new FileWorkflowProfileRunStateStore(dir);
+      const { document, components } = documentWithToolset({}, {});
+      // A fresh attempt writes the record (no lease: it is not a resume).
+      prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-locked', stateStore: store });
+      writeFileSync(leasePathFor(dir, 'run-locked'), JSON.stringify({ pid: waitForPid(child), acquiredAt: Date.now() }));
+
+      expect(() => prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-locked', stateStore: store }))
+        .toThrow(/resume\.locked|another live process/);
+    } finally {
+      child.kill('SIGKILL');
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('releases the lease when the attempt settles, so the next resume can run', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wp-lease-release-'));
+    const store = new FileWorkflowProfileRunStateStore(dir);
+    const { document, components } = documentWithToolset({}, {});
+    // Fresh attempt: record written, nothing runs → the process "dies" before the resume.
+    prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-release', stateStore: store });
+
+    const resumed = prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-release', stateStore: store });
+    const result = await resumed.run({ input: { goal: 'g' }, handlers: { intake: () => ({ goal: 'g' }) } });
+    expect(result.status).toBeDefined();
+    // The lease went back with the attempt: a later resume is not blocked by its predecessor.
+    const lease = store.tryLease('run-release');
+    expect(lease).toBeDefined();
+    lease!.release();
+    rmSync(dir, { recursive: true, force: true });
+  });
+});
+
+// ─── F-7: a mid-graph pause resumes with its recorded inputs ──────
+
+const stringPortHelper = () => ({ type: 'string', required: true });
+const objectPortHelper = () => ({ type: 'object', required: true });
+
+describe('F-7 — a resume restores the inputs of the paused node', () => {
+  const midGraphProfile = (): WorkflowProfileDocument => ({
+    schemaVersion: '1.0.0',
+    profile: { id: 'test.f7', name: 'F-7 fixture', version: '1.0.0', author: 'tests' },
+    dependencies: [
+      { kind: 'persona', id: 'planner', version: '1.0.0', digest: dependencyDigest('persona', 'planner', componentProjection({ ...PLANNER_PERSONA })) },
+    ],
+    workflow: {
+      startNode: 'start',
+      nodes: [
+        { id: 'start', kind: 'intake', goal: 'intake', inputs: {}, outputs: { goal: stringPortHelper() }, config: {} },
+        {
+          id: 'plan', kind: 'planner', goal: 'plan', inputs: { goal: stringPortHelper() },
+          outputs: { planText: stringPortHelper() }, config: { mode: 'decompose' }, bindings: { personaRef: 'planner' },
+        },
+        {
+          id: 'confirm', kind: 'approval', goal: 'confirm', inputs: { planText: stringPortHelper() },
+          outputs: { planText: stringPortHelper(), decision: objectPortHelper() },
+          config: { prompt: 'Approve?', approvalType: 'continue', responseKind: 'decision', show: ['planText'] },
+        },
+        {
+          id: 'work', kind: 'execute', goal: 'work', inputs: { planText: stringPortHelper() },
+          outputs: { summary: stringPortHelper() }, config: { mode: 'assisted', requireApprovalForSideEffects: true },
+          bindings: { personaSource: 'plan-step' },
+        },
+        {
+          id: 'finish', kind: 'end', goal: 'finish', inputs: { summary: stringPortHelper() },
+          outputs: { summary: stringPortHelper() }, config: { outcome: 'success', emit: { summary: 'summary' } },
+        },
+      ],
+      edges: [
+        { from: 'start', to: 'plan', map: { goal: '/goal' } },
+        { from: 'plan', to: 'confirm', map: { planText: '/planText' } },
+        { from: 'confirm', to: 'work', map: { planText: '/planText' } },
+        { from: 'work', to: 'finish', map: { summary: '/summary' } },
+      ],
+    },
+    policies: {
+      execution: { maxNodeVisits: 30, maxDurationSeconds: 60, maxModelCalls: 1, maxToolCalls: 5, onLimit: 'ask-user' },
+      tools: { allowedToolsets: [] },
+      approvals: { policy: 'runtime-default' },
+    },
+    result: [{ fromNode: 'finish', port: 'summary', kind: 'response', outcome: 'success' }],
+  }) as unknown as WorkflowProfileDocument;
+
+  it('stores the paused node inputs and hands them back on resume instead of the entry payload', async () => {
+    const store = new MemoryWorkflowProfileRunStateStore();
+    const document = midGraphProfile();
+    const executeInputs: Array<Record<string, unknown>> = [];
+    const handlers = {
+      intake: () => ({ goal: 'g' }),
+      planner: (invocation: { budget: { consumeModelCall: () => void } }) => {
+        invocation.budget.consumeModelCall();
+        return { planText: 'THE PLAN' };
+      },
+      approval: (invocation: { inputs: Record<string, unknown> }) => ({
+        planText: invocation.inputs.planText, decision: { approved: true },
+      }),
+      execute: (invocation: { inputs: Record<string, unknown>; budget: { consumeModelCall: () => void } }) => {
+        executeInputs.push({ ...invocation.inputs });
+        invocation.budget.consumeModelCall();
+        return { summary: 'done' };
+      },
+    };
+
+    const first = prepareWorkflowProfileRun({ document, sources: sources(), env: ENV, runId: 'run-f7', stateStore: store });
+    const paused = await first.run({ input: { goal: 'entry' }, handlers });
+    expect(paused.limit).toBe('ask-user');
+    const record = store.load('run-f7')!;
+    expect(record.currentNodeId).toBe('work');
+
+    const second = prepareWorkflowProfileRun({ document, sources: sources(), env: ENV, runId: 'run-f7', stateStore: store });
+    await second.run({ input: { goal: 'a different entry payload' }, handlers });
+
+    // The resumed execute node saw the mapped plan, not the caller's entry input: without F-7 it
+    // would have been handed `{ goal: ... }` and failed on the missing `planText` port.
+    expect(executeInputs).toHaveLength(2);
+    expect(executeInputs[1]).toMatchObject({ planText: 'THE PLAN' });
+  });
+
+  it('refuses a legacy pause record that has no stored inputs instead of failing mid-graph', async () => {
+    const store = new MemoryWorkflowProfileRunStateStore();
+    const document = midGraphProfile();
+    const first = prepareWorkflowProfileRun({ document, sources: sources(), env: ENV, runId: 'run-f7-legacy', stateStore: store });
+    await first.run({
+      input: { goal: 'entry' },
+      handlers: {
+        intake: () => ({ goal: 'g' }),
+        planner: (invocation: { budget: { consumeModelCall: () => void } }) => {
+          invocation.budget.consumeModelCall();
+          return { planText: 'THE PLAN' };
+        },
+        approval: (invocation: { inputs: Record<string, unknown> }) => ({
+          planText: invocation.inputs.planText, decision: { approved: true },
+        }),
+        execute: (invocation: { budget: { consumeModelCall: () => void } }) => {
+          invocation.budget.consumeModelCall();
+          return { summary: 'done' };
+        },
+      },
+    });
+    // Records written before F-7 have no `nodeInputs`: resuming one from a mid-graph node refuses
+    // (a clear diagnostic) instead of running the node with the wrong inputs.
+    const legacy = store.load('run-f7-legacy')!;
+    const { nodeInputs: _dropped, ...withoutInputs } = legacy;
+    store.save(withoutInputs as typeof legacy);
+
+    const second = prepareWorkflowProfileRun({ document, sources: sources(), env: ENV, runId: 'run-f7-legacy', stateStore: store });
+    await expect(second.run({
+      input: { goal: 'entry' },
+      handlers: { intake: () => ({ goal: 'g' }), planner: () => ({ planText: 'p' }), approval: () => ({}), execute: () => ({ summary: 's' }) },
+    })).rejects.toThrow(/inputs-missing/);
+  });
+});
+
+// ─── F-5: a bound approval must have shown the content ────────────
+
+describe('F-5 — an approval cannot bind content the approver never saw', () => {
+  it('refuses at the runtime boundary, before any interaction, when the bound port is not shown', async () => {
+    const document = {
+      schemaVersion: '1.0.0',
+      profile: { id: 'test.f5', name: 'F-5 fixture', version: '1.0.0', author: 'tests' },
+      dependencies: [],
+      workflow: {
+        startNode: 'start',
+        nodes: [
+          { id: 'start', kind: 'intake', goal: 'intake', inputs: {}, outputs: { plan: objectPort() }, config: {} },
+          {
+            id: 'ask', kind: 'approval', goal: 'ask',
+            inputs: { plan: objectPort() },
+            outputs: { decision: objectPort() },
+            config: { prompt: 'Approve?', approvalType: 'side-effect', responseKind: 'decision', bindsTo: 'plan' },
+          },
+          {
+            id: 'finish', kind: 'end', goal: 'finish', inputs: { decision: objectPort() },
+            outputs: { decision: objectPort() }, config: { outcome: 'success', emit: { decision: 'decision' } },
+          },
+        ],
+        edges: [
+          { from: 'start', to: 'ask', map: { plan: '/plan' } },
+          { from: 'ask', to: 'finish', map: { decision: '/decision' } },
+        ],
+      },
+      policies: {
+        execution: { maxNodeVisits: 10, maxDurationSeconds: 60, maxModelCalls: 5, maxToolCalls: 5, onLimit: 'fail' },
+        tools: { allowedToolsets: [] },
+        approvals: { policy: 'runtime-default' },
+      },
+      result: [{ fromNode: 'finish', port: 'decision', kind: 'response', outcome: 'success' }],
+    } as unknown as WorkflowProfileDocument;
+    const approvals = { request: vi.fn(async () => ({ status: 'approved' as const, approvedDigest: contentDigest({ id: 'p1' }) })) };
+    const handlers = createWorkflowProfileHandlers({ approvals });
+    const result = await runWorkflowProfileKernel({ profile: document, input: { plan: { id: 'p1' } }, handlers });
+
+    expect(result.status).toBe('failure');
+    expect(result.terminalFailure?.code).toBe('approval.bound-content-not-shown');
+    expect(approvals.request).not.toHaveBeenCalled();
+
+    // Showing the bound port is what makes the same profile legal.
+    (document.workflow.nodes[1]!.config as Record<string, unknown>).show = ['plan'];
+    const accepted = await runWorkflowProfileKernel({ profile: document, input: { plan: { id: 'p1' } }, handlers });
+    expect(accepted.status).toBe('success');
+    expect(approvals.request).toHaveBeenCalledTimes(1);
   });
 });
 

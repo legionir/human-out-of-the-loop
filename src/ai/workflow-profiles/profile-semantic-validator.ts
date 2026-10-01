@@ -259,6 +259,12 @@ function validateWorkflowProfileSemanticsUnchecked(profile: WorkflowProfileDocum
     if (node.kind === 'approval') {
       const config = node.config as Record<string, any>;
       if (typeof config.bindsTo === 'string' && !Object.hasOwn(node.inputs, config.bindsTo)) addDiagnostic('approval.binds-to-port-missing', `Approval bindsTo references undeclared input port "${config.bindsTo}"`, `/workflow/nodes/${index}/config/bindsTo`, node.id);
+      // F-5: consent needs the content that is being approved on screen. A node that binds to a port
+      // but does not list it in `show` would ask the user to authorize content they never saw, so the
+      // profile is refused at load time (the runtime handler enforces the same rule again).
+      if (typeof config.bindsTo === 'string' && !(config.show ?? []).includes(config.bindsTo)) {
+        addDiagnostic('approval.bound-content-not-shown', `Approval bindsTo "${config.bindsTo}" but does not show it; an approver must see the content they are binding (add it to "show")`, `/workflow/nodes/${index}/config/show`, node.id);
+      }
       for (const [showIndex, portName] of (config.show ?? []).entries()) {
         if (!Object.hasOwn(node.inputs, portName)) addDiagnostic('approval.show-port-missing', `Approval show references undeclared input port "${portName}"`, `/workflow/nodes/${index}/config/show/${showIndex}`, node.id);
       }

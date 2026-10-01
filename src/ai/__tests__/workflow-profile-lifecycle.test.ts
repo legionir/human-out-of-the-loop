@@ -142,7 +142,9 @@ describe('Workflow Profile resume decisions', () => {
       runId: 'run-1', profile: executableProfile(), dependencies: pins(),
       runtimeVersion: RUNTIME_VERSION, startNodeId: 'work', authority, now: 1,
     });
-    state = { ...state, currentNodeId: 'work', visits: 2 };
+    // A mid-graph pause record: the node's inputs were stored with the pause (F-7), so the
+    // integrity/authority checks below decide the outcome, not the input gate.
+    state = { ...state, currentNodeId: 'work', visits: 2, nodeInputs: { goal: 'g' } };
   });
 
   const expectation = () => ({ profile: executableProfile(), dependencies: pins(), runtimeVersion: RUNTIME_VERSION, authority });

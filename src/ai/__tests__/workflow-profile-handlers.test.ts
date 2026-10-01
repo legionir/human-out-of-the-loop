@@ -389,7 +389,7 @@ describe('Workflow Profile approval handler', () => {
       request: () => Promise.resolve({ status: 'approved', approvedDigest: contentDigest({ other: true }) }),
     };
     const result = await runWorkflowProfileKernel({
-      profile: approvalProfile({ prompt: 'Approve?', approvalType: 'side-effect', responseKind: 'decision', bindsTo: 'plan' }),
+      profile: approvalProfile({ prompt: 'Approve?', approvalType: 'side-effect', responseKind: 'decision', bindsTo: 'plan', show: ['plan'] }),
       input: { plan: { id: 'p1' } },
       handlers: handlers({ approvals }),
     });

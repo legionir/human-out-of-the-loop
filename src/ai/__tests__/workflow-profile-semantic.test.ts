@@ -320,6 +320,17 @@ describe('Workflow Profile semantic validation', () => {
     expect(codes(badApproval)).toContain('approval.binds-to-port-missing');
     expect(codes(badApproval)).toContain('approval.show-port-missing');
 
+    // F-5: binding content the approver cannot see is refused at load time. The default example
+    // shows its bound port, so removing it from `show` is exactly the consent gap the review found.
+    // The full repository example has a digest-bound confirmation that shows its bound port; the
+    // minimal semantic fixtures do not bind at all.
+    const unseenBinding = fixture('examples/bounded-review-fix.example.json');
+    const hidden = unseenBinding.workflow.nodes.find((node) => node.kind === 'approval' && typeof node.config.bindsTo === 'string')!;
+    hidden.config.show = [];
+    expect(codes(unseenBinding)).toContain('approval.bound-content-not-shown');
+    hidden.config.show = [hidden.config.bindsTo as string];
+    expect(codes(unseenBinding)).not.toContain('approval.bound-content-not-shown');
+
     const badCondition = fixture('bounded-review-fix.example.json');
     const condition = badCondition.workflow.nodes.find((node) => node.kind === 'condition')!;
     condition.outputs.unproduced = { type: 'string' };

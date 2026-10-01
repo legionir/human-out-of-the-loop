@@ -395,6 +395,14 @@ export function createWorkflowProfileHandlers(
       });
     }
     const showPorts = Array.isArray(node.config.show) ? node.config.show : [];
+    // F-5: the approver must see what they are binding. The semantic validator refuses such a
+    // profile at load time; this is the runtime boundary, so a document assembled in memory cannot
+    // ask for a digest-bound approval of unseen content.
+    if (bindsTo && !showPorts.includes(bindsTo)) {
+      throw new WorkflowNodeError(`Approval node "${node.id}" binds to "${bindsTo}" without showing it; refusing to ask for approval of content the user cannot see`, {
+        category: 'validation', code: 'approval.bound-content-not-shown', retryable: false,
+      });
+    }
     const shown: Record<string, unknown> = {};
     for (const portName of showPorts) {
       const value = readPort(inputs, `/${portName}`);

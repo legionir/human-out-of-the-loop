@@ -195,6 +195,17 @@ export function prepareWorkflowProfileRun(options: PrepareWorkflowProfileRunOpti
   let state: WorkflowProfileRunState | undefined = options.stateStore ? options.stateStore.load(runId) : undefined;
   /** A record that already existed means this attempt is a resume, not a first run. */
   const resumingStoredRun = state !== undefined;
+  // F-4: resuming a stored attempt takes an exclusive run lease before anything executes, so two
+  // live processes cannot continue the same run (a lease whose holder died is taken over by the
+  // store). The lease is released when the attempt settles; a caller that prepares without ever
+  // running leaves it to the process, and the next resume takes it over.
+  const lease = resumingStoredRun ? options.stateStore?.tryLease?.(runId) : undefined;
+  if (resumingStoredRun && options.stateStore?.tryLease && !lease) {
+    throw new WorkflowProfileLoadError(`Workflow Profile run "${runId}" is being resumed by another live process`, [{
+      stage: 'read', code: 'resume.locked', profileId: profile.profile.id,
+      message: 'Another process holds this run\'s lease; wait for it to finish (or release it) before resuming',
+    }]);
+  }
   let started = false;
 
   const persist = (next: WorkflowProfileRunState): void => {
@@ -242,69 +253,76 @@ export function prepareWorkflowProfileRun(options: PrepareWorkflowProfileRunOpti
         }]);
       }
       started = true;
-      let resumeFrom: WorkflowProfileRunState | undefined;
-      if (options.stateStore) {
-        if (resumingStoredRun) {
-          const decision = evaluateWorkflowProfileResume(state!, {
-            profile: frozen as WorkflowProfileDocument,
-            dependencies,
-            runtimeVersion,
-            authority: declaredAuthority,
-          });
-          if (decision.action !== 'resume') {
-            for (const diagnostic of decision.diagnostics) {
-              events.emit({ type: 'workflow.run.resume-refused', runId, atMs: now(), code: diagnostic.code, status: decision.action });
-            }
-            const reasons = decision.diagnostics.map((diagnostic) => diagnostic.code).join(', ');
-            throw new WorkflowProfileLoadError(`Workflow Profile run "${runId}" cannot resume (${decision.action}: ${reasons})`, decision.diagnostics.map((diagnostic) => ({
-              stage: 'semantic' as const,
-              code: diagnostic.code,
-              message: diagnostic.message,
-              profileId: profile.profile.id,
-            })));
-          }
-          resumeFrom = state;
-        }
-      }
-
-      const resuming = resumeFrom !== undefined;
-      const runProfile = resuming
-        ? ({ ...frozen, workflow: { ...frozen.workflow, startNode: resumeFrom!.currentNodeId } } as WorkflowProfileDocument)
-        : (frozen as WorkflowProfileDocument);
-
-      const { onEvent: callerOnEvent, ...kernelOptions } = runOptions;
-      let result: WorkflowRunResult;
       try {
-        result = await runWorkflowProfileKernel({
-          ...kernelOptions,
-          profile: runProfile,
-          onEvent: (event) => {
-            events.emitKernelEvent(event);
-            callerOnEvent?.(event);
-          },
-          ...(resuming ? { usage: resumeFrom!.budget, loopCounters: resumeFrom!.loopCounters, visitCount: resumeFrom!.visits } : {}),
-          ...(options.maxNodeVisits !== undefined ? { maxNodeVisits: options.maxNodeVisits } : {}),
-          ...(options.budget ? { budget: options.budget } : {}),
-          ...(options.sessionBudget ? { sessionBudget: options.sessionBudget } : {}),
-          now,
-        });
-      } catch (error) {
-        // The kernel does not throw for run outcomes; a throw here is a defect.
-        events.emit({ type: 'workflow.run.end', runId, atMs: now(), status: 'kernel-error', code: error instanceof Error ? error.name : 'unknown' });
-        throw error;
-      }
+        let resumeFrom: WorkflowProfileRunState | undefined;
+        if (options.stateStore) {
+          if (resumingStoredRun) {
+            const decision = evaluateWorkflowProfileResume(state!, {
+              profile: frozen as WorkflowProfileDocument,
+              dependencies,
+              runtimeVersion,
+              authority: declaredAuthority,
+            });
+            if (decision.action !== 'resume') {
+              for (const diagnostic of decision.diagnostics) {
+                events.emit({ type: 'workflow.run.resume-refused', runId, atMs: now(), code: diagnostic.code, status: decision.action });
+              }
+              const reasons = decision.diagnostics.map((diagnostic) => diagnostic.code).join(', ');
+              throw new WorkflowProfileLoadError(`Workflow Profile run "${runId}" cannot resume (${decision.action}: ${reasons})`, decision.diagnostics.map((diagnostic) => ({
+                stage: 'semantic' as const,
+                code: diagnostic.code,
+                message: diagnostic.message,
+                profileId: profile.profile.id,
+              })));
+            }
+            resumeFrom = state;
+          }
+        }
 
-      if (options.stateStore && state) {
-        persist(applyRunResultToState(state, {
-          result,
-          awaitingUser: result.limit === 'ask-user',
-          nodeSequence: result.nodeSequence,
-          ...(options.planId ? { planId: options.planId } : {}),
-          ...(options.sessionId ? { sessionId: options.sessionId } : {}),
-          now: now(),
-        }));
-      }
-      return result;
+        const resuming = resumeFrom !== undefined;
+        const runProfile = resuming
+          ? ({ ...frozen, workflow: { ...frozen.workflow, startNode: resumeFrom!.currentNodeId } } as WorkflowProfileDocument)
+          : (frozen as WorkflowProfileDocument);
+
+        const { onEvent: callerOnEvent, ...kernelOptions } = runOptions;
+        let result: WorkflowRunResult;
+      try {
+          result = await runWorkflowProfileKernel({
+            ...kernelOptions,
+            profile: runProfile,
+            onEvent: (event) => {
+              events.emitKernelEvent(event);
+              callerOnEvent?.(event);
+            },
+            // F-7: the paused node continues with the inputs it was waiting on, not the caller's
+          // entry payload (which belongs to the start node).
+          ...(resuming && resumeFrom!.nodeInputs ? { input: resumeFrom!.nodeInputs } : {}),
+          ...(resuming ? { usage: resumeFrom!.budget, loopCounters: resumeFrom!.loopCounters, visitCount: resumeFrom!.visits } : {}),
+            ...(options.maxNodeVisits !== undefined ? { maxNodeVisits: options.maxNodeVisits } : {}),
+            ...(options.budget ? { budget: options.budget } : {}),
+            ...(options.sessionBudget ? { sessionBudget: options.sessionBudget } : {}),
+            now,
+          });
+        } catch (error) {
+          // The kernel does not throw for run outcomes; a throw here is a defect.
+          events.emit({ type: 'workflow.run.end', runId, atMs: now(), status: 'kernel-error', code: error instanceof Error ? error.name : 'unknown' });
+          throw error;
+        }
+
+        if (options.stateStore && state) {
+          persist(applyRunResultToState(state, {
+            result,
+            awaitingUser: result.limit === 'ask-user',
+            nodeSequence: result.nodeSequence,
+            ...(options.planId ? { planId: options.planId } : {}),
+            ...(options.sessionId ? { sessionId: options.sessionId } : {}),
+            now: now(),
+          }));
+        }
+        return result;
+      } finally {
+          lease?.release();
+        }
     },
     recordApproval: (approval: Omit<WorkflowProfileApprovalRecord, 'atMs'> & { atMs?: number }): void => {
       if (!state || !options.stateStore) return;

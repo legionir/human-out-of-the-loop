@@ -147,6 +147,12 @@ export interface WorkflowRunResult {
    * is a resumable pause, so the durable layer must not treat it as terminal.
    */
   limit?: 'fail' | 'handoff' | 'ask-user';
+  /**
+   * F-7: the inputs the node that stopped the run was given. A resume hands them back to that
+   * node, so a pause after the planner (or any mid-graph node) can continue with the values it
+   * was waiting on instead of failing on missing inputs.
+   */
+  resumeInputs?: Readonly<Record<string, unknown>>;
 }
 
 const SCHEMA_MAX_NODE_VISITS = 1000;
@@ -259,6 +265,11 @@ export async function runWorkflowProfileKernel(options: WorkflowKernelOptions): 
     events: [],
   };
 
+  // F-7: what the node currently being handled was given. The loop refreshes it every iteration,
+  // so every `finish` (limit, failure, abort, route error) reports the inputs of the node that
+  // stopped the run, which the durable layer stores for a resume.
+  let handedInputs: Record<string, unknown> = { ...(options.input ?? {}) };
+
   const finish = (
     status: WorkflowRunStatus,
     terminalFailure?: WorkflowFailure,
@@ -269,6 +280,7 @@ export async function runWorkflowProfileKernel(options: WorkflowKernelOptions): 
       results: Object.freeze([...state.results]),
       ...(terminalFailure ? { terminalFailure } : {}),
       ...(limit ? { limit } : {}),
+      resumeInputs: Object.freeze({ ...handedInputs }),
       visits: state.visits,
       loopCounters: Object.freeze(Object.fromEntries([...state.counters.entries()].sort())),
       nodeSequence: Object.freeze([...state.sequence]),
@@ -392,9 +404,10 @@ export async function runWorkflowProfileKernel(options: WorkflowKernelOptions): 
   if (!current) {
     return finish('failure', { category: 'validation', code: 'workflow.start-missing', retryable: false, nodeId: profile.workflow?.startNode ?? '<none>', attempt: 1 });
   }
-  let inputs: Record<string, unknown> = { ...(options.input ?? {}) };
+  let inputs: Record<string, unknown> = handedInputs;
 
   for (;;) {
+    handedInputs = inputs;
     const abortResult = cancelled(current.id);
     if (abortResult) return abortResult;
 

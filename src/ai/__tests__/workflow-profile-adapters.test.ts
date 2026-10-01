@@ -191,7 +191,7 @@ describe('Workflow Profile approval adapter', () => {
             id: 'ask', kind: 'approval', goal: 'ask',
             inputs: { plan: { type: 'object', required: true } },
             outputs: { plan: { type: 'object', required: true }, decision: { type: 'object', required: true } },
-            config: { prompt: 'Approve?', approvalType: 'side-effect', responseKind: 'decision', bindsTo: 'plan' },
+            config: { prompt: 'Approve?', approvalType: 'side-effect', responseKind: 'decision', bindsTo: 'plan', show: ['plan'] },
           },
           { id: 'ok', kind: 'end', goal: 'ok', inputs: { plan: { type: 'object', required: true } }, outputs: { plan: { type: 'object', required: true } }, config: { outcome: 'success', emit: { plan: 'plan' } } },
         ],

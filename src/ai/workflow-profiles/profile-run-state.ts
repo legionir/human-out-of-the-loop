@@ -23,6 +23,7 @@ import path from 'node:path';
 import { atomicWriteFileSync } from '../runtime/atomic-write.js';
 import { canonicalJson } from './profile-digest.js';
 import { contentDigest } from './untrusted-content.js';
+import { isProcessAlive, readLockInfo, type LockInfo } from '../runtime/file-lock.js';
 import { detectAuthorityIncrease, type AuthoritySnapshot } from './profile-access-guard.js';
 import type { WorkflowBudgetUsage } from './profile-budget.js';
 import type { ProfileDependency, WorkflowProfileDocument } from './profile-types.js';
@@ -109,6 +110,12 @@ export interface WorkflowProfileRunState {
   planId?: string;
   sessionId?: string;
   pendingEffect?: WorkflowProfilePendingEffect;
+  /**
+   * F-7: the inputs the recorded current node was given when the run paused, so a resume can hand
+   * them back. Absent for a run that was killed before any node ran (it resumes at the start node
+   * with the caller's input) and for records written before this field existed.
+   */
+  nodeInputs?: Record<string, unknown>;
   updatedAtMs: number;
 }
 
@@ -179,10 +186,14 @@ export function applyRunResultToState(
   const now = options.now ?? Date.now();
   const { awaitingUser: _previous, ...carried } = state;
   const paused = options.awaitingUser === true;
+  const { nodeInputs: _previousInputs, ...rest } = carried;
+  const pausedInputs = paused ? options.result.resumeInputs : undefined;
   return {
-    ...carried,
+    ...rest,
     status: paused ? 'interrupted' : options.result.status,
     ...(paused ? { awaitingUser: true } : {}),
+    // F-7: only a resumable pause keeps the pause inputs; a finished run does not need them.
+    ...(pausedInputs ? { nodeInputs: { ...pausedInputs } } : {}),
     currentNodeId: options.nodeSequence?.at(-1) ?? state.currentNodeId,
     nodeSequence: [...(options.nodeSequence ?? state.nodeSequence)],
     visits: options.result.visits,
@@ -235,12 +246,33 @@ export function clearPendingEffect(state: WorkflowProfileRunState): WorkflowProf
 
 // ─── Store ────────────────────────────────────────────────────────
 
+/**
+ * F-4: the exclusive right to continue one stored run. A resume takes the lease before anything
+ * executes; a second live process is refused (`resume.locked`), and a lease whose holder died is
+ * taken over (same self-healing rule as the file locks the other stores use).
+ */
+export interface WorkflowProfileRunLease {
+  /** Give the lease back; idempotent per handle. */
+  release(): void;
+}
+
 export interface WorkflowProfileRunStateStore {
   save(state: WorkflowProfileRunState): void;
   load(runId: string): WorkflowProfileRunState | undefined;
   list(): string[];
   delete(runId: string): void;
+  /**
+   * Try to take the run's lease. Returns `undefined` when another live process holds it. Stores
+   * that cannot be shared between processes (in-memory) always grant a no-op lease.
+   */
+  tryLease?(runId: string): WorkflowProfileRunLease | undefined;
 }
+
+/**
+ * In-process bookkeeping for the file store's leases, so a nested prepare inside the same process
+ * shares the lease instead of stealing it from itself (mirrors `heldLocks` in `file-lock.ts`).
+ */
+const heldRunLeases = new Map<string, number>();
 
 function hashedFileName(id: string): string {
   return contentDigest(id).slice('sha256:'.length, 'sha256:'.length + 32) + '.json';
@@ -297,6 +329,65 @@ export class FileWorkflowProfileRunStateStore implements WorkflowProfileRunState
     const file = this.pathFor(runId);
     if (fs.existsSync(file)) fs.unlinkSync(file);
   }
+
+  private leasePathFor(runId: string): string {
+    return `${this.pathFor(runId)}.lease`;
+  }
+
+  private leaseHandle(leasePath: string): WorkflowProfileRunLease {
+    return {
+      release: () => {
+        const depth = heldRunLeases.get(leasePath) ?? 0;
+        if (depth <= 1) {
+          heldRunLeases.delete(leasePath);
+          try {
+            fs.unlinkSync(leasePath);
+          } catch {
+            // Already gone (a self-healed predecessor, or a racing release): nothing to do.
+          }
+          return;
+        }
+        heldRunLeases.set(leasePath, depth - 1);
+      },
+    };
+  }
+
+  tryLease(runId: string): WorkflowProfileRunLease | undefined {
+    const leasePath = this.leasePathFor(runId);
+    const depth = heldRunLeases.get(leasePath);
+    if (depth !== undefined) {
+      // Re-entrant within this process: the same lease is shared, never duplicated on disk.
+      heldRunLeases.set(leasePath, depth + 1);
+      return this.leaseHandle(leasePath);
+    }
+    fs.mkdirSync(this.dir, { recursive: true });
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const fd = fs.openSync(leasePath, 'wx');
+        try {
+          const info: LockInfo = { pid: process.pid, acquiredAt: Date.now() };
+          fs.writeSync(fd, JSON.stringify(info));
+        } finally {
+          fs.closeSync(fd);
+        }
+        heldRunLeases.set(leasePath, 1);
+        return this.leaseHandle(leasePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        const holder = readLockInfo(leasePath);
+        // A live holder — us in another process, or a real concurrent runner — keeps the lease.
+        // Our own pid is handled above through the in-process map; reaching here with our pid means
+        // a leaked file, which a fresh attempt may take over.
+        if (holder && holder.pid !== process.pid && isProcessAlive(holder.pid)) return undefined;
+        try {
+          fs.unlinkSync(leasePath);
+        } catch {
+          // Someone else removed or replaced it; the next attempt (or the caller) decides.
+        }
+      }
+    }
+    return undefined;
+  }
 }
 
 export class MemoryWorkflowProfileRunStateStore implements WorkflowProfileRunStateStore {
@@ -317,6 +408,11 @@ export class MemoryWorkflowProfileRunStateStore implements WorkflowProfileRunSta
 
   delete(runId: string): void {
     this.states.delete(runId);
+  }
+
+  /** Single-process store: there is no other runner to exclude. */
+  tryLease(): WorkflowProfileRunLease {
+    return { release: () => {} };
   }
 }
 
@@ -340,6 +436,7 @@ export interface WorkflowProfileResumeDiagnostic {
     | 'resume.dependency-changed'
     | 'resume.authority-increase'
     | 'resume.ambiguous-effect'
+    | 'resume.inputs-missing'
     | 'resume.already-terminal';
   message: string;
 }
@@ -348,6 +445,7 @@ export type WorkflowProfileResumeAction =
   | 'resume'
   | 'refuse-integrity'
   | 'refuse-ambiguous-effect'
+  | 'refuse-missing-inputs'
   | 'already-terminal';
 
 export interface WorkflowProfileResumeDecision {
@@ -414,6 +512,18 @@ export function evaluateWorkflowProfileResume(
   }
   if (TERMINAL_RUN_STATUSES.has(state.status)) {
     return { action: 'already-terminal', diagnostics: [{ code: 'resume.already-terminal', message: `Run already finished with status ${state.status}` }] };
+  }
+  // F-7: a pause that happened inside the graph can only continue when the inputs that node was
+  // waiting on were stored; resuming it without them would fail on missing inputs. A run that was
+  // killed before any node ran still sits at its start node and resumes with the caller's input.
+  if (state.currentNodeId !== expectation.profile.workflow.startNode && !state.nodeInputs) {
+    return {
+      action: 'refuse-missing-inputs',
+      diagnostics: [{
+        code: 'resume.inputs-missing',
+        message: `Run paused at node "${state.currentNodeId}" without recorded inputs; it cannot be resumed from that node`,
+      }],
+    };
   }
   return { action: 'resume', diagnostics: [] };
 }
