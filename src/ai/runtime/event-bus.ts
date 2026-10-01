@@ -68,6 +68,12 @@ export interface AgentCompletedEvent extends AgentEventBase {
   toolsUsed: string[];
   /** Token usage from AI SDK */
   usage?: TokenUsage;
+  /**
+   * F-12: how many model calls this agent run made (the SDK's step count, which is 1 + one per
+   * tool round). Budget accounting counts these, so a multi-step run is charged for every call it
+   * made rather than once. Older emitters omit it; consumers treat a missing value as 1.
+   */
+  modelCalls?: number;
 }
 
 export interface AgentErrorEvent extends AgentEventBase {
@@ -77,6 +83,8 @@ export interface AgentErrorEvent extends AgentEventBase {
   code: string;
   /** C-06: partial token usage collected before the failure. */
   usage?: TokenUsage;
+  /** F-12: model calls made before the failure (1 when only the aggregate usage is known). */
+  modelCalls?: number;
 }
 
 export type AgentEvent =

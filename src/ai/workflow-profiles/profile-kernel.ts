@@ -153,6 +153,14 @@ export interface WorkflowRunResult {
    * was waiting on instead of failing on missing inputs.
    */
   resumeInputs?: Readonly<Record<string, unknown>>;
+  /**
+   * F-15: the node those inputs belong to. A limit can stop the run at the top of the loop —
+   * before the node is visited — so `nodeSequence` would name the previous node while
+   * `resumeInputs` already holds the next node's values; the durable layer pairs
+   * `currentNodeId`/`nodeInputs` from this field so a resume never hands a node someone
+   * else's inputs.
+   */
+  resumeNodeId?: string;
 }
 
 const SCHEMA_MAX_NODE_VISITS = 1000;
@@ -265,10 +273,12 @@ export async function runWorkflowProfileKernel(options: WorkflowKernelOptions): 
     events: [],
   };
 
-  // F-7: what the node currently being handled was given. The loop refreshes it every iteration,
-  // so every `finish` (limit, failure, abort, route error) reports the inputs of the node that
-  // stopped the run, which the durable layer stores for a resume.
+  // F-7/F-15: what the node currently being handled was given, and which node that is. The loop
+  // refreshes both every iteration, so every `finish` (limit, failure, abort, route error) reports
+  // the inputs OF THE NODE IT NAMES: a limit checked before the node runs stops at that node with
+  // its own mapped inputs, never at the previous node with next node's inputs.
   let handedInputs: Record<string, unknown> = { ...(options.input ?? {}) };
+  let handedNodeId: string | undefined;
 
   const finish = (
     status: WorkflowRunStatus,
@@ -281,6 +291,7 @@ export async function runWorkflowProfileKernel(options: WorkflowKernelOptions): 
       ...(terminalFailure ? { terminalFailure } : {}),
       ...(limit ? { limit } : {}),
       resumeInputs: Object.freeze({ ...handedInputs }),
+      ...(handedNodeId ? { resumeNodeId: handedNodeId } : {}),
       visits: state.visits,
       loopCounters: Object.freeze(Object.fromEntries([...state.counters.entries()].sort())),
       nodeSequence: Object.freeze([...state.sequence]),
@@ -408,6 +419,7 @@ export async function runWorkflowProfileKernel(options: WorkflowKernelOptions): 
 
   for (;;) {
     handedInputs = inputs;
+    handedNodeId = current.id;
     const abortResult = cancelled(current.id);
     if (abortResult) return abortResult;
 

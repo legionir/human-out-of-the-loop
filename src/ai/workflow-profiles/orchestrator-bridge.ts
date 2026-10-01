@@ -28,6 +28,7 @@ import {
   type PlannerLike,
   type PlanRuntimeLike,
   type ExecutionUsageSource,
+  type PlanRuntimeExecutionMeta,
 } from './orchestrator-adapters.js';
 import { createWorkflowProfileHandlers, type WorkflowReviewerPort } from './node-handlers.js';
 import { confineUntrustedContent } from './untrusted-content.js';
@@ -225,7 +226,7 @@ export async function runWorkflowProfileBridge(
   let usageRecorder: ExecutionUsageRecorder | undefined;
   let usageForPlan: { modelCalls: number; toolCalls: number } | undefined;
   const planRuntimeView: PlanRuntimeLike = {
-    async execute(planArg: Plan, meta?: { nodeId?: string; signal?: AbortSignal }): Promise<PlanExecutionResult> {
+    async execute(planArg: Plan, meta?: PlanRuntimeExecutionMeta): Promise<PlanExecutionResult> {
       // F-3: the delegated execution is the profile's side-effect window. The marker is persisted
       // BEFORE the runtime is called — where the security gate already passed — and cleared only
       // once the call reports back (a returned result, success or failed-partial, is a known
@@ -244,7 +245,9 @@ export async function runWorkflowProfileBridge(
       }
       let outcomeKnown = false;
       try {
-        const result = await services.planRuntime.execute(planArg);
+        // F-11/F-12: the profile's guardrails are handed to the runtime unchanged; the wrapper only
+        // adds the window/cancellation semantics around the call.
+        const result = await services.planRuntime.execute(planArg, meta);
         execution = result;
         outcomeKnown = true;
         return result;
@@ -315,6 +318,9 @@ export async function runWorkflowProfileBridge(
     executor: createExecutorPort({
       planRuntime: planRuntimeView,
       narrowPlan: (plan, request) => narrowFor(request)(plan),
+      // F-11: the same surface, handed to the runtime so the skill fallback and any re-planned
+      // step are bounded too (the plan-level narrowing cannot see either).
+      toolSurfaceFor: (request) => declaredExecutionToolSurface(prepared, request),
       usageFor: (plan) => {
         void plan;
         return usageForPlan;

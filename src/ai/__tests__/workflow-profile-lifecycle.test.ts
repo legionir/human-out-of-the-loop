@@ -368,7 +368,10 @@ describe('Workflow Profile durable runs', () => {
     expect(store.load('run-durable')!.pendingEffect).toMatchObject({ nodeId: 'work', attemptId, intent: 'external-write' });
 
     prepared.recordEffectCommitted();
-    expect(store.load('run-durable')!.pendingEffect).toBeUndefined();
+    // F-13: knowing the outcome is not enough to clear the durable marker — it is dropped only in
+    // the same write that persists the settled progress, so a crash between the two windows is
+    // still visible to the resume gate below.
+    expect(store.load('run-durable')!.pendingEffect).toBeDefined();
 
     prepared.recordEffectStart('work', 'external-write');
     const resumed = runWith(store);

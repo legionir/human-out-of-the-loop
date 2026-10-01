@@ -41,13 +41,36 @@ export interface PlannerLike {
   }>;
 }
 
+/**
+ * F-11: a structural view of the profile's declared tool surface, enforced by the delegated
+ * runtime on the steps AND on the tools each built agent finally receives.
+ */
+export interface ExecutionToolSurface {
+  readonly allow?: ReadonlyArray<string>;
+  readonly deny: ReadonlyArray<string>;
+}
+
+/**
+ * What the executor port hands a delegated runtime for one execution. `nodeId`/`signal` are for the
+ * wiring (the side-effect window and cancellation); `toolSurface`/`budgetExceeded` are the profile's
+ * guardrails and are forwarded to the runtime unchanged (F-11/F-12).
+ */
+export interface PlanRuntimeExecutionMeta {
+  nodeId?: string;
+  signal?: AbortSignal;
+  toolSurface?: ExecutionToolSurface;
+  budgetExceeded?: () => string | undefined;
+}
+
 export interface PlanRuntimeLike {
   /**
-   * Execute the confirmed plan. `meta` carries the execute node and the run's abort signal when the
-   * wiring provides them, so an implementation can mark the side-effect window and stop dispatching
-   * new steps when the run is cancelled (F-3/F-8).
+   * Execute the confirmed plan. `meta` carries the execute node, the run's abort signal, the
+   * profile's tool surface and its live budget guard when the wiring provides them, so an
+   * implementation can mark the side-effect window (F-3), stop dispatching new steps when the run
+   * is cancelled (F-8), bound the tools a step agent gets (F-11) and stop *before* consuming more
+   * when the profile budget is already exhausted (F-12).
    */
-  execute(plan: Plan, meta?: { nodeId?: string; signal?: AbortSignal }): Promise<PlanExecutionResult>;
+  execute(plan: Plan, meta?: PlanRuntimeExecutionMeta): Promise<PlanExecutionResult>;
   /**
    * Ask the delegated runtime to stop dispatching new steps (F-8). The wiring calls this when the
    * run's abort signal fires mid-execution; in-flight work finishes, nothing new starts.
@@ -131,7 +154,8 @@ export function createEventBusExecutionUsage(eventBus: EventBus): ExecutionUsage
           return;
         }
         if ((event.type === 'agent:completed' || event.type === 'agent:error') && event.usage) {
-          modelCalls += 1;
+          // F-12: one charge per model call the run reported (an SDK step), not one per agent run.
+          modelCalls += event.modelCalls ?? 1;
         }
       });
       return {
@@ -164,6 +188,12 @@ export interface ExecutorPortOptions {
    * toolset or a deny list is enforced at the real call site, not only in the authority snapshot.
    */
   narrowPlan?: (plan: Plan, request: { nodeId: string; toolsetRef?: string; personaRef?: string }) => Plan;
+  /**
+   * F-11: the profile's declared tool surface for the node being executed. Handed to the runtime
+   * as well, because the runtime builds each step agent (and re-plans) after the plan-level
+   * narrowing, and both of those can reintroduce tools the surface forbids.
+   */
+  toolSurfaceFor?: (request: { nodeId: string; toolsetRef?: string; personaRef?: string }) => ExecutionToolSurface | undefined;
 }
 
 /** Map an existing `PlanExecutionResult` onto the execute node's ports. */
@@ -211,11 +241,44 @@ export function createExecutorPort(options: ExecutorPortOptions): WorkflowExecut
           ...(request.personaRef ? { personaRef: request.personaRef } : {}),
         })
         : (request.plan as Plan);
+      // F-12: the profile's live budget, consulted by the runtime before it dispatches each step.
+      // A dimension with no headroom reports its own `budget.*` code, so an exhausted budget stops
+      // new work instead of being discovered only after it ran.
+      const budget = request.budget;
+      const budgetExceeded = budget
+        ? (): string | undefined => {
+          const remaining = budget.remaining();
+          if (remaining.maxModelCalls <= 0) return 'budget.model-calls-exceeded';
+          if (remaining.maxToolCalls <= 0) return 'budget.tool-calls-exceeded';
+          if (remaining.maxDurationSeconds <= 0) return 'budget.duration-exceeded';
+          return undefined;
+        }
+        : undefined;
+      const surface = options.toolSurfaceFor?.({
+        nodeId: request.nodeId,
+        ...(request.toolsetRef ? { toolsetRef: request.toolsetRef } : {}),
+        ...(request.personaRef ? { personaRef: request.personaRef } : {}),
+      });
       const result = await options.planRuntime.execute(executed, {
         nodeId: request.nodeId,
         ...(request.signal ? { signal: request.signal } : {}),
+        ...(surface ? { toolSurface: surface } : {}),
+        ...(budgetExceeded ? { budgetExceeded } : {}),
       });
       if (result.status === 'cancelled' || result.status === 'cancelling') {
+        // F-12: a guard stop names the exhausted dimension — report it as the terminal budget
+        // failure it is (the kernel applies the profile's `onLimit`), not as a bare cancellation.
+        if (result.cancelReason?.startsWith('budget.')) {
+          // F-12: the calls the run made before the guard stopped it are measured and charged here,
+          // because no outcome is returned for the caller to charge (an uncharged stop would let a
+          // resumed run spend the same calls again).
+          const measured = options.usageFor?.(executed);
+          if (measured?.modelCalls) budget?.consumeModelCall(measured.modelCalls);
+          if (measured?.toolCalls) budget?.consumeToolCall(measured.toolCalls);
+          throw new WorkflowNodeError('the delegated plan stopped: profile budget exhausted', {
+            category: 'budget', code: result.cancelReason, retryable: false,
+          });
+        }
         // Cancellation is terminal and can never be routed or retried by a profile.
         throw new WorkflowNodeError('plan execution was cancelled', {
           category: 'cancelled', code: 'execute.cancelled', retryable: false,

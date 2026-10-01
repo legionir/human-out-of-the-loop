@@ -25,7 +25,7 @@ import { ABSENT, readPort } from './profile-predicate.js';
 import { confineUntrustedContent, confineUntrustedRecord, contentDigest } from './untrusted-content.js';
 import type { ConfinedUntrustedContent } from './untrusted-content.js';
 import { WorkflowNodeError } from './profile-kernel.js';
-import type { WorkflowFailureCategory, WorkflowNodeHandler, WorkflowNodeInvocation } from './profile-kernel.js';
+import type { WorkflowBudgetHandle, WorkflowFailureCategory, WorkflowNodeHandler, WorkflowNodeInvocation } from './profile-kernel.js';
 import type { Plan } from '../schemas/plan.js';
 import type { WorkflowNode } from './profile-types.js';
 
@@ -65,6 +65,11 @@ export interface WorkflowExecutorRequest {
   toolsetRef?: string;
   modelProfileRef?: string;
   signal?: AbortSignal;
+  /**
+   * F-12: the kernel's live budget handle. The adapter turns it into the runtime's per-dispatch
+   * guard, so the delegated execution stops before consuming beyond the profile's caps.
+   */
+  budget?: WorkflowBudgetHandle;
 }
 
 export interface WorkflowExecutorOutcome {
@@ -331,6 +336,7 @@ export function createWorkflowProfileHandlers(
         ...(node.bindings?.toolsetRef ? { toolsetRef: node.bindings.toolsetRef } : {}),
         ...(node.bindings?.modelProfileRef ? { modelProfileRef: node.bindings.modelProfileRef } : {}),
         ...(signal ? { signal } : {}),
+        budget: invocation.budget,
       });
     } catch (error) {
       throw failure(error, 'execute.failed', 'tool');

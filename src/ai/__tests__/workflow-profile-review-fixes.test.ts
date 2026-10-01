@@ -33,9 +33,10 @@ import { createBuiltInRubricCatalogue, type WorkflowProfileComponentSources } fr
 import { EventBus, type AgentEvent } from '../runtime/event-bus.js';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { lockIdentity } from '../runtime/file-lock.js';
 import type { Plan } from '../schemas/plan.js';
 import type { PlanExecutionResult } from '../runtime/plan-runtime.js';
 import { emptyReviewUsage } from '../schemas/review.js';
@@ -416,32 +417,73 @@ describe('F-4 — a resume holds an exclusive run lease', () => {
     try {
       const store = new FileWorkflowProfileRunStateStore(dir);
       const { document, components } = documentWithToolset({}, {});
-      // A fresh attempt writes the record (no lease: it is not a resume).
-      prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-locked', stateStore: store });
+      // A first attempt runs to settle, so its own lease is released and the record stays behind.
+      const first = prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-locked', stateStore: store });
+      await first.run({ input: { goal: 'g' }, handlers: { intake: () => ({ goal: 'g' }) } });
+      // Another live process now holds the lease for the same run.
       writeFileSync(leasePathFor(dir, 'run-locked'), JSON.stringify({ pid: waitForPid(child), acquiredAt: Date.now() }));
 
       expect(() => prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-locked', stateStore: store }))
         .toThrow(/resume\.locked|another live process/);
     } finally {
+      const exited = once(child, 'exit');
       child.kill('SIGKILL');
+      await exited;
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
-  it('releases the lease when the attempt settles, so the next resume can run', async () => {
+  it('never breaks a lease another process took after the stale one was judged (identity CAS)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wp-lease-cas-'));
+    const store = new FileWorkflowProfileRunStateStore(dir);
+    const leasePath = leasePathFor(dir, 'run-cas');
+    mkdirSync(dirname(leasePath), { recursive: true });
+    // The lease that was judged stale…
+    writeFileSync(leasePath, JSON.stringify({ pid: 999_999, acquiredAt: Date.now() }));
+    const staleIdentity = lockIdentity(leasePath);
+    // …is replaced by a fresh one before the break happens (another process won the race).
+    rmSync(leasePath);
+    writeFileSync(leasePath, JSON.stringify({ pid: process.pid, acquiredAt: Date.now() + 1 }));
+
+    const breakStale = (store as unknown as {
+      breakStaleLease(leasePath: string, staleIdentity: string | undefined): boolean;
+    }).breakStaleLease.bind(store);
+    expect(breakStale(leasePath, staleIdentity)).toBe(false);
+    // The fresh lease survives: the caller must fail closed, never run beside it.
+    expect(readFileSync(leasePath, 'utf8')).toContain(`"pid":${process.pid}`);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('leases a fresh run too, so two processes cannot write and execute one run id at once', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'wp-lease-fresh-'));
+    const child = holdLock();
+    try {
+      const store = new FileWorkflowProfileRunStateStore(dir);
+      const { document, components } = documentWithToolset({}, {});
+      // No record exists yet: this is a fresh run, and the live holder still wins.
+      writeFileSync(leasePathFor(dir, 'run-fresh-locked'), JSON.stringify({ pid: waitForPid(child), acquiredAt: Date.now() }));
+      expect(() => prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-fresh-locked', stateStore: store }))
+        .toThrow(/run\.locked|another live process/);
+    } finally {
+      const exited = once(child, 'exit');
+      child.kill('SIGKILL');
+      await exited;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('releases the lease when the attempt settles, so a later attempt can lease again', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'wp-lease-release-'));
     const store = new FileWorkflowProfileRunStateStore(dir);
     const { document, components } = documentWithToolset({}, {});
-    // Fresh attempt: record written, nothing runs → the process "dies" before the resume.
-    prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-release', stateStore: store });
+    const fresh = prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-release', stateStore: store });
+    await fresh.run({ input: { goal: 'g' }, handlers: { intake: () => ({ goal: 'g' }) } });
+    // Settled: the lease file is gone, so a later attempt is not blocked by its predecessor.
+    expect(() => readFileSync(leasePathFor(dir, 'run-release'), 'utf8')).toThrow();
 
-    const resumed = prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-release', stateStore: store });
-    const result = await resumed.run({ input: { goal: 'g' }, handlers: { intake: () => ({ goal: 'g' }) } });
-    expect(result.status).toBeDefined();
-    // The lease went back with the attempt: a later resume is not blocked by its predecessor.
-    const lease = store.tryLease('run-release');
-    expect(lease).toBeDefined();
-    lease!.release();
+    // The next attempt leases the run again (its own record status is a separate question).
+    prepareWorkflowProfileRun({ document, sources: components, env: ENV, runId: 'run-release', stateStore: store });
+    expect(() => readFileSync(leasePathFor(dir, 'run-release'), 'utf8')).not.toThrow();
     rmSync(dir, { recursive: true, force: true });
   });
 });
@@ -679,5 +721,71 @@ describe('F-8 — the abort signal reaches the delegated PlanRuntime', () => {
     // reached it and the delegate was cancelled immediately — never a silent continuation.
     const executions = vi.mocked(services.planRuntime.execute!).mock.calls.length;
     expect(cancelled).toBe(executions > 0 ? 1 : 0);
+  });
+});
+
+// ─── F-11: the surface reaches the runtime, not only the plan ──────
+
+describe('F-11 — the declared surface also bounds what the runtime builds', () => {
+  it('hands the runtime the profile’s declared surface so the skill fallback is bounded too', async () => {
+    const { prepared } = preparedRequest();
+    const runtimeExecute = vi.fn<PlanRuntimeLike['execute']>(async () => execution);
+    const services = bridgeServices({ planRuntime: { execute: runtimeExecute } });
+    const outcome = await runWorkflowProfileBridge(prepared, {
+      services, input: { request: { goal: 'ship it', mode: 'plan' } },
+    });
+
+    expect(outcome.status).toBe('success');
+    const meta = runtimeExecute.mock.calls[0]![1];
+    // The bridge plan-level narrowing cannot see the tools a skill contributes or a re-planned
+    // step invents, so the surface travels to the runtime with the call.
+    expect(meta?.toolSurface).toEqual({
+      allow: ['read_file', 'search_files'],
+      deny: ['search_files'],
+    });
+  });
+});
+
+// ─── F-12: the budget is consulted by the runtime, and counted per call ─
+
+describe('F-12 — the profile budget stops the delegated run and is counted per model call', () => {
+  it('charges one model call per call the run reported, not one per agent run', () => {
+    const bus = new EventBus();
+    const recorder = createEventBusExecutionUsage(bus).begin({ id: 'plan-1' } as Plan);
+    // One agent run that made three model calls (the SDK steps of a multi-step run).
+    bus.emit({
+      type: 'agent:completed', planId: 'plan-1', usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+      modelCalls: 3,
+    } as AgentEvent);
+    // An older emitter says nothing: the run is charged one call, never zero.
+    bus.emit({
+      type: 'agent:completed', planId: 'plan-1', usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    } as AgentEvent);
+    expect(recorder.end()).toEqual({ modelCalls: 4, toolCalls: 0 });
+  });
+
+  it('maps a delegated budget stop to a terminal budget failure, charging the calls it measured', async () => {
+    const budget = {
+      consumeModelCall: vi.fn(), consumeToolCall: vi.fn(),
+      remaining: () => ({ maxNodeVisits: 10, maxDurationSeconds: 60, maxModelCalls: 0, maxToolCalls: 10 }),
+      elapsedMs: () => 0, usage: () => ({ visits: 0, durationMs: 0, modelCalls: 0, toolCalls: 0 }),
+    };
+    const port = createExecutorPort({
+      planRuntime: {
+        execute: vi.fn(async () => ({
+          ...execution, status: 'cancelled' as const, cancelReason: 'budget.model-calls-exceeded',
+        })),
+      },
+      usageFor: () => ({ modelCalls: 3, toolCalls: 2 }),
+    });
+    await expect(port.execute({
+      nodeId: 'work', goal: confinedGoal('g'), plan: planWith(['read_file']),
+      mode: 'assisted', requireApprovalForSideEffects: true, budget,
+    })).rejects.toMatchObject({
+      options: { category: 'budget', code: 'budget.model-calls-exceeded', retryable: false },
+    });
+    // The stop is terminal, but the calls that already ran are still charged to the profile.
+    expect(budget.consumeModelCall).toHaveBeenCalledWith(3);
+    expect(budget.consumeToolCall).toHaveBeenCalledWith(2);
   });
 });

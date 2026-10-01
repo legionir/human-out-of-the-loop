@@ -30,7 +30,6 @@ import { createWorkflowProfileEventEmitter, type EventSinkLike, type WorkflowPro
 import {
   appendApprovalRecord,
   applyRunResultToState,
-  clearPendingEffect,
   createWorkflowProfileRunState,
   evaluateWorkflowProfileResume,
   markPendingEffect,
@@ -197,16 +196,26 @@ export function prepareWorkflowProfileRun(options: PrepareWorkflowProfileRunOpti
   const resumingStoredRun = state !== undefined;
   // F-4: resuming a stored attempt takes an exclusive run lease before anything executes, so two
   // live processes cannot continue the same run (a lease whose holder died is taken over by the
-  // store). The lease is released when the attempt settles; a caller that prepares without ever
-  // running leaves it to the process, and the next resume takes it over.
-  const lease = resumingStoredRun ? options.stateStore?.tryLease?.(runId) : undefined;
-  if (resumingStoredRun && options.stateStore?.tryLease && !lease) {
-    throw new WorkflowProfileLoadError(`Workflow Profile run "${runId}" is being resumed by another live process`, [{
-      stage: 'read', code: 'resume.locked', profileId: profile.profile.id,
-      message: 'Another process holds this run\'s lease; wait for it to finish (or release it) before resuming',
+  // store). F-14: EVERY store-backed run takes it — fresh and resumed alike — so two processes can
+  // never write and execute the same run id at once (a fresh run with a colliding id would otherwise
+  // clobber the record a live runner is working from). The lease is released when the attempt
+  // settles; a caller that prepares without ever running leaves it to the process, and another
+  // process takes it over once that holder is gone (or its pid is dead).
+  const lease = options.stateStore?.tryLease?.(runId);
+  if (options.stateStore?.tryLease && !lease) {
+    throw new WorkflowProfileLoadError(`Workflow Profile run "${runId}" is already being run by another live process`, [{
+      stage: 'read', code: resumingStoredRun ? 'resume.locked' : 'run.locked', profileId: profile.profile.id,
+      message: 'Another live process holds this run\'s lease; wait for it to finish (or release it) before running or resuming it',
     }]);
   }
   let started = false;
+  // F-13: the effect's outcome is known as soon as the delegated call reports back, but clearing
+  // the durable marker immediately would open a window in which the record says "no effect in
+  // flight" while the progress it belongs to is still only in memory. The flag stays in memory and
+  // the marker is dropped in the SAME write that persists the settled progress (see the
+  // `applyRunResultToState` call below), so a process killed anywhere before that write leaves the
+  // marker behind and the resume gate refuses instead of repeating the side effect.
+  let effectOutcomeKnown = false;
 
   const persist = (next: WorkflowProfileRunState): void => {
     state = next;
@@ -313,6 +322,7 @@ export function prepareWorkflowProfileRun(options: PrepareWorkflowProfileRunOpti
           persist(applyRunResultToState(state, {
             result,
             awaitingUser: result.limit === 'ask-user',
+            ...(effectOutcomeKnown ? { effectOutcomeKnown: true } : {}),
             nodeSequence: result.nodeSequence,
             ...(options.planId ? { planId: options.planId } : {}),
             ...(options.sessionId ? { sessionId: options.sessionId } : {}),
@@ -330,13 +340,14 @@ export function prepareWorkflowProfileRun(options: PrepareWorkflowProfileRunOpti
     },
     recordEffectStart: (nodeId: string, intent: string): string => {
       const attemptId = `effect-${now()}-${Math.trunc(Math.random() * 1e6)}`;
+      effectOutcomeKnown = false;
       if (!state || !options.stateStore) return attemptId;
       persist(markPendingEffect(state, { nodeId, attemptId, intent, startedAtMs: now() }));
       return attemptId;
     },
     recordEffectCommitted: (): void => {
-      if (!state || !options.stateStore) return;
-      persist(clearPendingEffect(state));
+      // F-13: in-memory only; the durable marker is cleared together with the settled progress.
+      effectOutcomeKnown = true;
     },
   });
 }

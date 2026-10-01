@@ -20,10 +20,11 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { atomicWriteFileSync } from '../runtime/atomic-write.js';
 import { canonicalJson } from './profile-digest.js';
 import { contentDigest } from './untrusted-content.js';
-import { isProcessAlive, readLockInfo, type LockInfo } from '../runtime/file-lock.js';
+import { isProcessAlive, lockIdentity, readLockInfo, type LockInfo } from '../runtime/file-lock.js';
 import { detectAuthorityIncrease, type AuthoritySnapshot } from './profile-access-guard.js';
 import type { WorkflowBudgetUsage } from './profile-budget.js';
 import type { ProfileDependency, WorkflowProfileDocument } from './profile-types.js';
@@ -175,6 +176,13 @@ export interface RecordRunResultOptions {
   approvals?: ReadonlyArray<WorkflowProfileApprovalRecord>;
   planId?: string;
   sessionId?: string;
+  /**
+   * F-13: the delegated execution reported back during this attempt, so the `pendingEffect` marker
+   * is cleared in this same write — the write that also persists the progress the effect belongs
+   * to. A crash before it leaves both the marker and the un-advanced progress behind, which is the
+   * fail-closed pair the resume gate refuses.
+   */
+  effectOutcomeKnown?: boolean;
   now?: number;
 }
 
@@ -186,15 +194,23 @@ export function applyRunResultToState(
   const now = options.now ?? Date.now();
   const { awaitingUser: _previous, ...carried } = state;
   const paused = options.awaitingUser === true;
-  const { nodeInputs: _previousInputs, ...rest } = carried;
+  const { nodeInputs: _previousInputs, pendingEffect: _previousEffect, ...rest } = carried;
   const pausedInputs = paused ? options.result.resumeInputs : undefined;
   return {
     ...rest,
+    // F-13: the marker survives every intermediate write; only a settle that also persists the
+    // progress may drop it.
+    ...(options.effectOutcomeKnown !== true && state.pendingEffect !== undefined
+      ? { pendingEffect: state.pendingEffect }
+      : {}),
     status: paused ? 'interrupted' : options.result.status,
     ...(paused ? { awaitingUser: true } : {}),
     // F-7: only a resumable pause keeps the pause inputs; a finished run does not need them.
     ...(pausedInputs ? { nodeInputs: { ...pausedInputs } } : {}),
-    currentNodeId: options.nodeSequence?.at(-1) ?? state.currentNodeId,
+    // F-15: the node the kernel stopped at, when it reported one — a limit pause before a node is
+    // visited names that node, and its `nodeInputs` are that node's own mapped values. Falling
+    // back to the last visited node keeps older records and terminal runs unchanged.
+    currentNodeId: options.result.resumeNodeId ?? options.nodeSequence?.at(-1) ?? state.currentNodeId,
     nodeSequence: [...(options.nodeSequence ?? state.nodeSequence)],
     visits: options.result.visits,
     loopCounters: { ...options.result.loopCounters },
@@ -352,6 +368,44 @@ export class FileWorkflowProfileRunStateStore implements WorkflowProfileRunState
     };
   }
 
+  /**
+   * Remove a lease we judged stale WITHOUT deleting a lease another process took in the meantime.
+   *
+   * F-14: the simple check-then-unlink could delete a fresh lease created between the check and the
+   * unlink, letting two runners hold the same run. The removal is a rename to a tombstone, and the
+   * tombstone's identity (inode + contents, see `lockIdentity`) is compared with the one that was
+   * judged stale; on a mismatch the fresh lease is linked back and the caller refuses. This is the
+   * same trick `breakStaleLock` uses for the runtime's file locks.
+   */
+  private breakStaleLease(leasePath: string, staleIdentity: string | undefined): boolean {
+    if (staleIdentity === undefined) return true; // already gone — just retry the open
+    const tomb = `${leasePath}.${randomUUID()}.stale`;
+    try {
+      fs.renameSync(leasePath, tomb);
+    } catch {
+      return false;
+    }
+    if (lockIdentity(tomb) !== staleIdentity) {
+      try {
+        fs.linkSync(tomb, leasePath);
+      } catch {
+        // Someone else holds the path now — the fresh holder keeps its lease.
+      }
+      try {
+        fs.unlinkSync(tomb);
+      } catch {
+        // ignore
+      }
+      return false;
+    }
+    try {
+      fs.unlinkSync(tomb);
+    } catch {
+      // ignore
+    }
+    return true;
+  }
+
   tryLease(runId: string): WorkflowProfileRunLease | undefined {
     const leasePath = this.leasePathFor(runId);
     const depth = heldRunLeases.get(leasePath);
@@ -374,16 +428,18 @@ export class FileWorkflowProfileRunStateStore implements WorkflowProfileRunState
         return this.leaseHandle(leasePath);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        // The identity is captured BEFORE the holder is judged: it must describe the lease this
+        // attempt decided was stale. Capturing it later would bless whatever lease is on disk at
+        // break time — including a fresh one another process just took — as "the stale one".
+        const staleIdentity = lockIdentity(leasePath);
         const holder = readLockInfo(leasePath);
         // A live holder — us in another process, or a real concurrent runner — keeps the lease.
         // Our own pid is handled above through the in-process map; reaching here with our pid means
         // a leaked file, which a fresh attempt may take over.
         if (holder && holder.pid !== process.pid && isProcessAlive(holder.pid)) return undefined;
-        try {
-          fs.unlinkSync(leasePath);
-        } catch {
-          // Someone else removed or replaced it; the next attempt (or the caller) decides.
-        }
+        // The holder is dead (or this is our own leaked file): break the lease by identity, so a
+        // lease another process created since the read survives and the caller fails closed.
+        if (!this.breakStaleLease(leasePath, staleIdentity)) return undefined;
       }
     }
     return undefined;
