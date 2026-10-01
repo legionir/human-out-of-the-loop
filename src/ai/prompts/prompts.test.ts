@@ -70,4 +70,15 @@ describe('central prompt module', () => {
     expect(prompts.buildAnswerPrompt('hello')).toContain('[[NEEDS_PLAN: false]]');
     expect(prompts.buildStructuredPlanPrompt('request', 'catalog')).toContain('catalog');
   });
+
+  it('asks only about materially blocking ambiguity and otherwise uses a safe default', () => {
+    const assessment = prompts.buildAssessmentPrompt('update the project', undefined, 'auto');
+    const plan = prompts.buildPlanPrompt('update the project');
+    const structuredPlan = prompts.buildStructuredPlanPrompt('update the project', 'catalog');
+    for (const prompt of [assessment, plan, structuredPlan]) {
+      expect(prompt).toContain('materially change the outcome or risk');
+      expect(prompt).toContain('conventional, low-risk default');
+      expect(prompt).toContain('Do not ask about routine implementation details');
+    }
+  });
 });
