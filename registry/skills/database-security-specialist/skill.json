@@ -5,6 +5,7 @@
   "instructions": "SKILL.md",
   "tools": [
     "directory_tree",
+    "edit_file",
     "get_file_info",
     "git_branch_list",
     "git_diff",
@@ -19,7 +20,9 @@
     "read_multiple_files",
     "run_tests",
     "search_code",
-    "search_files"
+    "search_files",
+    "write_file",
+    "write_multiple_files"
   ],
   "priority": 50,
   "description": "Persona \"Database Security Specialist\" (EXECUTOR) in the Security: Implement database access, encryption, and security audit. Use when the task needs Manage roles/access, encryption and keys, audit log and masking, security testing and the output must be \"Security configuration, audit report\"; this skill enforces the domain, the authority (PROCEED / PAUSE / RETRY / ROLLBACK / BLOCK / ESCALATE), the 5 execution steps, and the final Quality Gate. Use when you need Database Security Specialist-level judgment with evidence and a fixed scope."

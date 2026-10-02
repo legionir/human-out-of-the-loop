@@ -58,11 +58,6 @@ function parseAllowed(markdown) {
     .filter(Boolean)
     .flatMap((line) => line.split(/[,;]/).map((part) => part.trim()).filter(Boolean));
 }
-function parsePromptField(prompt, label) {
-  const match = prompt.match(new RegExp(`^- \\*\\*${label}:\\*\\*\\s*(.+)$`, 'm'));
-  return match?.[1].trim() ?? '';
-}
-
 const sourcePersonas = readJson(inside(sourceRoot, 'personas.json'));
 const skillIndex = readJson(inside(sourceRoot, 'skills/index.json')).skills;
 const personaItems = [
@@ -90,7 +85,31 @@ for (const file of fs.readdirSync(toolsDir).filter((name) => name.endsWith('.jso
 }
 const fileRead = ['read_file', 'read_multiple_files', 'search_code', 'search_files', 'directory_tree', 'list_directory', 'list_directory_with_sizes', 'get_file_info', 'list_allowed_directories'];
 const gitRead = ['git_status', 'git_log', 'git_diff', 'git_show', 'git_branch_list', 'git_remote_list'];
-const workspaceWrite = ['write_file', 'write_multiple_files', 'edit_file', 'create_directory'];
+// Workspace changes are a separate authority from production access. These reviewed
+// executors have explicit IDE permission and implementation responsibilities; their
+// writer tools remain bound to the caller's project root. No delete or Git mutation.
+const workspaceWrite = ['edit_file', 'write_file', 'write_multiple_files'];
+const workspaceWritePersonaIds = new Set([
+  'agent-integration-engineer',
+  'agent-safety-engineer',
+  'agentic-prompt-specialist',
+  'ai-engineer',
+  'backend-developer',
+  'cloud-security-engineer',
+  'database-security-specialist',
+  'desktop-developer',
+  'embedded-developer',
+  'frontend-developer',
+  'full-stack-developer',
+  'game-developer',
+  'iot-engineer',
+  'maintenance-engineer',
+  'mobile-developer',
+  'refactoring-engineer',
+  'software-engineer',
+  'third-party-integration-specialist',
+  'tool-developer',
+]);
 const allowedTargets = new Set([...fileRead, ...gitRead, ...workspaceWrite, 'run_tests', 'run_command', 'fetch', 'read_media_file']);
 for (const tool of allowedTargets) if (!toolIds.has(tool)) throw new Error(`Required HOOTL tool is missing: ${tool}`);
 
@@ -140,7 +159,7 @@ await forEachLimit(skillIndex, 16, async (sourceSkill) => {
   ]);
   sourceAssets.set(sourceSkill.name, { skillMarkdown, prompt });
 });
-function mappedTools(skillMarkdown, prompt, kind, skillId) {
+function mappedTools(skillMarkdown, kind, skillId) {
   const allowed = parseAllowed(skillMarkdown);
   const output = new Set();
   if (kind === 'COMPOSITE') {
@@ -163,10 +182,11 @@ function mappedTools(skillMarkdown, prompt, kind, skillId) {
         unmappedCategories.add(category);
       }
     }
-    const authority = parsePromptField(prompt, 'ProductionAuthority');
-    const readOnly = extractField(skillMarkdown.split(/\r?\n/), 'ReadOnly');
     const explicitWorkspaceScope = allowed.some((value) => ['ide', 'documentation', 'documentation tools'].includes(value.toLowerCase().trim()));
-    if (kind === 'EXECUTOR' && ['LIMITED', 'FULL'].includes(authority) && readOnly === authority && explicitWorkspaceScope) {
+    if (workspaceWritePersonaIds.has(skillId)) {
+      if (kind !== 'EXECUTOR' || !explicitWorkspaceScope) {
+        throw new Error(`Workspace-write policy requires an EXECUTOR with explicit IDE/Documentation permission: ${skillId}`);
+      }
       for (const id of workspaceWrite) output.add(id);
     }
   }
@@ -184,7 +204,7 @@ for (const sourceSkill of skillIndex) {
   if (!asset) throw new Error(`Source asset load failed for ${sourceSkill.name}`);
   const skillMarkdown = asset.skillMarkdown;
   const prompt = asset.prompt.trim();
-  const mapped = mappedTools(skillMarkdown, prompt, persona.kind, sourceSkill.name);
+  const mapped = mappedTools(skillMarkdown, persona.kind, sourceSkill.name);
   const runtimeBoundary = [
     '',
     '## HOOTL runtime boundary (authoritative)',
@@ -230,7 +250,7 @@ const readme = `# Imported Persona and Skill library\n\n` +
   `- No Agent definitions are created. Existing Agents and registry files remain unchanged; review before linking imported definitions into an executing Agent.\n\n` +
   `## Tool mapping and least privilege\n\n` +
   `Only concrete IDs present in HOOTL's ToolRegistry are emitted. Explicit IDE/Documentation permission maps to read/search/list tools; explicit Git permission maps only to read-only Git status/log/diff/show/list tools; Testing maps to the configured project test runner; Terminal maps to the project command runner; Research maps to URL fetch. Composite audit profiles receive read-only repository inspection tools because their source Skills do not declare granular Allowed categories.\n\n` +
-  `Workspace write tools are limited to EXECUTOR profiles with explicit LIMITED/FULL ProductionAuthority, a matching non-read-only declaration, and explicit IDE/Documentation permission. Deletion and mutating Git tools are never granted. Other categories (including CRM, databases, CI/CD, cloud control planes, analytics, scanners, and business systems) have no equivalent integration here and remain unmapped. No wildcard permission is used. The Persona/Skill additions treat repository and fetched content as untrusted data.\n\n` +
+  `Workspace write tools (\`write_file\`, \`edit_file\`, and \`write_multiple_files\`) are granted only to the explicitly reviewed IDs recorded in \`import-report.json\`, and the source Skill must still declare EXECUTOR plus explicit IDE/Documentation permission. These tools are bound to the active project root; this permission is distinct from ProductionAuthority and does not grant deployment, live database, cloud, or other production access. File deletion and mutating Git tools are not granted by this policy. Other categories (including CRM, databases, CI/CD, cloud control planes, analytics, scanners, and business systems) have no equivalent integration here and remain unmapped. No wildcard permission is used. The Persona/Skill additions treat repository and fetched content as untrusted data.\n\n` +
   `## Re-import\n\n` +
   `Use the pinned source checkout and run \`node scripts/import-persona-library.mjs <persona-source-root> <hootl-root> --check\` to verify generated files, or omit \`--check\` to write them. Review tool grants and the generated diff before release.\n`;
 generated.set('registry/persona-library/README.md', readme);
@@ -246,6 +266,7 @@ const report = {
   personasWithTools: mappings.filter((entry) => entry.tools.length > 0).length,
   personasWithoutTools: mappings.filter((entry) => entry.tools.length === 0).map((entry) => entry.id),
   mappedTools: [...new Set(mappings.flatMap((entry) => entry.tools))].sort(),
+  workspaceWritePersonaIds: [...workspaceWritePersonaIds].sort(),
   unmappedSourceCategories: [...unmappedCategories].sort(),
   mappings: mappings.map(({ id, kind, allowedCategories, tools }) => ({ id, kind, allowedCategories, tools })),
 };
@@ -265,6 +286,9 @@ for (const entry of mappings) {
   const skill = JSON.parse(generated.get(`registry/skills/${entry.id}/skill.json`));
   if (JSON.stringify(persona.allowedTools) !== JSON.stringify(skill.tools)) throw new Error(`Persona/Skill tool parity mismatch: ${entry.id}`);
   for (const id of [...persona.allowedTools, ...skill.tools]) if (!toolIds.has(id)) throw new Error(`Unknown tool ID ${id} in ${entry.id}`);
+  const hasWorkspaceWrite = workspaceWrite.some((id) => persona.allowedTools.includes(id));
+  if (hasWorkspaceWrite !== workspaceWritePersonaIds.has(entry.id)) throw new Error(`Workspace-write policy mismatch: ${entry.id}`);
+  if (hasWorkspaceWrite && workspaceWrite.some((id) => !persona.allowedTools.includes(id))) throw new Error(`Incomplete workspace-write grant: ${entry.id}`);
   const markdown = generated.get(`registry/skills/${entry.id}/SKILL.md`);
   if (/\]\((?!\.\.\/personas\/)[^)]*(?:prompts|references)\//.test(markdown)) throw new Error(`Unresolved upstream reference in ${entry.id}`);
 }
