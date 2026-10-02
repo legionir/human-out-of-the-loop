@@ -12,7 +12,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { Repl, splitArgs, parseOnOff, displayPath, parseInteractiveArgs, type ReplState } from '../repl.js';
 import { PassThrough } from 'node:stream';
-import { readLine, type Suggestion } from '../line-editor.js';
+import { EventEmitter } from 'node:events';
+import { readLine, suspendInactiveKeypressBuffer, type Suggestion } from '../line-editor.js';
 import { renderSplash, bigText } from '../splash.js';
 import { createProgram, main } from '../../cli.js';
 import { useIsolatedHome, type HomeHandle } from '../../test-utils/isolated-home.js';
@@ -281,6 +282,55 @@ describe('the line editor', () => {
 
   it('Tab completes and keeps editing', async () => {
     expect(await type(['/mo', KEYS.tab, 's', KEYS.enter], menu)).toEqual({ kind: 'line', line: '/models' });
+  });
+
+  it('preserves input typed between an AI response and the next prompt', async () => {
+    class TerminalInput extends EventEmitter {
+      isTTY = true;
+      isRaw = false;
+      pause() { return this; }
+      resume() { return this; }
+      setRawMode(raw: boolean) { this.isRaw = raw; return this; }
+      type(text: string) { this.emit('data', Buffer.from(text)); }
+    }
+
+    const input = new TerminalInput() as unknown as NodeJS.ReadStream;
+    const output = new PassThrough() as unknown as NodeJS.WriteStream;
+    const history: string[] = [];
+    const first = readLine({ input, output, prompt: '> ', history, suggest: () => [] });
+    (input as unknown as TerminalInput).type('first\r');
+    expect(await first).toEqual({ kind: 'line', line: 'first' });
+
+    // Node's keypress decoder receives this while no per-prompt handler is active.
+    (input as unknown as TerminalInput).type('next message\r');
+    const second = readLine({ input, output, prompt: '> ', history, suggest: () => [] });
+    expect(await second).toEqual({ kind: 'line', line: 'next message' });
+  });
+
+  it('does not replay answers consumed by another interactive prompt', async () => {
+    class TerminalInput extends EventEmitter {
+      isTTY = true;
+      isRaw = false;
+      pause() { return this; }
+      resume() { return this; }
+      setRawMode(raw: boolean) { this.isRaw = raw; return this; }
+      type(text: string) { this.emit('data', Buffer.from(text)); }
+    }
+
+    const input = new TerminalInput() as unknown as NodeJS.ReadStream;
+    const output = new PassThrough() as unknown as NodeJS.WriteStream;
+    const history: string[] = [];
+    const first = readLine({ input, output, prompt: '> ', history, suggest: () => [] });
+    (input as unknown as TerminalInput).type('first\r');
+    expect(await first).toEqual({ kind: 'line', line: 'first' });
+
+    const restoreBuffer = suspendInactiveKeypressBuffer(input);
+    (input as unknown as TerminalInput).type('yes\r');
+    restoreBuffer();
+
+    const second = readLine({ input, output, prompt: '> ', history, suggest: () => [] });
+    (input as unknown as TerminalInput).type('next\r');
+    expect(await second).toEqual({ kind: 'line', line: 'next' });
   });
 
   it('Esc closes the menu so Enter submits what was typed', async () => {

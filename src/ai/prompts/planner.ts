@@ -1,6 +1,9 @@
 import { DEFAULT_RUN_MODE, type RunMode } from '../modes.js';
 import { buildProjectContext } from './project-context.js';
 
+const CLARIFICATION_POLICY =
+  'Clarify only when missing information is necessary for a safe, correct, useful plan, cannot be inferred from the request, session history, or project context, and would materially change the outcome or risk. Ask before destructive or irreversible actions, security or privacy choices, production targets, or other high-impact decisions when the intended choice is not clear. Otherwise infer the most reasonable conventional, low-risk default, proceed, and state any meaningful assumption in the plan. Do not ask about routine implementation details, preferences with a sensible standard, or information available by inspecting the project. Never ask merely because a detail is unspecified.';
+
 export function buildAssessmentPrompt(
   userRequest: string,
   projectRoot?: string,
@@ -20,11 +23,12 @@ export function buildAssessmentPrompt(
         : 'Decide what the request needs:\n' +
           '- a greeting ("hello", "سلام"), a thank-you, small talk, a question, an explanation, or anything you can answer yourself → kind="answer" with your reply in the "answer" field;\n' +
           '- real work in this project (files to change, commands to run, several steps) → kind="plan" and provide the full plan;\n' +
-          '- too vague to do either → kind="clarify" and ask.';
+          '- genuinely blocked work that cannot be planned safely or usefully from available context → kind="clarify" and ask only the blocking question(s).';
   return `
 You are deciding what to do with the following user request.
 ${note ? `\n${note}` : ''}
 ${modeRule}
+Clarification policy (for plan and auto modes): ${CLARIFICATION_POLICY}
 ${catalog ? `\n${catalog}\n` : ''}
 USER REQUEST:
 """
@@ -52,6 +56,7 @@ export function buildPlanPrompt(
   const context = buildProjectContext(projectRoot);
   let prompt = `
 Decompose the following user request into a detailed execution plan.
+${CLARIFICATION_POLICY}
 ${context ? `\n${context}\n` : ''}
 ${catalog ? `${catalog}\n` : ''}
 USER REQUEST:
@@ -95,6 +100,7 @@ export function buildStructuredPlanPrompt(
 ): string {
   let prompt = `
 Decompose the following user request into a detailed execution plan.
+${CLARIFICATION_POLICY}
 
 ${catalog}
 

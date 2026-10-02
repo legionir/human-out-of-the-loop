@@ -12,6 +12,7 @@
  */
 import inquirer from 'inquirer';
 import { color, out } from './output.js';
+import { suspendInactiveKeypressBuffer } from '../line-editor.js';
 
 export interface ConfirmationResult {
   confirmed: boolean;
@@ -35,7 +36,11 @@ export class InteractivePromptUnavailableError extends Error {
  *
  * @param planText the formatted plan (from formatPlanForUser)
  */
-export async function confirmPlanInteractively(planText: string): Promise<ConfirmationResult> {
+export function confirmPlanInteractively(planText: string): Promise<ConfirmationResult> {
+  return withInactiveKeypressBufferSuspended(() => confirmPlanInteractivelyPrompt(planText));
+}
+
+async function confirmPlanInteractivelyPrompt(planText: string): Promise<ConfirmationResult> {
   if (!process.stdout.isTTY || !process.stdin.isTTY) {
     throw new InteractivePromptUnavailableError();
   }
@@ -108,7 +113,14 @@ export async function confirmPlanInteractively(planText: string): Promise<Confir
  * Ctrl+C/Escape (or answering ALL questions empty) → `null`, which the
  * orchestrator treats as a clean run cancellation.
  */
-export async function promptClarifications(
+export function promptClarifications(
+  questions: string[],
+  round: number,
+): Promise<Record<string, string> | null> {
+  return withInactiveKeypressBufferSuspended(() => promptClarificationsPrompt(questions, round));
+}
+
+async function promptClarificationsPrompt(
   questions: string[],
   round: number,
 ): Promise<Record<string, string> | null> {
@@ -144,6 +156,15 @@ export async function promptClarifications(
     return null;
   }
   return answers;
+}
+
+async function withInactiveKeypressBufferSuspended<T>(action: () => Promise<T>): Promise<T> {
+  const resumeBuffer = suspendInactiveKeypressBuffer(process.stdin as NodeJS.ReadStream);
+  try {
+    return await action();
+  } finally {
+    resumeBuffer();
+  }
 }
 
 function isExitPromptError(error: unknown): boolean {

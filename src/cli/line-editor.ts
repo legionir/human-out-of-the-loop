@@ -58,6 +58,48 @@ interface Key {
   sequence?: string;
 }
 
+interface BufferedKeypress {
+  str: string | undefined;
+  key: Key;
+}
+
+interface InputSession {
+  active?: (str: string | undefined, key: Key) => void;
+  captureInactive: boolean;
+  pending: BufferedKeypress[];
+}
+
+const inputSessions = new WeakMap<NodeJS.ReadStream, InputSession>();
+const MAX_BUFFERED_KEYPRESSES = 16_384;
+
+function getInputSession(input: NodeJS.ReadStream): InputSession {
+  const existing = inputSessions.get(input);
+  if (existing) return existing;
+  const session: InputSession = { captureInactive: true, pending: [] };
+  inputSessions.set(input, session);
+  // Keep one keypress listener for the lifetime of this input stream. Node's
+  // keypress decoder detaches itself when its last listener is removed; data
+  // typed during an AI run would then be consumed before the next prompt.
+  input.on('keypress', (str: string | undefined, key: Key = {}) => {
+    if (session.active) session.active(str, key);
+    else if (session.captureInactive && session.pending.length < MAX_BUFFERED_KEYPRESSES) {
+      session.pending.push({ str, key: { ...key } });
+    }
+  });
+  return session;
+}
+
+/** Do not queue keystrokes while another readline-based prompt owns stdin. */
+export function suspendInactiveKeypressBuffer(input: NodeJS.ReadStream): () => void {
+  const session = inputSessions.get(input);
+  if (!session) return () => undefined;
+  const previous = session.captureInactive;
+  session.captureInactive = false;
+  return () => {
+    session.captureInactive = previous;
+  };
+}
+
 // eslint-disable-next-line no-control-regex
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 const visibleLength = (s: string): number => displayWidth(s.replace(ANSI, ''));
@@ -162,16 +204,19 @@ export function readLine(opts: LineEditorOptions): Promise<ReadResult> {
 
   return new Promise<ReadResult>((resolve) => {
     readline.emitKeypressEvents(input);
+    const session = getInputSession(input);
     const wasRaw = input.isRaw;
     if (input.isTTY) input.setRawMode(true);
     if (input.isTTY) output.write('\x1b[?2004h');
-    input.resume();
     let pasting = false;
+    let finished = false;
 
     const finish = (result: ReadResult): void => {
+      if (finished) return;
+      finished = true;
       suggestions = [];
       render(true);
-      input.removeListener('keypress', onKey);
+      session.active = undefined;
       if (input.isTTY) output.write('\x1b[?2004l');
       if (input.isTTY) input.setRawMode(wasRaw ?? false);
       input.pause();
@@ -307,8 +352,17 @@ export function readLine(opts: LineEditorOptions): Promise<ReadResult> {
       render();
     };
 
-    input.on('keypress', onKey);
-    refreshSuggestions();
-    render();
+    // Activate the editor before resuming stdin: a terminal may have already
+    // buffered keystrokes while the previous AI response was being handled.
+    session.active = onKey;
+    for (const event of session.pending.splice(0)) {
+      if (finished) break;
+      session.active(event.str, event.key);
+    }
+    if (!finished) {
+      input.resume();
+      refreshSuggestions();
+      render();
+    }
   });
 }
